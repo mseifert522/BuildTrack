@@ -1,0 +1,28 @@
+{
+  "name": "buildtrack-backend",
+  "version": "1.0.0",
+  "description": "New Urban Development Field App - Backend API",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^12.8.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "express-validator": "^7.3.1",
+    "jsonwebtoken": "^9.0.3",
+    "multer": "^2.1.1",
+    "negotiator": "^1.0.0",
+    "nodemailer": "^8.0.4",
+    "pdfkit": "^0.18.0",
+    "uuid": "^13.0.0"
+  }
+}
