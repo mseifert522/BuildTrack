@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useCallback } from 'react';
 
-const GOOGLE_API_KEY = 'REMOVED_KEY_USE_ENV_VAR';
+const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
 
 // Singleton loader — only inject the script once
 let scriptLoaded = false;
