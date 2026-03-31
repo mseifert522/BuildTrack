@@ -6,15 +6,15 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-# Stage 2: Production
-FROM node:20-alpine AS production
-RUN apk add --no-cache python3 make g++ sqlite
+# Stage 2: Production (Debian slim for glibc compatibility with native modules)
+FROM node:20-slim AS production
+RUN apt-get update && apt-get install -y --no-install-recommends wget sqlite3 && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app/backend
 
 # Install backend dependencies
 COPY backend/package.json backend/package-lock.json ./
-ENV npm_config_build_from_source=true
 RUN npm ci --omit=dev
 
 # Copy backend source
