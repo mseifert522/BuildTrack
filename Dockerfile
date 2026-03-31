@@ -14,7 +14,10 @@ WORKDIR /app/backend
 
 # Install backend dependencies
 COPY backend/package.json backend/package-lock.json ./
-RUN npm ci --omit=dev && npm rebuild better-sqlite3 --build-from-source
+RUN npm ci --omit=dev && \
+    rm -rf node_modules/better-sqlite3/build && \
+    cd node_modules/better-sqlite3 && npx --yes prebuild-install || npx --yes node-gyp rebuild && \
+    cd /app/backend
 
 # Copy backend source
 COPY backend/ ./
