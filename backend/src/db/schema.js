@@ -26,9 +26,10 @@ function initializeSchema() {
       name TEXT NOT NULL,
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('super_admin','operations_manager','admin_assistant','contractor')),
+      role TEXT NOT NULL CHECK(role IN ('super_admin','operations_manager','project_manager','contractor')),
       phone TEXT,
       company TEXT,
+      avatar_url TEXT,
       is_active INTEGER NOT NULL DEFAULT 1,
       force_password_reset INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -203,6 +204,9 @@ function initializeSchema() {
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
   `);
+
+  // ── Runtime migrations (safe to run on every startup) ──
+  try { db.exec(`ALTER TABLE users ADD COLUMN avatar_url TEXT`); } catch (_) { /* already exists */ }
 
   return db;
 }

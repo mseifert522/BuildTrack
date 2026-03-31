@@ -8,6 +8,7 @@ export interface User {
   is_active?: number;
   phone?: string;
   company?: string;
+  avatar_url?: string | null;
   force_password_reset?: boolean;
 }
 

@@ -2,19 +2,82 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
 const { getDb } = require('../db/schema');
 const { authenticate, authorize, authorizeOverUser, blacklistToken } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
 
 router.use(authenticate);
 
+// Multer config for avatar uploads
+const avatarStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(__dirname, '../../uploads/avatars');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
+    cb(null, `avatar-${req.user.id}${ext}`);
+  },
+});
+const avatarUpload = multer({
+  storage: avatarStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype.startsWith('image/')) return cb(new Error('Only image files allowed'));
+    cb(null, true);
+  },
+});
+
 const VALID_ROLES = ['super_admin', 'operations_manager', 'project_manager', 'contractor'];
+
+// GET /api/users/me - get current user profile (any authenticated user)
+router.get('/me', (req, res) => {
+  const db = getDb();
+  const user = db.prepare('SELECT id, name, email, role, phone, company, avatar_url, is_active FROM users WHERE id = ?').get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  res.json(user);
+});
+
+// POST /api/users/me/avatar - upload avatar for current user
+router.post('/me/avatar', avatarUpload.single('avatar'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const avatarUrl = `/uploads/avatars/${req.file.filename}`;
+    const db = getDb();
+    db.prepare(`UPDATE users SET avatar_url = ?, updated_at = datetime('now') WHERE id = ?`).run(avatarUrl, req.user.id);
+    logActivity({ userId: req.user.id, action: 'avatar_updated', entityType: 'user', entityId: req.user.id });
+    res.json({ avatar_url: avatarUrl, message: 'Avatar updated successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to upload avatar' });
+  }
+});
+
+// DELETE /api/users/me/avatar - remove avatar
+router.delete('/me/avatar', (req, res) => {
+  try {
+    const db = getDb();
+    const user = db.prepare('SELECT avatar_url FROM users WHERE id = ?').get(req.user.id);
+    if (user?.avatar_url) {
+      const filePath = path.join(__dirname, '../../', user.avatar_url);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    }
+    db.prepare(`UPDATE users SET avatar_url = NULL, updated_at = datetime('now') WHERE id = ?`).run(req.user.id);
+    res.json({ message: 'Avatar removed' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to remove avatar' });
+  }
+});
 
 // GET /api/users - list all users (super_admin, operations_manager only)
 router.get('/', authorize('super_admin', 'operations_manager'), (req, res) => {
   const db = getDb();
   const users = db.prepare(
-    'SELECT id, name, email, role, phone, company, is_active, created_at FROM users ORDER BY name'
+    'SELECT id, name, email, role, phone, company, avatar_url, is_active, created_at FROM users ORDER BY name'
   ).all();
   res.json(users);
 });
