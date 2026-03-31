@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
-import { useAuthStore, canManageProjects } from '../store/authStore';
+import { useAuthStore, canCreateProjects } from '../store/authStore';
 import GooglePlacesInput from '../components/GooglePlacesInput';
 
 const STAGES = [
@@ -42,7 +42,7 @@ export default function MobileAddProject() {
   const [saving, setSaving] = useState(false);
 
   // Role guard
-  if (!user || !canManageProjects(user.role)) {
+  if (!user || !canCreateProjects(user.role)) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', backgroundColor: '#F4F5F7', padding: 24 }}>
         <div style={{ width: 64, height: 64, borderRadius: 20, backgroundColor: '#FEF2F2', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>

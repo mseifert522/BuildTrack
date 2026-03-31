@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
-import { useAuthStore } from './store/authStore';
+import { useAuthStore, canManageUsers, canAccessSettings, isAdminRole } from './store/authStore';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -39,6 +39,33 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, token } = useAuthStore();
   if (!token || !user) return <Navigate to="/login" replace />;
   if (user.force_password_reset) return <Navigate to="/change-password" replace />;
+  return <>{children}</>;
+}
+
+/** Redirect contractors away from desktop — they should use mobile */
+function DesktopRoute({ children }: { children: React.ReactNode }) {
+  const { user, token } = useAuthStore();
+  if (!token || !user) return <Navigate to="/login" replace />;
+  if (user.force_password_reset) return <Navigate to="/change-password" replace />;
+  if (user.role === 'contractor') return <Navigate to="/mobile" replace />;
+  return <>{children}</>;
+}
+
+/** Only super_admin and operations_manager can access Users page */
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const { user, token } = useAuthStore();
+  if (!token || !user) return <Navigate to="/login" replace />;
+  if (user.force_password_reset) return <Navigate to="/change-password" replace />;
+  if (!canManageUsers(user.role)) return <Navigate to="/dashboard" replace />;
+  return <>{children}</>;
+}
+
+/** Only super_admin and operations_manager can access Settings page */
+function SettingsRoute({ children }: { children: React.ReactNode }) {
+  const { user, token } = useAuthStore();
+  if (!token || !user) return <Navigate to="/login" replace />;
+  if (user.force_password_reset) return <Navigate to="/change-password" replace />;
+  if (!canAccessSettings(user.role)) return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
 }
 
@@ -89,56 +116,58 @@ export default function App() {
         <Route path="/mobile/project/:id/notes" element={<ProtectedRoute><MobileNotes /></ProtectedRoute>} />
         <Route path="/mobile/project/:id/progress" element={<ProtectedRoute><MobileProgress /></ProtectedRoute>} />
 
-        {/* ── Desktop Routes (with enterprise sidebar layout) ── */}
+        {/* ── Desktop Routes (contractors are redirected to /mobile) ── */}
         <Route path="/dashboard" element={
-          <ProtectedRoute>
+          <DesktopRoute>
             <Layout><Dashboard /></Layout>
-          </ProtectedRoute>
+          </DesktopRoute>
         } />
         <Route path="/projects" element={
-          <ProtectedRoute>
+          <DesktopRoute>
             <Layout><Projects /></Layout>
-          </ProtectedRoute>
+          </DesktopRoute>
         } />
         <Route path="/projects/:id" element={
-          <ProtectedRoute>
+          <DesktopRoute>
             <Layout><ProjectDetail /></Layout>
-          </ProtectedRoute>
+          </DesktopRoute>
         } />
         <Route path="/projects/:projectId/invoices/new" element={
-          <ProtectedRoute>
+          <DesktopRoute>
             <Layout><InvoiceBuilder /></Layout>
-          </ProtectedRoute>
+          </DesktopRoute>
         } />
         <Route path="/projects/:projectId/invoices/:invoiceId" element={
-          <ProtectedRoute>
+          <DesktopRoute>
             <Layout><InvoiceBuilder /></Layout>
-          </ProtectedRoute>
+          </DesktopRoute>
         } />
         <Route path="/punch-list" element={
-          <ProtectedRoute>
+          <DesktopRoute>
             <Layout><PunchList /></Layout>
-          </ProtectedRoute>
+          </DesktopRoute>
         } />
         <Route path="/photos" element={
-          <ProtectedRoute>
+          <DesktopRoute>
             <Layout><Photos /></Layout>
-          </ProtectedRoute>
+          </DesktopRoute>
         } />
         <Route path="/invoices" element={
-          <ProtectedRoute>
+          <DesktopRoute>
             <Layout><Invoices /></Layout>
-          </ProtectedRoute>
+          </DesktopRoute>
         } />
+        {/* Users: super_admin and operations_manager only */}
         <Route path="/users" element={
-          <ProtectedRoute>
+          <AdminRoute>
             <Layout><Users /></Layout>
-          </ProtectedRoute>
+          </AdminRoute>
         } />
+        {/* Settings: super_admin and operations_manager only */}
         <Route path="/settings" element={
-          <ProtectedRoute>
+          <SettingsRoute>
             <Layout><Settings /></Layout>
-          </ProtectedRoute>
+          </SettingsRoute>
         } />
 
         {/* Fallback */}

@@ -4,7 +4,8 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  role: 'super_admin' | 'operations_manager' | 'admin_assistant' | 'contractor';
+  role: 'super_admin' | 'operations_manager' | 'project_manager' | 'contractor';
+  is_active?: number;
   phone?: string;
   company?: string;
   force_password_reset?: boolean;
@@ -43,15 +44,26 @@ export const useAuthStore = create<AuthState>((set) => ({
 export const roleLabels: Record<string, string> = {
   super_admin: 'Super Admin',
   operations_manager: 'Operations Manager',
-  admin_assistant: 'Admin Assistant',
+  project_manager: 'Project Manager',
   contractor: 'Contractor',
 };
 
+/** Can create/edit/delete projects */
 export const canManageProjects = (role: string) =>
+  ['super_admin', 'operations_manager', 'project_manager'].includes(role);
+
+/** Can create NEW projects (desktop only) */
+export const canCreateProjects = (role: string) =>
   ['super_admin', 'operations_manager'].includes(role);
 
+/** Can access Users management page */
 export const canManageUsers = (role: string) =>
-  role === 'super_admin';
+  ['super_admin', 'operations_manager'].includes(role);
 
+/** Non-contractor roles that can access the desktop dashboard */
 export const isAdminRole = (role: string) =>
-  ['super_admin', 'operations_manager', 'admin_assistant'].includes(role);
+  ['super_admin', 'operations_manager', 'project_manager'].includes(role);
+
+/** Can access Settings page */
+export const canAccessSettings = (role: string) =>
+  ['super_admin', 'operations_manager'].includes(role);

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useAuthStore, canManageProjects } from '../store/authStore';
+import { useAuthStore, canManageProjects, canCreateProjects } from '../store/authStore';
 import api from '../lib/api';
 import { Loading, StatusBadge, Modal, PageHeader } from '../components/ui';
 import { Plus, Search, MapPin, Users, ClipboardList, ChevronRight } from 'lucide-react';
@@ -78,7 +78,7 @@ export default function Projects() {
     }
   };
 
-  const canCreate = user && canManageProjects(user.role);
+  const canCreate = user && canCreateProjects(user.role);
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto">

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useAuthStore, roleLabels } from '../store/authStore';
+import { useAuthStore, roleLabels, canManageUsers } from '../store/authStore';
 import api from '../lib/api';
 import { Loading, Modal, PageHeader } from '../components/ui';
-import { Users as UsersIcon, Plus, Edit2, Key, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Users as UsersIcon, Plus, Edit2, Key, ToggleLeft, ToggleRight, ShieldOff, ShieldCheck } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
@@ -27,6 +27,8 @@ export default function Users() {
   const [resetUser, setResetUser] = useState<User | null>(null);
   const { register, handleSubmit, reset, setValue, formState: { isSubmitting } } = useForm();
   const { register: registerReset, handleSubmit: handleSubmitReset, reset: resetForm, formState: { isSubmitting: isResetting } } = useForm();
+
+  const canManage = currentUser ? canManageUsers(currentUser.role) : false;
 
   const load = async () => {
     try {
@@ -78,20 +80,33 @@ export default function Users() {
     }
   };
 
-  const toggleActive = async (user: User) => {
+  /** Instant lockout — blacklists all active sessions immediately */
+  const handleLockout = async (u: User) => {
+    if (!confirm(`Lock out ${u.name}? Their session will be terminated immediately.`)) return;
     try {
-      await api.put(`/users/${user.id}`, { ...user, is_active: user.is_active ? 0 : 1 });
-      toast.success(user.is_active ? 'User deactivated' : 'User activated');
+      await api.post(`/users/${u.id}/lockout`);
+      toast.success(`${u.name} has been locked out`);
       load();
-    } catch (err) {
-      toast.error('Failed to update user');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to lock out user');
+    }
+  };
+
+  /** Reactivate a locked user */
+  const handleUnlock = async (u: User) => {
+    try {
+      await api.post(`/users/${u.id}/unlock`);
+      toast.success(`${u.name} has been reactivated`);
+      load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to unlock user');
     }
   };
 
   const roleColors: Record<string, string> = {
     super_admin: 'bg-red-100 text-red-700',
     operations_manager: 'bg-blue-100 text-blue-700',
-    admin_assistant: 'bg-purple-100 text-purple-700',
+    project_manager: 'bg-purple-100 text-purple-700',
     contractor: 'bg-green-100 text-green-700',
   };
 
@@ -101,30 +116,33 @@ export default function Users() {
         title="User Management"
         subtitle={`${users.length} users`}
         actions={
-          <button onClick={() => setShowCreate(true)} className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl font-medium text-sm hover:bg-blue-700 transition-colors shadow-sm">
-            <Plus className="w-4 h-4" /> Add User
-          </button>
+          canManage ? (
+            <button onClick={() => setShowCreate(true)} className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl font-medium text-sm hover:bg-blue-700 transition-colors shadow-sm">
+              <Plus className="w-4 h-4" /> Add User
+            </button>
+          ) : undefined
         }
       />
 
       {loading ? <Loading /> : (
         <div className="space-y-3">
           {users.map(u => (
-            <div key={u.id} className={`bg-white rounded-xl border p-4 flex items-center gap-3 ${!u.is_active ? 'opacity-60 border-gray-200' : 'border-gray-200'}`}>
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${u.is_active ? 'bg-blue-100' : 'bg-gray-100'}`}>
-                <span className={`font-bold text-sm ${u.is_active ? 'text-blue-700' : 'text-gray-500'}`}>{u.name?.[0]?.toUpperCase()}</span>
+            <div key={u.id} className={`bg-white rounded-xl border p-4 flex items-center gap-3 ${!u.is_active ? 'opacity-60 border-red-200 bg-red-50' : 'border-gray-200'}`}>
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${u.is_active ? 'bg-blue-100' : 'bg-red-100'}`}>
+                <span className={`font-bold text-sm ${u.is_active ? 'text-blue-700' : 'text-red-500'}`}>{u.name?.[0]?.toUpperCase()}</span>
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <p className="font-semibold text-gray-900 text-sm">{u.name}</p>
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${roleColors[u.role]}`}>{roleLabels[u.role]}</span>
-                  {!u.is_active && <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Inactive</span>}
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${roleColors[u.role] || 'bg-gray-100 text-gray-600'}`}>{roleLabels[u.role] || u.role}</span>
+                  {!u.is_active && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600 font-medium">🔒 Locked Out</span>}
                 </div>
                 <p className="text-xs text-gray-500">{u.email}</p>
                 {u.phone && <p className="text-xs text-gray-400">{u.phone}</p>}
+                {u.company && <p className="text-xs text-gray-400">{u.company}</p>}
                 <p className="text-xs text-gray-400 mt-0.5">Joined {format(new Date(u.created_at), 'MMM d, yyyy')}</p>
               </div>
-              {currentUser?.role === 'super_admin' && u.id !== currentUser.id && (
+              {canManage && u.id !== currentUser?.id && u.role !== 'super_admin' && (
                 <div className="flex items-center gap-1 flex-shrink-0">
                   <button
                     onClick={() => { setEditUser(u); Object.entries(u).forEach(([k, v]) => setValue(k, v)); }}
@@ -140,13 +158,23 @@ export default function Users() {
                   >
                     <Key className="w-4 h-4" />
                   </button>
-                  <button
-                    onClick={() => toggleActive(u)}
-                    className={`p-2 rounded-lg transition-colors ${u.is_active ? 'text-green-500 hover:text-red-500 hover:bg-red-50' : 'text-gray-400 hover:text-green-500 hover:bg-green-50'}`}
-                    title={u.is_active ? 'Deactivate user' : 'Activate user'}
-                  >
-                    {u.is_active ? <ToggleRight className="w-4 h-4" /> : <ToggleLeft className="w-4 h-4" />}
-                  </button>
+                  {u.is_active ? (
+                    <button
+                      onClick={() => handleLockout(u)}
+                      className="p-2 text-green-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      title="Lock out user (instant session termination)"
+                    >
+                      <ShieldOff className="w-4 h-4" />
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handleUnlock(u)}
+                      className="p-2 text-red-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                      title="Reactivate user"
+                    >
+                      <ShieldCheck className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -170,9 +198,9 @@ export default function Users() {
             <select {...register('role', { required: true })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
               <option value="">Select role...</option>
               <option value="contractor">Contractor</option>
-              <option value="admin_assistant">Admin Assistant</option>
-              <option value="operations_manager">Operations Manager</option>
-              <option value="super_admin">Super Admin</option>
+              <option value="project_manager">Project Manager</option>
+              {currentUser?.role === 'super_admin' && <option value="operations_manager">Operations Manager</option>}
+              {currentUser?.role === 'super_admin' && <option value="super_admin">Super Admin</option>}
             </select>
           </div>
           <div>
@@ -184,7 +212,7 @@ export default function Users() {
             <input {...register('company')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Company name" />
           </div>
           <div className="bg-blue-50 rounded-lg p-3 text-xs text-blue-700">
-            A temporary password (TempPass2026!) will be set. The user will be prompted to change it on first login.
+            A temporary password will be generated. The user will be prompted to change it on first login.
           </div>
           <div className="flex gap-3">
             <button type="button" onClick={() => { setShowCreate(false); reset(); }} className="flex-1 py-2.5 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50">Cancel</button>
@@ -210,9 +238,9 @@ export default function Users() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
             <select {...register('role')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
               <option value="contractor">Contractor</option>
-              <option value="admin_assistant">Admin Assistant</option>
-              <option value="operations_manager">Operations Manager</option>
-              <option value="super_admin">Super Admin</option>
+              <option value="project_manager">Project Manager</option>
+              {currentUser?.role === 'super_admin' && <option value="operations_manager">Operations Manager</option>}
+              {currentUser?.role === 'super_admin' && <option value="super_admin">Super Admin</option>}
             </select>
           </div>
           <div>
@@ -237,7 +265,7 @@ export default function Users() {
         <form onSubmit={handleSubmitReset(onResetPassword)} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
-            <input type="password" {...registerReset('new_password')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Leave blank for TempPass2026!" />
+            <input type="password" {...registerReset('new_password')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Leave blank for auto-generated password" />
           </div>
           <div className="bg-yellow-50 rounded-lg p-3 text-xs text-yellow-700">
             The user will be required to change their password on next login.

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { useAuthStore, roleLabels, isAdminRole, canManageUsers } from '../store/authStore';
+import { useAuthStore, roleLabels, isAdminRole, canManageUsers, canAccessSettings } from '../store/authStore';
 import {
   LayoutDashboard, FolderOpen, ClipboardList, Image, FileText,
   Users, Settings, LogOut, Menu, X, Bell, ChevronRight, Building2,
@@ -28,7 +28,7 @@ export default function Layout({ children }: LayoutProps) {
     { to: '/photos', icon: Image, label: 'Photos', show: true, badge: null },
     { to: '/invoices', icon: FileText, label: 'Invoices', show: true, badge: null },
     { to: '/users', icon: Users, label: 'Users', show: user ? canManageUsers(user.role) : false, badge: null },
-    { to: '/settings', icon: Settings, label: 'Settings', show: user ? isAdminRole(user.role) : false, badge: null },
+    { to: '/settings', icon: Settings, label: 'Settings', show: user ? canAccessSettings(user.role) : false, badge: null },
   ].filter(i => i.show);
 
   const isActive = (path: string) => {
