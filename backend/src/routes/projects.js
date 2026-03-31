@@ -51,7 +51,7 @@ router.get('/', (req, res) => {
 });
 
 // GET /api/projects/stats - dashboard stats
-router.get('/stats', authorize('super_admin', 'operations_manager', 'admin_assistant'), (req, res) => {
+router.get('/stats', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
   const db = getDb();
 
   // Lifecycle KPI counts
@@ -139,7 +139,7 @@ router.get('/:id', authorizeProjectAccess, (req, res) => {
 });
 
 // POST /api/projects - create project
-router.post('/', authorize('super_admin', 'operations_manager'), (req, res) => {
+router.post('/', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
   try {
     const {
       address, job_name, status, start_date, target_completion, scope_of_work, budget,
@@ -185,7 +185,7 @@ router.post('/', authorize('super_admin', 'operations_manager'), (req, res) => {
 });
 
 // PUT /api/projects/:id - update project
-router.put('/:id', authorize('super_admin', 'operations_manager', 'admin_assistant'), authorizeProjectAccess, (req, res) => {
+router.put('/:id', authorize('super_admin', 'operations_manager', 'project_manager'), authorizeProjectAccess, (req, res) => {
   try {
     const db = getDb();
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
@@ -245,7 +245,7 @@ router.delete('/:id', authorize('super_admin'), (req, res) => {
 });
 
 // POST /api/projects/:id/assign - assign user to project
-router.post('/:id/assign', authorize('super_admin', 'operations_manager'), (req, res) => {
+router.post('/:id/assign', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
   try {
     const { user_id } = req.body;
     if (!user_id) return res.status(400).json({ error: 'user_id required' });
@@ -262,7 +262,7 @@ router.post('/:id/assign', authorize('super_admin', 'operations_manager'), (req,
 });
 
 // DELETE /api/projects/:id/assign/:userId - remove assignment
-router.delete('/:id/assign/:userId', authorize('super_admin', 'operations_manager'), (req, res) => {
+router.delete('/:id/assign/:userId', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
   const db = getDb();
   db.prepare('DELETE FROM project_assignments WHERE project_id = ? AND user_id = ?').run(req.params.id, req.params.userId);
   logActivity({ userId: req.user.id, projectId: req.params.id, action: 'user_unassigned', entityType: 'project', entityId: req.params.id });

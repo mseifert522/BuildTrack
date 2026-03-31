@@ -126,7 +126,7 @@ router.post('/', upload.array('photos', 20), (req, res) => {
 
 // DELETE /api/projects/:projectId/photos/:id
 router.delete('/:id', (req, res) => {
-  if (!['super_admin', 'operations_manager'].includes(req.user.role)) {
+  if (!['super_admin', 'operations_manager', 'project_manager'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Insufficient permissions' });
   }
   const db = getDb();

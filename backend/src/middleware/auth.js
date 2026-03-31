@@ -1,19 +1,45 @@
 const jwt = require('jsonwebtoken');
 const { getDb } = require('../db/schema');
 
+// ── Role hierarchy (higher index = more authority) ──────────────────────────
+const ROLE_HIERARCHY = {
+  contractor: 0,
+  project_manager: 1,
+  operations_manager: 2,
+  super_admin: 3,
+};
+
+const PROJECT_MANAGE_ROLES = ['super_admin', 'operations_manager', 'project_manager'];
+const USER_MANAGE_ROLES = ['super_admin', 'operations_manager'];
+
+// In-memory JWT blacklist for instant lockout
+const tokenBlacklist = new Set();
+
+function blacklistToken(token) {
+  tokenBlacklist.add(token);
+}
+
 function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Authentication required' });
   }
-
   const token = authHeader.split(' ')[1];
+
+  if (tokenBlacklist.has(token)) {
+    return res.status(401).json({ error: 'Session terminated. Please log in again.' });
+  }
+
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const db = getDb();
     const user = db.prepare('SELECT * FROM users WHERE id = ? AND is_active = 1').get(decoded.userId);
-    if (!user) return res.status(401).json({ error: 'User not found or inactive' });
+    if (!user) {
+      tokenBlacklist.add(token);
+      return res.status(401).json({ error: 'Account has been deactivated. Contact your administrator.' });
+    }
     req.user = user;
+    req.token = token;
     next();
   } catch (err) {
     return res.status(401).json({ error: 'Invalid or expired token' });
@@ -23,10 +49,16 @@ function authenticate(req, res, next) {
 function authorize(...roles) {
   return (req, res, next) => {
     if (!roles.includes(req.user.role)) {
-      return res.status(403).json({ error: 'Insufficient permissions' });
+      return res.status(403).json({ error: 'Insufficient permissions for this action' });
     }
     next();
   };
+}
+
+function authorizeOverUser(actorRole, targetRole) {
+  const actorLevel = ROLE_HIERARCHY[actorRole] ?? -1;
+  const targetLevel = ROLE_HIERARCHY[targetRole] ?? -1;
+  return actorLevel > targetLevel;
 }
 
 function authorizeProjectAccess(req, res, next) {
@@ -34,22 +66,26 @@ function authorizeProjectAccess(req, res, next) {
   const projectId = req.params.projectId || req.params.id;
   const user = req.user;
 
-  // Super admin, operations manager, admin assistant can access all projects
-  if (['super_admin', 'operations_manager', 'admin_assistant'].includes(user.role)) {
-    return next();
-  }
+  if (PROJECT_MANAGE_ROLES.includes(user.role)) return next();
 
-  // Contractors can only access assigned projects
   if (user.role === 'contractor') {
     const assignment = db.prepare(
       'SELECT id FROM project_assignments WHERE project_id = ? AND user_id = ?'
     ).get(projectId, user.id);
     if (!assignment) {
-      return res.status(403).json({ error: 'Access denied to this project' });
+      return res.status(403).json({ error: 'Access denied: you are not assigned to this project' });
     }
   }
-
   next();
 }
 
-module.exports = { authenticate, authorize, authorizeProjectAccess };
+module.exports = {
+  authenticate,
+  authorize,
+  authorizeOverUser,
+  authorizeProjectAccess,
+  blacklistToken,
+  ROLE_HIERARCHY,
+  PROJECT_MANAGE_ROLES,
+  USER_MANAGE_ROLES,
+};

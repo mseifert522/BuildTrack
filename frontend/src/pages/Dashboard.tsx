@@ -13,9 +13,12 @@ import { formatDistanceToNow, format } from 'date-fns';
 
 interface Stats {
   total_projects: number;
+  total_acquisitions: number;
+  under_construction: number;
+  completed_projects: number;
+  sold_projects: number;
   active_projects: number;
   in_progress_projects: number;
-  completed_projects: number;
   open_punch_items: number;
   pending_invoices: number;
   recent_photos: number;
@@ -104,52 +107,52 @@ export default function Dashboard() {
   const firstName = user?.name?.split(' ')[0] || 'there';
   const now = new Date();
 
-  // Derive stats from data if API stats not available
-  const totalProjects = stats?.total_projects ?? allProjects.length;
-  const openPunchItems = stats?.open_punch_items ?? projects.reduce((s, p) => s + (p.open_punch_items || 0), 0);
-  const pendingInvoices = stats?.pending_invoices ?? invoices.filter(i => i.status === 'pending' || i.status === 'draft').length;
-  const recentPhotos = stats?.recent_photos ?? 0;
+  // Lifecycle KPI counts
+  const totalAcquisitions = stats?.total_acquisitions ?? allProjects.length;
+  const activeRehabs = stats?.under_construction ?? allProjects.filter(p => p.status === 'active').length;
+  const rehabComplete = stats?.completed_projects ?? 0;
+  const closedSold = stats?.sold_projects ?? 0;
 
   const kpiCards = [
     {
-      label: 'Total Projects',
-      value: totalProjects,
-      sub: `${stats?.active_projects ?? projects.length} active`,
+      label: 'Total Acquisitions',
+      value: totalAcquisitions,
+      sub: 'All properties acquired',
       icon: FolderOpen,
       gradient: 'linear-gradient(135deg, #1E3A5F 0%, #2563EB 100%)',
       iconBg: 'rgba(255,255,255,0.15)',
-      trend: '+2 this month',
+      trend: 'Portfolio total',
       trendUp: true,
     },
     {
-      label: 'Open Punch Items',
-      value: openPunchItems,
-      sub: 'Require attention',
-      icon: ClipboardList,
+      label: 'Active Rehabs',
+      value: activeRehabs,
+      sub: 'Currently under construction',
+      icon: TrendingUp,
       gradient: 'linear-gradient(135deg, #7C2D12 0%, #EA580C 100%)',
       iconBg: 'rgba(255,255,255,0.15)',
-      trend: openPunchItems > 0 ? 'Action needed' : 'All clear',
-      trendUp: openPunchItems === 0,
+      trend: activeRehabs > 0 ? 'In progress' : 'None active',
+      trendUp: activeRehabs > 0,
     },
     {
-      label: 'Pending Invoices',
-      value: pendingInvoices,
-      sub: 'Awaiting approval',
-      icon: FileText,
+      label: 'Rehab Complete',
+      value: rehabComplete,
+      sub: 'Construction finished',
+      icon: CheckCircle2,
       gradient: 'linear-gradient(135deg, #4A1D96 0%, #7C3AED 100%)',
       iconBg: 'rgba(255,255,255,0.15)',
-      trend: pendingInvoices > 0 ? 'Review required' : 'Up to date',
-      trendUp: pendingInvoices === 0,
+      trend: rehabComplete > 0 ? 'Ready for sale' : 'In progress',
+      trendUp: rehabComplete > 0,
     },
     {
-      label: 'Photos This Week',
-      value: recentPhotos,
-      sub: 'Field documentation',
-      icon: Image,
+      label: 'Closed & Sold',
+      value: closedSold,
+      sub: 'Dispositions completed',
+      icon: ArrowUpRight,
       gradient: 'linear-gradient(135deg, #064E3B 0%, #059669 100%)',
       iconBg: 'rgba(255,255,255,0.15)',
-      trend: 'Updated today',
-      trendUp: true,
+      trend: closedSold > 0 ? 'Sold' : 'Pending',
+      trendUp: closedSold > 0,
     },
   ];
 
