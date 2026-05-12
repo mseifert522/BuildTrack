@@ -4,8 +4,8 @@ import api from '../lib/api';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '../store/authStore';
 import {
-  ArrowLeft, Send, Trash2, MessageSquare, Wifi, WifiOff,
-  Clock, User, ChevronDown,
+  ArrowLeft, Send, MessageSquare, Wifi, WifiOff,
+  Clock, User, ChevronDown, Mic, Square,
 } from 'lucide-react';
 
 interface Note {
@@ -14,6 +14,7 @@ interface Note {
   user_id: string;
   user_name: string;
   user_role: string;
+  user_avatar_url?: string | null;
   note: string;
   note_type: string;
   created_at: string;
@@ -70,12 +71,14 @@ export default function MobileNotes() {
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [listening, setListening] = useState(false);
   const [connected, setConnected] = useState(false);
   const [expandedNote, setExpandedNote] = useState<string | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const recognitionRef = useRef<any>(null);
 
   // Load project info + initial notes
   useEffect(() => {
@@ -120,8 +123,8 @@ export default function MobileNotes() {
               if (prev.find(n => n.id === data.note.id)) return prev;
               return [...prev, data.note];
             });
-          } else if (data.type === 'delete_note') {
-            setNotes(prev => prev.filter(n => n.id !== data.noteId));
+          } else if (data.type === 'update_note') {
+            setNotes(prev => prev.map(n => n.id === data.note.id ? data.note : n));
           }
         } catch { /* ignore parse errors */ }
       };
@@ -153,6 +156,7 @@ export default function MobileNotes() {
       user_id: user!.id,
       user_name: user!.name,
       user_role: user!.role,
+      user_avatar_url: user!.avatar_url || null,
       note: text.trim(),
       note_type: 'general',
       created_at: new Date().toISOString(),
@@ -175,19 +179,48 @@ export default function MobileNotes() {
     }
   }, [text, sending, projectId, user]);
 
-  const handleDelete = async (noteId: string) => {
-    try {
-      await api.delete(`/projects/${projectId}/notes/${noteId}`);
-      setNotes(prev => prev.filter(n => n.id !== noteId));
-      toast.success('Note deleted');
-    } catch {
-      toast.error('Failed to delete note');
+  const startDictation = useCallback(() => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      toast.error('Microphone dictation is not supported in this browser');
+      return;
     }
-  };
 
-  const canDelete = (note: Note) =>
-    note.user_id === user?.id ||
-    ['super_admin', 'operations_manager'].includes(user?.role || '');
+    recognitionRef.current?.stop?.();
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'en-US';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.onstart = () => setListening(true);
+    recognition.onend = () => {
+      if (recognitionRef.current === recognition) {
+        setListening(false);
+        recognitionRef.current = null;
+      }
+    };
+    recognition.onerror = () => {
+      setListening(false);
+      recognitionRef.current = null;
+      toast.error('Microphone dictation stopped');
+    };
+    recognition.onresult = (event: any) => {
+      const spokenText = Array.from(event.results).slice(event.resultIndex || 0)
+        .filter((result: any) => result.isFinal)
+        .map((result: any) => result[0]?.transcript)
+        .filter(Boolean)
+        .join(' ')
+        .trim();
+      if (spokenText) setText(prev => `${prev}${prev.trim() ? ' ' : ''}${spokenText}`);
+    };
+    recognitionRef.current = recognition;
+    recognition.start();
+  }, []);
+
+  const stopDictation = useCallback(() => {
+    recognitionRef.current?.stop?.();
+    recognitionRef.current = null;
+    setListening(false);
+  }, []);
 
   // Group notes by date
   const groupedNotes = notes.reduce<{ date: string; notes: Note[] }[]>((groups, note) => {
@@ -304,12 +337,21 @@ export default function MobileNotes() {
                   return (
                     <div key={note.id} className={`flex gap-3 ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}>
                       {/* Avatar */}
-                      <div
-                        className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 text-white text-xs font-black"
-                        style={{ background: color, marginTop: 2 }}
-                      >
-                        {getInitials(note.user_name)}
-                      </div>
+                      {note.user_avatar_url ? (
+                        <img
+                          src={note.user_avatar_url}
+                          alt={note.user_name}
+                          className="w-9 h-9 rounded-full object-cover flex-shrink-0"
+                          style={{ marginTop: 2, objectPosition: 'center top' }}
+                        />
+                      ) : (
+                        <div
+                          className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 text-white text-xs font-black"
+                          style={{ background: color, marginTop: 2 }}
+                        >
+                          {getInitials(note.user_name)}
+                        </div>
+                      )}
 
                       {/* Bubble */}
                       <div className={`flex-1 max-w-xs ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
@@ -354,15 +396,6 @@ export default function MobileNotes() {
                             {formatTime(note.created_at)}
                             <ChevronDown className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                           </button>
-                          {canDelete(note) && (
-                            <button
-                              onClick={() => handleDelete(note.id)}
-                              className="p-1 rounded-lg transition-colors"
-                              style={{ color: '#EF4444' }}
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
                         </div>
 
                         {/* Expanded full timestamp */}
@@ -404,6 +437,16 @@ export default function MobileNotes() {
             Posting as <strong className="text-gray-700">{user?.name}</strong>
           </span>
         </div>
+        {listening && (
+          <div className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded-xl" style={{ background: '#FEF3C7', color: '#92400E' }}>
+            <span className="text-xs font-black">Listening</span>
+            <span className="flex items-end gap-0.5 h-4">
+              {[0, 1, 2, 3].map(i => (
+                <span key={i} className="w-1 rounded-full bg-current animate-pulse" style={{ height: 5 + i * 3, animationDelay: `${i * 120}ms` }} />
+              ))}
+            </span>
+          </div>
+        )}
 
         <div className="flex items-end gap-3">
           <div
@@ -430,6 +473,17 @@ export default function MobileNotes() {
               style={{ maxHeight: 120, overflowY: 'auto' }}
             />
           </div>
+
+          <button
+            onClick={listening ? stopDictation : startDictation}
+            className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 transition-all active:scale-95 disabled:opacity-60"
+            style={{
+              background: listening ? '#FEF3C7' : '#F3F4F6',
+              border: listening ? '1px solid #D99D26' : '1px solid #E5E7EB',
+            }}
+          >
+            {listening ? <Square className="w-5 h-5" style={{ color: '#D99D26' }} /> : <Mic className="w-5 h-5" style={{ color: '#6B7280' }} />}
+          </button>
 
           <button
             onClick={handleSend}

@@ -9,7 +9,6 @@ interface Project {
   address: string;
   job_name?: string;
   status: string;
-  project_stage?: string;
   open_punch_items?: number;
 }
 
@@ -20,18 +19,6 @@ const statusColors: Record<string, string> = {
   on_hold: '#ef4444',
 };
 
-const stageLabel: Record<string, string> = {
-  acquisition: 'Acquisition',
-  planning: 'Planning',
-  demo: 'Demo',
-  framing: 'Framing',
-  rough_ins: 'Rough-Ins',
-  drywall: 'Drywall',
-  finishes: 'Finishes',
-  punch_out: 'Punch-Out',
-  final: 'Final',
-  complete: 'Complete',
-};
 
 export default function MobileProjects() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -73,7 +60,7 @@ export default function MobileProjects() {
       <div className="sticky top-0 z-10 shadow-md" style={{ backgroundColor: '#181D25' }}>
         <div className="flex items-center justify-between px-4 pt-4 pb-3">
           <div className="flex items-center gap-3">
-            <img src="/nud-logo.jpg" alt="NUD" className="w-9 h-9 rounded-full object-cover border-2" style={{ borderColor: '#D99D26' }} />
+            <img src="/buildtrack-logo.png" alt="NUD" className="w-9 h-9 rounded-full object-cover border-2" style={{ borderColor: '#D99D26' }} />
             <div>
               <p className="text-white font-bold text-sm leading-tight">BuildTrack</p>
               <p className="text-xs" style={{ color: '#D99D26' }}>New Urban Development</p>
@@ -208,11 +195,6 @@ export default function MobileProjects() {
                       {project.status?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
                     </span>
                     {/* Stage badge */}
-                    {project.project_stage && (
-                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
-                        {stageLabel[project.project_stage] || project.project_stage}
-                      </span>
-                    )}
                     {/* Open punch items */}
                     {(project.open_punch_items ?? 0) > 0 && (
                       <span className="px-2 py-0.5 rounded-full text-xs font-semibold text-white" style={{ backgroundColor: '#ef4444' }}>

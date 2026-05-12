@@ -21,6 +21,7 @@ export default function InvoiceBuilder() {
   const [lineItems, setLineItems] = useState<LineItem[]>([{ description: '', amount: '' }]);
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(true);
+  const [nextInvoiceNumber, setNextInvoiceNumber] = useState('');
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -121,7 +122,10 @@ export default function InvoiceBuilder() {
 
   if (loading) return <Loading />;
 
+
   const isReadOnly = invoice?.status && invoice.status !== 'draft';
+
+  const displayInvoiceNum = invoice?.invoice_number || nextInvoiceNumber;
 
   return (
     <div className="min-h-full bg-gray-50">
@@ -133,7 +137,7 @@ export default function InvoiceBuilder() {
           </button>
           <div className="flex-1 min-w-0">
             <h1 className="font-bold text-gray-900 text-base">
-              {invoiceId ? `Invoice #${invoice?.invoice_number}` : 'New Invoice'}
+              {invoiceId ? `Invoice #${invoice?.invoice_number}` : (displayInvoiceNum ? `New Invoice — ${displayInvoiceNum}` : 'New Invoice')}
             </h1>
             <p className="text-xs text-gray-500 truncate">{project?.address}</p>
           </div>
@@ -157,7 +161,7 @@ export default function InvoiceBuilder() {
               <p className="text-sm text-gray-500 mt-0.5">invoices@newurbandev.com</p>
             </div>
             <div className="text-right">
-              <p className="text-xs text-gray-400">Invoice</p>
+              <p className="text-xs text-gray-400">Invoice {displayInvoiceNum && <span className="font-bold text-gray-600 ml-1">{displayInvoiceNum}</span>}</p>
               <p className="font-bold text-gray-900">{invoice?.invoice_number || 'DRAFT'}</p>
               <p className="text-xs text-gray-400 mt-1">{new Date().toLocaleDateString()}</p>
             </div>

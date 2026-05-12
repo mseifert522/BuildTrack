@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react';
 import { useAuthStore, roleLabels, canManageUsers } from '../store/authStore';
 import api from '../lib/api';
 import { Loading, Modal, PageHeader } from '../components/ui';
-import { Users as UsersIcon, Plus, Edit2, Key, ToggleLeft, ToggleRight, ShieldOff, ShieldCheck } from 'lucide-react';
+import { Users as UsersIcon, Plus, Edit2, Key, ToggleLeft, ToggleRight, ShieldOff, ShieldCheck, Camera, Trash2, Radio } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
-import { format } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
 
 interface User {
   id: string;
@@ -14,9 +14,33 @@ interface User {
   role: string;
   phone: string;
   company: string;
+  contractor_category?: string | null;
+  avatar_url: string | null;
+  pin: string | null;
   is_active: number;
+  is_online: number;
+  last_seen_at?: string | null;
+  last_login_at?: string | null;
   created_at: string;
 }
+
+const CONTRACTOR_CATEGORIES = [
+  'Floor',
+  'Roof',
+  'Electrical',
+  'Plumbing',
+  'Handymen',
+  'Painting',
+  'Drywall',
+  'Concrete',
+  'Cleaning',
+  'Window Install',
+  'Carpenter',
+  'Carpet Installer',
+  'Foundations',
+  'Excavators',
+  'Framing',
+];
 
 export default function Users() {
   const { user: currentUser } = useAuthStore();
@@ -25,6 +49,7 @@ export default function Users() {
   const [showCreate, setShowCreate] = useState(false);
   const [editUser, setEditUser] = useState<User | null>(null);
   const [resetUser, setResetUser] = useState<User | null>(null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const { register, handleSubmit, reset, setValue, formState: { isSubmitting } } = useForm();
   const { register: registerReset, handleSubmit: handleSubmitReset, reset: resetForm, formState: { isSubmitting: isResetting } } = useForm();
 
@@ -41,7 +66,11 @@ export default function Users() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    const timer = window.setInterval(load, 30000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const onCreateUser = async (data: any) => {
     try {
@@ -52,6 +81,23 @@ export default function Users() {
       load();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to create user');
+    }
+  };
+
+  const handleAvatarUpload = async (userId: string, file: File) => {
+    setUploadingAvatar(true);
+    try {
+      const formData = new FormData();
+      formData.append('avatar', file);
+      await api.post(`/users/${userId}/avatar`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      toast.success('Photo uploaded');
+      load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to upload photo');
+    } finally {
+      setUploadingAvatar(false);
     }
   };
 
@@ -81,6 +127,18 @@ export default function Users() {
   };
 
   /** Instant lockout — blacklists all active sessions immediately */
+  const handleDelete = async (u: User) => {
+    if (!confirm(`Permanently delete ${u.name}? This cannot be undone.`)) return;
+    if (!confirm(`Are you absolutely sure? All data for ${u.name} will be removed.`)) return;
+    try {
+      await api.delete(`/users/${u.id}`);
+      toast.success(`${u.name} has been deleted`);
+      load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to delete user');
+    }
+  };
+
   const handleLockout = async (u: User) => {
     if (!confirm(`Lock out ${u.name}? Their session will be terminated immediately.`)) return;
     try {
@@ -128,19 +186,42 @@ export default function Users() {
         <div className="space-y-3">
           {users.map(u => (
             <div key={u.id} className={`bg-white rounded-xl border p-4 flex items-center gap-3 ${!u.is_active ? 'opacity-60 border-red-200 bg-red-50' : 'border-gray-200'}`}>
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${u.is_active ? 'bg-blue-100' : 'bg-red-100'}`}>
-                <span className={`font-bold text-sm ${u.is_active ? 'text-blue-700' : 'text-red-500'}`}>{u.name?.[0]?.toUpperCase()}</span>
+              <div className="relative flex-shrink-0">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center overflow-hidden ${u.is_active ? 'bg-blue-100' : 'bg-red-100'}`}>
+                  {u.avatar_url ? (
+                    <img src={u.avatar_url} alt={u.name} className="w-full h-full object-cover" style={{ objectPosition: 'center top' }} />
+                  ) : (
+                    <span className={`font-bold text-sm ${u.is_active ? 'text-blue-700' : 'text-red-500'}`}>{u.name?.[0]?.toUpperCase()}</span>
+                  )}
+                </div>
+                <span
+                  className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-white ${u.is_online ? 'bg-green-500' : 'bg-gray-300'}`}
+                  title={u.is_online ? 'Live now' : 'Offline'}
+                />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <p className="font-semibold text-gray-900 text-sm">{u.name}</p>
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${roleColors[u.role] || 'bg-gray-100 text-gray-600'}`}>{roleLabels[u.role] || u.role}</span>
+                  <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-bold ${u.is_online ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                    <Radio className={`w-3 h-3 ${u.is_online ? 'animate-pulse' : ''}`} />
+                    {u.is_online ? 'Live now' : 'Offline'}
+                  </span>
                   {!u.is_active && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600 font-medium">🔒 Locked Out</span>}
                 </div>
                 <p className="text-xs text-gray-500">{u.email}</p>
                 {u.phone && <p className="text-xs text-gray-400">{u.phone}</p>}
                 {u.company && <p className="text-xs text-gray-400">{u.company}</p>}
-                <p className="text-xs text-gray-400 mt-0.5">Joined {format(new Date(u.created_at), 'MMM d, yyyy')}</p>
+                {u.role === 'contractor' && u.contractor_category && <p className="text-xs text-amber-600 font-semibold">{u.contractor_category}</p>}
+                <div className="flex items-center gap-3 mt-0.5">
+                  <p className="text-xs text-gray-400">Joined {format(new Date(u.created_at), 'MMM d, yyyy')}</p>
+                  {u.last_seen_at && (
+                    <p className="text-xs text-gray-400">
+                      Seen {formatDistanceToNow(new Date(/[zZ]|[+-]\d{2}:?\d{2}$/.test(u.last_seen_at) ? u.last_seen_at : `${u.last_seen_at}Z`), { addSuffix: true })}
+                    </p>
+                  )}
+                  {u.pin && <span className="text-xs font-mono font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded">PIN: {u.pin}</span>}
+                </div>
               </div>
               {canManage && u.id !== currentUser?.id && u.role !== 'super_admin' && (
                 <div className="flex items-center gap-1 flex-shrink-0">
@@ -175,6 +256,13 @@ export default function Users() {
                       <ShieldCheck className="w-4 h-4" />
                     </button>
                   )}
+                  <button
+                    onClick={() => handleDelete(u)}
+                    className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    title="Delete user permanently"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
               )}
             </div>
@@ -211,6 +299,13 @@ export default function Users() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Company</label>
             <input {...register('company')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Company name" />
           </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Contractor Category</label>
+            <select {...register('contractor_category')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+              <option value="">Select category for contractors...</option>
+              {CONTRACTOR_CATEGORIES.map(category => <option key={category} value={category}>{category}</option>)}
+            </select>
+          </div>
           <div className="bg-blue-50 rounded-lg p-3 text-xs text-blue-700">
             A temporary password will be generated. The user will be prompted to change it on first login.
           </div>
@@ -226,6 +321,35 @@ export default function Users() {
       {/* Edit User Modal */}
       <Modal isOpen={!!editUser} onClose={() => { setEditUser(null); reset(); }} title="Edit User">
         <form onSubmit={handleSubmit(onEditUser)} className="space-y-4">
+          {/* Avatar Upload */}
+          <div className="flex items-center gap-4 pb-4 border-b border-gray-200">
+            <div className="w-20 h-20 rounded-full overflow-hidden bg-gray-100 flex items-center justify-center flex-shrink-0 relative group">
+              {editUser?.avatar_url ? (
+                <img src={editUser.avatar_url} alt={editUser.name} className="w-full h-full object-cover" style={{ objectPosition: 'center top' }} />
+              ) : (
+                <span className="text-2xl font-bold text-gray-400">{editUser?.name?.[0]?.toUpperCase()}</span>
+              )}
+              <label className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer rounded-full">
+                <Camera className="w-6 h-6 text-white" />
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={e => {
+                    const file = e.target.files?.[0];
+                    if (file && editUser) handleAvatarUpload(editUser.id, file);
+                  }}
+                />
+              </label>
+            </div>
+            <div>
+              <p className="font-semibold text-gray-900">{editUser?.name}</p>
+              <p className="text-xs text-gray-500">{editUser?.email}</p>
+              {uploadingAvatar && <p className="text-xs text-blue-500 mt-1">Uploading photo...</p>}
+              {!uploadingAvatar && <p className="text-xs text-gray-400 mt-1">Hover photo to change</p>}
+            </div>
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
             <input {...register('name')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
@@ -250,6 +374,13 @@ export default function Users() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Company</label>
             <input {...register('company')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Contractor Category</label>
+            <select {...register('contractor_category')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+              <option value="">Select category for contractors...</option>
+              {CONTRACTOR_CATEGORIES.map(category => <option key={category} value={category}>{category}</option>)}
+            </select>
           </div>
           <div className="flex gap-3">
             <button type="button" onClick={() => { setEditUser(null); reset(); }} className="flex-1 py-2.5 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50">Cancel</button>

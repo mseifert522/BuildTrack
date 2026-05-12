@@ -15,6 +15,8 @@ const punchListRoutes = require('./src/routes/punchlist');
 const photoRoutes = require('./src/routes/photos');
 const invoiceRoutes = require('./src/routes/invoices');
 const notesRoutes = require('./src/routes/notes');
+const searchRoutes = require('./src/routes/search');
+const chatRoutes = require('./src/routes/chat');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -46,13 +48,63 @@ app.use('/api/projects/:projectId/punch-list', punchListRoutes);
 app.use('/api/projects/:projectId/photos', photoRoutes);
 app.use('/api/projects/:projectId/invoices', invoiceRoutes);
 app.use('/api/projects/:projectId/notes', notesRoutes);
+app.use('/api/search', searchRoutes);
+app.use('/api/chat', chatRoutes);
+
+// Consolidated project notes feed for the dashboard.
+app.get('/api/notes/recent', authenticate, (req, res) => {
+  const { getDb } = require('./src/db/schema');
+  const db = getDb();
+  const requestedLimit = Number.parseInt(req.query.limit, 10);
+  const limit = Number.isFinite(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 100) : 50;
+
+  const contractorOnly = req.user.role === 'contractor';
+  const assignmentJoin = contractorOnly
+    ? 'JOIN project_assignments pa ON pa.project_id = n.project_id AND pa.user_id = ?'
+    : '';
+  const params = contractorOnly ? [req.user.id, limit] : [limit];
+
+  const notes = db.prepare(`
+    SELECT
+      n.id,
+      n.project_id,
+      n.user_id,
+      n.note,
+      n.note_type,
+      n.visibility,
+      n.edited_at,
+      n.edited_by,
+      n.edit_count,
+      n.created_at,
+      u.name as user_name,
+      u.role as user_role,
+      u.avatar_url as user_avatar_url,
+      ph.id as photo_id,
+      ph.filename as photo_filename,
+      ph.original_name as photo_original_name,
+      ph.caption as photo_caption,
+      p.address as project_address,
+      p.job_name as project_job_name,
+      p.status as project_status
+    FROM project_notes n
+    JOIN users u ON u.id = n.user_id
+    JOIN projects p ON p.id = n.project_id
+    LEFT JOIN photos ph ON ph.note_id = n.id
+    ${assignmentJoin}
+      ${contractorOnly ? "AND (n.user_id = ? OR n.visibility = 'public')" : ''}
+    ORDER BY datetime(n.created_at) DESC, n.created_at DESC
+    LIMIT ?
+  `).all(...(contractorOnly ? [req.user.id, req.user.id, limit] : [limit]));
+
+  res.json(notes);
+});
 
 // All invoices endpoint (for admin dashboard)
 app.get('/api/invoices', authenticate, (req, res) => {
   const { getDb } = require('./src/db/schema');
   const { authorize } = require('./src/middleware/auth');
   const db = getDb();
-  if (!['super_admin', 'operations_manager', 'admin_assistant'].includes(req.user.role)) {
+  if (!['super_admin', 'operations_manager', 'project_manager', 'admin_assistant'].includes(req.user.role)) {
     // Contractors see their own
     const invoices = db.prepare(`
       SELECT i.*, u.name as contractor_name, p.address, p.job_name
@@ -73,19 +125,29 @@ app.get('/api/invoices', authenticate, (req, res) => {
 app.get('/api/activity', authenticate, (req, res) => {
   const { getDb } = require('./src/db/schema');
   const db = getDb();
-  if (!['super_admin', 'operations_manager', 'admin_assistant'].includes(req.user.role)) {
+  if (!['super_admin', 'operations_manager', 'project_manager', 'admin_assistant'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Forbidden' });
   }
   const logs = db.prepare(`
-    SELECT al.*, u.name as user_name
-    FROM activity_log al JOIN users u ON u.id = al.user_id
-    ORDER BY al.created_at DESC LIMIT 100
+    SELECT al.*, u.name as user_name, p.address as project_address, p.job_name as project_job_name
+    FROM activity_log al
+    JOIN users u ON u.id = al.user_id
+    LEFT JOIN projects p ON p.id = al.project_id
+    ORDER BY al.created_at DESC LIMIT 50
   `).all();
   res.json(logs);
 });
 
 // Health check
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
+
+// Redirect app.newurbandev.com root to /app
+app.get('/', (req, res, next) => {
+  if (req.hostname === 'app.newurbandev.com') {
+    return res.redirect('/app');
+  }
+  next();
+});
 
 // Serve React frontend in production
 const frontendDist = path.resolve(__dirname, '../frontend/dist');

@@ -4,25 +4,14 @@ import api from '../lib/api';
 import toast from 'react-hot-toast';
 import { useAuthStore, canCreateProjects } from '../store/authStore';
 import GooglePlacesInput from '../components/GooglePlacesInput';
+import CurrencyInput from '../components/CurrencyInput';
 
-const STAGES = [
-  { value: 'acquisition', label: 'Acquisition' },
-  { value: 'planning', label: 'Planning' },
-  { value: 'demo', label: 'Demo' },
-  { value: 'framing', label: 'Framing' },
-  { value: 'rough_ins', label: 'Rough-Ins' },
-  { value: 'drywall', label: 'Drywall' },
-  { value: 'finishes', label: 'Finishes' },
-  { value: 'punch_out', label: 'Punch-Out' },
-  { value: 'final', label: 'Final' },
-  { value: 'complete', label: 'Complete' },
-];
 
 const STATUSES = [
-  { value: 'active', label: 'Active', color: '#22c55e' },
-  { value: 'pending', label: 'Pending', color: '#D99D26' },
-  { value: 'on_hold', label: 'On Hold', color: '#ef4444' },
-  { value: 'completed', label: 'Completed', color: '#6b7280' },
+  { value: 'active_rehab', label: 'Active Rehab', color: '#22c55e' },
+  { value: 'on_market', label: 'On Market', color: '#D97706' },
+  { value: 'closed_sold', label: 'Closed and Sold', color: '#6b7280' },
+
 ];
 
 export default function MobileAddProject() {
@@ -32,11 +21,12 @@ export default function MobileAddProject() {
   // Form fields
   const [address, setAddress] = useState('');
   const [jobName, setJobName] = useState('');
-  const [status, setStatus] = useState('active');
-  const [stage, setStage] = useState('planning');
+  const [status, setStatus] = useState('active_rehab');
+  const [acquisitionDate, setAcquisitionDate] = useState('');
   const [startDate, setStartDate] = useState('');
   const [targetCompletion, setTargetCompletion] = useState('');
   const [budget, setBudget] = useState('');
+  const [purchasePrice, setPurchasePrice] = useState('');
   const [scopeOfWork, setScopeOfWork] = useState('');
   const [fieldNotes, setFieldNotes] = useState('');
   const [saving, setSaving] = useState(false);
@@ -68,10 +58,11 @@ export default function MobileAddProject() {
         address: address.trim(),
         job_name: jobName.trim(),
         status,
-        project_stage: stage,
+        acquisition_date: acquisitionDate || undefined,
         start_date: startDate || undefined,
         target_completion: targetCompletion || undefined,
         budget: budget ? Number(budget) : undefined,
+        purchase_price: purchasePrice ? Number(purchasePrice) : undefined,
         scope_of_work: scopeOfWork.trim() || undefined,
         field_notes: fieldNotes.trim() || undefined,
       });
@@ -101,7 +92,7 @@ export default function MobileAddProject() {
             <p style={{ color: 'white', fontWeight: 700, fontSize: 16, margin: 0 }}>New Project</p>
             <p style={{ color: '#D99D26', fontSize: 12, margin: '2px 0 0' }}>New Urban Development</p>
           </div>
-          <img src="/nud-logo.jpg" alt="NUD" style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover', border: '2px solid #D99D26' }} />
+          <img src="/buildtrack-logo.png" alt="NUD" style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover', border: '2px solid #D99D26' }} />
         </div>
       </div>
 
@@ -142,10 +133,10 @@ export default function MobileAddProject() {
           </div>
         </div>
 
-        {/* Section: Status & Stage */}
+        {/* Section: Status */}
         <div style={{ marginBottom: 8 }}>
           <p style={{ color: '#9CA3AF', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', margin: '16px 0 10px' }}>
-            Status & Stage
+            Status
           </p>
 
           {/* Status Selector */}
@@ -179,35 +170,6 @@ export default function MobileAddProject() {
               ))}
             </div>
           </div>
-
-          {/* Stage Selector */}
-          <div style={{ backgroundColor: 'white', borderRadius: 16, padding: '14px 16px', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
-            <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
-              Project Stage
-            </label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {STAGES.map(s => (
-                <button
-                  key={s.value}
-                  type="button"
-                  onClick={() => setStage(s.value)}
-                  style={{
-                    padding: '8px 14px',
-                    borderRadius: 20,
-                    border: 'none',
-                    backgroundColor: stage === s.value ? '#D99D26' : '#F3F4F6',
-                    color: stage === s.value ? 'white' : '#6B7280',
-                    fontWeight: 600,
-                    fontSize: 13,
-                    cursor: 'pointer',
-                    transition: 'all 0.15s',
-                  }}
-                >
-                  {s.label}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
 
         {/* Section: Dates & Budget */}
@@ -216,6 +178,17 @@ export default function MobileAddProject() {
             Dates & Budget
           </p>
           <div style={{ backgroundColor: 'white', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+            <div style={{ padding: '14px 16px', borderBottom: '1px solid #F3F4F6' }}>
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>
+                Acquisition Date
+              </label>
+              <input
+                type="date"
+                value={acquisitionDate}
+                onChange={e => setAcquisitionDate(e.target.value)}
+                style={{ width: '100%', border: 'none', outline: 'none', fontSize: 15, color: '#111827', backgroundColor: 'transparent', boxSizing: 'border-box' }}
+              />
+            </div>
             <div style={{ padding: '14px 16px', borderBottom: '1px solid #F3F4F6' }}>
               <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>
                 Start Date
@@ -242,12 +215,21 @@ export default function MobileAddProject() {
               <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>
                 Budget ($)
               </label>
-              <input
-                type="number"
+              <CurrencyInput
                 value={budget}
-                onChange={e => setBudget(e.target.value)}
+                onChange={setBudget}
                 placeholder="0.00"
-                min="0"
+                style={{ width: '100%', border: 'none', outline: 'none', fontSize: 15, color: '#111827', backgroundColor: 'transparent', boxSizing: 'border-box' }}
+              />
+            </div>
+            <div style={{ padding: '14px 16px' }}>
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>
+                Acquisition Price ($)
+              </label>
+              <CurrencyInput
+                value={purchasePrice}
+                onChange={setPurchasePrice}
+                placeholder="0.00"
                 style={{ width: '100%', border: 'none', outline: 'none', fontSize: 15, color: '#111827', backgroundColor: 'transparent', boxSizing: 'border-box' }}
               />
             </div>

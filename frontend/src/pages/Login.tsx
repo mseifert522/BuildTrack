@@ -1,12 +1,25 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
 
-const isMobile = () =>
-  /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
-  window.innerWidth < 768;
+const landingPathFor = (user: { role?: string; force_password_reset?: boolean }) => {
+  if (user.force_password_reset) return '/change-password';
+  return user.role === 'contractor' ? '/mobile' : '/dashboard';
+};
+
+const clearReviewSummaryDismissals = (user: { id?: string; role?: string }) => {
+  if (!user.id || user.role === 'contractor') return;
+  Object.keys(sessionStorage)
+    .filter(key => key.startsWith(`buildtrack-review-summary:${user.id}:`))
+    .forEach(key => sessionStorage.removeItem(key));
+};
+
+const queueLoginReviewSummary = (user: { id?: string; role?: string }) => {
+  if (!user.id || user.role === 'contractor') return;
+  sessionStorage.setItem(`buildtrack-login-review-summary:${user.id}`, '1');
+};
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -16,6 +29,12 @@ export default function Login() {
   );
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [needs2FA, setNeeds2FA] = useState(false);
+  const [twofaCode, setTwofaCode] = useState('');
+  const [trustDevice, setTrustDevice] = useState(false);
+  const [twofaLoading, setTwofaLoading] = useState(false);
+  const [showPinLogin, setShowPinLogin] = useState(false);
+  const [pinDigits, setPinDigits] = useState('');
   const [focusedField, setFocusedField] = useState<string | null>(null);
   const { setAuth } = useAuthStore();
   const navigate = useNavigate();
@@ -24,20 +43,73 @@ export default function Login() {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await api.post('/auth/login', { email, password });
-      localStorage.setItem('stayLoggedIn', stayLoggedIn ? 'true' : 'false');
-      setAuth(res.data.user, res.data.token);
-      if (res.data.user.force_password_reset) {
-        navigate('/change-password');
-      } else if (isMobile()) {
-        navigate('/mobile');
+      const deviceToken = localStorage.getItem('bt_device_token') || undefined;
+      const res = await api.post('/auth/login', { email, password, device_token: deviceToken });
+
+      if (res.data.requires_2fa) {
+        setNeeds2FA(true);
+        toast.success('Verification code sent to your email');
       } else {
-        navigate('/');
+        localStorage.setItem('stayLoggedIn', stayLoggedIn ? 'true' : 'false');
+        if (res.data.device_token) localStorage.setItem('bt_device_token', res.data.device_token);
+        setAuth(res.data.user, res.data.token);
+        clearReviewSummaryDismissals(res.data.user);
+        queueLoginReviewSummary(res.data.user);
+        navigate(landingPathFor(res.data.user));
       }
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Invalid credentials. Please try again.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleVerify2FA = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTwofaLoading(true);
+    try {
+      const res = await api.post('/auth/login', { email, password, twofa_code: twofaCode, trust_device: trustDevice });
+      if (res.data.requires_2fa) {
+        toast.error('Invalid or expired code. Try again.');
+      } else {
+        localStorage.setItem('stayLoggedIn', stayLoggedIn ? 'true' : 'false');
+        if (res.data.device_token) localStorage.setItem('bt_device_token', res.data.device_token);
+        setAuth(res.data.user, res.data.token);
+        clearReviewSummaryDismissals(res.data.user);
+        queueLoginReviewSummary(res.data.user);
+        navigate(landingPathFor(res.data.user));
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Invalid code');
+    } finally {
+      setTwofaLoading(false);
+    }
+  };
+
+  const handlePinLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pinDigits.length !== 5) return;
+    setLoading(true);
+    try {
+      const res = await api.post('/auth/pin-login', { pin: pinDigits });
+      setAuth(res.data.user, res.data.token);
+      clearReviewSummaryDismissals(res.data.user);
+      queueLoginReviewSummary(res.data.user);
+      navigate(landingPathFor(res.data.user));
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Invalid PIN');
+      setPinDigits('');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendCode = async () => {
+    try {
+      await api.post('/auth/login', { email, password });
+      toast.success('New code sent to your email');
+    } catch {
+      toast.error('Failed to resend code');
     }
   };
 
@@ -78,12 +150,12 @@ export default function Login() {
             className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-2xl overflow-hidden border-2"
             style={{ borderColor: 'rgba(217,157,38,0.4)', background: 'rgba(217,157,38,0.1)' }}
           >
-            <img src="/nud-logo.jpg" alt="NUD" className="w-full h-full object-cover" />
+            <img src="/buildtrack-logo.png" alt="BuildTrack" className="w-full h-full object-cover" />
           </div>
           <div>
-            <p className="text-white font-bold text-lg leading-tight tracking-tight">New Urban Development</p>
+            <p className="text-white font-bold text-lg leading-tight tracking-tight">BuildTrack</p>
             <p className="text-xs font-medium tracking-widest uppercase" style={{ color: '#D99D26' }}>
-              Field Operations Platform
+              Construction Management
             </p>
           </div>
         </div>
@@ -151,11 +223,11 @@ export default function Login() {
             className="w-20 h-20 rounded-3xl overflow-hidden border-4 shadow-2xl mb-4"
             style={{ borderColor: '#D99D26' }}
           >
-            <img src="/nud-logo.jpg" alt="NUD" className="w-full h-full object-cover" />
+            <img src="/buildtrack-logo.png" alt="BuildTrack" className="w-full h-full object-cover" />
           </div>
-          <h1 className="text-2xl font-black text-gray-900 text-center">New Urban Development</h1>
+          <h1 className="text-2xl font-black text-gray-900 text-center">BuildTrack</h1>
           <p className="text-sm font-semibold mt-1 tracking-wide" style={{ color: '#D99D26' }}>
-            Field Operations Platform
+            Construction Management
           </p>
         </div>
 
@@ -167,6 +239,62 @@ export default function Login() {
           </div>
 
           {/* Form */}
+          {needs2FA ? (
+            <form onSubmit={handleVerify2FA} className="space-y-5">
+              <div className="bg-white rounded-2xl p-6 text-center" style={{ border: '2px solid #E5E7EB' }}>
+                <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4" style={{ background: 'rgba(217,157,38,0.1)' }}>
+                  <svg className="w-7 h-7" style={{ color: '#D99D26' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
+                </div>
+                <h3 className="font-bold text-gray-900 text-lg mb-1">Check your email</h3>
+                <p className="text-sm text-gray-500 mb-6">We sent a 6-digit verification code to <strong>{email}</strong></p>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={twofaCode}
+                  onChange={e => setTwofaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  autoFocus
+                  className="w-full text-center text-3xl font-black tracking-[0.4em] py-4 rounded-2xl focus:outline-none"
+                  style={{ border: '2px solid #E5E7EB', letterSpacing: '0.4em' }}
+                  placeholder="000000"
+                />
+              </div>
+              <label
+                className="flex items-start gap-3 p-4 rounded-2xl cursor-pointer"
+                style={{ background: 'white', border: '2px solid #E5E7EB' }}
+              >
+                <input
+                  type="checkbox"
+                  checked={trustDevice}
+                  onChange={e => setTrustDevice(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300"
+                  style={{ accentColor: '#D99D26' }}
+                />
+                <span>
+                  <span className="block text-sm font-bold text-gray-900">Trust this device for 60 days</span>
+                  <span className="block text-xs text-gray-500 mt-0.5">Skip email verification on this computer until the trusted period expires.</span>
+                </span>
+              </label>
+              <button
+                type="submit"
+                disabled={twofaLoading || twofaCode.length !== 6}
+                className="w-full py-4 rounded-2xl font-bold text-sm text-white disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg, #D99D26, #C4891F)', boxShadow: '0 8px 24px rgba(217,157,38,0.35)' }}
+              >
+                {twofaLoading ? 'Verifying...' : 'Verify & Sign In'}
+              </button>
+              <div className="flex items-center justify-between">
+                <button type="button" onClick={() => { setNeeds2FA(false); setTwofaCode(''); }} className="text-sm font-medium text-gray-500 hover:text-gray-700">
+                  Back
+                </button>
+                <button type="button" onClick={handleResendCode} className="text-sm font-bold" style={{ color: '#D99D26' }}>
+                  Resend Code
+                </button>
+              </div>
+            </form>
+          ) : (
           <form onSubmit={handleSubmit} className="space-y-5">
             {/* Email */}
             <div>
@@ -249,6 +377,13 @@ export default function Login() {
               </div>
             </div>
 
+            {/* Forgot Password */}
+            <div className="text-right -mt-2">
+              <Link to="/forgot-password" className="text-xs font-bold hover:underline" style={{ color: '#D99D26' }}>
+                Forgot password?
+              </Link>
+            </div>
+
             {/* Stay Logged In */}
             <div
               className="flex items-center justify-between p-4 rounded-2xl"
@@ -307,6 +442,7 @@ export default function Login() {
               )}
             </button>
           </form>
+          )}
 
           <p className="text-center text-xs text-gray-400 mt-8">
             © 2026 New Urban Development · All rights reserved

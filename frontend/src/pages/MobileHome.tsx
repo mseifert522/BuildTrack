@@ -14,7 +14,6 @@ interface Project {
   address: string;
   job_name?: string;
   status: string;
-  project_stage?: string;
   open_punch_items?: number;
 }
 
@@ -28,17 +27,7 @@ interface PunchSummary {
   in_progress: number;
 }
 
-const stageLabel: Record<string, string> = {
-  acquisition: 'Acquisition', planning: 'Planning', demo: 'Demo',
-  framing: 'Framing', rough_ins: 'Rough-Ins', drywall: 'Drywall',
-  finishes: 'Finishes', punch_out: 'Punch-Out', final: 'Final', complete: 'Complete',
-};
 
-const stageColor: Record<string, string> = {
-  acquisition: '#8B5CF6', planning: '#3B82F6', demo: '#EF4444',
-  framing: '#F59E0B', rough_ins: '#F97316', drywall: '#10B981',
-  finishes: '#06B6D4', punch_out: '#D99D26', final: '#22C55E', complete: '#6B7280',
-};
 
 type Tab = 'projects' | 'punchlists' | 'invoices';
 
@@ -79,8 +68,8 @@ export default function MobileHome() {
                 job_name: p.job_name,
                 total: items.length,
                 open: items.filter((i: any) => i.status === 'not_started' || i.status === 'open').length,
-                completed: items.filter((i: any) => i.status === 'completed').length,
-                in_progress: items.filter((i: any) => i.status === 'in_progress').length,
+                completed: items.filter((i: any) => i.status === 'rehab_completed' || i.status === 'closed_sold' || i.status === 'completed').length,
+                in_progress: items.filter((i: any) => i.status === 'active_rehab' || i.status === 'in_progress').length,
               });
             }
           } catch {}
@@ -252,15 +241,6 @@ export default function MobileHome() {
                         <p style={{ fontWeight: 700, fontSize: 13, color: '#111827', margin: 0, lineHeight: 1.3 }}>{p.address}</p>
                         {p.job_name && <p style={{ fontSize: 11, color: '#9CA3AF', margin: '2px 0 0' }}>{p.job_name}</p>}
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-                          {p.project_stage && (
-                            <span style={{
-                              background: stageColor[p.project_stage] || '#6B7280',
-                              color: 'white', borderRadius: 20, padding: '3px 10px',
-                              fontSize: 11, fontWeight: 700,
-                            }}>
-                              {stageLabel[p.project_stage] || p.project_stage}
-                            </span>
-                          )}
                           {(p.open_punch_items || 0) > 0 && (
                             <span style={{
                               background: 'rgba(234,88,12,0.1)', color: '#EA580C',

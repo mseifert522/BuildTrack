@@ -7,6 +7,7 @@ const { logActivity } = require('../utils/audit');
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
 router.use(authorizeProjectAccess);
+const MANAGEMENT_ROLES = ['super_admin', 'operations_manager', 'project_manager'];
 
 // In-memory SSE client registry: { projectId: [{ res, userId }] }
 const sseClients = {};
@@ -23,12 +24,28 @@ function broadcastToProject(projectId, data) {
 router.get('/', (req, res) => {
   const db = getDb();
   const notes = db.prepare(`
-    SELECT n.*, u.name as user_name, u.role as user_role
+    SELECT
+      n.*,
+      u.name as user_name,
+      u.role as user_role,
+      u.avatar_url as user_avatar_url,
+      eu.name as edited_by_name,
+      ph.id as photo_id,
+      ph.filename as photo_filename,
+      ph.original_name as photo_original_name,
+      ph.caption as photo_caption
     FROM project_notes n
     JOIN users u ON u.id = n.user_id
+    LEFT JOIN users eu ON eu.id = n.edited_by
+    LEFT JOIN photos ph ON ph.note_id = n.id
     WHERE n.project_id = ?
+      AND (
+        ? != 'contractor'
+        OR n.user_id = ?
+        OR n.visibility = 'public'
+      )
     ORDER BY n.created_at ASC
-  `).all(req.params.projectId);
+  `).all(req.params.projectId, req.user.role, req.user.id);
   res.json(notes);
 });
 
@@ -67,17 +84,20 @@ router.get('/stream', (req, res) => {
 
 // POST /api/projects/:projectId/notes — create a note
 router.post('/', (req, res) => {
-  const { note, note_type } = req.body;
+  const { note, note_type, visibility } = req.body;
   if (!note || !note.trim()) return res.status(400).json({ error: 'Note text is required' });
 
   const db = getDb();
   const id = uuidv4();
   const createdAt = new Date().toISOString();
+  const noteVisibility = req.user.role === 'contractor'
+    ? 'private'
+    : (visibility === 'public' ? 'public' : 'private');
 
   db.prepare(`
-    INSERT INTO project_notes (id, project_id, user_id, note, note_type, created_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(id, req.params.projectId, req.user.id, note.trim(), note_type || 'general', createdAt);
+    INSERT INTO project_notes (id, project_id, user_id, note, note_type, visibility, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(id, req.params.projectId, req.user.id, note.trim(), note_type || 'general', noteVisibility, createdAt);
 
   const newNote = {
     id,
@@ -85,8 +105,18 @@ router.post('/', (req, res) => {
     user_id: req.user.id,
     user_name: req.user.name,
     user_role: req.user.role,
+    user_avatar_url: req.user.avatar_url || null,
     note: note.trim(),
     note_type: note_type || 'general',
+    visibility: noteVisibility,
+    edit_count: 0,
+    edited_at: null,
+    edited_by: null,
+    edited_by_name: null,
+    photo_id: null,
+    photo_filename: null,
+    photo_original_name: null,
+    photo_caption: null,
     created_at: createdAt,
   };
 
@@ -105,24 +135,55 @@ router.post('/', (req, res) => {
 });
 
 // DELETE /api/projects/:projectId/notes/:id — delete a note (own notes or admin)
-router.delete('/:id', (req, res) => {
+router.put('/:id', (req, res) => {
+  const { note, note_type, visibility } = req.body;
+  if (!note || !note.trim()) return res.status(400).json({ error: 'Note text is required' });
+
   const db = getDb();
-  const note = db.prepare('SELECT * FROM project_notes WHERE id = ? AND project_id = ?')
+  const existing = db.prepare('SELECT * FROM project_notes WHERE id = ? AND project_id = ?')
     .get(req.params.id, req.params.projectId);
-  if (!note) return res.status(404).json({ error: 'Note not found' });
+  if (!existing) return res.status(404).json({ error: 'Note not found' });
+  const isOwner = existing.user_id === req.user.id;
+  if (!isOwner) {
+    return res.status(403).json({ error: 'You can only edit your own notes' });
+  }
+  if (Number(existing.edit_count || 0) >= 1) return res.status(403).json({ error: 'This note has already been edited once' });
 
-  const canDelete =
-    note.user_id === req.user.id ||
-    ['super_admin', 'operations_manager'].includes(req.user.role);
+  const editedAt = new Date().toISOString();
+  const nextVisibility = req.user.role === 'contractor'
+    ? 'private'
+    : (visibility === 'public' ? 'public' : visibility === 'private' ? 'private' : existing.visibility || 'private');
+  db.prepare(`
+    UPDATE project_notes
+    SET note = ?, note_type = ?, visibility = ?, edited_at = ?, edited_by = ?, edit_count = edit_count + 1
+    WHERE id = ? AND project_id = ?
+  `).run(note.trim(), note_type || existing.note_type || 'general', nextVisibility, editedAt, req.user.id, req.params.id, req.params.projectId);
 
-  if (!canDelete) return res.status(403).json({ error: 'Cannot delete this note' });
+  const updated = db.prepare(`
+    SELECT
+      n.*,
+      u.name as user_name,
+      u.role as user_role,
+      u.avatar_url as user_avatar_url,
+      eu.name as edited_by_name,
+      ph.id as photo_id,
+      ph.filename as photo_filename,
+      ph.original_name as photo_original_name,
+      ph.caption as photo_caption
+    FROM project_notes n
+    JOIN users u ON u.id = n.user_id
+    LEFT JOIN users eu ON eu.id = n.edited_by
+    LEFT JOIN photos ph ON ph.note_id = n.id
+    WHERE n.id = ? AND n.project_id = ?
+  `).get(req.params.id, req.params.projectId);
 
-  db.prepare('DELETE FROM project_notes WHERE id = ?').run(req.params.id);
+  broadcastToProject(req.params.projectId, { type: 'update_note', note: updated });
+  logActivity({ userId: req.user.id, projectId: req.params.projectId, action: 'note_updated', entityType: 'note', entityId: req.params.id });
+  res.json(updated);
+});
 
-  // Broadcast deletion
-  broadcastToProject(req.params.projectId, { type: 'delete_note', noteId: req.params.id });
-
-  res.json({ message: 'Note deleted' });
+router.delete('/:id', (req, res) => {
+  res.status(405).json({ error: 'Notes cannot be deleted' });
 });
 
 module.exports = router;

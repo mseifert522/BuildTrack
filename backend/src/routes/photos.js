@@ -43,7 +43,7 @@ const upload = multer({ storage, fileFilter, limits: { fileSize: 20 * 1024 * 102
 // GET /api/projects/:projectId/photos
 router.get('/', (req, res) => {
   const db = getDb();
-  const { category_id, punch_list_item_id } = req.query;
+  const { category_id, punch_list_item_id, note_id, construction_plan_item_id, material_id } = req.query;
   let query = `
     SELECT ph.*, u.name as uploader_name, pc.name as category_name
     FROM photos ph
@@ -54,6 +54,9 @@ router.get('/', (req, res) => {
   const params = [req.params.projectId];
   if (category_id) { query += ' AND ph.category_id = ?'; params.push(category_id); }
   if (punch_list_item_id) { query += ' AND ph.punch_list_item_id = ?'; params.push(punch_list_item_id); }
+  if (note_id) { query += ' AND ph.note_id = ?'; params.push(note_id); }
+  if (construction_plan_item_id) { query += ' AND ph.construction_plan_item_id = ?'; params.push(construction_plan_item_id); }
+  if (material_id) { query += ' AND ph.material_id = ?'; params.push(material_id); }
   query += ' ORDER BY ph.created_at DESC';
   res.json(db.prepare(query).all(...params));
 });
@@ -97,10 +100,26 @@ router.post('/', upload.array('photos', 20), (req, res) => {
   try {
     if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No files uploaded' });
     const db = getDb();
-    const { category_id, punch_list_item_id, caption } = req.body;
-    const photoType = req.query.type === 'progress' ? 'progress' : 'general';
+    const { category_id, punch_list_item_id, note_id, construction_plan_item_id, material_id, caption } = req.body;
+    const photoType = construction_plan_item_id ? 'construction_plan'
+      : material_id ? 'material'
+      : note_id ? 'note'
+      : (req.query.type === 'progress' ? 'progress' : 'general');
     const takenAt = new Date().toISOString(); // server-side timestamp
     const inserted = [];
+
+    if (note_id) {
+      const note = db.prepare('SELECT id FROM project_notes WHERE id = ? AND project_id = ?').get(note_id, req.params.projectId);
+      if (!note) return res.status(400).json({ error: 'Note not found for this project' });
+    }
+    if (construction_plan_item_id) {
+      const item = db.prepare('SELECT id FROM construction_plan_items WHERE id = ? AND project_id = ?').get(construction_plan_item_id, req.params.projectId);
+      if (!item) return res.status(400).json({ error: 'Construction plan item not found for this project' });
+    }
+    if (material_id) {
+      const material = db.prepare('SELECT id FROM construction_materials WHERE id = ? AND project_id = ?').get(material_id, req.params.projectId);
+      if (!material) return res.status(400).json({ error: 'Material not found for this project' });
+    }
 
     // Determine the file path prefix based on type
     const subFolder = photoType === 'progress' ? 'progress' : '';
@@ -110,13 +129,13 @@ router.post('/', upload.array('photos', 20), (req, res) => {
       // Store relative path including subfolder so we can serve it correctly
       const storedFilename = subFolder ? `progress/${file.filename}` : file.filename;
       db.prepare(`
-        INSERT INTO photos (id, project_id, category_id, punch_list_item_id, filename, original_name, mime_type, size, caption, uploaded_by, photo_type, taken_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(id, req.params.projectId, category_id || null, punch_list_item_id || null, storedFilename, file.originalname, file.mimetype, file.size, caption || null, req.user.id, photoType, takenAt);
+        INSERT INTO photos (id, project_id, category_id, punch_list_item_id, note_id, construction_plan_item_id, material_id, filename, original_name, mime_type, size, caption, uploaded_by, photo_type, taken_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, req.params.projectId, category_id || null, punch_list_item_id || null, note_id || null, construction_plan_item_id || null, material_id || null, storedFilename, file.originalname, file.mimetype, file.size, caption || null, req.user.id, photoType, takenAt);
       inserted.push({ id, filename: storedFilename, original_name: file.originalname, taken_at: takenAt });
     }
 
-    logActivity({ userId: req.user.id, projectId: req.params.projectId, action: 'photos_uploaded', entityType: 'photo', details: { count: req.files.length, type: photoType } });
+    logActivity({ userId: req.user.id, projectId: req.params.projectId, action: 'photos_uploaded', entityType: 'photo', details: { count: req.files.length, type: photoType, note_id: note_id || null } });
     res.status(201).json({ uploaded: inserted.length, photos: inserted });
   } catch (err) {
     console.error(err);

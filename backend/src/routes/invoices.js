@@ -11,6 +11,16 @@ const { generateInvoicePDF } = require('../utils/pdf');
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
 
+function buildDesktopInvoiceUrl(projectId, invoiceId) {
+  const appUrl = (process.env.APP_URL || 'https://buildtrack.newurbandev.com').replace(/\/$/, '');
+  return `${appUrl}/projects/${projectId}/invoices/${invoiceId}`;
+}
+
+function buildDesktopInvoicesUrl() {
+  const appUrl = (process.env.APP_URL || 'https://buildtrack.newurbandev.com').replace(/\/$/, '');
+  return `${appUrl}/invoices`;
+}
+
 // GET /api/projects/:projectId/invoices
 router.get('/', authorizeProjectAccess, (req, res) => {
   const db = getDb();
@@ -32,7 +42,7 @@ router.get('/', authorizeProjectAccess, (req, res) => {
 });
 
 // GET /api/invoices - all invoices (admin view)
-router.get('/all', authorize('super_admin', 'operations_manager', 'admin_assistant'), (req, res) => {
+router.get('/all', authorize('super_admin', 'operations_manager', 'project_manager', 'admin_assistant'), (req, res) => {
   const db = getDb();
   const invoices = db.prepare(`
     SELECT i.*, u.name as contractor_name, p.address, p.job_name
@@ -43,6 +53,18 @@ router.get('/all', authorize('super_admin', 'operations_manager', 'admin_assista
     LIMIT 100
   `).all();
   res.json(invoices);
+});
+
+// GET /api/projects/:projectId/invoices/next-number
+router.get('/next-number', (req, res) => {
+  const db = getDb();
+  const maxNum = db.prepare("SELECT invoice_number FROM invoices ORDER BY CAST(REPLACE(invoice_number, 'NUD-', '') AS INTEGER) DESC LIMIT 1").get();
+  let nextNum = 1023;
+  if (maxNum && maxNum.invoice_number) {
+    const num = parseInt(maxNum.invoice_number.replace('NUD-', ''));
+    if (!isNaN(num) && num >= 1023) nextNum = num + 1;
+  }
+  res.json({ invoice_number: `NUD-${nextNum}` });
 });
 
 // GET /api/projects/:projectId/invoices/:id
@@ -65,14 +87,19 @@ router.get('/:id', authorizeProjectAccess, (req, res) => {
 });
 
 // POST /api/projects/:projectId/invoices - create invoice
-router.post('/', authorizeProjectAccess, (req, res) => {
+router.post('/', authorizeProjectAccess, async (req, res) => {
   try {
-    const { notes, line_items } = req.body;
+    const { notes, line_items, send_email } = req.body;
     const db = getDb();
 
-    // Generate invoice number
-    const count = db.prepare('SELECT COUNT(*) as cnt FROM invoices').get();
-    const invoiceNumber = `INV-${String(count.cnt + 1).padStart(5, '0')}`;
+    // Generate invoice number starting at 1023
+    const maxNum = db.prepare("SELECT invoice_number FROM invoices ORDER BY CAST(REPLACE(invoice_number, 'NUD-', '') AS INTEGER) DESC LIMIT 1").get();
+    let nextNum = 1023;
+    if (maxNum && maxNum.invoice_number) {
+      const num = parseInt(maxNum.invoice_number.replace('NUD-', ''));
+      if (!isNaN(num) && num >= 1023) nextNum = num + 1;
+    }
+    const invoiceNumber = `NUD-${nextNum}`;
 
     const total = (line_items || []).reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
     const id = uuidv4();
@@ -91,7 +118,52 @@ router.post('/', authorizeProjectAccess, (req, res) => {
     }
 
     logActivity({ userId: req.user.id, projectId: req.params.projectId, action: 'invoice_created', entityType: 'invoice', entityId: id });
-    res.status(201).json({ id, invoice_number: invoiceNumber, total });
+
+    const desktopUrl = buildDesktopInvoiceUrl(req.params.projectId, id);
+    const desktopInvoicesUrl = buildDesktopInvoicesUrl();
+
+    // Auto-submit and send email if requested (mobile flow)
+    if (send_email) {
+      db.prepare("UPDATE invoices SET status = 'submitted', submitted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(id);
+      logActivity({ userId: req.user.id, projectId: req.params.projectId, action: 'invoice_submitted', entityType: 'invoice', entityId: id });
+
+      // Send email to both office and contractor with a main-site BuildTrack link.
+      try {
+        const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.projectId);
+        const contractor = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+        const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);
+        const lineItems = db.prepare('SELECT * FROM invoice_line_items WHERE invoice_id = ? ORDER BY sort_order').all(id);
+        let pdfBuffer = null;
+
+        try {
+          pdfBuffer = await generateInvoicePDF({ invoice, lineItems, project, contractor });
+          const pdfDir = path.join(process.env.UPLOADS_PATH || './uploads', 'invoices');
+          if (!fs.existsSync(pdfDir)) fs.mkdirSync(pdfDir, { recursive: true });
+          fs.writeFileSync(path.join(pdfDir, `${invoice.invoice_number}.pdf`), pdfBuffer);
+        } catch (pdfErr) {
+          console.error('[INVOICE] PDF generation failed:', pdfErr.message);
+        }
+
+        await sendInvoiceEmail({
+          invoice: { ...invoice, desktop_url: desktopUrl, desktop_invoices_url: desktopInvoicesUrl },
+          project,
+          contractor,
+          pdfBuffer,
+        });
+        console.log('[INVOICE] Email sent for', invoiceNumber, 'to', contractor.email, 'desktopUrl=', desktopUrl);
+      } catch (emailErr) {
+        console.error('[INVOICE] Email failed:', emailErr.message);
+      }
+    }
+
+    res.status(201).json({
+      id,
+      invoice_number: invoiceNumber,
+      total,
+      status: send_email ? 'submitted' : 'draft',
+      desktop_url: desktopUrl,
+      desktop_invoices_url: desktopInvoicesUrl,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to create invoice' });
@@ -108,7 +180,7 @@ router.put('/:id', authorizeProjectAccess, (req, res) => {
     if (!['draft', 'submitted'].includes(invoice.status)) return res.status(400).json({ error: 'Only draft or submitted invoices can be edited' });
     if (req.user.role === 'contractor' && invoice.contractor_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
 
-    const { notes, line_items } = req.body;
+    const { notes, line_items, send_email } = req.body;
     const total = (line_items || []).reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
 
     db.prepare("UPDATE invoices SET notes = ?, total = ?, updated_at = datetime('now') WHERE id = ?")
@@ -175,7 +247,7 @@ router.post('/:id/submit', authorizeProjectAccess, async (req, res) => {
 });
 
 // PUT /api/projects/:projectId/invoices/:id/status - update invoice status (admin)
-router.put('/:id/status', authorize('super_admin', 'operations_manager', 'admin_assistant'), (req, res) => {
+router.put('/:id/status', authorize('super_admin', 'operations_manager', 'project_manager', 'admin_assistant'), (req, res) => {
   const { status } = req.body;
   const validStatuses = ['draft', 'submitted', 'reviewed', 'approved', 'paid'];
   if (!validStatuses.includes(status)) return res.status(400).json({ error: 'Invalid status' });
@@ -183,6 +255,18 @@ router.put('/:id/status', authorize('super_admin', 'operations_manager', 'admin_
   db.prepare("UPDATE invoices SET status = ?, updated_at = datetime('now') WHERE id = ?").run(status, req.params.id);
   logActivity({ userId: req.user.id, projectId: req.params.projectId, action: 'invoice_status_updated', entityType: 'invoice', entityId: req.params.id, details: { status } });
   res.json({ message: 'Status updated' });
+});
+
+// GET /api/projects/:projectId/invoices/next-number
+router.get('/next-number', (req, res) => {
+  const db = getDb();
+  const maxNum = db.prepare("SELECT invoice_number FROM invoices ORDER BY CAST(REPLACE(invoice_number, 'NUD-', '') AS INTEGER) DESC LIMIT 1").get();
+  let nextNum = 1023;
+  if (maxNum && maxNum.invoice_number) {
+    const num = parseInt(maxNum.invoice_number.replace('NUD-', ''));
+    if (!isNaN(num) && num >= 1023) nextNum = num + 1;
+  }
+  res.json({ invoice_number: `NUD-${nextNum}` });
 });
 
 // GET /api/projects/:projectId/invoices/:id/pdf - download PDF

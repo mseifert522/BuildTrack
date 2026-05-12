@@ -3,6 +3,11 @@ import React from 'react';
 // Status badge colors
 export const statusColors: Record<string, string> = {
   // Project status
+  active_rehab: 'bg-green-100 text-green-800',
+  rehab_completed: 'bg-blue-100 text-blue-800',
+  on_market: 'bg-amber-100 text-amber-800',
+  closed_sold: 'bg-gray-100 text-gray-700',
+  // Legacy
   active: 'bg-green-100 text-green-800',
   in_progress: 'bg-blue-100 text-blue-800',
   on_hold: 'bg-yellow-100 text-yellow-800',
@@ -28,6 +33,11 @@ export const priorityColors: Record<string, string> = {
 };
 
 export const statusLabels: Record<string, string> = {
+  active_rehab: 'Active Rehab',
+  rehab_completed: 'Rehab Completed',
+  on_market: 'On Market',
+  closed_sold: 'Closed and Sold',
+  // Legacy
   active: 'Active',
   in_progress: 'In Progress',
   on_hold: 'On Hold',

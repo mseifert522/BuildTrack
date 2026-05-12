@@ -8,16 +8,9 @@ interface Project {
   address: string;
   job_name?: string;
   status: string;
-  project_stage?: string;
   budget?: number;
 }
 
-const stageLabel: Record<string, string> = {
-  acquisition: 'Acquisition', planning: 'Planning', demo: 'Demo',
-  framing: 'Framing', rough_ins: 'Rough-Ins', drywall: 'Drywall',
-  finishes: 'Finishes', punch_out: 'Punch-Out', final: 'Final', complete: 'Complete',
-  electrical: 'Electrical', plumbing: 'Plumbing',
-};
 
 export default function MobileProjectHub() {
   const { id } = useParams<{ id: string }>();
@@ -45,7 +38,7 @@ export default function MobileProjectHub() {
       .then(([punchRes, invRes]) => {
         const items = Array.isArray(punchRes.data) ? punchRes.data : [];
         setPunchCount(items.length);
-        setOpenCount(items.filter((p: any) => p.status !== 'completed').length);
+        setOpenCount(items.filter((p: any) => p.status !== 'completed' && p.status !== 'rehab_completed' && p.status !== 'closed_sold').length);
         setInvoiceCount(Array.isArray(invRes.data) ? invRes.data.length : 0);
       })
       .catch((err) => {
@@ -104,19 +97,17 @@ export default function MobileProjectHub() {
               </p>
             )}
           </div>
-          <img src="/nud-logo.jpg" alt="NUD" style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover', border: '2px solid #D99D26', flexShrink: 0 }} />
+          <img src="/buildtrack-logo.png" alt="NUD" style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover', border: '2px solid #D99D26', flexShrink: 0 }} />
         </div>
         {/* Stage / Status strip */}
         <div style={{ display: 'flex', gap: 8, padding: '0 16px 12px', flexWrap: 'wrap' }}>
-          <span style={{ backgroundColor: '#D99D26', color: 'white', borderRadius: 20, padding: '4px 12px', fontSize: 12, fontWeight: 600 }}>
-            {stageLabel[project.project_stage || ''] || project.project_stage || 'No Stage'}
-          </span>
+
           <span style={{ backgroundColor: 'rgba(255,255,255,0.15)', color: 'white', borderRadius: 20, padding: '4px 12px', fontSize: 12, fontWeight: 600, textTransform: 'capitalize' }}>
             {project.status?.replace(/_/g, ' ')}
           </span>
           {project.budget && (
             <span style={{ backgroundColor: 'rgba(255,255,255,0.15)', color: 'white', borderRadius: 20, padding: '4px 12px', fontSize: 12, fontWeight: 600 }}>
-              ${Number(project.budget).toLocaleString()}
+              ${Number(project.budget).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
           )}
         </div>
