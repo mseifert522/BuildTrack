@@ -229,6 +229,31 @@ function initializeSchema() {
       FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
     );
 
+    -- Emailed invoice intake. These records are intentionally separate from
+    -- project-bound invoices until office staff files them to the right job.
+    CREATE TABLE IF NOT EXISTS invoice_email_intake (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL DEFAULT 'webhook',
+      provider_message_id TEXT,
+      message_hash TEXT UNIQUE NOT NULL,
+      from_email TEXT,
+      from_name TEXT,
+      to_email TEXT,
+      cc_email TEXT,
+      subject TEXT,
+      text_body TEXT,
+      html_body TEXT,
+      attachment_count INTEGER NOT NULL DEFAULT 0,
+      attachments_json TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new','filed','ignored')),
+      received_at TEXT NOT NULL DEFAULT (datetime('now')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_invoice_email_intake_status_received
+      ON invoice_email_intake(status, received_at);
+
     -- Activity / audit log
     CREATE TABLE IF NOT EXISTS activity_log (
       id TEXT PRIMARY KEY,

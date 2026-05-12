@@ -17,6 +17,7 @@ const invoiceRoutes = require('./src/routes/invoices');
 const notesRoutes = require('./src/routes/notes');
 const searchRoutes = require('./src/routes/search');
 const chatRoutes = require('./src/routes/chat');
+const invoiceEmailIntakeRoutes = require('./src/routes/invoiceEmailIntake');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -34,8 +35,9 @@ app.use(cors({
   origin: (origin, cb) => cb(null, true),
   credentials: true,
 }));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+const bodyLimit = process.env.REQUEST_BODY_LIMIT || process.env.INBOUND_EMAIL_JSON_LIMIT || '25mb';
+app.use(express.json({ limit: bodyLimit }));
+app.use(express.urlencoded({ extended: true, limit: bodyLimit }));
 
 // Serve uploaded files
 app.use('/uploads', express.static(path.resolve(uploadsPath)));
@@ -50,6 +52,8 @@ app.use('/api/projects/:projectId/invoices', invoiceRoutes);
 app.use('/api/projects/:projectId/notes', notesRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/inbound/invoices', invoiceEmailIntakeRoutes.publicRouter);
+app.use('/api/invoices/email-intake', invoiceEmailIntakeRoutes.authenticatedRouter);
 
 // Consolidated project notes feed for the dashboard.
 app.get('/api/notes/recent', authenticate, (req, res) => {

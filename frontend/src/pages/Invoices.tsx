@@ -9,6 +9,9 @@ import {
   ChevronRight,
   Download,
   FileText,
+  Inbox,
+  Mail,
+  Paperclip,
   Receipt,
   Search,
   WalletCards,
@@ -29,6 +32,26 @@ interface Invoice {
   created_at: string;
   submitted_at: string;
   updated_at?: string;
+}
+
+interface EmailAttachment {
+  id: string;
+  original_name: string;
+  mime_type: string;
+  size: number;
+}
+
+interface EmailIntake {
+  id: string;
+  from_email?: string;
+  from_name?: string;
+  to_email?: string;
+  subject?: string;
+  text_body?: string;
+  attachment_count: number;
+  attachments: EmailAttachment[];
+  status: 'new' | 'filed' | 'ignored';
+  received_at: string;
 }
 
 interface ProjectOption {
@@ -65,23 +88,28 @@ const tabOptions = [
 
 export default function Invoices() {
   const { user } = useAuthStore();
+  const canManageInvoices = isAdminRole(user?.role || '');
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [emailIntake, setEmailIntake] = useState<EmailIntake[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
   const [projectSearch, setProjectSearch] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [updatingInvoiceId, setUpdatingInvoiceId] = useState<string | null>(null);
+  const [updatingEmailId, setUpdatingEmailId] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
     try {
-      const [projectRes, invoiceRes] = await Promise.all([
+      const [projectRes, invoiceRes, emailRes] = await Promise.all([
         api.get('/projects'),
         api.get('/invoices'),
+        canManageInvoices ? api.get('/invoices/email-intake') : Promise.resolve({ data: [] }),
       ]);
       setProjects(Array.isArray(projectRes.data) ? projectRes.data : []);
       setInvoices(Array.isArray(invoiceRes.data) ? invoiceRes.data : []);
+      setEmailIntake(Array.isArray(emailRes.data) ? emailRes.data : []);
     } catch {
       toast.error('Failed to load invoices');
     } finally {
@@ -89,7 +117,7 @@ export default function Invoices() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [canManageInvoices]);
 
   const selectedProject = projects.find(project => project.id === selectedProjectId) || null;
 
@@ -181,6 +209,14 @@ export default function Invoices() {
     };
   }, [invoices]);
 
+  const emailStats = useMemo(() => {
+    const newItems = emailIntake.filter(item => item.status === 'new');
+    return {
+      newCount: newItems.length,
+      attachmentCount: emailIntake.reduce((sum, item) => sum + Number(item.attachment_count || 0), 0),
+    };
+  }, [emailIntake]);
+
   const updateStatus = async (invoice: Invoice, status: string) => {
     if (!isAdminRole(user?.role || '') || invoice.status === status) return;
     setUpdatingInvoiceId(invoice.id);
@@ -206,6 +242,34 @@ export default function Invoices() {
       URL.revokeObjectURL(url);
     } catch {
       toast.error('Failed to download PDF');
+    }
+  };
+
+  const downloadEmailAttachment = async (email: EmailIntake, attachment: EmailAttachment) => {
+    try {
+      const res = await api.get(`/invoices/email-intake/${email.id}/attachments/${attachment.id}`, { responseType: 'blob' });
+      const url = URL.createObjectURL(new Blob([res.data], { type: attachment.mime_type || 'application/octet-stream' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = attachment.original_name || 'invoice-attachment';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error('Failed to download attachment');
+    }
+  };
+
+  const updateEmailStatus = async (email: EmailIntake, status: EmailIntake['status']) => {
+    if (email.status === status) return;
+    setUpdatingEmailId(email.id);
+    try {
+      await api.put(`/invoices/email-intake/${email.id}/status`, { status });
+      setEmailIntake(prev => prev.map(item => item.id === email.id ? { ...item, status } : item));
+      toast.success(status === 'filed' ? 'Email invoice filed' : 'Email invoice updated');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to update email invoice');
+    } finally {
+      setUpdatingEmailId(null);
     }
   };
 
@@ -263,6 +327,100 @@ export default function Invoices() {
             </div>
           ))}
         </div>
+
+        {canManageInvoices && (
+          <div className="rounded-2xl overflow-hidden border border-gray-200" style={{ background: 'white', boxShadow: '0 10px 30px rgba(17,24,39,0.08)' }}>
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 px-5 py-4 border-b border-gray-100 bg-gray-50">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-700 flex items-center justify-center flex-shrink-0">
+                  <Inbox className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="text-sm font-black text-gray-900">Emailed invoices</h2>
+                  <p className="text-xs font-semibold text-gray-500">
+                    {emailStats.newCount} new | {emailStats.attachmentCount} attachment{emailStats.attachmentCount !== 1 ? 's' : ''}
+                  </p>
+                </div>
+              </div>
+              <div className="text-xs font-black uppercase tracking-wide text-gray-500">
+                invoices@newurbandev.com
+              </div>
+            </div>
+
+            {emailIntake.length === 0 ? (
+              <div className="text-center py-10">
+                <Mail className="w-9 h-9 text-gray-300 mx-auto mb-3" />
+                <p className="text-sm font-bold text-gray-500">No emailed invoices received</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-100">
+                {emailIntake.map(email => (
+                  <div key={email.id} className="grid grid-cols-12 gap-3 px-5 py-4 items-center">
+                    <div className="col-span-12 lg:col-span-4 min-w-0">
+                      <p className="text-sm font-black text-gray-900 truncate">{email.subject || '(no subject)'}</p>
+                      <p className="text-xs text-gray-500 truncate">
+                        {email.from_name || email.from_email || 'Unknown sender'}
+                        {email.from_name && email.from_email ? ` | ${email.from_email}` : ''}
+                      </p>
+                    </div>
+                    <div className="col-span-6 lg:col-span-2">
+                      <span className={`inline-flex px-2.5 py-1 rounded-full border text-xs font-black ${
+                        email.status === 'new' ? 'bg-blue-50 text-blue-700 border-blue-100' :
+                        email.status === 'filed' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
+                        'bg-gray-50 text-gray-600 border-gray-200'
+                      }`}>
+                        {email.status === 'new' ? 'New Email' : email.status.charAt(0).toUpperCase() + email.status.slice(1)}
+                      </span>
+                    </div>
+                    <div className="col-span-6 lg:col-span-2 text-right lg:text-left">
+                      <p className="text-xs font-bold text-gray-600">
+                        {email.received_at ? format(new Date(email.received_at), 'MMM d, yyyy') : 'Received'}
+                      </p>
+                    </div>
+                    <div className="col-span-12 lg:col-span-2 flex flex-wrap gap-2">
+                      {email.attachments?.length ? email.attachments.slice(0, 3).map(attachment => (
+                        <button
+                          key={attachment.id}
+                          type="button"
+                          onClick={() => downloadEmailAttachment(email, attachment)}
+                          className="inline-flex items-center gap-1.5 max-w-full px-2.5 py-1.5 rounded-lg text-xs font-bold text-gray-700 bg-gray-50 border border-gray-200 hover:bg-gray-100 cursor-pointer"
+                          title={attachment.original_name}
+                        >
+                          <Paperclip className="w-3.5 h-3.5 flex-shrink-0" />
+                          <span className="truncate max-w-[130px]">{attachment.original_name}</span>
+                        </button>
+                      )) : (
+                        <span className="text-xs font-semibold text-gray-400">No attachments</span>
+                      )}
+                    </div>
+                    <div className="col-span-12 lg:col-span-2 flex justify-end gap-2">
+                      {email.status !== 'filed' && (
+                        <button
+                          type="button"
+                          disabled={updatingEmailId === email.id}
+                          onClick={() => updateEmailStatus(email, 'filed')}
+                          className="px-3 py-2 rounded-xl text-xs font-black text-green-700 bg-green-50 border border-green-100 hover:bg-green-100 disabled:opacity-50 cursor-pointer"
+                        >
+                          Filed
+                        </button>
+                      )}
+                      {email.status !== 'ignored' && (
+                        <button
+                          type="button"
+                          disabled={updatingEmailId === email.id}
+                          onClick={() => updateEmailStatus(email, 'ignored')}
+                          className="px-3 py-2 rounded-xl text-xs font-black text-gray-600 bg-gray-50 border border-gray-200 hover:bg-gray-100 disabled:opacity-50 cursor-pointer"
+                        >
+                          Ignore
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {!selectedProject ? (
           <>
