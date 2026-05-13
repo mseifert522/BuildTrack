@@ -18,7 +18,10 @@ const notesRoutes = require('./src/routes/notes');
 const searchRoutes = require('./src/routes/search');
 const chatRoutes = require('./src/routes/chat');
 const invoiceEmailIntakeRoutes = require('./src/routes/invoiceEmailIntake');
+const invoiceAgentRoutes = require('./src/routes/invoiceAgent');
 const { startGmailInvoicePoller } = require('./src/services/gmailInvoicePoller');
+const { startInvoiceAgent } = require('./src/services/invoiceAgent');
+const { startPortalAgent } = require('./src/services/portalAgent');
 const documentRoutes = require('./src/routes/documents');
 
 const app = express();
@@ -56,6 +59,7 @@ app.use('/api/search', searchRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/inbound/invoices', invoiceEmailIntakeRoutes.publicRouter);
 app.use('/api/invoices/email-intake', invoiceEmailIntakeRoutes.authenticatedRouter);
+app.use('/api/invoice-agent', invoiceAgentRoutes);
 app.use('/api/documents', documentRoutes);
 
 // Consolidated project notes feed for the dashboard.
@@ -181,6 +185,8 @@ async function start() {
       console.log('╚══════════════════════════════════════════════════╝');
       console.log('');
       startGmailInvoicePoller();
+      startInvoiceAgent();
+      startPortalAgent();
     });
   } catch (err) {
     console.error('Failed to start server:', err);

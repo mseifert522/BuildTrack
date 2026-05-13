@@ -265,13 +265,60 @@ function initializeSchema() {
       attachment_count INTEGER NOT NULL DEFAULT 0,
       attachments_json TEXT NOT NULL DEFAULT '[]',
       status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new','filed','ignored')),
+      extracted_vendor TEXT,
+      extracted_invoice_number TEXT,
+      extracted_amount REAL,
+      extracted_invoice_date TEXT,
+      extracted_service_address TEXT,
+      extracted_summary TEXT,
+      matched_project_id TEXT,
+      match_confidence REAL,
+      agent_status TEXT NOT NULL DEFAULT 'pending' CHECK(agent_status IN ('pending','matched','needs_review','filed','ignored','error')),
+      agent_notes TEXT,
+      agent_model TEXT,
+      agent_result_json TEXT,
+      agent_last_run_at TEXT,
       received_at TEXT NOT NULL DEFAULT (datetime('now')),
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (matched_project_id) REFERENCES projects(id) ON DELETE SET NULL
     );
 
     CREATE INDEX IF NOT EXISTS idx_invoice_email_intake_status_received
       ON invoice_email_intake(status, received_at);
+
+    CREATE INDEX IF NOT EXISTS idx_invoice_email_intake_agent_status
+      ON invoice_email_intake(agent_status, received_at);
+
+    CREATE TABLE IF NOT EXISTS invoice_agent_runs (
+      id TEXT PRIMARY KEY,
+      intake_id TEXT,
+      action TEXT NOT NULL,
+      status TEXT NOT NULL,
+      model TEXT,
+      input_summary TEXT,
+      result_json TEXT,
+      error TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (intake_id) REFERENCES invoice_email_intake(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_invoice_agent_runs_intake_created
+      ON invoice_agent_runs(intake_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS portal_agent_runs (
+      id TEXT PRIMARY KEY,
+      status TEXT NOT NULL,
+      model TEXT,
+      score INTEGER,
+      scan_summary TEXT,
+      findings_json TEXT,
+      error TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_portal_agent_runs_created
+      ON portal_agent_runs(created_at);
 
     -- Activity / audit log
     CREATE TABLE IF NOT EXISTS activity_log (
@@ -505,6 +552,56 @@ function initializeSchema() {
   try { db.exec(`ALTER TABLE users ADD COLUMN contractor_category TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE users ADD COLUMN contractor_secondary_category TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE contractor_profiles ADD COLUMN contractor_secondary_category TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE invoice_email_intake ADD COLUMN extracted_vendor TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE invoice_email_intake ADD COLUMN extracted_invoice_number TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE invoice_email_intake ADD COLUMN extracted_amount REAL`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE invoice_email_intake ADD COLUMN extracted_invoice_date TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE invoice_email_intake ADD COLUMN extracted_service_address TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE invoice_email_intake ADD COLUMN extracted_summary TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE invoice_email_intake ADD COLUMN matched_project_id TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE invoice_email_intake ADD COLUMN match_confidence REAL`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE invoice_email_intake ADD COLUMN agent_status TEXT NOT NULL DEFAULT 'pending'`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE invoice_email_intake ADD COLUMN agent_notes TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE invoice_email_intake ADD COLUMN agent_model TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE invoice_email_intake ADD COLUMN agent_result_json TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE invoice_email_intake ADD COLUMN agent_last_run_at TEXT`); } catch (_) { /* already exists */ }
+
+  try {
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_invoice_email_intake_agent_status
+        ON invoice_email_intake(agent_status, received_at);
+
+      CREATE TABLE IF NOT EXISTS invoice_agent_runs (
+        id TEXT PRIMARY KEY,
+        intake_id TEXT,
+        action TEXT NOT NULL,
+        status TEXT NOT NULL,
+        model TEXT,
+        input_summary TEXT,
+        result_json TEXT,
+        error TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (intake_id) REFERENCES invoice_email_intake(id) ON DELETE SET NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_invoice_agent_runs_intake_created
+        ON invoice_agent_runs(intake_id, created_at);
+
+      CREATE TABLE IF NOT EXISTS portal_agent_runs (
+        id TEXT PRIMARY KEY,
+        status TEXT NOT NULL,
+        model TEXT,
+        score INTEGER,
+        scan_summary TEXT,
+        findings_json TEXT,
+        error TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_portal_agent_runs_created
+        ON portal_agent_runs(created_at);
+    `);
+  } catch (_) { /* agent tables already exist */ }
 
   try {
     db.exec(`

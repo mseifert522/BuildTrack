@@ -11,6 +11,7 @@ import PunchList from './pages/PunchList';
 import Photos from './pages/Photos';
 import Invoices from './pages/Invoices';
 import InvoiceBuilder from './pages/InvoiceBuilder';
+import InvoiceAgent from './pages/InvoiceAgent';
 import Documents from './pages/Documents';
 import Contractors from './pages/Contractors';
 import Suppliers from './pages/Suppliers';
@@ -212,6 +213,11 @@ export default function App() {
         <Route path="/invoices" element={
           <DesktopRoute>
             <Layout><Invoices /></Layout>
+          </DesktopRoute>
+        } />
+        <Route path="/invoice-agent" element={
+          <DesktopRoute>
+            <Layout><InvoiceAgent /></Layout>
           </DesktopRoute>
         } />
         <Route path="/documents" element={

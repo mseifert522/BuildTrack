@@ -4,7 +4,7 @@ import { useAuthStore, roleLabels, canManageUsers, canAccessSettings, isAdminRol
 import {
   LayoutDashboard, FolderOpen, ClipboardList, FileText,
   Users, Settings, LogOut, Menu, X, Bell, ChevronRight,
-  Camera, Files, Search, Trash2, Truck
+  Camera, Files, Search, Trash2, Truck, BrainCircuit
 } from 'lucide-react';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
@@ -147,6 +147,7 @@ export default function Layout({ children }: LayoutProps) {
     { to: '/documents', icon: Files, label: 'Documents' },
     { to: '/contractors', icon: Users, label: 'Contractors' },
     { to: '/suppliers', icon: Truck, label: 'Suppliers' },
+    { to: '/invoice-agent', icon: BrainCircuit, label: 'Invoice Agent' },
   ];
 
   const isActive = (path: string) => location.pathname.startsWith(path);
@@ -158,6 +159,7 @@ export default function Layout({ children }: LayoutProps) {
     '/documents': 'Documents',
     '/contractors': 'Contractors',
     '/suppliers': 'Suppliers',
+    '/invoice-agent': 'Invoice Agent',
     '/users': 'Users',
     '/settings': 'Settings',
   };

@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../lib/api';
-import { Loading } from '../components/ui';
+import { Loading, Modal } from '../components/ui';
 import {
   ArrowLeft,
   Building2,
   CheckCircle2,
   ChevronRight,
   Download,
+  Eye,
+  FileSearch,
   FileText,
   Inbox,
   Mail,
@@ -48,10 +50,33 @@ interface EmailIntake {
   to_email?: string;
   subject?: string;
   text_body?: string;
+  html_body?: string;
   attachment_count: number;
   attachments: EmailAttachment[];
   status: 'new' | 'filed' | 'ignored';
+  agent_status?: 'pending' | 'matched' | 'needs_review' | 'filed' | 'ignored' | 'error';
+  extracted_vendor?: string | null;
+  extracted_amount?: number | null;
+  extracted_service_address?: string | null;
+  matched_project_address?: string | null;
+  match_confidence?: number | null;
   received_at: string;
+}
+
+interface InvoiceAgentSummary {
+  configured: boolean;
+  auto_file: boolean;
+  stats?: {
+    total: number;
+    new_count: number;
+    filed_count: number;
+    pending_count: number;
+    matched_count: number;
+    needs_review_count: number;
+    error_count: number;
+    extracted_total: number;
+  };
+  items?: EmailIntake[];
 }
 
 interface ProjectOption {
@@ -92,12 +117,14 @@ export default function Invoices() {
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [emailIntake, setEmailIntake] = useState<EmailIntake[]>([]);
+  const [agentSummary, setAgentSummary] = useState<InvoiceAgentSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
   const [projectSearch, setProjectSearch] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [updatingInvoiceId, setUpdatingInvoiceId] = useState<string | null>(null);
   const [updatingEmailId, setUpdatingEmailId] = useState<string | null>(null);
+  const [selectedEmail, setSelectedEmail] = useState<EmailIntake | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -105,11 +132,12 @@ export default function Invoices() {
       const [projectRes, invoiceRes, emailRes] = await Promise.all([
         api.get('/projects'),
         api.get('/invoices'),
-        canManageInvoices ? api.get('/invoices/email-intake') : Promise.resolve({ data: [] }),
+        canManageInvoices ? api.get('/invoice-agent', { params: { limit: 4 } }) : Promise.resolve({ data: null }),
       ]);
       setProjects(Array.isArray(projectRes.data) ? projectRes.data : []);
       setInvoices(Array.isArray(invoiceRes.data) ? invoiceRes.data : []);
-      setEmailIntake(Array.isArray(emailRes.data) ? emailRes.data : []);
+      setAgentSummary(emailRes.data || null);
+      setEmailIntake(Array.isArray(emailRes.data?.items) ? emailRes.data.items : []);
     } catch {
       toast.error('Failed to load invoices');
     } finally {
@@ -210,12 +238,27 @@ export default function Invoices() {
   }, [invoices]);
 
   const emailStats = useMemo(() => {
+    const stats = agentSummary?.stats;
+    if (stats) {
+      return {
+        newCount: Number(stats.new_count || 0),
+        attachmentCount: emailIntake.reduce((sum, item) => sum + Number(item.attachment_count || 0), 0),
+        matchedCount: Number(stats.matched_count || 0),
+        filedCount: Number(stats.filed_count || 0),
+        needsReviewCount: Number(stats.needs_review_count || 0),
+        extractedTotal: Number(stats.extracted_total || 0),
+      };
+    }
     const newItems = emailIntake.filter(item => item.status === 'new');
     return {
       newCount: newItems.length,
       attachmentCount: emailIntake.reduce((sum, item) => sum + Number(item.attachment_count || 0), 0),
+      matchedCount: emailIntake.filter(item => item.agent_status === 'matched').length,
+      filedCount: emailIntake.filter(item => item.status === 'filed').length,
+      needsReviewCount: emailIntake.filter(item => item.agent_status === 'needs_review').length,
+      extractedTotal: emailIntake.reduce((sum, item) => sum + Number(item.extracted_amount || 0), 0),
     };
-  }, [emailIntake]);
+  }, [agentSummary, emailIntake]);
 
   const updateStatus = async (invoice: Invoice, status: string) => {
     if (!isAdminRole(user?.role || '') || invoice.status === status) return;
@@ -271,6 +314,14 @@ export default function Invoices() {
     } finally {
       setUpdatingEmailId(null);
     }
+  };
+
+  const emailBodyText = (email: EmailIntake | null) => {
+    if (!email) return '';
+    if (email.text_body?.trim()) return email.text_body.trim();
+    if (!email.html_body) return '';
+    const parsed = new DOMParser().parseFromString(email.html_body, 'text/html');
+    return parsed.body.textContent?.replace(/\n{3,}/g, '\n\n').trim() || '';
   };
 
   if (loading) return <Loading />;
@@ -336,89 +387,104 @@ export default function Invoices() {
                   <Inbox className="w-5 h-5" />
                 </div>
                 <div className="min-w-0">
-                  <h2 className="text-sm font-black text-gray-900">Emailed invoices</h2>
+                  <h2 className="text-sm font-black text-gray-900">Email invoice inbox</h2>
                   <p className="text-xs font-semibold text-gray-500">
-                    {emailStats.newCount} new | {emailStats.attachmentCount} attachment{emailStats.attachmentCount !== 1 ? 's' : ''}
+                    {emailStats.newCount} new | {emailStats.matchedCount} matched | {emailStats.needsReviewCount} review
                   </p>
                 </div>
               </div>
-              <div className="text-xs font-black uppercase tracking-wide text-gray-500">
-                invoices@newurbandev.com
-              </div>
+              <Link
+                to="/invoice-agent"
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gray-900 text-white text-sm font-black hover:bg-gray-800"
+              >
+                <FileSearch className="w-4 h-4" />
+                Open email inbox
+              </Link>
             </div>
 
-            {emailIntake.length === 0 ? (
-              <div className="text-center py-10">
-                <Mail className="w-9 h-9 text-gray-300 mx-auto mb-3" />
-                <p className="text-sm font-bold text-gray-500">No emailed invoices received</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-gray-100">
-                {emailIntake.map(email => (
-                  <div key={email.id} className="grid grid-cols-12 gap-3 px-5 py-4 items-center">
-                    <div className="col-span-12 lg:col-span-4 min-w-0">
-                      <p className="text-sm font-black text-gray-900 truncate">{email.subject || '(no subject)'}</p>
-                      <p className="text-xs text-gray-500 truncate">
-                        {email.from_name || email.from_email || 'Unknown sender'}
-                        {email.from_name && email.from_email ? ` | ${email.from_email}` : ''}
-                      </p>
-                    </div>
-                    <div className="col-span-6 lg:col-span-2">
-                      <span className={`inline-flex px-2.5 py-1 rounded-full border text-xs font-black ${
-                        email.status === 'new' ? 'bg-blue-50 text-blue-700 border-blue-100' :
-                        email.status === 'filed' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
-                        'bg-gray-50 text-gray-600 border-gray-200'
-                      }`}>
-                        {email.status === 'new' ? 'New Email' : email.status.charAt(0).toUpperCase() + email.status.slice(1)}
-                      </span>
-                    </div>
-                    <div className="col-span-6 lg:col-span-2 text-right lg:text-left">
-                      <p className="text-xs font-bold text-gray-600">
-                        {email.received_at ? format(new Date(email.received_at), 'MMM d, yyyy') : 'Received'}
-                      </p>
-                    </div>
-                    <div className="col-span-12 lg:col-span-2 flex flex-wrap gap-2">
-                      {email.attachments?.length ? email.attachments.slice(0, 3).map(attachment => (
-                        <button
-                          key={attachment.id}
-                          type="button"
-                          onClick={() => downloadEmailAttachment(email, attachment)}
-                          className="inline-flex items-center gap-1.5 max-w-full px-2.5 py-1.5 rounded-lg text-xs font-bold text-gray-700 bg-gray-50 border border-gray-200 hover:bg-gray-100 cursor-pointer"
-                          title={attachment.original_name}
-                        >
-                          <Paperclip className="w-3.5 h-3.5 flex-shrink-0" />
-                          <span className="truncate max-w-[130px]">{attachment.original_name}</span>
-                        </button>
-                      )) : (
-                        <span className="text-xs font-semibold text-gray-400">No attachments</span>
-                      )}
-                    </div>
-                    <div className="col-span-12 lg:col-span-2 flex justify-end gap-2">
-                      {email.status !== 'filed' && (
-                        <button
-                          type="button"
-                          disabled={updatingEmailId === email.id}
-                          onClick={() => updateEmailStatus(email, 'filed')}
-                          className="px-3 py-2 rounded-xl text-xs font-black text-green-700 bg-green-50 border border-green-100 hover:bg-green-100 disabled:opacity-50 cursor-pointer"
-                        >
-                          Filed
-                        </button>
-                      )}
-                      {email.status !== 'ignored' && (
-                        <button
-                          type="button"
-                          disabled={updatingEmailId === email.id}
-                          onClick={() => updateEmailStatus(email, 'ignored')}
-                          className="px-3 py-2 rounded-xl text-xs font-black text-gray-600 bg-gray-50 border border-gray-200 hover:bg-gray-100 disabled:opacity-50 cursor-pointer"
-                        >
-                          Ignore
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            <div className="grid md:grid-cols-4 divide-y md:divide-y-0 md:divide-x divide-gray-100">
+              {[
+                { label: 'Extracted Total', value: money(emailStats.extractedTotal), color: 'text-gray-900' },
+                { label: 'Filed', value: emailStats.filedCount, color: 'text-emerald-700' },
+                { label: 'Attachments', value: emailStats.attachmentCount, color: 'text-gray-900' },
+                { label: 'Agent', value: agentSummary?.configured ? 'Active' : 'Needs key', color: agentSummary?.configured ? 'text-blue-700' : 'text-amber-700' },
+              ].map(item => (
+                <div key={item.label} className="p-4">
+                  <p className="text-xs font-black uppercase tracking-wide text-gray-400">{item.label}</p>
+                  <p className={`mt-1 text-xl font-black truncate ${item.color}`}>{item.value}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="border-t border-gray-100">
+              {emailIntake.length === 0 ? (
+                <div className="text-center py-10">
+                  <Mail className="w-9 h-9 text-gray-300 mx-auto mb-3" />
+                  <p className="text-sm font-bold text-gray-500">No emailed invoices received</p>
+                </div>
+              ) : (
+                <div className="grid lg:grid-cols-2 gap-0 divide-y lg:divide-y-0 lg:divide-x divide-gray-100">
+                  {emailIntake.slice(0, 4).map(email => {
+                    const agentStatus = email.agent_status || 'pending';
+                    return (
+                      <div key={email.id} className="p-4 min-w-0">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-black text-gray-900 truncate">{email.subject || '(no subject)'}</p>
+                            <p className="text-xs text-gray-500 truncate">
+                              {email.extracted_vendor || email.from_name || email.from_email || 'Unknown sender'}
+                            </p>
+                          </div>
+                          <span className={`inline-flex px-2.5 py-1 rounded-full border text-[11px] font-black whitespace-nowrap ${
+                            agentStatus === 'filed' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
+                            agentStatus === 'matched' ? 'bg-indigo-50 text-indigo-700 border-indigo-100' :
+                            agentStatus === 'needs_review' ? 'bg-amber-50 text-amber-700 border-amber-100' :
+                            agentStatus === 'error' ? 'bg-red-50 text-red-700 border-red-100' :
+                            'bg-blue-50 text-blue-700 border-blue-100'
+                          }`}>
+                            {agentStatus.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase())}
+                          </span>
+                        </div>
+                        <div className="mt-4 grid grid-cols-3 gap-3">
+                          <div>
+                            <p className="text-sm font-black text-gray-900">
+                              {email.extracted_amount !== null && email.extracted_amount !== undefined ? money(email.extracted_amount) : '-'}
+                            </p>
+                            <p className="text-xs font-semibold text-gray-500">Amount</p>
+                          </div>
+                          <div>
+                            <p className="text-sm font-black text-gray-900">
+                              {email.match_confidence ? `${Math.round(Number(email.match_confidence) * 100)}%` : '-'}
+                            </p>
+                            <p className="text-xs font-semibold text-gray-500">Match</p>
+                          </div>
+                          <div className="text-right">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedEmail(email)}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold text-gray-700 bg-gray-50 border border-gray-200 hover:bg-gray-100"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              Preview
+                            </button>
+                          </div>
+                        </div>
+                        <p className="mt-3 text-xs font-semibold text-gray-500 truncate">
+                          {email.matched_project_address || email.extracted_service_address || 'No property match yet'}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {emailIntake.length > 0 && (
+                <div className="px-5 py-3 border-t border-gray-100 bg-gray-50 flex justify-end">
+                  <Link to="/invoice-agent" className="text-xs font-black text-blue-700 hover:text-blue-900">
+                    Review all emailed invoices
+                  </Link>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -634,6 +700,80 @@ export default function Invoices() {
           </>
         )}
       </div>
+
+      <Modal isOpen={!!selectedEmail} onClose={() => setSelectedEmail(null)} title={selectedEmail?.subject || 'Emailed invoice'} size="xl">
+        {selectedEmail && (
+          <div className="space-y-4">
+            <div className="grid md:grid-cols-2 gap-3 text-sm">
+              <div className="rounded-xl bg-gray-50 border border-gray-100 p-3">
+                <p className="text-xs font-black uppercase tracking-wide text-gray-400">From</p>
+                <p className="font-bold text-gray-900 mt-1">{selectedEmail.from_name || selectedEmail.from_email || 'Unknown sender'}</p>
+                {selectedEmail.from_email && <p className="text-xs text-gray-500 mt-0.5">{selectedEmail.from_email}</p>}
+              </div>
+              <div className="rounded-xl bg-gray-50 border border-gray-100 p-3">
+                <p className="text-xs font-black uppercase tracking-wide text-gray-400">Received</p>
+                <p className="font-bold text-gray-900 mt-1">
+                  {selectedEmail.received_at ? format(new Date(selectedEmail.received_at), 'MMM d, yyyy h:mm a') : '-'}
+                </p>
+                <p className="text-xs text-gray-500 mt-0.5">{selectedEmail.to_email || 'invoices@newurbandev.com'}</p>
+              </div>
+            </div>
+
+            <div className="grid md:grid-cols-3 gap-3 text-sm">
+              <div className="rounded-xl bg-blue-50 border border-blue-100 p-3">
+                <p className="text-xs font-black uppercase tracking-wide text-blue-500">Amount</p>
+                <p className="font-black text-blue-900 mt-1">
+                  {selectedEmail.extracted_amount !== null && selectedEmail.extracted_amount !== undefined ? money(selectedEmail.extracted_amount) : '-'}
+                </p>
+              </div>
+              <div className="rounded-xl bg-gray-50 border border-gray-100 p-3">
+                <p className="text-xs font-black uppercase tracking-wide text-gray-400">Matched Property</p>
+                <p className="font-bold text-gray-900 mt-1 truncate">{selectedEmail.matched_project_address || selectedEmail.extracted_service_address || '-'}</p>
+              </div>
+              <div className="rounded-xl bg-gray-50 border border-gray-100 p-3">
+                <p className="text-xs font-black uppercase tracking-wide text-gray-400">Confidence</p>
+                <p className="font-bold text-gray-900 mt-1">
+                  {selectedEmail.match_confidence ? `${Math.round(Number(selectedEmail.match_confidence) * 100)}%` : '-'}
+                </p>
+              </div>
+            </div>
+
+            {selectedEmail.attachments?.length > 0 && (
+              <div className="rounded-xl border border-gray-200 p-3">
+                <p className="text-xs font-black uppercase tracking-wide text-gray-400 mb-2">Attachments</p>
+                <div className="flex flex-wrap gap-2">
+                  {selectedEmail.attachments.map(attachment => (
+                    <button
+                      key={attachment.id}
+                      type="button"
+                      onClick={() => downloadEmailAttachment(selectedEmail, attachment)}
+                      className="inline-flex items-center gap-1.5 max-w-full px-2.5 py-1.5 rounded-lg text-xs font-bold text-gray-700 bg-gray-50 border border-gray-200 hover:bg-gray-100 cursor-pointer"
+                      title={attachment.original_name}
+                    >
+                      <Paperclip className="w-3.5 h-3.5 flex-shrink-0" />
+                      <span className="truncate max-w-[220px]">{attachment.original_name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="rounded-xl border border-gray-200 overflow-hidden">
+              <div className="px-3 py-2 bg-gray-50 border-b border-gray-200 flex items-center justify-between gap-3">
+                <p className="text-xs font-black uppercase tracking-wide text-gray-500">Email body</p>
+                {!selectedEmail.attachments?.length && (
+                  <span className="text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-1 rounded-full">
+                    No attachment, body shown here
+                  </span>
+                )}
+              </div>
+              <pre className="whitespace-pre-wrap break-words text-sm text-gray-800 p-4 max-h-[54vh] overflow-y-auto font-sans leading-relaxed">
+                {emailBodyText(selectedEmail) || 'No email body was stored for this message.'}
+              </pre>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

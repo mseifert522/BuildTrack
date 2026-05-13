@@ -222,13 +222,14 @@ authenticatedRouter.get('/', (req, res) => {
   const limit = Number.isFinite(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 200) : 50;
   const status = String(req.query.status || '').trim();
 
-  const where = status ? 'WHERE status = ?' : '';
+  const where = status ? 'WHERE e.status = ?' : '';
   const params = status ? [status, limit] : [limit];
   const rows = db.prepare(`
-    SELECT *
-    FROM invoice_email_intake
+    SELECT e.*, p.address as matched_project_address, p.job_name as matched_project_job_name
+    FROM invoice_email_intake e
+    LEFT JOIN projects p ON p.id = e.matched_project_id
     ${where}
-    ORDER BY datetime(received_at) DESC, datetime(created_at) DESC
+    ORDER BY datetime(e.received_at) DESC, datetime(e.created_at) DESC
     LIMIT ?
   `).all(...params);
 
@@ -245,8 +246,9 @@ authenticatedRouter.put('/:id/status', (req, res) => {
   }
 
   const db = getDb();
-  const result = db.prepare("UPDATE invoice_email_intake SET status = ?, updated_at = datetime('now') WHERE id = ?")
-    .run(status, req.params.id);
+  const agentStatus = status === 'ignored' ? 'ignored' : status === 'filed' ? 'filed' : 'pending';
+  const result = db.prepare("UPDATE invoice_email_intake SET status = ?, agent_status = ?, updated_at = datetime('now') WHERE id = ?")
+    .run(status, agentStatus, req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'Inbound invoice email not found' });
   res.json({ message: 'Status updated' });
 });
