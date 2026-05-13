@@ -19,6 +19,7 @@ const searchRoutes = require('./src/routes/search');
 const chatRoutes = require('./src/routes/chat');
 const invoiceEmailIntakeRoutes = require('./src/routes/invoiceEmailIntake');
 const { startGmailInvoicePoller } = require('./src/services/gmailInvoicePoller');
+const documentRoutes = require('./src/routes/documents');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -55,6 +56,7 @@ app.use('/api/search', searchRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/inbound/invoices', invoiceEmailIntakeRoutes.publicRouter);
 app.use('/api/invoices/email-intake', invoiceEmailIntakeRoutes.authenticatedRouter);
+app.use('/api/documents', documentRoutes);
 
 // Consolidated project notes feed for the dashboard.
 app.get('/api/notes/recent', authenticate, (req, res) => {

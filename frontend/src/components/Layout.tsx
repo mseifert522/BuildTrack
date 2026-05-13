@@ -4,7 +4,7 @@ import { useAuthStore, roleLabels, canManageUsers, canAccessSettings, isAdminRol
 import {
   LayoutDashboard, FolderOpen, ClipboardList, FileText,
   Users, Settings, LogOut, Menu, X, Bell, ChevronRight,
-  Camera, Search, Trash2, Truck
+  Camera, Files, Search, Trash2, Truck
 } from 'lucide-react';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
@@ -144,6 +144,7 @@ export default function Layout({ children }: LayoutProps) {
     { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/projects', icon: FolderOpen, label: 'Projects' },
     { to: '/invoices', icon: FileText, label: 'Invoices' },
+    { to: '/documents', icon: Files, label: 'Documents' },
     { to: '/contractors', icon: Users, label: 'Contractors' },
     { to: '/suppliers', icon: Truck, label: 'Suppliers' },
   ];
@@ -154,6 +155,7 @@ export default function Layout({ children }: LayoutProps) {
     '/dashboard': 'Dashboard',
     '/projects': 'Projects',
     '/invoices': 'Invoices',
+    '/documents': 'Documents',
     '/contractors': 'Contractors',
     '/suppliers': 'Suppliers',
     '/users': 'Users',

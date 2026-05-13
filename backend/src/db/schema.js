@@ -4,6 +4,24 @@ const fs = require('fs');
 
 let db;
 
+const DEFAULT_CONTRACTOR_CATEGORIES = [
+  'Floor',
+  'Roof',
+  'Electrical',
+  'Plumbing',
+  'Handymen',
+  'Painting',
+  'Drywall',
+  'Concrete',
+  'Cleaning',
+  'Window Install',
+  'Carpenter',
+  'Carpet Installer',
+  'Foundations',
+  'Excavators',
+  'Framing',
+];
+
 function getDb() {
   if (!db) {
     const dbPath = process.env.DB_PATH || './data/buildtrack.db';
@@ -30,6 +48,7 @@ function initializeSchema() {
       phone TEXT,
       company TEXT,
       contractor_category TEXT,
+      contractor_secondary_category TEXT,
       avatar_url TEXT,
       last_login_at TEXT,
       last_seen_at TEXT,
@@ -344,6 +363,7 @@ function initializeSchema() {
       billing_address TEXT,
       account_number TEXT,
       contractor_category TEXT,
+      contractor_secondary_category TEXT,
       linked_user_id TEXT,
       source TEXT,
       source_row INTEGER,
@@ -357,6 +377,14 @@ function initializeSchema() {
 
     CREATE INDEX IF NOT EXISTS idx_contractor_profiles_linked_user
       ON contractor_profiles(linked_user_id);
+
+    CREATE TABLE IF NOT EXISTS contractor_categories (
+      id TEXT PRIMARY KEY,
+      name TEXT UNIQUE NOT NULL,
+      created_by TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    );
 
     CREATE TABLE IF NOT EXISTS contractor_profile_notes (
       id TEXT PRIMARY KEY,
@@ -436,6 +464,23 @@ function initializeSchema() {
 
     CREATE INDEX IF NOT EXISTS idx_chat_messages_recipient
       ON chat_messages(recipient_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS project_documents (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      original_name TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      document_type TEXT,
+      uploaded_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (uploaded_by) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_project_documents_project_created
+      ON project_documents(project_id, created_at);
   `);
 
   // ── Runtime migrations (safe to run on every startup) ──
@@ -458,6 +503,8 @@ function initializeSchema() {
   try { db.exec(`ALTER TABLE photos ADD COLUMN material_id TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE users ADD COLUMN pin TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE users ADD COLUMN contractor_category TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE users ADD COLUMN contractor_secondary_category TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE contractor_profiles ADD COLUMN contractor_secondary_category TEXT`); } catch (_) { /* already exists */ }
 
   try {
     db.exec(`
@@ -484,7 +531,7 @@ function initializeSchema() {
   try {
     db.exec(`
       INSERT OR IGNORE INTO contractor_profiles (
-        id, vendor_name, contact_name, email, phone, contractor_category, linked_user_id, source, created_at, updated_at
+        id, vendor_name, contact_name, email, phone, contractor_category, contractor_secondary_category, linked_user_id, source, created_at, updated_at
       )
       SELECT
         id,
@@ -493,6 +540,7 @@ function initializeSchema() {
         email,
         phone,
         contractor_category,
+        contractor_secondary_category,
         id,
         'user',
         datetime('now'),
@@ -501,6 +549,29 @@ function initializeSchema() {
       WHERE role = 'contractor'
     `);
   } catch (_) { /* profile backfill best-effort */ }
+
+  try {
+    const insertCategory = db.prepare(`
+      INSERT OR IGNORE INTO contractor_categories (id, name, created_by, created_at)
+      VALUES (?, ?, NULL, datetime('now'))
+    `);
+    for (const category of DEFAULT_CONTRACTOR_CATEGORIES) {
+      const id = category.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      insertCategory.run(id, category);
+    }
+    db.exec(`
+      INSERT OR IGNORE INTO contractor_categories (id, name, created_by, created_at)
+      SELECT lower(replace(replace(contractor_category, ' ', '-'), '/', '-')), contractor_category, NULL, datetime('now')
+      FROM users
+      WHERE contractor_category IS NOT NULL AND trim(contractor_category) != ''
+    `);
+    db.exec(`
+      INSERT OR IGNORE INTO contractor_categories (id, name, created_by, created_at)
+      SELECT lower(replace(replace(contractor_category, ' ', '-'), '/', '-')), contractor_category, NULL, datetime('now')
+      FROM contractor_profiles
+      WHERE contractor_category IS NOT NULL AND trim(contractor_category) != ''
+    `);
+  } catch (_) { /* category bootstrap best-effort */ }
 
   // Auto-assign PINs to existing users without one
   const usersWithoutPin = db.prepare("SELECT id FROM users WHERE pin IS NULL").all();

@@ -47,7 +47,7 @@ const avatarUpload = multer({
 });
 
 const VALID_ROLES = ['super_admin', 'operations_manager', 'project_manager', 'contractor'];
-const CONTRACTOR_CATEGORIES = [
+const DEFAULT_CONTRACTOR_CATEGORIES = [
   'Floor',
   'Roof',
   'Electrical',
@@ -65,12 +65,76 @@ const CONTRACTOR_CATEGORIES = [
   'Framing',
 ];
 
+function normalizeCategory(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ');
+}
+
+function categorySlug(value) {
+  return normalizeCategory(value).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+function getContractorCategories(db) {
+  try {
+    const rows = db.prepare('SELECT name FROM contractor_categories ORDER BY lower(name)').all();
+    if (rows.length > 0) return rows.map(row => row.name);
+  } catch (_) {
+    // Table may not exist until schema migration runs.
+  }
+  return DEFAULT_CONTRACTOR_CATEGORIES;
+}
+
+function resolveCategory(db, value) {
+  const name = normalizeCategory(value);
+  if (!name) return null;
+  const categories = getContractorCategories(db);
+  return categories.find(category => category.toLowerCase() === name.toLowerCase()) || null;
+}
+
+function validateCategory(db, value, label = 'contractor category') {
+  const name = normalizeCategory(value);
+  if (!name) return null;
+  const resolved = resolveCategory(db, name);
+  if (resolved) return resolved;
+  const err = new Error(`Invalid ${label}`);
+  err.statusCode = 400;
+  throw err;
+}
+
+function createContractorCategory(db, rawName, userId) {
+  const name = normalizeCategory(rawName);
+  if (!name) {
+    const err = new Error('Category name is required');
+    err.statusCode = 400;
+    throw err;
+  }
+  if (name.length > 80) {
+    const err = new Error('Category name must be 80 characters or less');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const existing = resolveCategory(db, name);
+  if (existing) return existing;
+  const id = categorySlug(name) || uuidv4();
+  db.prepare(`
+    INSERT OR IGNORE INTO contractor_categories (id, name, created_by, created_at)
+    VALUES (?, ?, ?, datetime('now'))
+  `).run(id, name, userId);
+  return resolveCategory(db, name) || name;
+}
+
+function categoryError(res, err) {
+  if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message });
+  console.error(err);
+  return res.status(500).json({ error: 'Failed to save contractor category' });
+}
+
 // GET /api/users/me - get current user profile (any authenticated user)
 router.get('/me', (req, res) => {
   const db = getDb();
   const user = db.prepare(`
     SELECT
-      id, name, email, role, phone, company, contractor_category, avatar_url,
+      id, name, email, role, phone, company, contractor_category, contractor_secondary_category, avatar_url,
       is_active, last_login_at, last_seen_at,
       CASE WHEN last_seen_at IS NOT NULL AND datetime(last_seen_at) >= datetime('now', '-2 minutes') THEN 1 ELSE 0 END as is_online
     FROM users
@@ -116,7 +180,7 @@ router.get('/', authorize('super_admin', 'operations_manager'), (req, res) => {
   const db = getDb();
   const users = db.prepare(
     `SELECT
-      id, name, email, role, phone, company, contractor_category, avatar_url,
+      id, name, email, role, phone, company, contractor_category, contractor_secondary_category, avatar_url,
       is_active, pin, created_at, last_login_at, last_seen_at,
       CASE WHEN last_seen_at IS NOT NULL AND datetime(last_seen_at) >= datetime('now', '-2 minutes') THEN 1 ELSE 0 END as is_online
      FROM users
@@ -143,9 +207,32 @@ router.get('/presence', authorize('super_admin', 'operations_manager', 'project_
 router.get('/contractors', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
   const db = getDb();
   const users = db.prepare(
-    "SELECT id, name, email, phone, company, contractor_category, last_seen_at, CASE WHEN last_seen_at IS NOT NULL AND datetime(last_seen_at) >= datetime('now', '-2 minutes') THEN 1 ELSE 0 END as is_online FROM users WHERE role = 'contractor' AND is_active = 1 ORDER BY name"
+    "SELECT id, name, email, phone, company, contractor_category, contractor_secondary_category, last_seen_at, CASE WHEN last_seen_at IS NOT NULL AND datetime(last_seen_at) >= datetime('now', '-2 minutes') THEN 1 ELSE 0 END as is_online FROM users WHERE role = 'contractor' AND is_active = 1 ORDER BY name"
   ).all();
   res.json(users);
+});
+
+// GET /api/users/contractor-categories - list contractor categories for dropdowns
+router.get('/contractor-categories', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
+  const db = getDb();
+  res.json({ categories: getContractorCategories(db) });
+});
+
+// POST /api/users/contractor-categories - super admin and operations manager can add categories
+router.post('/contractor-categories', authorize('super_admin', 'operations_manager'), (req, res) => {
+  try {
+    const db = getDb();
+    const category = createContractorCategory(db, req.body?.name, req.user.id);
+    logActivity({
+      userId: req.user.id,
+      action: 'contractor_category_created',
+      entityType: 'contractor_category',
+      details: { name: category },
+    });
+    res.status(201).json({ category, categories: getContractorCategories(db) });
+  } catch (err) {
+    categoryError(res, err);
+  }
 });
 
 // GET /api/users/contractors/directory - contractor table with project and payment context
@@ -161,6 +248,7 @@ router.get('/contractors/directory', authorize('super_admin', 'operations_manage
       cp.billing_address,
       cp.account_number,
       cp.contractor_category,
+      cp.contractor_secondary_category,
       cp.linked_user_id,
       cp.source,
       u.name as linked_user_name,
@@ -228,6 +316,36 @@ router.get('/contractors/directory', authorize('super_admin', 'operations_manage
     ORDER BY p.address
   `);
 
+  const contractorIds = contractors.map(contractor => contractor.id);
+  const notesByContractor = new Map();
+  if (contractorIds.length > 0) {
+    const placeholders = contractorIds.map(() => '?').join(',');
+    const noteRows = db.prepare(`
+      SELECT contractor_id, note, created_at, user_name
+      FROM (
+        SELECT
+          cn.contractor_id,
+          cn.note,
+          cn.created_at,
+          u.name as user_name,
+          ROW_NUMBER() OVER (
+            PARTITION BY cn.contractor_id
+            ORDER BY datetime(cn.created_at) DESC, cn.created_at DESC
+          ) as rn
+        FROM contractor_profile_notes cn
+        JOIN users u ON u.id = cn.user_id
+        WHERE cn.contractor_id IN (${placeholders})
+      )
+      WHERE rn <= 2
+      ORDER BY contractor_id, datetime(created_at) DESC, created_at DESC
+    `).all(...contractorIds);
+    for (const row of noteRows) {
+      const notes = notesByContractor.get(row.contractor_id) || [];
+      notes.push({ note: row.note, created_at: row.created_at, user_name: row.user_name });
+      notesByContractor.set(row.contractor_id, notes);
+    }
+  }
+
   const result = contractors.map((contractor) => {
     const linkedUserId = contractor.linked_user_id;
     const paid = linkedUserId ? (lastPaid.get(linkedUserId) || null) : null;
@@ -264,10 +382,11 @@ router.get('/contractors/directory', authorize('super_admin', 'operations_manage
       last_paid_invoice: paid,
       last_invoice: invoice,
       total_paid: Number(contractor.total_paid || 0),
+      latest_notes: notesByContractor.get(contractor.id) || [],
     };
   });
 
-  res.json({ categories: CONTRACTOR_CATEGORIES, contractors: result });
+  res.json({ categories: getContractorCategories(db), contractors: result });
 });
 
 function requireContractor(db, contractorId) {
@@ -289,13 +408,13 @@ router.put('/contractors/:id/profile', authorize('super_admin', 'operations_mana
       billing_address,
       account_number,
       contractor_category,
+      contractor_secondary_category,
     } = req.body;
 
     const nextName = String(vendor_name || '').trim();
     if (!nextName) return res.status(400).json({ error: 'Contractor name is required' });
-    if (contractor_category && !CONTRACTOR_CATEGORIES.includes(contractor_category)) {
-      return res.status(400).json({ error: 'Invalid contractor category' });
-    }
+    const primaryCategory = validateCategory(db, contractor_category, 'contractor category');
+    const secondaryCategory = validateCategory(db, contractor_secondary_category, 'secondary contractor category');
 
     db.prepare(`
       UPDATE contractor_profiles SET
@@ -306,6 +425,7 @@ router.put('/contractors/:id/profile', authorize('super_admin', 'operations_mana
         billing_address = ?,
         account_number = ?,
         contractor_category = ?,
+        contractor_secondary_category = ?,
         updated_at = datetime('now')
       WHERE id = ?
     `).run(
@@ -315,21 +435,32 @@ router.put('/contractors/:id/profile', authorize('super_admin', 'operations_mana
       phone ? String(phone).trim() : null,
       billing_address ? String(billing_address).trim() : null,
       account_number ? String(account_number).trim() : null,
-      contractor_category || null,
+      primaryCategory,
+      secondaryCategory,
       req.params.id
     );
+
+    const updatedProfile = db.prepare('SELECT linked_user_id FROM contractor_profiles WHERE id = ?').get(req.params.id);
+    if (updatedProfile?.linked_user_id) {
+      db.prepare(`
+        UPDATE users
+        SET contractor_category = ?, contractor_secondary_category = ?, updated_at = datetime('now')
+        WHERE id = ? AND role = 'contractor'
+      `).run(primaryCategory, secondaryCategory, updatedProfile.linked_user_id);
+    }
 
     logActivity({
       userId: req.user.id,
       action: 'contractor_profile_updated',
       entityType: 'contractor_profile',
       entityId: req.params.id,
-      details: { contractor_name: nextName, contractor_category: contractor_category || null },
+      details: { contractor_name: nextName, contractor_category: primaryCategory, contractor_secondary_category: secondaryCategory },
     });
 
     const updated = db.prepare('SELECT * FROM contractor_profiles WHERE id = ?').get(req.params.id);
     res.json({ contractor: updated, message: 'Contractor updated' });
   } catch (err) {
+    if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message });
     console.error(err);
     res.status(500).json({ error: 'Failed to update contractor' });
   }
@@ -491,12 +622,9 @@ router.delete('/contractors/:id/notes/:noteId', authorize('super_admin', 'operat
 // POST /api/users - create user (super_admin or operations_manager)
 router.post('/', authorize('super_admin', 'operations_manager'), async (req, res) => {
   try {
-    const { name, email, role, phone, company, contractor_category, password } = req.body;
+    const { name, email, role, phone, company, contractor_category, contractor_secondary_category, password } = req.body;
     if (!name || !email || !role) return res.status(400).json({ error: 'Name, email, and role are required' });
     if (!VALID_ROLES.includes(role)) return res.status(400).json({ error: 'Invalid role' });
-    if (role === 'contractor' && contractor_category && !CONTRACTOR_CATEGORIES.includes(contractor_category)) {
-      return res.status(400).json({ error: 'Invalid contractor category' });
-    }
 
     // Operations Manager cannot create Super Admin accounts
     if (req.user.role === 'operations_manager' && role === 'super_admin') {
@@ -504,6 +632,8 @@ router.post('/', authorize('super_admin', 'operations_manager'), async (req, res
     }
 
     const db = getDb();
+    const primaryCategory = role === 'contractor' ? validateCategory(db, contractor_category, 'contractor category') : null;
+    const secondaryCategory = role === 'contractor' ? validateCategory(db, contractor_secondary_category, 'secondary contractor category') : null;
     const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase().trim());
     if (existing) return res.status(409).json({ error: 'Email already in use' });
 
@@ -515,19 +645,19 @@ router.post('/', authorize('super_admin', 'operations_manager'), async (req, res
     const pin = generatePin(db);
 
     db.prepare(
-      `INSERT INTO users (id, name, email, password_hash, role, phone, company, contractor_category, force_password_reset, pin)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`
-    ).run(id, name, email.toLowerCase().trim(), hash, role, phone || null, company || null, role === 'contractor' ? (contractor_category || null) : null, pin);
+      `INSERT INTO users (id, name, email, password_hash, role, phone, company, contractor_category, contractor_secondary_category, force_password_reset, pin)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`
+    ).run(id, name, email.toLowerCase().trim(), hash, role, phone || null, company || null, primaryCategory, secondaryCategory, pin);
 
     if (role === 'contractor') {
       db.prepare(`
         INSERT OR IGNORE INTO contractor_profiles (
-          id, vendor_name, contact_name, email, phone, contractor_category, linked_user_id, source, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'user', datetime('now'), datetime('now'))
-      `).run(id, company || name, name, email.toLowerCase().trim(), phone || null, contractor_category || null, id);
+          id, vendor_name, contact_name, email, phone, contractor_category, contractor_secondary_category, linked_user_id, source, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'user', datetime('now'), datetime('now'))
+      `).run(id, company || name, name, email.toLowerCase().trim(), phone || null, primaryCategory, secondaryCategory, id);
     }
 
-    logActivity({ userId: req.user.id, action: 'user_created', entityType: 'user', entityId: id, details: { name, email, role, contractor_category } });
+    logActivity({ userId: req.user.id, action: 'user_created', entityType: 'user', entityId: id, details: { name, email, role, contractor_category: primaryCategory, contractor_secondary_category: secondaryCategory } });
 
     // Send invite email
     try {
@@ -538,6 +668,7 @@ router.post('/', authorize('super_admin', 'operations_manager'), async (req, res
 
     res.status(201).json({ id, name, email, role, pin, message: pin ? `User created. PIN: ${pin}. Invite sent to ${email}.` : `User created. Invite sent to ${email}.` });
   } catch (err) {
+    if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message });
     console.error(err);
     res.status(500).json({ error: 'Failed to create user' });
   }
@@ -555,26 +686,30 @@ router.put('/:id', authorize('super_admin', 'operations_manager'), async (req, r
       return res.status(403).json({ error: `You cannot modify a ${target.role.replace('_', ' ')} account` });
     }
 
-    const { name, email, role, phone, company, contractor_category, is_active } = req.body;
+    const { name, email, role, phone, company, contractor_category, contractor_secondary_category, is_active } = req.body;
 
     // Operations Manager cannot promote someone to Super Admin
     if (req.user.role === 'operations_manager' && role === 'super_admin') {
       return res.status(403).json({ error: 'Operations Manager cannot assign Super Admin role' });
     }
     const nextRole = role || target.role;
-    if (nextRole === 'contractor' && contractor_category && !CONTRACTOR_CATEGORIES.includes(contractor_category)) {
-      return res.status(400).json({ error: 'Invalid contractor category' });
-    }
+    const primaryCategory = nextRole === 'contractor'
+      ? (contractor_category !== undefined ? validateCategory(db, contractor_category, 'contractor category') : target.contractor_category)
+      : null;
+    const secondaryCategory = nextRole === 'contractor'
+      ? (contractor_secondary_category !== undefined ? validateCategory(db, contractor_secondary_category, 'secondary contractor category') : target.contractor_secondary_category)
+      : null;
 
     db.prepare(
-      `UPDATE users SET name = ?, email = ?, role = ?, phone = ?, company = ?, contractor_category = ?, is_active = ?, updated_at = datetime('now') WHERE id = ?`
+      `UPDATE users SET name = ?, email = ?, role = ?, phone = ?, company = ?, contractor_category = ?, contractor_secondary_category = ?, is_active = ?, updated_at = datetime('now') WHERE id = ?`
     ).run(
       name || target.name,
       email || target.email,
       nextRole,
       phone ?? target.phone,
       company ?? target.company,
-      nextRole === 'contractor' ? (contractor_category ?? target.contractor_category) : null,
+      primaryCategory,
+      secondaryCategory,
       is_active !== undefined ? (is_active ? 1 : 0) : target.is_active,
       req.params.id
     );
@@ -582,14 +717,15 @@ router.put('/:id', authorize('super_admin', 'operations_manager'), async (req, r
     if (nextRole === 'contractor') {
       db.prepare(`
         INSERT INTO contractor_profiles (
-          id, vendor_name, contact_name, email, phone, contractor_category, linked_user_id, source, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'user', datetime('now'), datetime('now'))
+          id, vendor_name, contact_name, email, phone, contractor_category, contractor_secondary_category, linked_user_id, source, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'user', datetime('now'), datetime('now'))
         ON CONFLICT(id) DO UPDATE SET
           vendor_name = excluded.vendor_name,
           contact_name = excluded.contact_name,
           email = excluded.email,
           phone = excluded.phone,
           contractor_category = excluded.contractor_category,
+          contractor_secondary_category = excluded.contractor_secondary_category,
           linked_user_id = excluded.linked_user_id,
           updated_at = datetime('now')
       `).run(
@@ -598,14 +734,16 @@ router.put('/:id', authorize('super_admin', 'operations_manager'), async (req, r
         name || target.name,
         email || target.email,
         phone ?? target.phone,
-        contractor_category ?? target.contractor_category,
+        primaryCategory,
+        secondaryCategory,
         req.params.id
       );
     }
 
-    logActivity({ userId: req.user.id, action: 'user_updated', entityType: 'user', entityId: req.params.id, details: { name, role: nextRole, contractor_category, is_active } });
+    logActivity({ userId: req.user.id, action: 'user_updated', entityType: 'user', entityId: req.params.id, details: { name, role: nextRole, contractor_category: primaryCategory, contractor_secondary_category: secondaryCategory, is_active } });
     res.json({ message: 'User updated successfully' });
   } catch (err) {
+    if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message });
     console.error(err);
     res.status(500).json({ error: 'Failed to update user' });
   }

@@ -8,6 +8,8 @@ export interface User {
   is_active?: number;
   phone?: string;
   company?: string;
+  contractor_category?: string | null;
+  contractor_secondary_category?: string | null;
   avatar_url?: string | null;
   force_password_reset?: boolean;
 }
@@ -28,11 +30,13 @@ export const useAuthStore = create<AuthState>((set) => ({
   setAuth: (user, token) => {
     localStorage.setItem('token', token);
     localStorage.setItem('user', JSON.stringify(user));
+    localStorage.setItem('auth_session_started_at', String(Date.now()));
     set({ user, token });
   },
   logout: () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    localStorage.removeItem('auth_session_started_at');
     set({ user: null, token: null });
   },
   updateUser: (updates) => set((state) => {

@@ -19,6 +19,7 @@ import {
 import toast from 'react-hot-toast';
 import api from '../lib/api';
 import { Loading, Modal } from '../components/ui';
+import { useAuthStore } from '../store/authStore';
 
 interface ContractorInvoice {
   id: string;
@@ -50,6 +51,7 @@ interface ContractorRow {
   billing_address?: string | null;
   account_number?: string | null;
   contractor_category?: string | null;
+  contractor_secondary_category?: string | null;
   source?: string | null;
   project_addresses: string[];
   connected_projects?: ConnectedProject[];
@@ -58,6 +60,7 @@ interface ContractorRow {
   total_paid: number;
   note_count?: number;
   latest_note_at?: string | null;
+  latest_notes?: ContractorNotePreview[];
   last_paid_invoice?: ContractorInvoice | null;
   last_invoice?: ContractorInvoice | null;
 }
@@ -76,6 +79,12 @@ interface ContractorNote {
   user_name: string;
   user_avatar_url?: string | null;
   note: string;
+  created_at: string;
+}
+
+interface ContractorNotePreview {
+  note: string;
+  user_name: string;
   created_at: string;
 }
 
@@ -119,6 +128,7 @@ const formatDate = (value?: string | null) => {
 
 export default function Contractors() {
   const navigate = useNavigate();
+  const { user: currentUser } = useAuthStore();
   const [contractors, setContractors] = useState<ContractorRow[]>([]);
   const [categories, setCategories] = useState<string[]>(fallbackCategories);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
@@ -146,11 +156,13 @@ export default function Contractors() {
     billing_address: '',
     account_number: '',
     contractor_category: '',
+    contractor_secondary_category: '',
   });
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [projectFilter, setProjectFilter] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
   const [deletingContractorId, setDeletingContractorId] = useState<string | null>(null);
+  const canAddCategories = currentUser ? ['super_admin', 'operations_manager'].includes(currentUser.role) : false;
 
   const loadDirectory = async () => {
     const [directoryRes, projectsRes] = await Promise.all([
@@ -203,7 +215,12 @@ export default function Contractors() {
       }));
       setNoteInputs(prev => ({ ...prev, [contractorId]: '' }));
       setContractors(prev => prev.map(contractor => contractor.id === contractorId
-        ? { ...contractor, note_count: Number(contractor.note_count || 0) + 1, latest_note_at: res.data.created_at }
+        ? {
+            ...contractor,
+            note_count: Number(contractor.note_count || 0) + 1,
+            latest_note_at: res.data.created_at,
+            latest_notes: [{ note: res.data.note, user_name: res.data.user_name, created_at: res.data.created_at }, ...(contractor.latest_notes || [])].slice(0, 2),
+          }
         : contractor
       ));
     } catch {
@@ -239,10 +256,31 @@ export default function Contractors() {
       billing_address: contractor.billing_address || '',
       account_number: contractor.account_number || '',
       contractor_category: contractor.contractor_category || '',
+      contractor_secondary_category: contractor.contractor_secondary_category || '',
     });
     setSelectedProjectIds((contractor.connected_projects || []).map(project => project.id).filter(Boolean) as string[]);
     setProjectFilter('');
   };
+
+  const addCategory = async (field: 'contractor_category' | 'contractor_secondary_category') => {
+    const name = window.prompt('New contractor category');
+    if (!name?.trim()) {
+      setEditForm(prev => ({ ...prev, [field]: '' }));
+      return;
+    }
+    try {
+      const res = await api.post('/users/contractor-categories', { name: name.trim() });
+      setCategories(Array.isArray(res.data?.categories) ? res.data.categories : categories);
+      setEditForm(prev => ({ ...prev, [field]: res.data?.category || name.trim() }));
+      toast.success('Category added');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to add category');
+      setEditForm(prev => ({ ...prev, [field]: '' }));
+    }
+  };
+
+  const categoryLabel = (contractor: ContractorRow) =>
+    [contractor.contractor_category, contractor.contractor_secondary_category].filter(Boolean).join(' / ');
 
   const saveEdit = async () => {
     if (!editingContractor || !editForm.vendor_name.trim()) {
@@ -307,6 +345,8 @@ export default function Contractors() {
           contractor.billing_address,
           contractor.account_number,
           contractor.contractor_category,
+          contractor.contractor_secondary_category,
+          ...(contractor.latest_notes || []).map(note => note.note),
           ...(contractor.project_addresses || []),
           lastPaid?.invoice_number,
           lastPaid?.address,
@@ -314,7 +354,7 @@ export default function Contractors() {
         if (!haystack.includes(q)) return false;
       }
 
-      if (category && contractor.contractor_category !== category) return false;
+      if (category && contractor.contractor_category !== category && contractor.contractor_secondary_category !== category) return false;
       if (paidFilter === 'paid' && !lastPaid) return false;
       if (paidFilter === 'unpaid' && lastPaid) return false;
       if (from !== null && (!lastPaidDate || lastPaidDate < from)) return false;
@@ -328,7 +368,7 @@ export default function Contractors() {
       if (sortBy === 'last_paid_date') return dateValue(b.last_paid_invoice?.updated_at) - dateValue(a.last_paid_invoice?.updated_at);
       if (sortBy === 'last_paid_amount') return Number(b.last_paid_invoice?.total || 0) - Number(a.last_paid_invoice?.total || 0);
       if (sortBy === 'total_paid') return Number(b.total_paid || 0) - Number(a.total_paid || 0);
-      if (sortBy === 'category') return String(a.contractor_category || '').localeCompare(String(b.contractor_category || ''));
+      if (sortBy === 'category') return categoryLabel(a).localeCompare(categoryLabel(b));
       return a.name.localeCompare(b.name);
     });
   }, [contractors, query, category, paidFilter, dateFrom, dateTo, minAmount, maxAmount, sortBy]);
@@ -419,9 +459,9 @@ export default function Contractors() {
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
                             <h2 className="text-base font-black text-gray-900 truncate">{contractor.name}</h2>
-                            {contractor.contractor_category ? (
+                            {categoryLabel(contractor) ? (
                               <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-black" style={{ background: '#FEF3C7', color: '#92400E' }}>
-                                {contractor.contractor_category}
+                                {categoryLabel(contractor)}
                               </span>
                             ) : (
                               <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-black bg-gray-100 text-gray-500">
@@ -486,7 +526,7 @@ export default function Contractors() {
                     </div>
 
                     <div className="grid lg:grid-cols-12 gap-4 mt-5">
-                      <div className="lg:col-span-4 rounded-xl border border-gray-100 p-4 bg-gray-50">
+                      <div className="lg:col-span-3 rounded-xl border border-gray-100 p-4 bg-gray-50">
                         <div className="flex items-center gap-2 mb-2">
                           <Building2 className="w-4 h-4 text-gray-400" />
                           <p className="text-xs font-black uppercase tracking-wide text-gray-500">Billing Address</p>
@@ -494,7 +534,7 @@ export default function Contractors() {
                         <p className="text-sm text-gray-800 whitespace-pre-wrap">{contractor.billing_address || 'No billing address on file'}</p>
                       </div>
 
-                      <div className="lg:col-span-5 rounded-xl border border-gray-100 p-4">
+                      <div className="lg:col-span-3 rounded-xl border border-gray-100 p-4">
                         <div className="flex items-center justify-between gap-2 mb-3">
                           <div className="flex items-center gap-2">
                             <LinkIcon className="w-4 h-4 text-gray-400" />
@@ -526,6 +566,33 @@ export default function Contractors() {
                           <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-black" style={{ background: '#FEF2F2', color: '#B91C1C' }}>
                             Needs project connection
                           </span>
+                        )}
+                      </div>
+
+                      <div className="lg:col-span-3 rounded-xl border border-gray-100 p-4 bg-white">
+                        <div className="flex items-center justify-between gap-2 mb-3">
+                          <div className="flex items-center gap-2">
+                            <MessageSquare className="w-4 h-4 text-gray-400" />
+                            <p className="text-xs font-black uppercase tracking-wide text-gray-500">Notes</p>
+                          </div>
+                          <span className="text-xs font-black text-gray-400">{contractor.note_count || 0}</span>
+                        </div>
+                        {(contractor.latest_notes || []).length > 0 ? (
+                          <div className="space-y-2">
+                            {(contractor.latest_notes || []).slice(0, 2).map((note, index) => (
+                              <div key={`${note.created_at}-${index}`} className="rounded-lg bg-gray-50 border border-gray-100 px-2.5 py-2">
+                                <p
+                                  className="text-xs font-semibold text-gray-700"
+                                  style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+                                >
+                                  {note.note}
+                                </p>
+                                <p className="text-[11px] text-gray-400 mt-1 truncate">{note.user_name}</p>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-gray-400">No notes yet</p>
                         )}
                       </div>
 
@@ -640,9 +707,32 @@ export default function Contractors() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-              <select value={editForm.contractor_category} onChange={e => setEditForm(prev => ({ ...prev, contractor_category: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+              <select
+                value={editForm.contractor_category}
+                onChange={e => {
+                  if (e.target.value === '__add_new__') addCategory('contractor_category');
+                  else setEditForm(prev => ({ ...prev, contractor_category: e.target.value }));
+                }}
+                className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
                 <option value="">Uncategorized</option>
                 {categories.map(item => <option key={item} value={item}>{item}</option>)}
+                {canAddCategories && <option value="__add_new__">+ Add category...</option>}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Secondary Category</label>
+              <select
+                value={editForm.contractor_secondary_category}
+                onChange={e => {
+                  if (e.target.value === '__add_new__') addCategory('contractor_secondary_category');
+                  else setEditForm(prev => ({ ...prev, contractor_secondary_category: e.target.value }));
+                }}
+                className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                <option value="">None</option>
+                {categories.map(item => <option key={item} value={item}>{item}</option>)}
+                {canAddCategories && <option value="__add_new__">+ Add category...</option>}
               </select>
             </div>
             <div>

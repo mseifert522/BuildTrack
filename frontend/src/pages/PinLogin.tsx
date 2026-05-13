@@ -46,6 +46,7 @@ export default function PinLogin() {
       localStorage.setItem('contractor_token', res.data.token);
       localStorage.setItem('contractor_user', JSON.stringify(res.data.user));
       localStorage.setItem('contractor_projects', JSON.stringify(res.data.projects));
+      localStorage.setItem('contractor_session_started_at', String(Date.now()));
       navigate('/app/home');
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Invalid PIN');

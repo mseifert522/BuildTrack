@@ -33,6 +33,8 @@ function publicUser(user) {
     role: user.role,
     phone: user.phone,
     company: user.company,
+    contractor_category: user.contractor_category || null,
+    contractor_secondary_category: user.contractor_secondary_category || null,
     avatar_url: user.avatar_url || null,
     force_password_reset: user.force_password_reset === 1,
   };
@@ -42,7 +44,7 @@ function issueSession(db, user, details) {
   const token = jwt.sign(
     { userId: user.id, role: user.role },
     process.env.JWT_SECRET,
-    { expiresIn: '60d' }
+    { expiresIn: '45m' }
   );
   markUserOnline(db, user.id, true);
   logActivity({
@@ -176,7 +178,7 @@ router.post('/pin-login', async (req, res) => {
     const token = jwt.sign(
       { userId: user.id, role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: '45m' }
     );
 
     logActivity({ userId: user.id, action: 'pin_login', entityType: 'user', entityId: user.id });
@@ -257,6 +259,8 @@ router.get('/me', authenticate, (req, res) => {
     role: u.role,
     phone: u.phone,
     company: u.company,
+    contractor_category: u.contractor_category || null,
+    contractor_secondary_category: u.contractor_secondary_category || null,
     avatar_url: u.avatar_url || null,
     last_login_at: u.last_login_at || null,
     last_seen_at: u.last_seen_at || null,

@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { useAuthStore, canManageUsers, canAccessSettings, isAdminRole } from './store/authStore';
@@ -10,6 +11,7 @@ import PunchList from './pages/PunchList';
 import Photos from './pages/Photos';
 import Invoices from './pages/Invoices';
 import InvoiceBuilder from './pages/InvoiceBuilder';
+import Documents from './pages/Documents';
 import Contractors from './pages/Contractors';
 import Suppliers from './pages/Suppliers';
 import Users from './pages/Users';
@@ -30,6 +32,15 @@ import ContractorHome from './pages/ContractorHome';
 import ContractorProjects from './pages/ContractorProjects';
 import ContractorInvoice from './pages/ContractorInvoice';
 import ContractorProjectDetail from './pages/ContractorProjectDetail';
+
+const SESSION_TIMEOUT_MS = 45 * 60 * 1000;
+
+function clearContractorSession() {
+  localStorage.removeItem('contractor_token');
+  localStorage.removeItem('contractor_user');
+  localStorage.removeItem('contractor_projects');
+  localStorage.removeItem('contractor_session_started_at');
+}
 
 /** Redirect /mobile to the public mobile invoice app. */
 function MobileRedirect() {
@@ -91,9 +102,48 @@ function AuthRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function SessionTimeout() {
+  const navigate = useNavigate();
+  const { token, logout } = useAuthStore();
+
+  useEffect(() => {
+    const checkSession = () => {
+      const now = Date.now();
+      const desktopToken = localStorage.getItem('token');
+      const desktopStartedAt = Number(localStorage.getItem('auth_session_started_at') || now);
+      if (desktopToken && now - desktopStartedAt >= SESSION_TIMEOUT_MS) {
+        logout();
+        navigate('/login', { replace: true });
+        return;
+      }
+
+      const contractorToken = localStorage.getItem('contractor_token');
+      const contractorStartedAt = Number(localStorage.getItem('contractor_session_started_at') || now);
+      if (contractorToken && now - contractorStartedAt >= SESSION_TIMEOUT_MS) {
+        clearContractorSession();
+        navigate('/app', { replace: true });
+      }
+    };
+
+    if (localStorage.getItem('token') && !localStorage.getItem('auth_session_started_at')) {
+      localStorage.setItem('auth_session_started_at', String(Date.now()));
+    }
+    if (localStorage.getItem('contractor_token') && !localStorage.getItem('contractor_session_started_at')) {
+      localStorage.setItem('contractor_session_started_at', String(Date.now()));
+    }
+
+    checkSession();
+    const timer = window.setInterval(checkSession, 30000);
+    return () => window.clearInterval(timer);
+  }, [token, logout, navigate]);
+
+  return null;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
+      <SessionTimeout />
       <Toaster
         position="top-center"
         toastOptions={{
@@ -162,6 +212,11 @@ export default function App() {
         <Route path="/invoices" element={
           <DesktopRoute>
             <Layout><Invoices /></Layout>
+          </DesktopRoute>
+        } />
+        <Route path="/documents" element={
+          <DesktopRoute>
+            <Layout><Documents /></Layout>
           </DesktopRoute>
         } />
         <Route path="/contractors" element={

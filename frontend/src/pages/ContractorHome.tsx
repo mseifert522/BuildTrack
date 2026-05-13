@@ -23,6 +23,7 @@ export default function ContractorHome() {
     localStorage.removeItem('contractor_token');
     localStorage.removeItem('contractor_user');
     localStorage.removeItem('contractor_projects');
+    localStorage.removeItem('contractor_session_started_at');
     navigate('/app');
   };
 

@@ -15,6 +15,7 @@ interface User {
   phone: string;
   company: string;
   contractor_category?: string | null;
+  contractor_secondary_category?: string | null;
   avatar_url: string | null;
   pin: string | null;
   is_active: number;
@@ -24,7 +25,7 @@ interface User {
   created_at: string;
 }
 
-const CONTRACTOR_CATEGORIES = [
+const fallbackCategories = [
   'Floor',
   'Roof',
   'Electrical',
@@ -50,20 +51,64 @@ export default function Users() {
   const [editUser, setEditUser] = useState<User | null>(null);
   const [resetUser, setResetUser] = useState<User | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [categories, setCategories] = useState<string[]>(fallbackCategories);
   const { register, handleSubmit, reset, setValue, formState: { isSubmitting } } = useForm();
   const { register: registerReset, handleSubmit: handleSubmitReset, reset: resetForm, formState: { isSubmitting: isResetting } } = useForm();
 
   const canManage = currentUser ? canManageUsers(currentUser.role) : false;
+  const canAddCategories = currentUser ? ['super_admin', 'operations_manager'].includes(currentUser.role) : false;
 
   const load = async () => {
     try {
-      const res = await api.get('/users');
-      setUsers(res.data);
+      const [usersRes, categoriesRes] = await Promise.all([
+        api.get('/users'),
+        api.get('/users/contractor-categories'),
+      ]);
+      setUsers(usersRes.data);
+      setCategories(Array.isArray(categoriesRes.data?.categories) ? categoriesRes.data.categories : fallbackCategories);
     } catch (err) {
       toast.error('Failed to load users');
     } finally {
       setLoading(false);
     }
+  };
+
+  const addCategory = async (field: string) => {
+    const name = window.prompt('New contractor category');
+    if (!name?.trim()) {
+      setValue(field, '');
+      return;
+    }
+    try {
+      const res = await api.post('/users/contractor-categories', { name: name.trim() });
+      setCategories(Array.isArray(res.data?.categories) ? res.data.categories : categories);
+      setValue(field, res.data?.category || name.trim());
+      toast.success('Category added');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to add category');
+      setValue(field, '');
+    }
+  };
+
+  const categorySelect = (field: 'contractor_category' | 'contractor_secondary_category', placeholder: string) => {
+    const select = register(field);
+    return (
+      <select
+        {...select}
+        onChange={(event) => {
+          if (event.target.value === '__add_new__') {
+            addCategory(field);
+            return;
+          }
+          select.onChange(event);
+        }}
+        className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+      >
+        <option value="">{placeholder}</option>
+        {categories.map(category => <option key={category} value={category}>{category}</option>)}
+        {canAddCategories && <option value="__add_new__">+ Add category...</option>}
+      </select>
+    );
   };
 
   useEffect(() => {
@@ -212,7 +257,11 @@ export default function Users() {
                 <p className="text-xs text-gray-500">{u.email}</p>
                 {u.phone && <p className="text-xs text-gray-400">{u.phone}</p>}
                 {u.company && <p className="text-xs text-gray-400">{u.company}</p>}
-                {u.role === 'contractor' && u.contractor_category && <p className="text-xs text-amber-600 font-semibold">{u.contractor_category}</p>}
+                {u.role === 'contractor' && (u.contractor_category || u.contractor_secondary_category) && (
+                  <p className="text-xs text-amber-600 font-semibold">
+                    {[u.contractor_category, u.contractor_secondary_category].filter(Boolean).join(' / ')}
+                  </p>
+                )}
                 <div className="flex items-center gap-3 mt-0.5">
                   <p className="text-xs text-gray-400">Joined {format(new Date(u.created_at), 'MMM d, yyyy')}</p>
                   {u.last_seen_at && (
@@ -301,10 +350,11 @@ export default function Users() {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Contractor Category</label>
-            <select {...register('contractor_category')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-              <option value="">Select category for contractors...</option>
-              {CONTRACTOR_CATEGORIES.map(category => <option key={category} value={category}>{category}</option>)}
-            </select>
+            {categorySelect('contractor_category', 'Select category for contractors...')}
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Secondary Category</label>
+            {categorySelect('contractor_secondary_category', 'Optional secondary category...')}
           </div>
           <div className="bg-blue-50 rounded-lg p-3 text-xs text-blue-700">
             A temporary password will be generated. The user will be prompted to change it on first login.
@@ -377,10 +427,11 @@ export default function Users() {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Contractor Category</label>
-            <select {...register('contractor_category')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-              <option value="">Select category for contractors...</option>
-              {CONTRACTOR_CATEGORIES.map(category => <option key={category} value={category}>{category}</option>)}
-            </select>
+            {categorySelect('contractor_category', 'Select category for contractors...')}
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Secondary Category</label>
+            {categorySelect('contractor_secondary_category', 'Optional secondary category...')}
           </div>
           <div className="flex gap-3">
             <button type="button" onClick={() => { setEditUser(null); reset(); }} className="flex-1 py-2.5 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50">Cancel</button>
