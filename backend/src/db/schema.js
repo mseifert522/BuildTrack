@@ -287,9 +287,6 @@ function initializeSchema() {
     CREATE INDEX IF NOT EXISTS idx_invoice_email_intake_status_received
       ON invoice_email_intake(status, received_at);
 
-    CREATE INDEX IF NOT EXISTS idx_invoice_email_intake_agent_status
-      ON invoice_email_intake(agent_status, received_at);
-
     CREATE TABLE IF NOT EXISTS invoice_agent_runs (
       id TEXT PRIMARY KEY,
       intake_id TEXT,
