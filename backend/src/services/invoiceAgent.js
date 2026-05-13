@@ -72,8 +72,9 @@ function parseMoney(value) {
 function extractAmount(text) {
   const source = cleanText(text);
   const labeled = [
-    /(?:amount due|balance due|invoice total|total due|grand total|payment total|total)\s*[:\-]?\s*\$?\s*([\d,]+\.\d{2})/i,
-    /\$\s*([\d,]+\.\d{2})\s*(?:total|paid|charged|payment)/i,
+    /(?:amount paid|paid amount|payment amount|amount charged|charged amount|charge amount|charged your account|amount due|balance due|invoice total|total due|grand total|payment total)\s*[:\-]?\s*\$?\s*([\d,]+\.\d{2})/i,
+    /(?:^|\n)\s*total\s*[:\-]?\s*\$?\s*([\d,]+\.\d{2})/i,
+    /\$\s*([\d,]+\.\d{2})\s*(?:paid|charged|payment|amount due|balance due)/i,
   ];
   for (const pattern of labeled) {
     const match = source.match(pattern);
@@ -228,6 +229,7 @@ async function askAnthropic({ emailText, fallback, projects }) {
       'Extract invoice or receipt facts from construction-related emails and match them to the correct project address.',
       'Return only valid JSON. Do not explain outside JSON.',
       'If the email is a payment receipt, charge receipt, invoice notice, or forwarded invoice body, treat it as invoice intake.',
+      'For total_amount, use the final amount paid, charged, due, or payable after discounts and taxes. Never use subtotal when an amount paid, amount charged, balance due, or total due is present.',
       'Prefer exact address matches. If uncertain, set should_file false and explain the review reason.',
     ].join(' '),
     messages: [{
