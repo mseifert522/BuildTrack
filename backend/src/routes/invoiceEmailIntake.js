@@ -154,45 +154,52 @@ function createMessageHash(payload) {
   return crypto.createHash('sha256').update(stable).digest('hex');
 }
 
+function storeInboundInvoice(payload) {
+  const db = getDb();
+  const messageHash = createMessageHash(payload);
+  const existing = db.prepare('SELECT id FROM invoice_email_intake WHERE message_hash = ?').get(messageHash);
+  if (existing) {
+    return { ok: true, duplicate: true, id: existing.id, attachment_count: 0 };
+  }
+
+  const id = uuidv4();
+  const attachments = (payload.attachments || []).map(attachment => saveAttachment(id, attachment));
+
+  db.prepare(`
+    INSERT INTO invoice_email_intake (
+      id, provider, provider_message_id, message_hash, from_email, from_name, to_email, cc_email,
+      subject, text_body, html_body, attachment_count, attachments_json, status, received_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?)
+  `).run(
+    id,
+    payload.provider,
+    payload.providerMessageId || null,
+    messageHash,
+    payload.fromEmail || null,
+    payload.fromName || null,
+    payload.toEmail || null,
+    payload.ccEmail || null,
+    payload.subject || '(no subject)',
+    payload.textBody ? String(payload.textBody).slice(0, 20000) : null,
+    payload.htmlBody ? String(payload.htmlBody).slice(0, 50000) : null,
+    attachments.length,
+    JSON.stringify(attachments),
+    payload.receivedAt
+  );
+
+  return { ok: true, id, duplicate: false, attachment_count: attachments.length };
+}
+
 publicRouter.get('/health', (_req, res) => {
   res.json({ ok: true, configured: Boolean(process.env.INBOUND_INVOICE_TOKEN) });
 });
 
 function handleInboundInvoice(req, res) {
   try {
-    const db = getDb();
     const payload = normalizePayload(req);
-    const messageHash = createMessageHash(payload);
-    const existing = db.prepare('SELECT id FROM invoice_email_intake WHERE message_hash = ?').get(messageHash);
-    if (existing) return res.json({ ok: true, duplicate: true, id: existing.id });
-
-    const id = uuidv4();
-    const attachments = payload.attachments.map(attachment => saveAttachment(id, attachment));
-
-    db.prepare(`
-      INSERT INTO invoice_email_intake (
-        id, provider, provider_message_id, message_hash, from_email, from_name, to_email, cc_email,
-        subject, text_body, html_body, attachment_count, attachments_json, status, received_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?)
-    `).run(
-      id,
-      payload.provider,
-      payload.providerMessageId || null,
-      messageHash,
-      payload.fromEmail || null,
-      payload.fromName || null,
-      payload.toEmail || null,
-      payload.ccEmail || null,
-      payload.subject || '(no subject)',
-      payload.textBody ? String(payload.textBody).slice(0, 20000) : null,
-      payload.htmlBody ? String(payload.htmlBody).slice(0, 50000) : null,
-      attachments.length,
-      JSON.stringify(attachments),
-      payload.receivedAt
-    );
-
-    res.status(201).json({ ok: true, id, attachment_count: attachments.length });
+    const result = storeInboundInvoice(payload);
+    res.status(result.duplicate ? 200 : 201).json(result);
   } catch (err) {
     console.error('[INBOUND INVOICE] Failed to store email:', err);
     res.status(500).json({ error: 'Failed to store inbound invoice email' });
@@ -261,4 +268,4 @@ authenticatedRouter.get('/:id/attachments/:attachmentId', (req, res) => {
   res.download(filePath, attachment.original_name);
 });
 
-module.exports = { publicRouter, authenticatedRouter };
+module.exports = { publicRouter, authenticatedRouter, storeInboundInvoice };

@@ -18,6 +18,7 @@ const notesRoutes = require('./src/routes/notes');
 const searchRoutes = require('./src/routes/search');
 const chatRoutes = require('./src/routes/chat');
 const invoiceEmailIntakeRoutes = require('./src/routes/invoiceEmailIntake');
+const { startGmailInvoicePoller } = require('./src/services/gmailInvoicePoller');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -177,6 +178,7 @@ async function start() {
       console.log('║   Database: SQLite (data/buildtrack.db)            ║');
       console.log('╚══════════════════════════════════════════════════╝');
       console.log('');
+      startGmailInvoicePoller();
     });
   } catch (err) {
     console.error('Failed to start server:', err);
