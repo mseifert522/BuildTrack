@@ -1,0 +1,15 @@
+.git
+.gitignore
+node_modules
+**/node_modules
+frontend/dist
+backend/data
+backend/uploads
+logs
+*.log
+*.bak
+*.bak-*
+*.backup
+*.backup-*
+.env
+.env.*

@@ -1,5 +1,8 @@
 import { create } from 'zustand';
 
+const AUTH_LAST_ACTIVITY_KEY = 'auth_last_activity_at';
+const AUTH_LAST_REFRESH_KEY = 'auth_last_refresh_at';
+
 export interface User {
   id: string;
   name: string;
@@ -28,15 +31,20 @@ export const useAuthStore = create<AuthState>((set) => ({
   })(),
   token: localStorage.getItem('token'),
   setAuth: (user, token) => {
+    const now = String(Date.now());
     localStorage.setItem('token', token);
     localStorage.setItem('user', JSON.stringify(user));
-    localStorage.setItem('auth_session_started_at', String(Date.now()));
+    localStorage.setItem('auth_session_started_at', now);
+    localStorage.setItem(AUTH_LAST_ACTIVITY_KEY, now);
+    localStorage.setItem(AUTH_LAST_REFRESH_KEY, now);
     set({ user, token });
   },
   logout: () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     localStorage.removeItem('auth_session_started_at');
+    localStorage.removeItem(AUTH_LAST_ACTIVITY_KEY);
+    localStorage.removeItem(AUTH_LAST_REFRESH_KEY);
     set({ user: null, token: null });
   },
   updateUser: (updates) => set((state) => {

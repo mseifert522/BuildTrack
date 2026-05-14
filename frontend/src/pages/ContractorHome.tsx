@@ -24,6 +24,8 @@ export default function ContractorHome() {
     localStorage.removeItem('contractor_user');
     localStorage.removeItem('contractor_projects');
     localStorage.removeItem('contractor_session_started_at');
+    localStorage.removeItem('contractor_last_activity_at');
+    localStorage.removeItem('contractor_last_refresh_at');
     navigate('/app');
   };
 

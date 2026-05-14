@@ -100,6 +100,50 @@ function validateCategory(db, value, label = 'contractor category') {
   throw err;
 }
 
+function uniqueCategories(values) {
+  const seen = new Set();
+  const result = [];
+  for (const value of values || []) {
+    const name = normalizeCategory(value);
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(name);
+  }
+  return result;
+}
+
+function validateContractorCategories(db, categories, primaryCategory, secondaryCategory) {
+  const requested = Array.isArray(categories)
+    ? categories
+    : [primaryCategory, secondaryCategory];
+  return uniqueCategories(requested).map(category => validateCategory(db, category, 'contractor category')).filter(Boolean);
+}
+
+function parseStoredContractorCategories(contractor) {
+  let stored = [];
+  try {
+    const parsed = JSON.parse(contractor.contractor_categories_json || '[]');
+    if (Array.isArray(parsed)) stored = parsed;
+  } catch (_) {
+    stored = [];
+  }
+  return uniqueCategories([
+    ...stored,
+    contractor.contractor_category,
+    contractor.contractor_secondary_category,
+  ]);
+}
+
+function validateContractorStatus(value) {
+  const status = String(value || 'active').trim().toLowerCase();
+  if (['active', 'terminated', 'will_use_again'].includes(status)) return status;
+  const err = new Error('Invalid contractor status');
+  err.statusCode = 400;
+  throw err;
+}
+
 function createContractorCategory(db, rawName, userId) {
   const name = normalizeCategory(rawName);
   if (!name) {
@@ -235,6 +279,48 @@ router.post('/contractor-categories', authorize('super_admin', 'operations_manag
   }
 });
 
+// GET /api/users/suppliers - contractors temporarily marked for the Suppliers tab
+router.get('/suppliers', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
+  const db = getDb();
+  const suppliers = db.prepare(`
+    SELECT
+      id,
+      vendor_name,
+      contact_name,
+      email,
+      phone,
+      billing_address,
+      account_number,
+      contractor_category,
+      contractor_secondary_category,
+      contractor_categories_json,
+      supplier_marked_at,
+      created_at,
+      updated_at
+    FROM contractor_profiles
+    WHERE COALESCE(is_supplier, 0) = 1
+    ORDER BY datetime(COALESCE(supplier_marked_at, created_at)) DESC, vendor_name
+  `).all();
+
+  res.json(suppliers.map(supplier => {
+    const categories = parseStoredContractorCategories(supplier);
+    return {
+      id: supplier.id,
+      name: supplier.vendor_name,
+      contact: supplier.contact_name,
+      email: supplier.email,
+      phone: supplier.phone,
+      billing_address: supplier.billing_address,
+      account_number: supplier.account_number,
+      categories,
+      category: categories.join(' / ') || 'Supplier',
+      supplier_marked_at: supplier.supplier_marked_at,
+      created_at: supplier.created_at,
+      updated_at: supplier.updated_at,
+    };
+  }));
+});
+
 // GET /api/users/contractors/directory - contractor table with project and payment context
 router.get('/contractors/directory', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
   const db = getDb();
@@ -247,10 +333,17 @@ router.get('/contractors/directory', authorize('super_admin', 'operations_manage
       cp.phone,
       cp.billing_address,
       cp.account_number,
+      cp.contractor_status,
       cp.contractor_category,
       cp.contractor_secondary_category,
+      cp.contractor_categories_json,
+      cp.is_supplier,
+      cp.supplier_marked_at,
+      cp.supplier_marked_by,
       cp.linked_user_id,
       cp.source,
+      cp.created_at,
+      cp.updated_at,
       u.name as linked_user_name,
       u.avatar_url,
       COALESCE(u.is_active, 1) as is_active,
@@ -275,11 +368,53 @@ router.get('/contractors/directory', authorize('super_admin', 'operations_manage
        WHERE cn.contractor_id = cp.id) as note_count,
       (SELECT MAX(datetime(cn.created_at))
        FROM contractor_profile_notes cn
-       WHERE cn.contractor_id = cp.id) as latest_note_at
+       WHERE cn.contractor_id = cp.id) as latest_note_at,
+      (SELECT cor.status
+       FROM contractor_onboarding_requests cor
+       WHERE cor.contractor_id = cp.id
+       ORDER BY datetime(cor.created_at) DESC, cor.created_at DESC
+       LIMIT 1) as onboarding_status,
+      (SELECT cor.last_sent_at
+       FROM contractor_onboarding_requests cor
+       WHERE cor.contractor_id = cp.id
+       ORDER BY datetime(cor.created_at) DESC, cor.created_at DESC
+       LIMIT 1) as onboarding_last_sent_at,
+      (SELECT cor.expires_at
+       FROM contractor_onboarding_requests cor
+       WHERE cor.contractor_id = cp.id
+       ORDER BY datetime(cor.created_at) DESC, cor.created_at DESC
+       LIMIT 1) as onboarding_expires_at,
+      COALESCE(
+        (SELECT cor.submitted_at
+         FROM contractor_onboarding_requests cor
+         WHERE cor.contractor_id = cp.id AND cor.submitted_at IS NOT NULL
+         ORDER BY datetime(cor.submitted_at) DESC, cor.submitted_at DESC
+         LIMIT 1),
+        (SELECT ccp.submitted_at
+         FROM contractor_compliance_profiles ccp
+         WHERE ccp.contractor_id = cp.id
+         LIMIT 1)
+      ) as onboarding_submitted_at,
+      (SELECT ccp.tax_id_last4
+       FROM contractor_compliance_profiles ccp
+       WHERE ccp.contractor_id = cp.id
+       LIMIT 1) as tax_id_last4,
+      (SELECT ccp.bank_account_last4
+       FROM contractor_compliance_profiles ccp
+       WHERE ccp.contractor_id = cp.id
+       LIMIT 1) as bank_account_last4,
+      (SELECT ccp.routing_last4
+       FROM contractor_compliance_profiles ccp
+       WHERE ccp.contractor_id = cp.id
+       LIMIT 1) as routing_last4,
+      (SELECT ccp.bank_name
+       FROM contractor_compliance_profiles ccp
+       WHERE ccp.contractor_id = cp.id
+       LIMIT 1) as bank_name
     FROM contractor_profiles cp
     LEFT JOIN users u ON u.id = cp.linked_user_id
     WHERE COALESCE(u.is_active, 1) = 1
-    ORDER BY cp.vendor_name
+    ORDER BY datetime(cp.created_at) DESC, cp.vendor_name
   `).all();
 
   const lastPaid = db.prepare(`
@@ -371,11 +506,13 @@ router.get('/contractors/directory', authorize('super_admin', 'operations_manage
 
     const connectedProjects = Array.from(connectedProjectMap.values());
     const projectAddresses = connectedProjects.map(project => project.address).filter(Boolean);
+    const contractorCategories = parseStoredContractorCategories(contractor);
 
     return {
       ...contractor,
       name: contractor.vendor_name,
       company: contractor.vendor_name,
+      contractor_categories: contractorCategories,
       connected_projects: connectedProjects,
       project_addresses: projectAddresses,
       connected_project_count: projectAddresses.length,
@@ -393,6 +530,98 @@ function requireContractor(db, contractorId) {
   return db.prepare("SELECT id, vendor_name as name FROM contractor_profiles WHERE id = ?").get(contractorId);
 }
 
+// POST /api/users/contractors/profile - add a contractor directory record
+router.post('/contractors/profile', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
+  try {
+    const db = getDb();
+    const {
+      vendor_name,
+      contact_name,
+      email,
+      phone,
+      billing_address,
+      account_number,
+      contractor_status,
+      contractor_category,
+      contractor_secondary_category,
+      contractor_categories,
+      project_ids,
+    } = req.body;
+
+    const nextName = String(vendor_name || '').trim();
+    if (!nextName) return res.status(400).json({ error: 'Contractor name is required' });
+    const nextEmail = email ? String(email).trim().toLowerCase() : null;
+    if (nextEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
+      return res.status(400).json({ error: 'Valid contractor email is required' });
+    }
+
+    const contractorCategories = validateContractorCategories(db, contractor_categories, contractor_category, contractor_secondary_category);
+    const primaryCategory = contractorCategories[0] || null;
+    const secondaryCategory = contractorCategories[1] || null;
+    const nextStatus = validateContractorStatus(contractor_status);
+    const contractorId = uuidv4();
+    const rawProjectIds = Array.isArray(project_ids) ? project_ids : [];
+    const projectIds = [...new Set(rawProjectIds.map(id => String(id || '').trim()).filter(Boolean))];
+
+    if (projectIds.length > 0) {
+      const placeholders = projectIds.map(() => '?').join(',');
+      const found = db.prepare(`SELECT id FROM projects WHERE id IN (${placeholders})`).all(...projectIds);
+      if (found.length !== projectIds.length) {
+        return res.status(400).json({ error: 'One or more selected projects could not be found' });
+      }
+    }
+
+    const createProfile = db.transaction(() => {
+      db.prepare(`
+        INSERT INTO contractor_profiles (
+          id, vendor_name, contact_name, email, phone, billing_address, account_number,
+          contractor_status, contractor_category, contractor_secondary_category, contractor_categories_json, source, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', datetime('now'), datetime('now'))
+      `).run(
+        contractorId,
+        nextName,
+        contact_name ? String(contact_name).trim() : null,
+        nextEmail,
+        phone ? String(phone).trim() : null,
+        billing_address ? String(billing_address).trim() : null,
+        account_number ? String(account_number).trim() : null,
+        nextStatus,
+        primaryCategory,
+        secondaryCategory,
+        JSON.stringify(contractorCategories)
+      );
+
+      const insertLink = db.prepare(`
+        INSERT OR IGNORE INTO contractor_project_links (id, contractor_id, project_id, created_by, created_at)
+        VALUES (?, ?, ?, ?, datetime('now'))
+      `);
+      for (const projectId of projectIds) {
+        insertLink.run(uuidv4(), contractorId, projectId, req.user.id);
+      }
+    });
+
+    createProfile();
+
+    logActivity({
+      userId: req.user.id,
+      action: 'contractor_profile_created',
+      entityType: 'contractor_profile',
+      entityId: contractorId,
+      details: { contractor_name: nextName, contractor_status: nextStatus, contractor_categories: contractorCategories, project_count: projectIds.length },
+    });
+
+    const contractor = db.prepare('SELECT * FROM contractor_profiles WHERE id = ?').get(contractorId);
+    res.status(201).json({ contractor, message: 'Contractor added' });
+  } catch (err) {
+    if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    if (err?.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      return res.status(409).json({ error: 'A manually added contractor with this name already exists' });
+    }
+    console.error(err);
+    res.status(500).json({ error: 'Failed to add contractor' });
+  }
+});
+
 // PUT /api/users/contractors/:id/profile - edit imported/vendor contractor details
 router.put('/contractors/:id/profile', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
   try {
@@ -407,14 +636,18 @@ router.put('/contractors/:id/profile', authorize('super_admin', 'operations_mana
       phone,
       billing_address,
       account_number,
+      contractor_status,
       contractor_category,
       contractor_secondary_category,
+      contractor_categories,
     } = req.body;
 
     const nextName = String(vendor_name || '').trim();
     if (!nextName) return res.status(400).json({ error: 'Contractor name is required' });
-    const primaryCategory = validateCategory(db, contractor_category, 'contractor category');
-    const secondaryCategory = validateCategory(db, contractor_secondary_category, 'secondary contractor category');
+    const contractorCategories = validateContractorCategories(db, contractor_categories, contractor_category, contractor_secondary_category);
+    const primaryCategory = contractorCategories[0] || null;
+    const secondaryCategory = contractorCategories[1] || null;
+    const nextStatus = validateContractorStatus(contractor_status);
 
     db.prepare(`
       UPDATE contractor_profiles SET
@@ -424,8 +657,10 @@ router.put('/contractors/:id/profile', authorize('super_admin', 'operations_mana
         phone = ?,
         billing_address = ?,
         account_number = ?,
+        contractor_status = ?,
         contractor_category = ?,
         contractor_secondary_category = ?,
+        contractor_categories_json = ?,
         updated_at = datetime('now')
       WHERE id = ?
     `).run(
@@ -435,8 +670,10 @@ router.put('/contractors/:id/profile', authorize('super_admin', 'operations_mana
       phone ? String(phone).trim() : null,
       billing_address ? String(billing_address).trim() : null,
       account_number ? String(account_number).trim() : null,
+      nextStatus,
       primaryCategory,
       secondaryCategory,
+      JSON.stringify(contractorCategories),
       req.params.id
     );
 
@@ -454,7 +691,7 @@ router.put('/contractors/:id/profile', authorize('super_admin', 'operations_mana
       action: 'contractor_profile_updated',
       entityType: 'contractor_profile',
       entityId: req.params.id,
-      details: { contractor_name: nextName, contractor_category: primaryCategory, contractor_secondary_category: secondaryCategory },
+      details: { contractor_name: nextName, contractor_status: nextStatus, contractor_categories: contractorCategories },
     });
 
     const updated = db.prepare('SELECT * FROM contractor_profiles WHERE id = ?').get(req.params.id);
@@ -463,6 +700,46 @@ router.put('/contractors/:id/profile', authorize('super_admin', 'operations_mana
     if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message });
     console.error(err);
     res.status(500).json({ error: 'Failed to update contractor' });
+  }
+});
+
+// PUT /api/users/contractors/:id/supplier - temporary supplier transfer checkbox
+router.put('/contractors/:id/supplier', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
+  try {
+    const db = getDb();
+    const contractor = requireContractor(db, req.params.id);
+    if (!contractor) return res.status(404).json({ error: 'Contractor not found' });
+
+    const isSupplier = req.body?.is_supplier ? 1 : 0;
+    const markedAt = isSupplier ? new Date().toISOString() : null;
+    const markedBy = isSupplier ? req.user.id : null;
+
+    db.prepare(`
+      UPDATE contractor_profiles
+      SET is_supplier = ?,
+          supplier_marked_at = ?,
+          supplier_marked_by = ?,
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(isSupplier, markedAt, markedBy, req.params.id);
+
+    logActivity({
+      userId: req.user.id,
+      action: isSupplier ? 'contractor_marked_supplier' : 'contractor_unmarked_supplier',
+      entityType: 'contractor_profile',
+      entityId: req.params.id,
+      details: { contractor_name: contractor.name, is_supplier: Boolean(isSupplier) },
+    });
+
+    res.json({
+      id: req.params.id,
+      is_supplier: Boolean(isSupplier),
+      supplier_marked_at: markedAt,
+      message: isSupplier ? 'Contractor added to suppliers' : 'Contractor removed from suppliers',
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update supplier status' });
   }
 });
 
@@ -521,6 +798,8 @@ router.delete('/contractors/:id/profile', authorize('super_admin', 'operations_m
     if (!contractor) return res.status(404).json({ error: 'Contractor not found' });
 
     const removeContractor = db.transaction(() => {
+      db.prepare('DELETE FROM contractor_onboarding_requests WHERE contractor_id = ?').run(req.params.id);
+      db.prepare('DELETE FROM contractor_compliance_profiles WHERE contractor_id = ?').run(req.params.id);
       db.prepare('DELETE FROM contractor_project_links WHERE contractor_id = ?').run(req.params.id);
       db.prepare('DELETE FROM contractor_profile_notes WHERE contractor_id = ?').run(req.params.id);
       db.prepare('DELETE FROM contractor_profiles WHERE id = ?').run(req.params.id);

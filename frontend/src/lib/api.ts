@@ -18,6 +18,8 @@ api.interceptors.response.use(
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       localStorage.removeItem('auth_session_started_at');
+      localStorage.removeItem('auth_last_activity_at');
+      localStorage.removeItem('auth_last_refresh_at');
       window.location.href = '/login';
     }
     return Promise.reject(err);

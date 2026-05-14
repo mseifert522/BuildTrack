@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const { getDb } = require('../db/schema');
 
 // ── Role hierarchy (higher index = more authority) ──────────────────────────
@@ -19,12 +20,70 @@ function blacklistToken(token) {
   tokenBlacklist.add(token);
 }
 
-function authenticate(req, res, next) {
+function sha256(value) {
+  return crypto.createHash('sha256').update(String(value || '')).digest('hex');
+}
+
+function timingSafeEqualHex(left, right) {
+  if (!left || !right || left.length !== right.length) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(left, 'hex'), Buffer.from(right, 'hex'));
+  } catch (_) {
+    return false;
+  }
+}
+
+function extractBearerToken(req) {
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return '';
+  return authHeader.slice('Bearer '.length).trim();
+}
+
+function extractApiKey(req, bearerToken) {
+  const headerKey = req.headers['x-api-key'] || req.headers['x-buildtrack-api-key'];
+  if (Array.isArray(headerKey)) return headerKey[0] || '';
+  return String(headerKey || bearerToken || '').trim();
+}
+
+function authenticateApiKey(req, key) {
+  const expectedHash = process.env.MAX_AI_API_KEY_HASH || '';
+  if (!expectedHash || !key) return false;
+
+  const providedHash = sha256(key);
+  if (!timingSafeEqualHex(providedHash, expectedHash.trim())) return false;
+
+  const db = getDb();
+  const userId = process.env.MAX_AI_API_USER_ID || 'max-ai-executive-assistant';
+  const user = db.prepare('SELECT * FROM users WHERE id = ? AND is_active = 1').get(userId);
+  if (!user) {
+    const err = new Error('Max AI API user is not active or does not exist');
+    err.statusCode = 503;
+    throw err;
+  }
+
+  req.user = user;
+  req.token = null;
+  req.auth = {
+    type: 'api_key',
+    key_id: process.env.MAX_AI_API_KEY_ID || 'max-ai-executive-assistant',
+  };
+  return true;
+}
+
+function authenticate(req, res, next) {
+  const bearerToken = extractBearerToken(req);
+  const apiKey = extractApiKey(req, bearerToken);
+
+  try {
+    if (authenticateApiKey(req, apiKey)) return next();
+  } catch (err) {
+    return res.status(err.statusCode || 401).json({ error: err.message || 'Invalid API key' });
+  }
+
+  if (!bearerToken) {
     return res.status(401).json({ error: 'Authentication required' });
   }
-  const token = authHeader.split(' ')[1];
+  const token = bearerToken;
 
   if (tokenBlacklist.has(token)) {
     return res.status(401).json({ error: 'Session terminated. Please log in again.' });
@@ -40,6 +99,7 @@ function authenticate(req, res, next) {
     }
     req.user = user;
     req.token = token;
+    req.auth = { type: 'jwt' };
     next();
   } catch (err) {
     return res.status(401).json({ error: 'Invalid or expired token' });

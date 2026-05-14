@@ -4,7 +4,7 @@ import { useAuthStore, roleLabels, canManageUsers, canAccessSettings, isAdminRol
 import {
   LayoutDashboard, FolderOpen, ClipboardList, FileText,
   Users, Settings, LogOut, Menu, X, Bell, ChevronRight,
-  Camera, Files, Search, Trash2, Truck, BrainCircuit
+  Camera, Search, Trash2, Truck
 } from 'lucide-react';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
@@ -144,10 +144,8 @@ export default function Layout({ children }: LayoutProps) {
     { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/projects', icon: FolderOpen, label: 'Projects' },
     { to: '/invoices', icon: FileText, label: 'Invoices' },
-    { to: '/documents', icon: Files, label: 'Documents' },
     { to: '/contractors', icon: Users, label: 'Contractors' },
     { to: '/suppliers', icon: Truck, label: 'Suppliers' },
-    { to: '/invoice-agent', icon: BrainCircuit, label: 'Invoice Agent' },
   ];
 
   const isActive = (path: string) => location.pathname.startsWith(path);
@@ -156,10 +154,8 @@ export default function Layout({ children }: LayoutProps) {
     '/dashboard': 'Dashboard',
     '/projects': 'Projects',
     '/invoices': 'Invoices',
-    '/documents': 'Documents',
     '/contractors': 'Contractors',
     '/suppliers': 'Suppliers',
-    '/invoice-agent': 'Invoice Agent',
     '/users': 'Users',
     '/settings': 'Settings',
   };
@@ -750,10 +746,10 @@ export default function Layout({ children }: LayoutProps) {
         </header>
 
         {/* Page content */}
-        <main className="flex-1 overflow-y-auto pb-80">
+        <main className="flex-1 overflow-y-auto pb-24">
           {children}
         </main>
-        <ManagementChatWidget sidebarWidth={W} />
+        <ManagementChatWidget />
       </div>
     </div>
   );

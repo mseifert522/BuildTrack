@@ -38,3 +38,9 @@ ecosystem.config.js.bak
 *.log
 logs/
 /tmp/*.log
+
+# ── Local production backup artifacts ──
+*.bak
+*.bak-*
+*.backup
+*.backup-*

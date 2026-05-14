@@ -238,7 +238,7 @@ export default function ProjectDetail() {
 
   const tabs: { id: Tab; label: string; icon: any }[] = [
     { id: 'overview', label: 'Overview', icon: MapPin },
-    { id: 'construction-plan', label: 'Construction Plan', icon: FileText },
+    { id: 'construction-plan', label: 'Scope of Work', icon: FileText },
     { id: 'punch-list', label: 'Punch List', icon: ClipboardList },
     { id: 'team', label: 'Assigned Contractors', icon: Users },
     { id: 'activity', label: 'Activity', icon: Activity },
@@ -502,7 +502,7 @@ export default function ProjectDetail() {
             </div>
 
               <button id="construction-plan" type="button" onClick={() => setTab('construction-plan')} className="w-full bg-white rounded-xl border border-gray-200 p-4 text-left hover:border-blue-300 hover:bg-blue-50 transition-colors">
-                <h3 className="font-semibold text-gray-900 mb-2 text-sm">Construction Plan</h3>
+                <h3 className="font-semibold text-gray-900 mb-2 text-sm">Scope of Work</h3>
                 <p className="text-sm text-gray-600">Open the ordered rehab plan, materials schedule, supply timing, costs, and step photos.</p>
               </button>
               </div>
@@ -949,7 +949,7 @@ function ConstructionPlanBoard({ projectId, canManage }: { projectId: string; ca
       <div className="bg-white rounded-2xl border border-gray-200 p-5" style={{ boxShadow: '0 10px 30px rgba(17,24,39,0.08)' }}>
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div>
-            <h3 className="font-black text-gray-900">Construction Plan</h3>
+            <h3 className="font-black text-gray-900">Scope of Work</h3>
             <p className="text-sm text-gray-500 mt-1">{items.length} line item{items.length !== 1 ? 's' : ''} · {materials.length} material item{materials.length !== 1 ? 's' : ''}</p>
           </div>
           {canManage && (
@@ -982,7 +982,7 @@ function ConstructionPlanBoard({ projectId, canManage }: { projectId: string; ca
       {items.length === 0 ? (
         <div className="bg-white rounded-2xl border border-dashed border-gray-300 p-10 text-center">
           <FileText className="w-9 h-9 text-gray-300 mx-auto mb-3" />
-          <p className="text-sm font-black text-gray-700">No construction plan lines yet</p>
+          <p className="text-sm font-black text-gray-700">No scope of work lines yet</p>
           {canManage && (
             <button type="button" onClick={openAddStep} className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-bold cursor-pointer">
               <Plus className="w-4 h-4" /> Add first line item
@@ -1336,7 +1336,7 @@ function ConstructionPlanTab({ projectId, canManage }: { projectId: string; canM
       <div className="bg-white rounded-xl border border-gray-200 p-4">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div>
-            <h3 className="font-black text-gray-900">Construction Plan & Materials Timeline</h3>
+            <h3 className="font-black text-gray-900">Scope of Work & Materials Timeline</h3>
             <p className="text-sm text-gray-500 mt-1">Ordered rehab steps coordinated with supply needs, delivery dates, costs, and field photos.</p>
           </div>
           {canManage && (

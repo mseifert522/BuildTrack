@@ -11,6 +11,7 @@ const { sendPasswordResetEmail, send2FACodeEmail } = require('../utils/email');
 const router = express.Router();
 const MANAGEMENT_ROLES = ['super_admin', 'operations_manager', 'project_manager'];
 const TRUSTED_DEVICE_DAYS = 60;
+const SESSION_EXPIRES_IN = '45m';
 
 function generate2FACode() {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -40,12 +41,16 @@ function publicUser(user) {
   };
 }
 
-function issueSession(db, user, details) {
-  const token = jwt.sign(
+function createSessionToken(user) {
+  return jwt.sign(
     { userId: user.id, role: user.role },
     process.env.JWT_SECRET,
-    { expiresIn: '45m' }
+    { expiresIn: SESSION_EXPIRES_IN }
   );
+}
+
+function issueSession(db, user, details) {
+  const token = createSessionToken(user);
   markUserOnline(db, user.id, true);
   logActivity({
     userId: user.id,
@@ -175,11 +180,7 @@ router.post('/pin-login', async (req, res) => {
       `).all(user.id);
     }
 
-    const token = jwt.sign(
-      { userId: user.id, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: '45m' }
-    );
+    const token = createSessionToken(user);
 
     logActivity({ userId: user.id, action: 'pin_login', entityType: 'user', entityId: user.id });
     markUserOnline(db, user.id, true);
@@ -266,6 +267,18 @@ router.get('/me', authenticate, (req, res) => {
     last_seen_at: u.last_seen_at || null,
     force_password_reset: u.force_password_reset === 1,
   });
+});
+
+// POST /api/auth/refresh - extend the current token while the client is active.
+router.post('/refresh', authenticate, (req, res) => {
+  try {
+    const db = getDb();
+    markUserOnline(db, req.user.id, false);
+    res.json({ token: createSessionToken(req.user), user: publicUser(req.user) });
+  } catch (err) {
+    console.error('Token refresh error:', err);
+    res.status(500).json({ error: 'Failed to refresh session' });
+  }
 });
 
 // POST /api/auth/heartbeat - update live presence while the app is open

@@ -406,8 +406,13 @@ function initializeSchema() {
       phone TEXT,
       billing_address TEXT,
       account_number TEXT,
+      contractor_status TEXT NOT NULL DEFAULT 'active' CHECK(contractor_status IN ('active','terminated','will_use_again')),
       contractor_category TEXT,
       contractor_secondary_category TEXT,
+      contractor_categories_json TEXT,
+      is_supplier INTEGER NOT NULL DEFAULT 0,
+      supplier_marked_at TEXT,
+      supplier_marked_by TEXT,
       linked_user_id TEXT,
       source TEXT,
       source_row INTEGER,
@@ -421,6 +426,88 @@ function initializeSchema() {
 
     CREATE INDEX IF NOT EXISTS idx_contractor_profiles_linked_user
       ON contractor_profiles(linked_user_id);
+
+    CREATE TABLE IF NOT EXISTS contractor_onboarding_requests (
+      id TEXT PRIMARY KEY,
+      contractor_id TEXT NOT NULL,
+      token_hash TEXT UNIQUE NOT NULL,
+      email TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'sent',
+      expires_at TEXT NOT NULL,
+      last_sent_at TEXT,
+      verified_at TEXT,
+      submitted_at TEXT,
+      requested_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (contractor_id) REFERENCES contractor_profiles(id) ON DELETE CASCADE,
+      FOREIGN KEY (requested_by) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_contractor_onboarding_requests_contractor
+      ON contractor_onboarding_requests(contractor_id, status, expires_at);
+
+    CREATE INDEX IF NOT EXISTS idx_contractor_onboarding_requests_token
+      ON contractor_onboarding_requests(token_hash);
+
+    CREATE TABLE IF NOT EXISTS contractor_onboarding_codes (
+      id TEXT PRIMARY KEY,
+      request_id TEXT NOT NULL,
+      code TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      used INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (request_id) REFERENCES contractor_onboarding_requests(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_contractor_onboarding_codes_request
+      ON contractor_onboarding_codes(request_id, used, expires_at);
+
+    CREATE TABLE IF NOT EXISTS contractor_onboarding_drafts (
+      request_id TEXT PRIMARY KEY,
+      contractor_id TEXT NOT NULL,
+      data_encrypted TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (request_id) REFERENCES contractor_onboarding_requests(id) ON DELETE CASCADE,
+      FOREIGN KEY (contractor_id) REFERENCES contractor_profiles(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_contractor_onboarding_drafts_contractor
+      ON contractor_onboarding_drafts(contractor_id, updated_at);
+
+    CREATE TABLE IF NOT EXISTS contractor_compliance_profiles (
+      contractor_id TEXT PRIMARY KEY,
+      legal_name TEXT NOT NULL,
+      business_name TEXT,
+      tax_classification TEXT,
+      tax_id_type TEXT,
+      tax_id_last4 TEXT,
+      address_line1 TEXT,
+      address_line2 TEXT,
+      city TEXT,
+      state TEXT,
+      postal_code TEXT,
+      country TEXT NOT NULL DEFAULT 'US',
+      phone TEXT,
+      email TEXT,
+      bank_name TEXT,
+      bank_account_last4 TEXT,
+      routing_last4 TEXT,
+      payment_method TEXT NOT NULL DEFAULT 'ach',
+      insurance_provider TEXT,
+      insurance_policy_number TEXT,
+      insurance_expires_at TEXT,
+      license_number TEXT,
+      license_state TEXT,
+      w9_certified INTEGER NOT NULL DEFAULT 0,
+      ach_authorized INTEGER NOT NULL DEFAULT 0,
+      data_encrypted TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      submitted_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (contractor_id) REFERENCES contractor_profiles(id) ON DELETE CASCADE
+    );
 
     CREATE TABLE IF NOT EXISTS contractor_categories (
       id TEXT PRIMARY KEY,
@@ -549,6 +636,34 @@ function initializeSchema() {
   try { db.exec(`ALTER TABLE users ADD COLUMN contractor_category TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE users ADD COLUMN contractor_secondary_category TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE contractor_profiles ADD COLUMN contractor_secondary_category TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE contractor_profiles ADD COLUMN contractor_status TEXT NOT NULL DEFAULT 'active'`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE contractor_profiles ADD COLUMN contractor_categories_json TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE contractor_profiles ADD COLUMN is_supplier INTEGER NOT NULL DEFAULT 0`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE contractor_profiles ADD COLUMN supplier_marked_at TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE contractor_profiles ADD COLUMN supplier_marked_by TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_contractor_profiles_supplier ON contractor_profiles(is_supplier, supplier_marked_at)`); } catch (_) { /* best-effort */ }
+  try { db.exec(`UPDATE contractor_profiles SET contractor_status = 'active' WHERE contractor_status IS NULL OR contractor_status NOT IN ('active','terminated','will_use_again')`); } catch (_) { /* best-effort */ }
+  try {
+    const rows = db.prepare(`
+      SELECT id, contractor_category, contractor_secondary_category, contractor_categories_json
+      FROM contractor_profiles
+    `).all();
+    const updateCategories = db.prepare('UPDATE contractor_profiles SET contractor_categories_json = ? WHERE id = ?');
+    for (const row of rows) {
+      let existing = [];
+      try {
+        const parsed = JSON.parse(row.contractor_categories_json || '[]');
+        if (Array.isArray(parsed)) existing = parsed.map(value => String(value || '').trim()).filter(Boolean);
+      } catch (_) {
+        existing = [];
+      }
+      if (existing.length > 0) continue;
+      const categories = [row.contractor_category, row.contractor_secondary_category]
+        .map(value => String(value || '').trim())
+        .filter(Boolean);
+      updateCategories.run(JSON.stringify([...new Set(categories)]), row.id);
+    }
+  } catch (_) { /* category backfill best-effort */ }
   try { db.exec(`ALTER TABLE invoice_email_intake ADD COLUMN extracted_vendor TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE invoice_email_intake ADD COLUMN extracted_invoice_number TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE invoice_email_intake ADD COLUMN extracted_amount REAL`); } catch (_) { /* already exists */ }

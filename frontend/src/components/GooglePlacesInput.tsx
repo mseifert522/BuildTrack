@@ -29,6 +29,14 @@ function loadGoogleMapsScript(cb: () => void) {
 interface GooglePlacesInputProps {
   value: string;
   onChange: (value: string) => void;
+  onPlaceSelect?: (place: {
+    formattedAddress: string;
+    streetAddress: string;
+    city: string;
+    state: string;
+    postalCode: string;
+    country: string;
+  }) => void;
   placeholder?: string;
   className?: string;
   style?: React.CSSProperties;
@@ -40,6 +48,7 @@ interface GooglePlacesInputProps {
 const GooglePlacesInput: React.FC<GooglePlacesInputProps> = ({
   value,
   onChange,
+  onPlaceSelect,
   placeholder = '123 Main St, City, State',
   className,
   style,
@@ -58,18 +67,33 @@ const GooglePlacesInput: React.FC<GooglePlacesInputProps> = ({
     const ac = new google.maps.places.Autocomplete(inputRef.current, {
       types: ['address'],
       componentRestrictions: { country: 'us' },
-      fields: ['formatted_address'],
+      fields: ['formatted_address', 'address_components'],
     });
 
     ac.addListener('place_changed', () => {
       const place = ac.getPlace();
       if (place?.formatted_address) {
         onChange(place.formatted_address);
+        const components = place.address_components || [];
+        const getComponent = (type: string, useShortName = false) => {
+          const component = components.find((item: any) => item.types?.includes(type));
+          return component ? (useShortName ? component.short_name : component.long_name) : '';
+        };
+        const streetNumber = getComponent('street_number');
+        const route = getComponent('route');
+        onPlaceSelect?.({
+          formattedAddress: place.formatted_address,
+          streetAddress: [streetNumber, route].filter(Boolean).join(' ') || place.formatted_address,
+          city: getComponent('locality') || getComponent('postal_town') || getComponent('sublocality_level_1'),
+          state: getComponent('administrative_area_level_1', true),
+          postalCode: getComponent('postal_code'),
+          country: getComponent('country', true),
+        });
       }
     });
 
     autocompleteRef.current = ac;
-  }, [onChange]);
+  }, [onChange, onPlaceSelect]);
 
   useEffect(() => {
     loadGoogleMapsScript(initAutocomplete);

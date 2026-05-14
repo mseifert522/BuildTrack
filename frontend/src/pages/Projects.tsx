@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthStore, canCreateProjects, isAdminRole } from '../store/authStore';
 import api from '../lib/api';
 import { Loading, StatusBadge, Modal, PageHeader } from '../components/ui';
-import { Camera, CheckCircle2, FileText, Plus, Search, MapPin, Users, ClipboardList, ChevronRight, Bell, KeyRound } from 'lucide-react';
+import { Camera, CheckCircle2, FileText, Plus, Search, MapPin, Users, ClipboardList, ChevronRight, Bell, KeyRound, Upload } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useForm } from 'react-hook-form';
 import GooglePlacesInput from '../components/GooglePlacesInput';
@@ -51,6 +51,13 @@ const PROJECT_STATUS_OPTIONS = [
   { value: 'rehab_completed', label: 'Completed' },
 ];
 
+const DOCUMENT_CATEGORIES = [
+  { value: 'invoices', label: 'Invoices' },
+  { value: 'quotes', label: 'Quotes' },
+  { value: 'other_documents', label: 'Other Documents' },
+  { value: 'insurance_documents', label: 'Insurance Documents' },
+];
+
 export default function Projects() {
   const { user } = useAuthStore();
   const navigate = useNavigate();
@@ -63,6 +70,10 @@ export default function Projects() {
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState<string | null>(null);
   const [lockboxProject, setLockboxProject] = useState<Project | null>(null);
+  const [documentUploadProject, setDocumentUploadProject] = useState<Project | null>(null);
+  const [documentType, setDocumentType] = useState(DOCUMENT_CATEGORIES[0].value);
+  const [documentFiles, setDocumentFiles] = useState<File[]>([]);
+  const [uploadingDocuments, setUploadingDocuments] = useState(false);
   const [reviewSummaries, setReviewSummaries] = useState<Record<string, ProjectReviewSummary>>({});
   const [addressValue, setAddressValue] = useState('');
   const [budgetValue, setBudgetValue] = useState('');
@@ -142,6 +153,31 @@ export default function Projects() {
       toast.error(err.response?.data?.error || 'Failed to upload project photo');
     } finally {
       setUploadingPhoto(null);
+    }
+  };
+
+  const closeDocumentUpload = () => {
+    setDocumentUploadProject(null);
+    setDocumentType(DOCUMENT_CATEGORIES[0].value);
+    setDocumentFiles([]);
+  };
+
+  const uploadProjectDocuments = async () => {
+    if (!documentUploadProject || documentFiles.length === 0) return;
+    setUploadingDocuments(true);
+    try {
+      const formData = new FormData();
+      formData.append('document_type', documentType);
+      documentFiles.forEach(file => formData.append('documents', file));
+      await api.post(`/documents/${documentUploadProject.id}`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      toast.success(documentFiles.length === 1 ? 'Document uploaded' : 'Documents uploaded');
+      closeDocumentUpload();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to upload documents');
+    } finally {
+      setUploadingDocuments(false);
     }
   };
 
@@ -292,7 +328,7 @@ export default function Projects() {
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     {[
-                      { label: 'Construction Plan', icon: FileText, hash: 'construction-plan', color: '#1D4ED8', bg: '#EFF6FF' },
+                      { label: 'Scope of Work', icon: FileText, hash: 'construction-plan', color: '#1D4ED8', bg: '#EFF6FF' },
                       { label: p.open_punch_items > 0 ? 'Punch List' : 'Punch List: Not Started', icon: ClipboardList, hash: 'punch-list', color: '#C2410C', bg: '#FFF7ED' },
                       { label: 'Assigned Contractors', icon: Users, hash: 'assigned-contractors', color: '#047857', bg: '#ECFDF5' },
                     ].map(action => (
@@ -322,6 +358,20 @@ export default function Projects() {
                       <KeyRound className="w-3.5 h-3.5" />
                       Lockbox Code
                     </button>
+                    {canUpdateStatus && (
+                      <button
+                        type="button"
+                        onClick={e => {
+                          e.stopPropagation();
+                          setDocumentUploadProject(p);
+                        }}
+                        className="relative z-20 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-black transition-colors cursor-pointer hover:brightness-95"
+                        style={{ background: '#ECFDF5', color: '#047857', border: '1px solid #04785722' }}
+                      >
+                        <Upload className="w-3.5 h-3.5" />
+                        Upload Documents
+                      </button>
+                    )}
                   </div>
                   {canUpdateStatus && (
                     <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -405,6 +455,68 @@ export default function Projects() {
             </p>
           </div>
           <p className="text-xs text-gray-500">Update this code from the project edit screen.</p>
+        </div>
+      </Modal>
+
+      <Modal isOpen={!!documentUploadProject} onClose={closeDocumentUpload} title="Upload Documents">
+        <div className="space-y-4">
+          <div className="rounded-xl bg-gray-50 border border-gray-200 p-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-gray-500 mb-1">Project</p>
+            <p className="font-black text-gray-900">{documentUploadProject?.address}</p>
+            <p className="text-sm text-gray-500">{documentUploadProject?.job_name}</p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Document category</label>
+            <select
+              value={documentType}
+              onChange={event => setDocumentType(event.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              {DOCUMENT_CATEGORIES.map(category => (
+                <option key={category.value} value={category.value}>{category.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-gray-300 bg-gray-50 px-4 py-5 text-center transition-colors hover:border-blue-400 hover:bg-blue-50">
+            <Upload className="h-6 w-6 text-blue-600" />
+            <span className="text-sm font-black text-gray-900">
+              {documentFiles.length > 0
+                ? `${documentFiles.length} file${documentFiles.length === 1 ? '' : 's'} selected`
+                : 'Choose document files'}
+            </span>
+            <span className="text-xs text-gray-500">Invoices, quotes, insurance documents, and other files</span>
+            <input
+              type="file"
+              multiple
+              className="hidden"
+              onChange={event => setDocumentFiles(Array.from(event.target.files || []))}
+            />
+          </label>
+
+          {documentFiles.length > 0 && (
+            <div className="max-h-32 overflow-y-auto rounded-xl border border-gray-200 bg-white">
+              {documentFiles.map(file => (
+                <div key={`${file.name}-${file.size}`} className="flex items-center gap-2 border-b border-gray-100 px-3 py-2 last:border-b-0">
+                  <FileText className="h-4 w-4 flex-shrink-0 text-gray-400" />
+                  <span className="truncate text-sm font-semibold text-gray-700">{file.name}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={closeDocumentUpload} className="flex-1 py-2.5 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">Cancel</button>
+            <button
+              type="button"
+              onClick={uploadProjectDocuments}
+              disabled={uploadingDocuments || documentFiles.length === 0}
+              className="flex-1 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-gray-800 transition-colors disabled:opacity-50"
+            >
+              {uploadingDocuments ? 'Uploading...' : 'Upload Documents'}
+            </button>
+          </div>
         </div>
       </Modal>
 

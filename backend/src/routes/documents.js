@@ -10,6 +10,7 @@ const { logActivity } = require('../utils/audit');
 
 const router = express.Router();
 router.use(authenticate);
+const DOCUMENT_TYPES = new Set(['invoices', 'quotes', 'other_documents', 'insurance_documents']);
 
 function canAccessProject(db, user, projectId) {
   if (PROJECT_MANAGE_ROLES.includes(user.role)) return true;
@@ -124,7 +125,8 @@ router.post('/:projectId', (req, res, next) => {
   if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No files uploaded' });
 
   const db = getDb();
-  const documentType = String(req.body.document_type || '').trim() || null;
+  const requestedDocumentType = String(req.body.document_type || '').trim();
+  const documentType = DOCUMENT_TYPES.has(requestedDocumentType) ? requestedDocumentType : 'other_documents';
   const inserted = [];
   for (const file of req.files) {
     const id = uuidv4();

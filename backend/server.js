@@ -18,11 +18,9 @@ const notesRoutes = require('./src/routes/notes');
 const searchRoutes = require('./src/routes/search');
 const chatRoutes = require('./src/routes/chat');
 const invoiceEmailIntakeRoutes = require('./src/routes/invoiceEmailIntake');
-const invoiceAgentRoutes = require('./src/routes/invoiceAgent');
 const { startGmailInvoicePoller } = require('./src/services/gmailInvoicePoller');
-const { startInvoiceAgent } = require('./src/services/invoiceAgent');
-const { startPortalAgent } = require('./src/services/portalAgent');
 const documentRoutes = require('./src/routes/documents');
+const contractorOnboardingRoutes = require('./src/routes/contractorOnboarding');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -59,8 +57,11 @@ app.use('/api/search', searchRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/inbound/invoices', invoiceEmailIntakeRoutes.publicRouter);
 app.use('/api/invoices/email-intake', invoiceEmailIntakeRoutes.authenticatedRouter);
-app.use('/api/invoice-agent', invoiceAgentRoutes);
 app.use('/api/documents', documentRoutes);
+app.use('/api/contractor-onboarding', contractorOnboardingRoutes);
+app.use('/api/invoice-agent', (_req, res) => {
+  res.status(404).json({ error: 'Endpoint removed' });
+});
 
 // Consolidated project notes feed for the dashboard.
 app.get('/api/notes/recent', authenticate, (req, res) => {
@@ -185,8 +186,6 @@ async function start() {
       console.log('╚══════════════════════════════════════════════════╝');
       console.log('');
       startGmailInvoicePoller();
-      startInvoiceAgent();
-      startPortalAgent();
     });
   } catch (err) {
     console.error('Failed to start server:', err);
