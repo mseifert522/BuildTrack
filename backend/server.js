@@ -48,6 +48,27 @@ app.use('/uploads', express.static(path.resolve(uploadsPath)));
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+
+// Friendly aliases for API clients. The web app historically keeps contractor
+// directory functions under /api/users/contractors/*.
+function contractorApiAlias(req, res, next) {
+  const queryIndex = req.url.indexOf('?');
+  const query = queryIndex >= 0 ? req.url.slice(queryIndex) : '';
+  const pathOnly = queryIndex >= 0 ? req.url.slice(0, queryIndex) : req.url;
+
+  if (!pathOnly || pathOnly === '/' || pathOnly === '/list' || pathOnly === '/directory') {
+    req.url = `/contractors/directory${query}`;
+  } else {
+    req.url = `/contractors${req.url}`;
+  }
+  return userRoutes(req, res, next);
+}
+
+app.use('/api/contractor', contractorApiAlias);
+app.use('/api/contractors', contractorApiAlias);
+app.use('/api/v1/contractor', contractorApiAlias);
+app.use('/api/v1/contractors', contractorApiAlias);
+
 app.use('/api/projects', projectRoutes);
 app.use('/api/projects/:projectId/punch-list', punchListRoutes);
 app.use('/api/projects/:projectId/photos', photoRoutes);
@@ -152,6 +173,11 @@ app.get('/api/activity', authenticate, (req, res) => {
 
 // Health check
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
+
+// Unknown API paths should return machine-readable JSON, not the React shell.
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: 'API endpoint not found', path: req.originalUrl });
+});
 
 // Redirect app.newurbandev.com root to /app
 app.get('/', (req, res, next) => {
