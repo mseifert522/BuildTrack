@@ -134,14 +134,14 @@ export default function MobileProjectHub() {
             justifyContent: 'space-between',
             minHeight: 88,
           }}
-          aria-label="Add progress picture"
+          aria-label="Upload progress pictures"
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <div style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
               <Camera size={28} color="white" />
             </div>
             <div>
-              <p style={{ fontWeight: 900, color: 'white', fontSize: 17, margin: 0 }}>Add Progress Picture</p>
+              <p style={{ fontWeight: 900, color: 'white', fontSize: 17, margin: 0 }}>Upload Progress Pictures</p>
               <p style={{ color: 'rgba(255,255,255,0.82)', fontSize: 13, margin: '4px 0 0' }}>Take or upload photos and videos for this project</p>
             </div>
           </div>

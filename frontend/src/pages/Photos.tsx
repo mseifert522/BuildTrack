@@ -138,7 +138,7 @@ export default function Photos() {
             className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-black text-white shadow-sm transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
           >
             <Camera className="h-4 w-4" />
-            {uploading ? 'Uploading...' : 'Add Progress Picture'}
+            {uploading ? 'Uploading...' : 'Upload Progress Pictures'}
           </button>
           <button onClick={() => setView('grid')} className={`min-h-11 min-w-11 p-2 rounded-lg transition-colors ${view === 'grid' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`} aria-label="Show photo grid">
             <Grid className="w-4 h-4" />
@@ -174,7 +174,7 @@ export default function Photos() {
                 className="hidden"
               />
               {uploading ? <Upload className="w-4 h-4 animate-pulse" /> : <Camera className="w-4 h-4" />}
-              {uploading ? 'Uploading...' : 'Add Progress Picture or Video'}
+              {uploading ? 'Uploading...' : 'Upload Progress Pictures or Video'}
             </label>
           </div>
           <p className="text-xs text-gray-500 mt-2">

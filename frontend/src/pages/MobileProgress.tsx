@@ -156,7 +156,7 @@ export default function MobileProgress() {
               }}
             >
               <Camera size={16} color="white" />
-            Add Progress Picture
+            Upload Progress Pictures
               <input
                 ref={fileInputRef}
                 type="file"
@@ -176,7 +176,7 @@ export default function MobileProgress() {
           <div style={{ width: '100%', background: 'white', borderRadius: '24px 24px 0 0', padding: '20px 16px 32px', maxHeight: '80vh', overflowY: 'auto' }}>
             <div style={{ width: 40, height: 4, background: '#E5E7EB', borderRadius: 2, margin: '0 auto 16px' }} />
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-              <p style={{ fontWeight: 800, fontSize: 17, color: '#111827', margin: 0 }}>Add Progress Picture</p>
+              <p style={{ fontWeight: 800, fontSize: 17, color: '#111827', margin: 0 }}>Upload Progress Pictures</p>
               <button onClick={cancelUpload} style={{ background: '#F3F4F6', border: 'none', borderRadius: 8, padding: 6, cursor: 'pointer' }}>
                 <X size={18} color="#6B7280" />
               </button>
@@ -267,7 +267,7 @@ export default function MobileProgress() {
             </div>
             <p style={{ color: 'rgba(255,255,255,0.7)', fontWeight: 700, fontSize: 16, margin: '0 0 8px' }}>No progress photos yet</p>
             <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, margin: 0 }}>
-              Tap "Add Progress Picture" to document construction progress
+              Tap "Upload Progress Pictures" to document construction progress
             </p>
           </div>
         ) : (

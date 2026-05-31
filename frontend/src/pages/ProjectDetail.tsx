@@ -441,12 +441,12 @@ export default function ProjectDetail() {
               type="button"
               onClick={() => navigate(`/photos?projectId=${id}`)}
               className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-amber-500 px-3 py-2 text-xs font-black text-white shadow-sm transition hover:bg-amber-600"
-              title="Add timestamped progress pictures or videos"
-              aria-label="Add progress picture"
+              title="Upload timestamped progress pictures or videos"
+              aria-label="Upload progress pictures"
             >
               <Camera className="h-4 w-4" />
-              <span className="hidden sm:inline">Add Progress Picture</span>
-              <span className="sm:hidden">Picture</span>
+              <span className="hidden md:inline">Upload Progress Pictures</span>
+              <span className="md:hidden">Upload</span>
             </button>
             {canEdit && (
               <button onClick={() => { setShowEdit(true); setEditAddress(project.address || ''); setEditBudget(project.budget ? String(project.budget) : ''); setEditPurchasePrice(project.purchase_price ? String(project.purchase_price) : ''); setEditArv(project.arv ? String(project.arv) : ''); setEditClosingCosts(project.closing_costs ? String(project.closing_costs) : ''); Object.entries(project).forEach(([k, v]) => setValue(k, v)); }} className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors">

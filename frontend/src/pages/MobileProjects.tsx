@@ -224,10 +224,10 @@ export default function MobileProjects() {
                 }}
                 className="mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl text-sm font-black text-white shadow-sm"
                 style={{ background: 'linear-gradient(135deg, #D99D26, #C4891F)', boxShadow: '0 6px 14px rgba(217,157,38,0.22)' }}
-                aria-label={`Add progress picture to ${project.address}`}
+                aria-label={`Upload progress pictures to ${project.address}`}
               >
                 <Camera className="h-4 w-4" />
-                Add Progress Picture
+                Upload Progress Pictures
               </button>
             </div>
           ))

@@ -308,10 +308,10 @@ export default function MobileHome() {
                       gap: 8,
                       boxShadow: '0 6px 14px rgba(217,157,38,0.22)',
                     }}
-                    aria-label={`Add progress picture to ${project.address}`}
+                    aria-label={`Upload progress pictures to ${project.address}`}
                   >
                     <Camera size={18} color="white" />
-                    Add Progress Picture
+                    Upload Progress Pictures
                   </button>
                 </div>
 
@@ -341,7 +341,7 @@ export default function MobileHome() {
                   <Camera size={22} color="white" />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ margin: 0, fontSize: 15, fontWeight: 900 }}>Add Progress Picture</p>
+                  <p style={{ margin: 0, fontSize: 15, fontWeight: 900 }}>Upload Progress Pictures</p>
                   <p style={{ margin: '3px 0 0', fontSize: 12, opacity: 0.82, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {rememberedProject ? `Continue with ${rememberedProject.address}` : 'Choose a project before uploading photos or videos'}
                   </p>

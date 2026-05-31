@@ -312,7 +312,7 @@ export default function MobilePhotos() {
           </button>
         </div>
 
-        <div style={{ padding: '0 14px 14px', display: 'grid', gridTemplateColumns: '1fr auto', gap: 8 }}>
+        <div style={{ padding: '0 14px 14px', display: 'grid', gridTemplateColumns: '1fr', gap: 8 }}>
           <button
             onClick={() => setShowProjectSelector(true)}
             style={{ minWidth: 0, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.08)', color: 'white', borderRadius: 13, padding: '10px 12px', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 9 }}
@@ -324,10 +324,10 @@ export default function MobilePhotos() {
           </button>
           <button
             onClick={openFilePicker}
-            style={{ border: 'none', borderRadius: 13, padding: '10px 14px', background: 'linear-gradient(135deg, #D99D26, #C4891F)', color: 'white', fontSize: 13, fontWeight: 900, display: 'flex', alignItems: 'center', gap: 7, whiteSpace: 'nowrap' }}
+            style={{ minHeight: 48, width: '100%', border: 'none', borderRadius: 13, padding: '10px 14px', background: 'linear-gradient(135deg, #D99D26, #C4891F)', color: 'white', fontSize: 13, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, whiteSpace: 'normal', textAlign: 'center', lineHeight: 1.15 }}
           >
             <Camera size={17} color="white" />
-            Add Progress Picture
+            Upload Progress Pictures
           </button>
         </div>
       </div>
@@ -349,7 +349,7 @@ export default function MobilePhotos() {
             style={{ width: '100%', border: '1px dashed #D99D26', background: '#FFFBEB', borderRadius: 16, padding: 18, color: '#92400E', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
           >
             <FolderOpen size={18} color="#D99D26" />
-            Choose a project to add progress picture
+            Choose a project to upload progress pictures
           </button>
         )}
 
