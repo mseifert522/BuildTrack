@@ -6,6 +6,8 @@ import {
   Clock3,
   Copy,
   Edit2,
+  Eye,
+  EyeOff,
   ExternalLink,
   FileText,
   Hash,
@@ -82,6 +84,33 @@ interface ContractorRow {
   bank_account_last4?: string | null;
   routing_last4?: string | null;
   bank_name?: string | null;
+}
+
+interface Sensitive1099Details {
+  contractor_id: string;
+  contractor_name?: string | null;
+  submitted_at?: string | null;
+  updated_at?: string | null;
+  legal_name?: string | null;
+  business_name?: string | null;
+  tax_classification?: string | null;
+  tax_id_type?: string | null;
+  tax_id?: string | null;
+  mailing_address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  bank_name?: string | null;
+  account_type?: string | null;
+  account_number?: string | null;
+  routing_number?: string | null;
+  payment_method?: string | null;
+  insurance_provider?: string | null;
+  insurance_policy_number?: string | null;
+  insurance_expires_at?: string | null;
+  license_number?: string | null;
+  license_state?: string | null;
+  w9_certified?: string | null;
+  ach_authorized?: string | null;
 }
 
 interface ProjectOption {
@@ -220,7 +249,11 @@ export default function Contractors() {
   const [setupShareSaveEmail, setSetupShareSaveEmail] = useState<Record<string, boolean>>({});
   const [selectedContractorId, setSelectedContractorId] = useState<string | null>(null);
   const [focused1099ContractorId, setFocused1099ContractorId] = useState<string | null>(null);
+  const [sensitive1099Details, setSensitive1099Details] = useState<Record<string, Sensitive1099Details>>({});
+  const [visible1099Details, setVisible1099Details] = useState<Record<string, boolean>>({});
+  const [loading1099DetailsId, setLoading1099DetailsId] = useState<string | null>(null);
   const canAddCategories = currentUser ? ['super_admin', 'operations_manager'].includes(currentUser.role) : false;
+  const canReveal1099Details = currentUser ? ['super_admin', 'operations_manager'].includes(currentUser.role) : false;
 
   const loadDirectory = async () => {
     const [directoryRes, projectsRes] = await Promise.all([
@@ -622,23 +655,78 @@ export default function Contractors() {
     [contractors, selectedContractorId]
   );
 
+  const scrollTo1099Information = (contractorId: string, delay = 120) => {
+    window.setTimeout(() => {
+      const section = document.getElementById(`contractor-1099-info-${contractorId}`);
+      section?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, delay);
+  };
+
   useEffect(() => {
     if (!focused1099ContractorId || selectedContractorId !== focused1099ContractorId) return;
-
-    const timer = window.setTimeout(() => {
-      const section = document.getElementById(`contractor-1099-info-${focused1099ContractorId}`);
-      section?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 150);
+    const timer = window.setTimeout(() => scrollTo1099Information(focused1099ContractorId, 0), 150);
 
     return () => window.clearTimeout(timer);
   }, [focused1099ContractorId, selectedContractorId]);
 
   const view1099Information = (contractor: ContractorRow) => {
     setSelectedContractorId(contractor.id);
+    setFocused1099ContractorId(null);
     setFocused1099ContractorId(contractor.id);
+    scrollTo1099Information(contractor.id, selectedContractorId === contractor.id ? 80 : 220);
     if (!contractorNotes[contractor.id]) {
       loadContractorNotes(contractor.id).catch(() => {});
     }
+  };
+
+  const toggleSensitive1099Details = async (contractor: ContractorRow) => {
+    if (visible1099Details[contractor.id]) {
+      setVisible1099Details(prev => ({ ...prev, [contractor.id]: false }));
+      return;
+    }
+    if (!canReveal1099Details) {
+      toast.error('Only authorized management users can reveal full 1099 and ACH details.');
+      return;
+    }
+
+    try {
+      if (!sensitive1099Details[contractor.id]) {
+        setLoading1099DetailsId(contractor.id);
+        const res = await api.get(`/users/contractors/${contractor.id}/1099`);
+        setSensitive1099Details(prev => ({ ...prev, [contractor.id]: res.data }));
+      }
+      setVisible1099Details(prev => ({ ...prev, [contractor.id]: true }));
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Unable to reveal 1099 information');
+    } finally {
+      setLoading1099DetailsId(null);
+    }
+  };
+
+  const copySensitive1099Details = (details: Sensitive1099Details) => {
+    const lines = [
+      ['Contractor', details.contractor_name],
+      ['Legal name', details.legal_name],
+      ['Business name', details.business_name],
+      ['Tax classification', details.tax_classification],
+      ['Tax ID type', details.tax_id_type?.toUpperCase()],
+      ['Tax ID', details.tax_id],
+      ['Email', details.email],
+      ['Phone', details.phone],
+      ['Mailing address', details.mailing_address],
+      ['Bank name', details.bank_name],
+      ['Account type', details.account_type],
+      ['ACH account number', details.account_number],
+      ['Routing number', details.routing_number],
+      ['W-9 certified', details.w9_certified],
+      ['ACH authorized', details.ach_authorized],
+    ]
+      .filter(([, value]) => value !== null && value !== undefined && value !== '')
+      .map(([label, value]) => `${label}: ${value}`)
+      .join('\n');
+
+    navigator.clipboard?.writeText(lines);
+    toast.success('Full 1099 and ACH details copied');
   };
 
   const detailValue = (value?: string | number | null) => {
@@ -1162,6 +1250,9 @@ export default function Contractors() {
         const setupShareEmail = setupShareEmails[contractor.id] ?? contractor.email ?? '';
         const setupShareSave = setupShareSaveEmail[contractor.id] ?? !contractor.email;
         const latestSetupLink = setupLinks[contractor.id];
+        const full1099Details = sensitive1099Details[contractor.id];
+        const full1099Visible = Boolean(visible1099Details[contractor.id] && full1099Details);
+        const loadingFull1099 = loading1099DetailsId === contractor.id;
 
         return (
           <Modal
@@ -1360,9 +1451,24 @@ export default function Contractors() {
                       : 'border-gray-200'
                   }`}
                 >
-                  <div className="mb-3 flex items-center gap-2">
-                    <ShieldCheck className="h-4 w-4 text-gray-400" />
-                    <h3 className="text-sm font-black text-gray-900">Contractor Setup And 1099 Information</h3>
+                  <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="h-4 w-4 text-gray-400" />
+                      <h3 className="text-sm font-black text-gray-900">Contractor Setup And 1099 Information</h3>
+                    </div>
+                    {contractorInfoCollected ? (
+                      <button
+                        type="button"
+                        onClick={() => toggleSensitive1099Details(contractor)}
+                        disabled={loadingFull1099 || !canReveal1099Details}
+                        className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-white px-3 py-2 text-xs font-black text-emerald-800 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-55"
+                        title={canReveal1099Details ? 'Reveal full encrypted 1099 and ACH details' : 'Only authorized management users can reveal full details'}
+                        aria-label={full1099Visible ? 'Hide full 1099 information' : 'Show full 1099 information'}
+                      >
+                        {full1099Visible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                        {loadingFull1099 ? 'Loading...' : full1099Visible ? 'Hide Full Details' : 'Show Full Details'}
+                      </button>
+                    ) : null}
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
                     {detailLine('Setup status', setupComplete ? 'Submitted' : setupPending ? 'Sent / pending' : 'Not sent')}
@@ -1374,6 +1480,47 @@ export default function Contractors() {
                     {detailLine('ACH account', contractor.bank_account_last4 ? `Ending ${contractor.bank_account_last4}` : null)}
                     {detailLine('Routing number', contractor.routing_last4 ? `Ending ${contractor.routing_last4}` : null)}
                   </div>
+                  {full1099Visible && full1099Details ? (
+                    <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <p className="text-xs font-black uppercase tracking-[0.12em] text-emerald-800">Full 1099 and ACH details</p>
+                          <p className="mt-1 text-xs font-semibold leading-5 text-emerald-900">
+                            Sensitive fields are revealed for banking entry. Viewing this panel is logged in BuildTrack.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => copySensitive1099Details(full1099Details)}
+                          className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-gray-950 px-3 py-2 text-xs font-black text-white transition hover:bg-gray-800"
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                          Copy Details
+                        </button>
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {detailLine('Legal name', full1099Details.legal_name)}
+                        {detailLine('Business name', full1099Details.business_name)}
+                        {detailLine('Tax classification', full1099Details.tax_classification)}
+                        {detailLine('Tax ID type', full1099Details.tax_id_type?.toUpperCase())}
+                        {detailLine('Full Tax ID', full1099Details.tax_id)}
+                        {detailLine('Email', full1099Details.email)}
+                        {detailLine('Phone', full1099Details.phone)}
+                        {detailLine('Mailing address', full1099Details.mailing_address, 'sm:col-span-2')}
+                        {detailLine('Bank name', full1099Details.bank_name)}
+                        {detailLine('Account type', full1099Details.account_type)}
+                        {detailLine('Full ACH account number', full1099Details.account_number)}
+                        {detailLine('Full routing number', full1099Details.routing_number)}
+                        {detailLine('W-9 certified', full1099Details.w9_certified)}
+                        {detailLine('ACH authorized', full1099Details.ach_authorized)}
+                        {detailLine('Insurance provider', full1099Details.insurance_provider)}
+                        {detailLine('Insurance policy number', full1099Details.insurance_policy_number)}
+                        {detailLine('Insurance expires', formatDate(full1099Details.insurance_expires_at))}
+                        {detailLine('License number', full1099Details.license_number)}
+                        {detailLine('License state', full1099Details.license_state)}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">

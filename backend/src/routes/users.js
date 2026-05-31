@@ -9,6 +9,7 @@ const { getDb } = require('../db/schema');
 const { authenticate, authorize, authorizeOverUser, blacklistToken } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
 const { sendInviteEmail } = require('../utils/email');
+const { decryptJson } = require('../utils/secureFields');
 const { ensureContractorMobileAccount, generatePin, syncContractorProjectAssignments } = require('../utils/contractorAccess');
 
 router.use(authenticate);
@@ -69,6 +70,34 @@ function getContractorCategories(db) {
     // Table may not exist until schema migration runs.
   }
   return DEFAULT_CONTRACTOR_CATEGORIES;
+}
+
+function cleanDigits(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function formatTaxIdForDisplay(value, type) {
+  const digits = cleanDigits(value).slice(0, 9);
+  if (digits.length !== 9) return value || null;
+  return type === 'ein' ? `${digits.slice(0, 2)}-${digits.slice(2)}` : `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+}
+
+function complianceMailingAddress(payload, row) {
+  const cityLine = [
+    payload.city || row.city,
+    payload.state || row.state,
+    payload.postal_code || row.postal_code,
+  ].filter(Boolean).join(', ');
+  return [
+    payload.address_line1 || row.address_line1,
+    payload.address_line2 || row.address_line2,
+    cityLine,
+    payload.country || row.country,
+  ].filter(Boolean).join('\n');
+}
+
+function booleanLabel(value) {
+  return value ? 'Yes' : 'No';
 }
 
 function resolveCategory(db, value) {
@@ -512,6 +541,81 @@ router.get('/contractors/directory', authorize('super_admin', 'operations_manage
   });
 
   res.json({ categories: getContractorCategories(db), contractors: result });
+});
+
+// GET /api/users/contractors/:id/1099 - explicitly reveal full encrypted 1099/ACH details
+router.get('/contractors/:id/1099', authorize('super_admin', 'operations_manager'), (req, res) => {
+  const db = getDb();
+  const row = db.prepare(`
+    SELECT
+      ccp.*,
+      cp.vendor_name,
+      cp.contact_name,
+      cp.email as profile_email,
+      cp.phone as profile_phone
+    FROM contractor_compliance_profiles ccp
+    JOIN contractor_profiles cp ON cp.id = ccp.contractor_id
+    WHERE ccp.contractor_id = ?
+    LIMIT 1
+  `).get(req.params.id);
+
+  if (!row) {
+    return res.status(404).json({ error: '1099 information has not been submitted for this contractor' });
+  }
+
+  let payload = {};
+  try {
+    payload = decryptJson(row.data_encrypted) || {};
+  } catch (err) {
+    console.error('Unable to decrypt contractor 1099 details:', err?.message || err);
+    return res.status(500).json({ error: 'Unable to decrypt contractor 1099 details' });
+  }
+
+  const taxIdType = payload.tax_id_type || row.tax_id_type || '';
+  const response = {
+    contractor_id: row.contractor_id,
+    contractor_name: row.vendor_name,
+    submitted_at: row.submitted_at,
+    updated_at: row.updated_at,
+    legal_name: payload.legal_name || row.legal_name,
+    business_name: payload.business_name || row.business_name,
+    tax_classification: payload.tax_classification || row.tax_classification,
+    tax_id_type: taxIdType,
+    tax_id: payload.tax_id_formatted || formatTaxIdForDisplay(payload.tax_id, taxIdType),
+    mailing_address: complianceMailingAddress(payload, row),
+    phone: payload.phone || row.phone || row.profile_phone,
+    email: payload.email || row.email || row.profile_email,
+    bank_name: payload.bank_name || row.bank_name,
+    account_type: payload.account_type || null,
+    account_number: payload.account_number || null,
+    routing_number: payload.routing_number || null,
+    payment_method: row.payment_method || 'ach',
+    insurance_provider: payload.insurance_provider || row.insurance_provider,
+    insurance_policy_number: payload.insurance_policy_number || row.insurance_policy_number,
+    insurance_expires_at: payload.insurance_expires_at || row.insurance_expires_at,
+    license_number: payload.license_number || row.license_number,
+    license_state: payload.license_state || row.license_state,
+    w9_certified: booleanLabel(payload.w9_certified || row.w9_certified),
+    ach_authorized: booleanLabel(payload.ach_authorized || row.ach_authorized),
+    redacted_summary: {
+      tax_id_last4: row.tax_id_last4,
+      bank_account_last4: row.bank_account_last4,
+      routing_last4: row.routing_last4,
+    },
+  };
+
+  logActivity({
+    userId: req.user.id,
+    action: 'contractor_1099_sensitive_viewed',
+    entityType: 'contractor_profile',
+    entityId: row.contractor_id,
+    details: {
+      contractor_name: row.vendor_name,
+      viewed_fields: ['tax_id', 'account_number', 'routing_number'],
+    },
+  });
+
+  res.json(response);
 });
 
 function requireContractor(db, contractorId) {
