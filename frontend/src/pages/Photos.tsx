@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import api from '../lib/api';
 import { Loading } from '../components/ui';
-import { Camera, Grid, List, PlayCircle, Upload, X } from 'lucide-react';
+import { Camera, Grid, List, PlayCircle, X } from 'lucide-react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 
@@ -140,6 +140,15 @@ export default function Photos() {
             <Camera className="h-4 w-4" />
             {uploading ? 'Uploading...' : 'Upload Progress Pictures'}
           </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept="image/*,video/*"
+            disabled={!selectedProject || uploading}
+            onChange={e => uploadMedia(e.target.files)}
+            className="hidden"
+          />
           <button onClick={() => setView('grid')} className={`min-h-11 min-w-11 p-2 rounded-lg transition-colors ${view === 'grid' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`} aria-label="Show photo grid">
             <Grid className="w-4 h-4" />
           </button>
@@ -163,19 +172,6 @@ export default function Photos() {
               placeholder="Optional caption for this upload"
               className="min-w-0 flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
-            <label className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold transition-colors ${selectedProject ? 'bg-blue-600 text-white cursor-pointer hover:bg-blue-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}>
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept="image/*,video/*"
-                disabled={!selectedProject || uploading}
-                onChange={e => uploadMedia(e.target.files)}
-                className="hidden"
-              />
-              {uploading ? <Upload className="w-4 h-4 animate-pulse" /> : <Camera className="w-4 h-4" />}
-              {uploading ? 'Uploading...' : 'Upload Progress Pictures or Video'}
-            </label>
           </div>
           <p className="text-xs text-gray-500 mt-2">
             {selectedProject ? 'Media will be hosted under the selected project with captured timestamp metadata.' : 'Select a project to add progress photos or project videos.'}
