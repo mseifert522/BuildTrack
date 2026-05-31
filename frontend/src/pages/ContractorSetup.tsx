@@ -483,7 +483,7 @@ export default function ContractorSetup() {
       setSetupSession('');
       setHasInteractedWithForm(false);
       setAutosaveStatus('idle');
-      setMessage('Your information has been sent to the main office and will be processed. Thank you. You may now close this browser.');
+      setMessage('Your information has been sent to the main office. BuildTrack will email your contractor PIN so you can open the mobile app when your projects are assigned.');
       setShowSubmitConfirmation(true);
     } catch (err: any) {
       const submitMessage = err.details?.[0] || err.message || 'Unable to submit setup form.';
@@ -757,8 +757,8 @@ export default function ContractorSetup() {
                       <Field label="Phone" required>
                         <input value={form.phone} onChange={event => update('phone', formatPhone(event.target.value))} className={inputClass} inputMode="tel" autoComplete="tel" placeholder="(123) 456-7890" required />
                       </Field>
-                      <Field label="Email">
-                        <input value={form.email} onChange={event => update('email', event.target.value)} className={inputClass} type="email" />
+                      <Field label="Email" required>
+                        <input value={form.email} onChange={event => update('email', event.target.value)} className={inputClass} type="email" autoComplete="email" required />
                       </Field>
                     </div>
                   </section>

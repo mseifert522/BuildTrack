@@ -5,9 +5,9 @@ const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/schema');
 const { authenticate, authorize } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
-const { sendContractorSetupEmail, sendContractorSetupCodeEmail, sendContractorSubmissionPdfEmail } = require('../utils/email');
+const { sendContractorSetupEmail, sendContractorSetupCodeEmail, sendContractorSubmissionPdfEmail, sendContractorPinEmail } = require('../utils/email');
 const { encryptJson, decryptJson } = require('../utils/secureFields');
-const { ensureContractorMobileAccount, ensureSelfSignupContractor } = require('../utils/contractorAccess');
+const { ensureContractorMobileAccount, ensureSelfSignupContractor, normalizeEmail } = require('../utils/contractorAccess');
 
 const router = express.Router();
 const MANAGEMENT_ROLES = ['super_admin', 'operations_manager', 'project_manager'];
@@ -205,6 +205,7 @@ function validateSubmission(body) {
   if (!payload.tax_classification) errors.push('Tax classification is required');
   if (!payload.address_line1 || !payload.city || !payload.state || !payload.postal_code) errors.push('Full mailing address is required');
   if (!payload.phone) errors.push('Phone number is required');
+  if (!payload.email) errors.push('Email address is required so BuildTrack can create contractor mobile access');
   if (payload.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.email)) errors.push('Valid email address is required');
   if (!payload.bank_name) errors.push('Bank name is required');
   if (!validateRoutingNumber(payload.routing_number)) errors.push('Valid 9-digit routing number is required');
@@ -325,20 +326,25 @@ router.post('/contractors/:id/request', authenticate, authorize(...MANAGEMENT_RO
   const db = getDb();
   const contractor = db.prepare('SELECT * FROM contractor_profiles WHERE id = ?').get(req.params.id);
   if (!contractor) return res.status(404).json({ error: 'Contractor not found' });
-  if (!contractor.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contractor.email)) {
-    return res.status(400).json({ error: 'Contractor must have a valid email address before setup can be sent' });
+
+  const requestedEmail = normalizeEmail(req.body?.email || contractor.email);
+  if (!requestedEmail) {
+    return res.status(400).json({ error: 'Enter a valid email address to send the contractor setup link' });
   }
+  const saveRecipientEmail = !req.body?.email || req.body?.save_email === true;
 
   const rawToken = crypto.randomBytes(32).toString('hex');
   const requestId = uuidv4();
   const now = new Date().toISOString();
   const expiresAt = new Date(Date.now() + REQUEST_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  const email = contractor.email.toLowerCase().trim();
+  const email = requestedEmail;
   const setupUrl = `${baseUrl()}/contractor-setup?token=${rawToken}`;
 
   try {
     const createRequest = db.transaction(() => {
-      ensureContractorMobileAccount(db, contractor.id, { email, assignedBy: req.user.id });
+      if (saveRecipientEmail) {
+        ensureContractorMobileAccount(db, contractor.id, { email, assignedBy: req.user.id });
+      }
       db.prepare(`
         UPDATE contractor_onboarding_requests
         SET status = 'revoked', updated_at = datetime('now')
@@ -374,6 +380,8 @@ router.post('/contractors/:id/request', authenticate, authorize(...MANAGEMENT_RO
       status: 'sent',
       expires_at: expiresAt,
       setup_url: setupUrl,
+      recipient_email: email,
+      saved_to_contractor: saveRecipientEmail,
     });
   } catch (err) {
     db.prepare(`
@@ -381,8 +389,12 @@ router.post('/contractors/:id/request', authenticate, authorize(...MANAGEMENT_RO
       SET status = 'revoked', updated_at = datetime('now')
       WHERE id = ?
     `).run(requestId);
-    console.error('Contractor setup request failed:', err);
-    res.status(500).json({ error: 'Unable to send contractor setup email. Please try again.' });
+    if (!err.statusCode || err.statusCode >= 500) {
+      console.error('Contractor setup request failed:', err);
+    }
+    res.status(err.statusCode || 500).json({
+      error: err.statusCode ? err.message : 'Unable to send contractor setup email. Please try again.',
+    });
   }
 });
 
@@ -589,6 +601,7 @@ router.post('/submit', async (req, res) => {
       user_agent: req.headers['user-agent'] || '',
     });
 
+    let mobileAccount = null;
     const saveSubmission = db.transaction(() => {
       db.prepare(`
         INSERT INTO contractor_compliance_profiles (
@@ -667,7 +680,7 @@ router.post('/submit', async (req, res) => {
         WHERE id = ?
       `).run(payload.legal_name, payload.email, payload.phone, safeAddress, request.contractor_id);
 
-      ensureContractorMobileAccount(db, request.contractor_id, {
+      mobileAccount = ensureContractorMobileAccount(db, request.contractor_id, {
         email: payload.email || request.email,
         contact_name: payload.legal_name,
         phone: payload.phone,
@@ -686,6 +699,7 @@ router.post('/submit', async (req, res) => {
     saveSubmission();
 
     let operationsEmailSent = false;
+    let contractorPinEmailSent = false;
     try {
       await sendContractorSubmissionPdfEmail({
         contractorName: request.vendor_name,
@@ -698,6 +712,19 @@ router.post('/submit', async (req, res) => {
       operationsEmailSent = true;
     } catch (emailErr) {
       console.error('Contractor setup operations PDF email failed:', emailErr?.message || emailErr);
+    }
+
+    if (mobileAccount?.user?.email && mobileAccount.user.pin) {
+      try {
+        await sendContractorPinEmail({
+          name: mobileAccount.user.name || payload.legal_name,
+          email: mobileAccount.user.email,
+          pin: mobileAccount.user.pin,
+        });
+        contractorPinEmailSent = true;
+      } catch (emailErr) {
+        console.error('Contractor setup PIN email failed:', emailErr?.message || emailErr);
+      }
     }
 
     logActivity({
@@ -713,7 +740,11 @@ router.post('/submit', async (req, res) => {
       },
     });
 
-    res.json({ message: 'Contractor setup submitted successfully', operations_email_sent: operationsEmailSent });
+    res.json({
+      message: 'Contractor setup submitted successfully',
+      operations_email_sent: operationsEmailSent,
+      contractor_pin_email_sent: contractorPinEmailSent,
+    });
   } catch (err) {
     console.error('Contractor setup submit failed:', err);
     res.status(err.statusCode || 500).json({ error: err.message || 'Unable to submit contractor setup', details: err.details });

@@ -807,7 +807,7 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                     <form onSubmit={submitContractorSignup} className="space-y-4">
                       <div className="rounded-lg p-5" style={{ background: 'white', border: '1px solid #E5E7EB' }}>
                         <h3 className="font-black text-gray-900 text-lg">Contractor Sign Up</h3>
-                        <p className="text-sm text-gray-500 mt-1 mb-5">Start your secure contractor setup and 1099 information form.</p>
+                        <p className="text-sm text-gray-500 mt-1 mb-5">Start your secure contractor setup and 1099 form. Your mobile PIN is emailed after submission.</p>
                         <div className="grid gap-3">
                           <input
                             type="text"

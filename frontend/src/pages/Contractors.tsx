@@ -155,9 +155,9 @@ const isSetupPending = (contractor: ContractorRow) =>
 
 const setupButtonLabel = (contractor: ContractorRow, sending: boolean) => {
   if (sending) return 'Sending...';
-  if (isSetupComplete(contractor)) return 'Request Updated Information';
-  if (isSetupPending(contractor)) return 'Resend Contractor Information';
-  return 'Request Contractor Information';
+  if (isSetupComplete(contractor)) return 'Request Updated 1099 Info';
+  if (isSetupPending(contractor)) return 'Resend 1099 Setup Link';
+  return 'Send 1099 Setup Link';
 };
 
 const contractorStatusMeta = (status?: string | null) => {
@@ -216,6 +216,8 @@ export default function Contractors() {
   const [deletingContractorId, setDeletingContractorId] = useState<string | null>(null);
   const [requestingSetupId, setRequestingSetupId] = useState<string | null>(null);
   const [setupLinks, setSetupLinks] = useState<Record<string, { url: string; expires_at?: string }>>({});
+  const [setupShareEmails, setSetupShareEmails] = useState<Record<string, string>>({});
+  const [setupShareSaveEmail, setSetupShareSaveEmail] = useState<Record<string, boolean>>({});
   const [selectedContractorId, setSelectedContractorId] = useState<string | null>(null);
   const [focused1099ContractorId, setFocused1099ContractorId] = useState<string | null>(null);
   const canAddCategories = currentUser ? ['super_admin', 'operations_manager'].includes(currentUser.role) : false;
@@ -510,15 +512,17 @@ export default function Contractors() {
     }
   };
 
-  const requestContractorSetup = async (contractor: ContractorRow) => {
-    if (!contractor.email) {
-      toast.error('Add a contractor email before sending setup');
+  const requestContractorSetup = async (contractor: ContractorRow, recipientEmail?: string, saveEmail = true) => {
+    const email = String(recipientEmail || contractor.email || '').trim();
+    if (!email) {
+      toast.error('Enter an email address before sending setup');
       return;
     }
 
     setRequestingSetupId(contractor.id);
     try {
-      const res = await api.post(`/contractor-onboarding/contractors/${contractor.id}/request`);
+      const body = recipientEmail ? { email, save_email: saveEmail } : {};
+      const res = await api.post(`/contractor-onboarding/contractors/${contractor.id}/request`, body);
       if (res.data?.setup_url) {
         setSetupLinks(prev => ({
           ...prev,
@@ -529,12 +533,18 @@ export default function Contractors() {
         }));
       }
       await loadDirectory();
-      toast.success('Contractor setup email sent');
+      toast.success(`Secure 1099 setup email sent to ${res.data?.recipient_email || email}`);
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to send contractor setup');
     } finally {
       setRequestingSetupId(null);
     }
+  };
+
+  const shareContractorSetup = (contractor: ContractorRow) => {
+    const email = String(setupShareEmails[contractor.id] ?? contractor.email ?? '').trim();
+    const saveEmail = setupShareSaveEmail[contractor.id] ?? !contractor.email;
+    requestContractorSetup(contractor, email, saveEmail);
   };
 
   const filteredContractors = useMemo(() => {
@@ -1149,6 +1159,9 @@ export default function Contractors() {
         const lastInvoice = contractor.last_invoice;
         const notes = contractorNotes[contractor.id] || [];
         const previewNotes = contractor.latest_notes || [];
+        const setupShareEmail = setupShareEmails[contractor.id] ?? contractor.email ?? '';
+        const setupShareSave = setupShareSaveEmail[contractor.id] ?? !contractor.email;
+        const latestSetupLink = setupLinks[contractor.id];
 
         return (
           <Modal
@@ -1227,6 +1240,72 @@ export default function Contractors() {
                       <ShieldCheck className="h-3.5 w-3.5" />
                       {setupButtonLabel(contractor, requestingSetupId === contractor.id)}
                     </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-2 flex items-center gap-2">
+                      <ShieldCheck className="h-4 w-4 text-amber-700" />
+                      <h3 className="text-sm font-black text-gray-950">Secure 1099 Setup Link</h3>
+                    </div>
+                    <p className="text-xs font-semibold leading-5 text-amber-900">
+                      Send the secure contractor setup link to any email address. The contractor verifies by email code, enters their own email in the form, and BuildTrack assigns their mobile PIN after submission.
+                    </p>
+                    {latestSetupLink?.url ? (
+                      <div className="mt-3 rounded-xl border border-amber-200 bg-white px-3 py-2">
+                        <p className="text-[11px] font-black uppercase tracking-wide text-amber-700">Latest generated link</p>
+                        <div className="mt-1 flex items-center gap-2">
+                          <a href={latestSetupLink.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-xs font-bold text-gray-950 underline">
+                            {latestSetupLink.url}
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard?.writeText(latestSetupLink.url);
+                              toast.success('Contractor setup link copied');
+                            }}
+                            className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                            title="Copy setup link"
+                          >
+                            <Copy className="h-4 w-4" />
+                          </button>
+                        </div>
+                        {latestSetupLink.expires_at ? <p className="mt-1 text-[11px] font-semibold text-amber-700">Expires {formatDate(latestSetupLink.expires_at)}</p> : null}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="w-full lg:w-[23rem]">
+                    <label className="mb-1 block text-[11px] font-black uppercase tracking-wide text-amber-800">Recipient email</label>
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <input
+                        type="email"
+                        value={setupShareEmail}
+                        onChange={event => setSetupShareEmails(prev => ({ ...prev, [contractor.id]: event.target.value }))}
+                        placeholder="contractor@email.com"
+                        className="min-w-0 flex-1 rounded-xl border border-amber-200 bg-white px-3 py-2.5 text-sm font-bold text-gray-950 outline-none focus:border-amber-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => shareContractorSetup(contractor)}
+                        disabled={requestingSetupId === contractor.id}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-gray-950 px-4 py-2.5 text-xs font-black text-white hover:bg-gray-800 disabled:opacity-60"
+                      >
+                        <Send className="h-3.5 w-3.5" />
+                        {requestingSetupId === contractor.id ? 'Sending...' : 'Send Link'}
+                      </button>
+                    </div>
+                    <label className="mt-2 flex items-center gap-2 text-xs font-bold text-amber-900">
+                      <input
+                        type="checkbox"
+                        checked={setupShareSave}
+                        onChange={event => setSetupShareSaveEmail(prev => ({ ...prev, [contractor.id]: event.target.checked }))}
+                        className="h-4 w-4 rounded border-amber-300 text-amber-600"
+                      />
+                      Save this as the contractor email and mobile login email
+                    </label>
                   </div>
                 </div>
               </div>

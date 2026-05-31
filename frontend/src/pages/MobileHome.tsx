@@ -11,6 +11,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Send,
   Truck,
   Users,
 } from 'lucide-react';
@@ -76,6 +77,8 @@ export default function MobileHome() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [setupEmailInputs, setSetupEmailInputs] = useState<Record<string, string>>({});
+  const [sendingSetupId, setSendingSetupId] = useState<string | null>(null);
 
   const navItems = useMemo(() => {
     if (managementUser) {
@@ -147,6 +150,28 @@ export default function MobileHome() {
   );
 
   const rememberedProject = projects.find(project => project.id === localStorage.getItem(storageKey));
+
+  const sendContractorSetup = async (contractor: ContractorItem) => {
+    const email = String(setupEmailInputs[contractor.id] ?? contractor.email ?? '').trim();
+    if (!email) {
+      toast.error('Enter an email for the secure 1099 setup link');
+      return;
+    }
+
+    setSendingSetupId(contractor.id);
+    try {
+      await api.post(`/contractor-onboarding/contractors/${contractor.id}/request`, {
+        email,
+        save_email: !contractor.email,
+      });
+      toast.success('Secure 1099 setup link sent');
+      await loadData(true);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to send setup link');
+    } finally {
+      setSendingSetupId(null);
+    }
+  };
 
   const handleLogout = () => {
     logout();
@@ -350,18 +375,44 @@ export default function MobileHome() {
             <p style={{ color: '#6B7280', fontSize: 11, fontWeight: 850, letterSpacing: '0.08em', textTransform: 'uppercase', margin: '2px 2px 0' }}>
               {filteredContractors.length} Contractor{filteredContractors.length === 1 ? '' : 's'}
             </p>
-            {filteredContractors.slice(0, 80).map(contractor => (
-              <div key={contractor.id} style={{ background: 'white', borderRadius: 15, padding: 13, display: 'flex', gap: 10, alignItems: 'center', boxShadow: '0 1px 8px rgba(0,0,0,0.06)' }}>
-                <div style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(22,163,74,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <Users size={18} color="#16A34A" />
+            {filteredContractors.slice(0, 80).map(contractor => {
+              const setupEmail = setupEmailInputs[contractor.id] ?? contractor.email ?? '';
+              return (
+                <div key={contractor.id} style={{ background: 'white', borderRadius: 15, padding: 13, boxShadow: '0 1px 8px rgba(0,0,0,0.06)' }}>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                    <div style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(22,163,74,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <Users size={18} color="#16A34A" />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ color: '#111827', margin: 0, fontSize: 13, fontWeight: 850, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{contractor.name || contractor.company || contractor.contact_name || 'Contractor'}</p>
+                      <p style={{ color: '#6B7280', margin: '2px 0 0', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{contractor.contractor_category || contractor.category || contractor.email || contractor.phone || 'Contractor'}</p>
+                    </div>
+                    <span style={{ color: '#16A34A', fontSize: 11, fontWeight: 850 }}>{contractor.connected_project_count ?? contractor.assigned_project_count ?? 0}</span>
+                  </div>
+                  <div style={{ marginTop: 10, borderTop: '1px solid #F3F4F6', paddingTop: 10 }}>
+                    <p style={{ color: '#92400E', margin: '0 0 6px', fontSize: 10, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Secure 1099 setup</p>
+                    <div style={{ display: 'flex', gap: 7 }}>
+                      <input
+                        type="email"
+                        value={setupEmail}
+                        onChange={event => setSetupEmailInputs(prev => ({ ...prev, [contractor.id]: event.target.value }))}
+                        placeholder="contractor@email.com"
+                        style={{ minWidth: 0, flex: 1, border: '1px solid #E5E7EB', borderRadius: 11, padding: '10px 11px', fontSize: 12, fontWeight: 750, outline: 'none' }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => sendContractorSetup(contractor)}
+                        disabled={sendingSetupId === contractor.id}
+                        style={{ border: 'none', borderRadius: 11, background: '#111827', color: 'white', width: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: sendingSetupId === contractor.id ? 0.6 : 1 }}
+                        aria-label="Send secure 1099 setup link"
+                      >
+                        <Send size={16} />
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ color: '#111827', margin: 0, fontSize: 13, fontWeight: 850, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{contractor.name || contractor.company || contractor.contact_name || 'Contractor'}</p>
-                  <p style={{ color: '#6B7280', margin: '2px 0 0', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{contractor.contractor_category || contractor.category || contractor.email || contractor.phone || 'Contractor'}</p>
-                </div>
-                <span style={{ color: '#16A34A', fontSize: 11, fontWeight: 850 }}>{contractor.connected_project_count ?? contractor.assigned_project_count ?? 0}</span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
