@@ -70,6 +70,8 @@ export default function MobilePhotos() {
   const requestedProjectId = searchParams.get('projectId') || '';
   const storageKey = `buildtrack-mobile-photo-project:${user?.id || 'session'}`;
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const previewUrlsRef = useRef<string[]>([]);
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState('');
@@ -124,6 +126,7 @@ export default function MobilePhotos() {
       return [];
     });
     if (fileInputRef.current) fileInputRef.current.value = '';
+    if (cameraInputRef.current) cameraInputRef.current.value = '';
   }, [storageKey]);
 
   const loadProjects = useCallback(async () => {
@@ -158,23 +161,38 @@ export default function MobilePhotos() {
     if (selectedProjectId) void loadPhotos(selectedProjectId);
   }, [loadPhotos, selectedProjectId]);
 
-  useEffect(() => () => clearPreviewUrls(previewUrls), [previewUrls]);
+  useEffect(() => {
+    previewUrlsRef.current = previewUrls;
+  }, [previewUrls]);
+
+  useEffect(() => () => clearPreviewUrls(previewUrlsRef.current), []);
+
+  const fileKey = (file: File) => `${file.name}:${file.size}:${file.lastModified}`;
+
+  const addPreviewFiles = (files: File[]) => {
+    if (!files.length) return;
+    setPreviewFiles(current => {
+      const existing = new Set(current.map(fileKey));
+      const nextFiles = files.filter(file => !existing.has(fileKey(file)));
+      if (!nextFiles.length) return current;
+      setPreviewUrls(urls => [...urls, ...nextFiles.map(file => URL.createObjectURL(file))]);
+      return [...current, ...nextFiles];
+    });
+  };
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (!selectedProjectId) {
       setShowProjectSelector(true);
       if (fileInputRef.current) fileInputRef.current.value = '';
+      if (cameraInputRef.current) cameraInputRef.current.value = '';
       toast.error('Choose a project before adding progress photos or videos');
       return;
     }
 
     const files = Array.from(event.target.files || []);
     if (!files.length) return;
-    setPreviewFiles(files);
-    setPreviewUrls(current => {
-      clearPreviewUrls(current);
-      return files.map(file => URL.createObjectURL(file));
-    });
+    addPreviewFiles(files);
+    event.currentTarget.value = '';
   };
 
   const cancelUpload = () => {
@@ -185,6 +203,7 @@ export default function MobilePhotos() {
     });
     setCaption('');
     if (fileInputRef.current) fileInputRef.current.value = '';
+    if (cameraInputRef.current) cameraInputRef.current.value = '';
   };
 
   const handleUpload = async () => {
@@ -225,6 +244,14 @@ export default function MobilePhotos() {
       return;
     }
     fileInputRef.current?.click();
+  };
+
+  const openCamera = () => {
+    if (!selectedProjectId) {
+      setShowProjectSelector(true);
+      return;
+    }
+    cameraInputRef.current?.click();
   };
 
   const projectSelector = (
@@ -329,6 +356,13 @@ export default function MobilePhotos() {
             <Camera size={17} color="white" />
             Upload Progress Pictures
           </button>
+          <button
+            onClick={openCamera}
+            style={{ minHeight: 44, width: '100%', border: '1px solid rgba(217,157,38,0.38)', borderRadius: 13, padding: '10px 14px', background: 'rgba(217,157,38,0.13)', color: '#FBD38D', fontSize: 13, fontWeight: 850, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}
+          >
+            <Camera size={16} color="#FBD38D" />
+            Open Camera
+          </button>
         </div>
       </div>
 
@@ -336,8 +370,15 @@ export default function MobilePhotos() {
         ref={fileInputRef}
         type="file"
         accept="image/*,video/*"
-        capture="environment"
         multiple
+        onChange={handleFileSelect}
+        style={{ display: 'none' }}
+      />
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
         onChange={handleFileSelect}
         style={{ display: 'none' }}
       />
@@ -392,6 +433,24 @@ export default function MobilePhotos() {
               placeholder="Caption for this upload"
               style={{ width: '100%', boxSizing: 'border-box', border: '1px solid #E5E7EB', borderRadius: 12, padding: '10px 12px', color: '#111827', fontSize: 14, marginBottom: 10 }}
             />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+              <button
+                onClick={openFilePicker}
+                type="button"
+                style={{ minHeight: 44, border: '1px solid #F3D08A', borderRadius: 12, background: '#FFFBEB', color: '#92400E', fontSize: 12, fontWeight: 850, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+              >
+                <ImagePlus size={15} color="#D99D26" />
+                Add More
+              </button>
+              <button
+                onClick={openCamera}
+                type="button"
+                style={{ minHeight: 44, border: '1px solid #D1D5DB', borderRadius: 12, background: '#F9FAFB', color: '#374151', fontSize: 12, fontWeight: 850, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+              >
+                <Camera size={15} color="#374151" />
+                Camera
+              </button>
+            </div>
             <button
               onClick={handleUpload}
               disabled={uploading}
@@ -414,7 +473,7 @@ export default function MobilePhotos() {
           <div style={{ textAlign: 'center', background: 'white', borderRadius: 18, padding: '44px 18px', boxShadow: '0 1px 8px rgba(0,0,0,0.06)' }}>
             <ImagePlus size={42} color="#D1D5DB" />
             <p style={{ margin: '12px 0 4px', color: '#374151', fontSize: 15, fontWeight: 850 }}>No progress photos yet</p>
-            <p style={{ margin: 0, color: '#9CA3AF', fontSize: 12 }}>Choose Add to capture or upload progress photos and videos.</p>
+            <p style={{ margin: 0, color: '#9CA3AF', fontSize: 12 }}>Choose multiple pictures at once, or open the camera and add shots before uploading.</p>
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 9 }}>

@@ -23,6 +23,7 @@ export default function ContractorProjectDetail() {
   const [photos, setPhotos] = useState<any[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   // Punch list state
   const [punchItems, setPunchItems] = useState<any[]>([]);
@@ -62,7 +63,7 @@ export default function ContractorProjectDetail() {
   };
 
   const loadPhotos = async () => {
-    try { const res = await api.get(`/projects/${id}/photos`); setPhotos(res.data); } catch {}
+    try { const res = await api.get(`/projects/${id}/photos?type=progress`); setPhotos(res.data); } catch {}
   };
 
   const loadPunchItems = async () => {
@@ -97,9 +98,13 @@ export default function ContractorProjectDetail() {
     try {
       const formData = new FormData();
       Array.from(files).forEach(f => formData.append('photos', f));
-      await api.post(`/projects/${id}/photos`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      formData.append('photo_type', 'progress');
+      formData.append('taken_at_values', JSON.stringify(
+        Array.from(files).map(file => new Date(file.lastModified || Date.now()).toISOString())
+      ));
+      await api.post(`/projects/${id}/photos?type=progress`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       loadPhotos();
-      toast.success(`${files.length} photo${files.length > 1 ? 's' : ''} uploaded`);
+      toast.success(`${files.length} progress photo${files.length > 1 ? 's' : ''} uploaded`);
     } catch { toast.error('Failed to upload'); }
     finally { setUploading(false); }
   };
@@ -281,11 +286,18 @@ export default function ContractorProjectDetail() {
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept="image/*,video/*"
               multiple
+              style={{ display: 'none' }}
+              onChange={e => { if (e.target.files && e.target.files.length > 0) uploadPhotos(e.target.files); e.currentTarget.value = ''; }}
+            />
+            <input
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*"
               capture="environment"
               style={{ display: 'none' }}
-              onChange={e => { if (e.target.files && e.target.files.length > 0) uploadPhotos(e.target.files); }}
+              onChange={e => { if (e.target.files && e.target.files.length > 0) uploadPhotos(e.target.files); e.currentTarget.value = ''; }}
             />
 
             <button
@@ -301,15 +313,27 @@ export default function ContractorProjectDetail() {
               {uploading ? (
                 <><div style={{ width: 18, height: 18, border: '2px solid #D99D26', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} /> Uploading...</>
               ) : (
-                <><Upload size={18} /> Take Photo or Upload</>
+                <><Upload size={18} /> Upload Progress Pictures</>
               )}
+            </button>
+            <button
+              onClick={() => cameraInputRef.current?.click()}
+              disabled={uploading}
+              style={{
+                width: '100%', padding: 14, borderRadius: 14,
+                border: '1px solid #F3D08A', background: '#FFFBEB',
+                cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+                color: '#92400E', fontWeight: 800, fontSize: 14, marginBottom: 16,
+              }}
+            >
+              <Camera size={18} /> Open Camera
             </button>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
               {photos.map(p => (
                 <div key={p.id} style={{ borderRadius: 10, overflow: 'hidden', aspectRatio: '1', background: '#E5E7EB' }}>
                   <img
-                    src={`/uploads/${p.filename}`}
+                    src={`/uploads/${id}/${p.filename}`}
                     alt={p.caption || ''}
                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   />

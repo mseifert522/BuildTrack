@@ -61,6 +61,8 @@ export default function MobileProgress() {
   const [lightbox, setLightbox] = useState<LightboxMedia | null>(null);
   const [showUpload, setShowUpload] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const previewUrlsRef = useRef<string[]>([]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -74,12 +76,28 @@ export default function MobileProgress() {
       .finally(() => setLoading(false));
   }, [projectId]);
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
+  useEffect(() => {
+    previewUrlsRef.current = previewUrls;
+  }, [previewUrls]);
+
+  const clearPreviewUrls = (urls: string[]) => urls.forEach(url => URL.revokeObjectURL(url));
+  const fileKey = (file: File) => `${file.name}:${file.size}:${file.lastModified}`;
+
+  const addPreviewFiles = (files: File[]) => {
     if (!files.length) return;
-    setPreviewFiles(files);
-    setPreviewUrls(files.map(f => URL.createObjectURL(f)));
+    setPreviewFiles(current => {
+      const existing = new Set(current.map(fileKey));
+      const nextFiles = files.filter(file => !existing.has(fileKey(file)));
+      if (!nextFiles.length) return current;
+      setPreviewUrls(urls => [...urls, ...nextFiles.map(file => URL.createObjectURL(file))]);
+      return [...current, ...nextFiles];
+    });
     setShowUpload(true);
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    addPreviewFiles(Array.from(e.target.files || []));
+    e.currentTarget.value = '';
   };
 
   const handleUpload = async () => {
@@ -102,10 +120,14 @@ export default function MobileProgress() {
       const res = await api.get(`/projects/${projectId}/photos?type=progress`).catch(() => api.get(`/projects/${projectId}/photos`));
       setPhotos(Array.isArray(res.data) ? res.data : []);
       setPreviewFiles([]);
-      setPreviewUrls([]);
+      setPreviewUrls(current => {
+        clearPreviewUrls(current);
+        return [];
+      });
       setCaption('');
       setShowUpload(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+      if (cameraInputRef.current) cameraInputRef.current.value = '';
     } catch {
       toast.error('Upload failed');
     } finally {
@@ -115,11 +137,20 @@ export default function MobileProgress() {
 
   const cancelUpload = () => {
     setPreviewFiles([]);
-    setPreviewUrls([]);
+    setPreviewUrls(current => {
+      clearPreviewUrls(current);
+      return [];
+    });
     setCaption('');
     setShowUpload(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
+    if (cameraInputRef.current) cameraInputRef.current.value = '';
   };
+
+  const openFilePicker = () => fileInputRef.current?.click();
+  const openCamera = () => cameraInputRef.current?.click();
+
+  useEffect(() => () => clearPreviewUrls(previewUrlsRef.current), []);
 
   const grouped = groupByDate(photos);
   const photoBaseUrl = (api.defaults.baseURL || '').replace('/api', '');
@@ -145,28 +176,45 @@ export default function MobileProgress() {
           </div>
         </div>
         {/* Upload bar */}
-        <div style={{ padding: '0 16px 12px', display: 'flex', gap: 8 }}>
-            <label
+        <div style={{ padding: '0 16px 12px', display: 'grid', gridTemplateColumns: '1fr', gap: 8 }}>
+            <button
+              type="button"
+              onClick={openFilePicker}
               style={{
-                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                minHeight: 48, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
                 background: 'linear-gradient(135deg, #D99D26, #C4891F)',
                 color: 'white', borderRadius: 12, padding: '12px 16px',
-                fontSize: 14, fontWeight: 900, cursor: 'pointer',
+                fontSize: 14, fontWeight: 900, cursor: 'pointer', border: 'none',
                 boxShadow: '0 4px 12px rgba(217,157,38,0.35)',
               }}
             >
               <Camera size={16} color="white" />
-            Upload Progress Pictures
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*,video/*"
-                capture="environment"
-                multiple
-                onChange={handleFileSelect}
-                style={{ display: 'none' }}
-              />
-            </label>
+              Upload Progress Pictures
+            </button>
+            <button
+              type="button"
+              onClick={openCamera}
+              style={{ minHeight: 44, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: 'rgba(217,157,38,0.14)', color: '#FBD38D', borderRadius: 12, padding: '10px 16px', fontSize: 13, fontWeight: 850, cursor: 'pointer', border: '1px solid rgba(217,157,38,0.34)' }}
+            >
+              <Camera size={15} color="#FBD38D" />
+              Open Camera
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,video/*"
+              multiple
+              onChange={handleFileSelect}
+              style={{ display: 'none' }}
+            />
+            <input
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={handleFileSelect}
+              style={{ display: 'none' }}
+            />
         </div>
       </div>
 
@@ -213,6 +261,23 @@ export default function MobileProgress() {
               placeholder="Add a caption (optional)..."
               style={{ width: '100%', border: '1.5px solid #E5E7EB', borderRadius: 12, padding: '10px 14px', fontSize: 14, color: '#111827', marginBottom: 14, boxSizing: 'border-box' }}
             />
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
+              <button
+                type="button"
+                onClick={openFilePicker}
+                style={{ minHeight: 44, border: '1px solid #F3D08A', borderRadius: 12, background: '#FFFBEB', color: '#92400E', fontSize: 12, fontWeight: 850, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+              >
+                Add More
+              </button>
+              <button
+                type="button"
+                onClick={openCamera}
+                style={{ minHeight: 44, border: '1px solid #D1D5DB', borderRadius: 12, background: '#F9FAFB', color: '#374151', fontSize: 12, fontWeight: 850, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+              >
+                Camera
+              </button>
+            </div>
 
             <div style={{ display: 'flex', gap: 10 }}>
               <button
