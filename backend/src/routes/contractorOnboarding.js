@@ -313,7 +313,9 @@ router.post('/self-signup', async (req, res) => {
         `).run(requestId);
       } catch (_) {}
     }
-    console.error('Contractor self signup failed:', err);
+    if (!err.statusCode || err.statusCode >= 500) {
+      console.error('Contractor self signup failed:', err);
+    }
     res.status(err.statusCode || 500).json({ error: err.message || 'Unable to start contractor signup' });
   }
 });
