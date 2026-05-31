@@ -217,6 +217,7 @@ export default function Contractors() {
   const [requestingSetupId, setRequestingSetupId] = useState<string | null>(null);
   const [setupLinks, setSetupLinks] = useState<Record<string, { url: string; expires_at?: string }>>({});
   const [selectedContractorId, setSelectedContractorId] = useState<string | null>(null);
+  const [focused1099ContractorId, setFocused1099ContractorId] = useState<string | null>(null);
   const canAddCategories = currentUser ? ['super_admin', 'operations_manager'].includes(currentUser.role) : false;
 
   const loadDirectory = async () => {
@@ -291,6 +292,7 @@ export default function Contractors() {
   };
 
   const openContractorDetails = (contractorId: string) => {
+    setFocused1099ContractorId(null);
     setSelectedContractorId(contractorId);
     if (!contractorNotes[contractorId]) {
       loadContractorNotes(contractorId).catch(() => {});
@@ -610,6 +612,25 @@ export default function Contractors() {
     [contractors, selectedContractorId]
   );
 
+  useEffect(() => {
+    if (!focused1099ContractorId || selectedContractorId !== focused1099ContractorId) return;
+
+    const timer = window.setTimeout(() => {
+      const section = document.getElementById(`contractor-1099-info-${focused1099ContractorId}`);
+      section?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 150);
+
+    return () => window.clearTimeout(timer);
+  }, [focused1099ContractorId, selectedContractorId]);
+
+  const view1099Information = (contractor: ContractorRow) => {
+    setSelectedContractorId(contractor.id);
+    setFocused1099ContractorId(contractor.id);
+    if (!contractorNotes[contractor.id]) {
+      loadContractorNotes(contractor.id).catch(() => {});
+    }
+  };
+
   const detailValue = (value?: string | number | null) => {
     if (value === null || value === undefined || value === '') return 'Not on file';
     return String(value);
@@ -772,10 +793,15 @@ export default function Contractors() {
                               </span>
                             ) : null}
                             {contractorInfoCollected && (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black bg-emerald-50 text-emerald-800 border border-emerald-200">
+                              <button
+                                type="button"
+                                onClick={() => view1099Information(contractor)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black bg-emerald-50 text-emerald-800 border border-emerald-200 transition hover:bg-emerald-100 hover:border-emerald-300"
+                                title="View 1099 information"
+                              >
                                 <FileText className="w-3.5 h-3.5" />
                                 1099 Info Collected
-                              </span>
+                              </button>
                             )}
                           </div>
                           {contractor.contact_name && <p className="text-sm text-gray-500 mt-0.5">Contact: {contractor.contact_name}</p>}
@@ -1157,15 +1183,30 @@ export default function Contractors() {
                           <span className="inline-flex rounded-full bg-gray-800 px-2.5 py-1 text-xs font-black text-gray-300">Uncategorized</span>
                         )}
                         {contractorInfoCollected ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-black text-emerald-800">
+                          <button
+                            type="button"
+                            onClick={() => view1099Information(contractor)}
+                            className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-black text-emerald-800 transition hover:bg-emerald-200"
+                            title="View 1099 information"
+                          >
                             <FileText className="h-3.5 w-3.5" />
                             1099 Info Collected
-                          </span>
+                          </button>
                         ) : null}
                       </div>
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2 md:justify-end">
+                    {contractorInfoCollected ? (
+                      <button
+                        type="button"
+                        onClick={() => view1099Information(contractor)}
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-100 px-3 py-2 text-xs font-black text-emerald-800 hover:bg-emerald-200"
+                      >
+                        <FileText className="h-3.5 w-3.5" />
+                        View 1099 Information
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => {
@@ -1232,7 +1273,14 @@ export default function Contractors() {
               </div>
 
               <div className="grid gap-4 lg:grid-cols-2">
-                <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                <div
+                  id={`contractor-1099-info-${contractor.id}`}
+                  className={`rounded-2xl border bg-gray-50 p-4 scroll-mt-6 transition-all ${
+                    focused1099ContractorId === contractor.id
+                      ? 'border-emerald-300 ring-4 ring-emerald-100'
+                      : 'border-gray-200'
+                  }`}
+                >
                   <div className="mb-3 flex items-center gap-2">
                     <ShieldCheck className="h-4 w-4 text-gray-400" />
                     <h3 className="text-sm font-black text-gray-900">Contractor Setup And 1099 Information</h3>
