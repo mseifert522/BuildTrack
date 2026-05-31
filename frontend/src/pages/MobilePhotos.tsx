@@ -9,6 +9,7 @@ import {
   FolderOpen,
   ImagePlus,
   MapPin,
+  PlayCircle,
   RefreshCw,
   Search,
   Upload,
@@ -31,8 +32,14 @@ interface ProjectPhoto {
   caption?: string;
   taken_at?: string;
   created_at: string;
+  mime_type?: string;
   uploader_name?: string;
   uploaded_by_name?: string;
+}
+
+interface LightboxMedia {
+  src: string;
+  isVideo: boolean;
 }
 
 function formatDateTime(value?: string) {
@@ -49,6 +56,11 @@ function formatDateTime(value?: string) {
 
 function clearPreviewUrls(urls: string[]) {
   urls.forEach(url => URL.revokeObjectURL(url));
+}
+
+function isVideoMedia(item: Pick<ProjectPhoto, 'filename' | 'mime_type'> | File) {
+  if (item instanceof File) return item.type.startsWith('video/') || /\.(mp4|mov|m4v|webm|avi|mkv|mpeg|mpg|3gp)$/i.test(item.name);
+  return Boolean(item.mime_type?.startsWith('video/')) || /\.(mp4|mov|m4v|webm|avi|mkv|mpeg|mpg|3gp)$/i.test(item.filename);
 }
 
 export default function MobilePhotos() {
@@ -70,7 +82,7 @@ export default function MobilePhotos() {
   const [photosLoading, setPhotosLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [showProjectSelector, setShowProjectSelector] = useState(false);
-  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<LightboxMedia | null>(null);
 
   const selectedProject = useMemo(
     () => projects.find(project => project.id === selectedProjectId) || null,
@@ -95,7 +107,7 @@ export default function MobilePhotos() {
       const res = await api.get(`/projects/${projectId}/photos?type=progress`);
       setPhotos(Array.isArray(res.data) ? res.data : []);
     } catch {
-      toast.error('Failed to load project photos');
+      toast.error('Failed to load progress photos');
     } finally {
       setPhotosLoading(false);
     }
@@ -152,7 +164,7 @@ export default function MobilePhotos() {
     if (!selectedProjectId) {
       setShowProjectSelector(true);
       if (fileInputRef.current) fileInputRef.current.value = '';
-      toast.error('Choose a project before adding photos');
+      toast.error('Choose a project before adding progress photos or videos');
       return;
     }
 
@@ -197,11 +209,11 @@ export default function MobilePhotos() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 
-      toast.success(`${previewFiles.length} photo${previewFiles.length === 1 ? '' : 's'} added to project`);
+      toast.success(`${previewFiles.length} progress item${previewFiles.length === 1 ? '' : 's'} added to project`);
       cancelUpload();
       await loadPhotos(selectedProjectId);
     } catch {
-      toast.error('Photo upload failed');
+      toast.error('Progress upload failed');
     } finally {
       setUploading(false);
     }
@@ -222,7 +234,7 @@ export default function MobilePhotos() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
           <div>
             <p style={{ color: '#111827', fontSize: 18, fontWeight: 800, margin: 0 }}>Choose Project</p>
-            <p style={{ color: '#6B7280', fontSize: 12, margin: '3px 0 0' }}>Photos cannot be uploaded without a project.</p>
+            <p style={{ color: '#6B7280', fontSize: 12, margin: '3px 0 0' }}>Progress photos and videos cannot be uploaded without a project.</p>
           </div>
           {selectedProjectId && (
             <button
@@ -287,7 +299,7 @@ export default function MobilePhotos() {
             <ArrowLeft size={19} color="white" />
           </button>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{ margin: 0, fontSize: 16, fontWeight: 850 }}>Mobile Photos</p>
+            <p style={{ margin: 0, fontSize: 16, fontWeight: 850 }}>Progress Photos</p>
             <p style={{ margin: '2px 0 0', color: '#D99D26', fontSize: 12, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {selectedProject ? selectedProject.address : 'No project selected'}
             </p>
@@ -323,7 +335,7 @@ export default function MobilePhotos() {
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,video/*"
         capture="environment"
         multiple
         onChange={handleFileSelect}
@@ -337,7 +349,7 @@ export default function MobilePhotos() {
             style={{ width: '100%', border: '1px dashed #D99D26', background: '#FFFBEB', borderRadius: 16, padding: 18, color: '#92400E', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
           >
             <FolderOpen size={18} color="#D99D26" />
-            Choose a project to add photos
+            Choose a project to add progress photos
           </button>
         )}
 
@@ -347,7 +359,7 @@ export default function MobilePhotos() {
             <p style={{ margin: '3px 0 0', color: '#6B7280', fontSize: 12 }}>{selectedProject.job_name || selectedProject.status || 'Selected project'}</p>
             <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 10, color: '#6B7280', fontSize: 11, fontWeight: 700 }}>
               <Clock size={13} color="#6B7280" />
-              New photos will be stamped with each file's captured time when available.
+              New photos and videos will be stamped with each file's captured time when available.
             </div>
           </div>
         )}
@@ -363,7 +375,14 @@ export default function MobilePhotos() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 7, marginBottom: 12 }}>
               {previewUrls.map((url, index) => (
                 <div key={url} style={{ position: 'relative', aspectRatio: '1 / 1', borderRadius: 10, overflow: 'hidden', background: '#F3F4F6' }}>
-                  <img src={url} alt={`Selected ${index + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  {isVideoMedia(previewFiles[index]) ? (
+                    <>
+                      <video src={url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted playsInline />
+                      <PlayCircle size={24} color="white" style={{ position: 'absolute', inset: 0, margin: 'auto', filter: 'drop-shadow(0 1px 4px rgba(0,0,0,0.65))' }} />
+                    </>
+                  ) : (
+                    <img src={url} alt={`Selected ${index + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  )}
                 </div>
               ))}
             </div>
@@ -379,14 +398,14 @@ export default function MobilePhotos() {
               style={{ width: '100%', border: 'none', borderRadius: 13, padding: '12px 14px', background: 'linear-gradient(135deg, #D99D26, #C4891F)', color: 'white', fontSize: 14, fontWeight: 850, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: uploading ? 0.72 : 1 }}
             >
               <Upload size={17} color="white" />
-              {uploading ? 'Uploading...' : `Upload ${previewFiles.length} Photo${previewFiles.length === 1 ? '' : 's'}`}
+              {uploading ? 'Uploading...' : `Upload ${previewFiles.length} Item${previewFiles.length === 1 ? '' : 's'}`}
             </button>
           </div>
         )}
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '2px 2px 10px' }}>
           <p style={{ margin: 0, color: '#6B7280', fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-            {photos.length} Project Photo{photos.length === 1 ? '' : 's'}
+            {photos.length} Progress Item{photos.length === 1 ? '' : 's'}
           </p>
           {photosLoading && <RefreshCw size={14} color="#9CA3AF" style={{ animation: 'spin 0.8s linear infinite' }} />}
         </div>
@@ -394,8 +413,8 @@ export default function MobilePhotos() {
         {photos.length === 0 ? (
           <div style={{ textAlign: 'center', background: 'white', borderRadius: 18, padding: '44px 18px', boxShadow: '0 1px 8px rgba(0,0,0,0.06)' }}>
             <ImagePlus size={42} color="#D1D5DB" />
-            <p style={{ margin: '12px 0 4px', color: '#374151', fontSize: 15, fontWeight: 850 }}>No project photos yet</p>
-            <p style={{ margin: 0, color: '#9CA3AF', fontSize: 12 }}>Choose Add to capture or upload progress pictures.</p>
+            <p style={{ margin: '12px 0 4px', color: '#374151', fontSize: 15, fontWeight: 850 }}>No progress photos yet</p>
+            <p style={{ margin: 0, color: '#9CA3AF', fontSize: 12 }}>Choose Add to capture or upload progress photos and videos.</p>
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 9 }}>
@@ -403,17 +422,25 @@ export default function MobilePhotos() {
               const src = photo.filename.startsWith('http')
                 ? photo.filename
                 : `${photoBaseUrl}/uploads/${selectedProjectId}/${photo.filename}`;
+              const isVideo = isVideoMedia(photo);
               return (
                 <button
                   key={photo.id}
-                  onClick={() => setLightbox(src)}
+                  onClick={() => setLightbox({ src, isVideo })}
                   style={{ border: 'none', background: 'white', borderRadius: 14, overflow: 'hidden', padding: 0, textAlign: 'left', boxShadow: '0 1px 8px rgba(0,0,0,0.08)' }}
                 >
                   <div style={{ aspectRatio: '1 / 1', background: '#E5E7EB' }}>
-                    <img src={src} alt={photo.caption || photo.original_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    {isVideo ? (
+                      <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+                        <video src={src} style={{ width: '100%', height: '100%', objectFit: 'cover' }} preload="metadata" muted playsInline />
+                        <PlayCircle size={30} color="white" style={{ position: 'absolute', inset: 0, margin: 'auto', filter: 'drop-shadow(0 1px 4px rgba(0,0,0,0.65))' }} />
+                      </div>
+                    ) : (
+                      <img src={src} alt={photo.caption || photo.original_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    )}
                   </div>
                   <div style={{ padding: 9 }}>
-                    <p style={{ margin: 0, color: '#111827', fontSize: 11, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{photo.caption || photo.original_name || 'Project photo'}</p>
+                    <p style={{ margin: 0, color: '#111827', fontSize: 11, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{photo.caption || photo.original_name || (isVideo ? 'Project video' : 'Progress photo')}</p>
                     <p style={{ margin: '3px 0 0', color: '#6B7280', fontSize: 10 }}>{formatDateTime(photo.taken_at || photo.created_at)}</p>
                     {(photo.uploader_name || photo.uploaded_by_name) && (
                       <p style={{ margin: '2px 0 0', color: '#D99D26', fontSize: 10, fontWeight: 700 }}>{photo.uploader_name || photo.uploaded_by_name}</p>
@@ -430,7 +457,11 @@ export default function MobilePhotos() {
 
       {lightbox && (
         <div onClick={() => setLightbox(null)} style={{ position: 'fixed', inset: 0, zIndex: 260, background: 'rgba(0,0,0,0.95)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <img src={lightbox} alt="Project photo" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+          {lightbox.isVideo ? (
+            <video src={lightbox.src} controls autoPlay style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 8 }} onClick={event => event.stopPropagation()} />
+          ) : (
+            <img src={lightbox.src} alt="Project photo" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+          )}
           <button
             onClick={() => setLightbox(null)}
             style={{ position: 'absolute', top: 18, right: 18, width: 40, height: 40, borderRadius: 20, border: 'none', background: 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
-import { ArrowLeft, Camera, X, ZoomIn } from 'lucide-react';
+import { ArrowLeft, Camera, PlayCircle, X, ZoomIn } from 'lucide-react';
 
 interface ProgressPhoto {
   id: string;
@@ -11,7 +11,18 @@ interface ProgressPhoto {
   caption?: string;
   taken_at?: string;
   created_at: string;
+  mime_type?: string;
   uploaded_by_name?: string;
+}
+
+interface LightboxMedia {
+  src: string;
+  isVideo: boolean;
+}
+
+function isVideoMedia(item: Pick<ProgressPhoto, 'filename' | 'mime_type'> | File) {
+  if (item instanceof File) return item.type.startsWith('video/') || /\.(mp4|mov|m4v|webm|avi|mkv|mpeg|mpg|3gp)$/i.test(item.name);
+  return Boolean(item.mime_type?.startsWith('video/')) || /\.(mp4|mov|m4v|webm|avi|mkv|mpeg|mpg|3gp)$/i.test(item.filename);
 }
 
 function formatDateTime(iso: string) {
@@ -47,7 +58,7 @@ export default function MobileProgress() {
   const [caption, setCaption] = useState('');
   const [previewFiles, setPreviewFiles] = useState<File[]>([]);
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
-  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<LightboxMedia | null>(null);
   const [showUpload, setShowUpload] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -87,7 +98,7 @@ export default function MobileProgress() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 
-      toast.success(`${previewFiles.length} photo${previewFiles.length > 1 ? 's' : ''} uploaded!`);
+      toast.success(`${previewFiles.length} progress item${previewFiles.length > 1 ? 's' : ''} uploaded!`);
       const res = await api.get(`/projects/${projectId}/photos?type=progress`).catch(() => api.get(`/projects/${projectId}/photos`));
       setPhotos(Array.isArray(res.data) ? res.data : []);
       setPreviewFiles([]);
@@ -145,11 +156,11 @@ export default function MobileProgress() {
               }}
             >
               <Camera size={16} color="white" />
-              Take / Upload Photo
+            Add Photo or Video
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*"
+                accept="image/*,video/*"
                 capture="environment"
                 multiple
                 onChange={handleFileSelect}
@@ -182,7 +193,14 @@ export default function MobileProgress() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 14 }}>
               {previewUrls.map((url, i) => (
                 <div key={i} style={{ position: 'relative', paddingBottom: '100%', borderRadius: 10, overflow: 'hidden', background: '#F3F4F6' }}>
-                  <img src={url} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+                  {isVideoMedia(previewFiles[i]) ? (
+                    <>
+                      <video src={url} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} muted playsInline />
+                      <PlayCircle size={26} color="white" style={{ position: 'absolute', inset: 0, margin: 'auto', filter: 'drop-shadow(0 1px 4px rgba(0,0,0,0.65))' }} />
+                    </>
+                  ) : (
+                    <img src={url} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+                  )}
                 </div>
               ))}
             </div>
@@ -208,7 +226,7 @@ export default function MobileProgress() {
                 disabled={uploading}
                 style={{ flex: 2, background: 'linear-gradient(135deg, #D99D26, #C4891F)', color: 'white', border: 'none', borderRadius: 12, padding: '12px 0', fontSize: 14, fontWeight: 700, cursor: 'pointer', opacity: uploading ? 0.7 : 1 }}
               >
-                {uploading ? 'Uploading...' : `Upload ${previewFiles.length} Photo${previewFiles.length > 1 ? 's' : ''}`}
+                {uploading ? 'Uploading...' : `Upload ${previewFiles.length} Item${previewFiles.length > 1 ? 's' : ''}`}
               </button>
             </div>
           </div>
@@ -221,7 +239,11 @@ export default function MobileProgress() {
           onClick={() => setLightbox(null)}
           style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(0,0,0,0.95)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         >
-          <img src={lightbox} alt="Full size" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 8 }} />
+          {lightbox.isVideo ? (
+            <video src={lightbox.src} controls autoPlay style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 8 }} onClick={event => event.stopPropagation()} />
+          ) : (
+            <img src={lightbox.src} alt="Full size" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 8 }} />
+          )}
           <button
             onClick={() => setLightbox(null)}
             style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: '50%', width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
@@ -245,7 +267,7 @@ export default function MobileProgress() {
             </div>
             <p style={{ color: 'rgba(255,255,255,0.7)', fontWeight: 700, fontSize: 16, margin: '0 0 8px' }}>No progress photos yet</p>
             <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, margin: 0 }}>
-              Tap "Take / Upload Photo" to document construction progress
+              Tap "Add Photo or Video" to document construction progress
             </p>
           </div>
         ) : (
@@ -266,19 +288,27 @@ export default function MobileProgress() {
                   const src = photo.filename.startsWith('http')
                     ? photo.filename
                     : `${photoBaseUrl}/uploads/${projectId}/${photo.filename}`;
+                  const isVideo = isVideoMedia(photo);
                   return (
                     <div
                       key={photo.id}
                       style={{ borderRadius: 14, overflow: 'hidden', background: '#1A1F2B', cursor: 'pointer' }}
-                      onClick={() => setLightbox(src)}
+                      onClick={() => setLightbox({ src, isVideo })}
                     >
                       <div style={{ position: 'relative', paddingBottom: '75%' }}>
-                        <img
-                          src={src}
-                          alt={photo.caption || photo.original_name}
-                          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
-                          onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                        />
+                        {isVideo ? (
+                          <>
+                            <video src={src} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} preload="metadata" muted playsInline />
+                            <PlayCircle size={32} color="white" style={{ position: 'absolute', inset: 0, margin: 'auto', filter: 'drop-shadow(0 1px 4px rgba(0,0,0,0.65))' }} />
+                          </>
+                        ) : (
+                          <img
+                            src={src}
+                            alt={photo.caption || photo.original_name}
+                            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+                            onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                          />
+                        )}
                         <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'linear-gradient(transparent, rgba(0,0,0,0.7))', padding: '16px 8px 6px' }}>
                           <ZoomIn size={12} color="rgba(255,255,255,0.7)" style={{ float: 'right' }} />
                         </div>

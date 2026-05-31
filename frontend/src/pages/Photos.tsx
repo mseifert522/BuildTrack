@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../lib/api';
 import { Loading } from '../components/ui';
-import { Camera, Search, Grid, List } from 'lucide-react';
+import { Camera, Grid, List, PlayCircle, Upload, X } from 'lucide-react';
 import { format } from 'date-fns';
+import toast from 'react-hot-toast';
 
 interface Photo {
   id: string;
@@ -13,53 +14,113 @@ interface Photo {
   uploader_name: string;
   category_name: string;
   created_at: string;
+  taken_at?: string;
+  mime_type?: string;
   project_id: string;
   project_address?: string;
+}
+
+interface LightboxMedia {
+  src: string;
+  isVideo: boolean;
+}
+
+function isVideoMedia(item: Pick<Photo, 'filename' | 'mime_type'>) {
+  return Boolean(item.mime_type?.startsWith('video/')) || /\.(mp4|mov|m4v|webm|avi|mkv|mpeg|mpg|3gp)$/i.test(item.filename);
+}
+
+function mediaLabel(count: number) {
+  return `${count} progress item${count === 1 ? '' : 's'}`;
 }
 
 export default function Photos() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
   const [view, setView] = useState<'grid' | 'list'>('grid');
-  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<LightboxMedia | null>(null);
   const [selectedProject, setSelectedProject] = useState('');
+  const [caption, setCaption] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const projRes = await api.get('/projects');
+      setProjects(projRes.data);
+
+      const allPhotos: Photo[] = [];
+      const projectsToLoad = selectedProject
+        ? projRes.data.filter((p: any) => p.id === selectedProject)
+        : projRes.data;
+
+      for (const proj of projectsToLoad) {
+        try {
+          const res = await api.get(`/projects/${proj.id}/photos?type=progress`);
+          res.data.forEach((photo: Photo) => {
+            allPhotos.push({ ...photo, project_address: proj.address });
+          });
+        } catch (err) {}
+      }
+      setPhotos(allPhotos.sort((a, b) => new Date(b.taken_at || b.created_at).getTime() - new Date(a.taken_at || a.created_at).getTime()));
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to load progress photos');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        const projRes = await api.get('/projects');
-        setProjects(projRes.data);
-
-        const allPhotos: Photo[] = [];
-        const projectsToLoad = selectedProject
-          ? projRes.data.filter((p: any) => p.id === selectedProject)
-          : projRes.data;
-
-        for (const proj of projectsToLoad) {
-          try {
-            const res = await api.get(`/projects/${proj.id}/photos`);
-            res.data.forEach((photo: Photo) => {
-              allPhotos.push({ ...photo, project_address: proj.address });
-            });
-          } catch (err) {}
-        }
-        setPhotos(allPhotos.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    };
     load();
   }, [selectedProject]);
+
+  const uploadMedia = async (files?: FileList | null) => {
+    if (!files || files.length === 0) return;
+    if (!selectedProject) {
+      toast.error('Select a project before uploading progress photos or videos');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      Array.from(files).forEach(file => formData.append('photos', file));
+      if (caption.trim()) formData.append('caption', caption.trim());
+      formData.append('photo_type', 'progress');
+      formData.append('taken_at_values', JSON.stringify(
+        Array.from(files).map(file => new Date(file.lastModified || Date.now()).toISOString())
+      ));
+
+      await api.post(`/projects/${selectedProject}/photos?type=progress`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      toast.success(`${files.length} progress item${files.length === 1 ? '' : 's'} uploaded`);
+      setCaption('');
+      await load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Upload failed');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const openMedia = (photo: Photo) => {
+    setLightbox({
+      src: `/uploads/${photo.project_id}/${photo.filename}`,
+      isVideo: isVideoMedia(photo),
+    });
+  };
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-5">
         <div>
           <h1 className="text-xl font-bold text-gray-900">Progress Photos</h1>
-          <p className="text-sm text-gray-500 mt-0.5">{photos.length} photos</p>
+          <p className="text-sm text-gray-500 mt-0.5">{mediaLabel(photos.length)}</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setView('grid')} className={`p-2 rounded-lg transition-colors ${view === 'grid' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
@@ -71,73 +132,118 @@ export default function Photos() {
         </div>
       </div>
 
-      {/* Filter by project */}
-      <div className="mb-5">
-        <select value={selectedProject} onChange={e => setSelectedProject(e.target.value)} className="w-full sm:w-auto px-3.5 py-2.5 rounded-xl border border-gray-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+      <div className="mb-5 grid gap-3 lg:grid-cols-[minmax(260px,380px)_1fr]">
+        <select value={selectedProject} onChange={e => setSelectedProject(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
           <option value="">All Projects</option>
           {projects.map(p => <option key={p.id} value={p.id}>{p.address}</option>)}
         </select>
+
+        <div className="rounded-xl border border-gray-200 bg-white p-3">
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              value={caption}
+              onChange={e => setCaption(e.target.value)}
+              placeholder="Optional caption for this upload"
+              className="min-w-0 flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <label className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold transition-colors ${selectedProject ? 'bg-blue-600 text-white cursor-pointer hover:bg-blue-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept="image/*,video/*"
+                disabled={!selectedProject || uploading}
+                onChange={e => uploadMedia(e.target.files)}
+                className="hidden"
+              />
+              {uploading ? <Upload className="w-4 h-4 animate-pulse" /> : <Camera className="w-4 h-4" />}
+              {uploading ? 'Uploading...' : 'Upload Progress Photos / Videos'}
+            </label>
+          </div>
+          <p className="text-xs text-gray-500 mt-2">
+            {selectedProject ? 'Media will be hosted under the selected project with captured timestamp metadata.' : 'Select a project to add progress photos or project videos.'}
+          </p>
+        </div>
       </div>
 
       {loading ? <Loading /> : (
         photos.length === 0 ? (
           <div className="text-center py-16 bg-white rounded-xl border border-gray-200">
             <Camera className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-            <p className="text-gray-500 font-medium">No photos yet</p>
-            <p className="text-gray-400 text-sm mt-1">Upload photos from any project page</p>
+            <p className="text-gray-500 font-medium">No progress photos yet</p>
+            <p className="text-gray-400 text-sm mt-1">Select a project above to upload photos or videos</p>
           </div>
         ) : view === 'grid' ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
-            {photos.map(photo => (
-              <div
-                key={photo.id}
-                className="relative group aspect-square rounded-xl overflow-hidden bg-gray-100 cursor-pointer"
-                onClick={() => setLightbox(`/uploads/${photo.project_id}/${photo.filename}`)}
-              >
-                <img
-                  src={`/uploads/${photo.project_id}/${photo.filename}`}
-                  alt={photo.original_name}
-                  className="w-full h-full object-cover transition-transform group-hover:scale-105"
-                  loading="lazy"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                <div className="absolute bottom-0 left-0 right-0 p-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <p className="text-white text-xs font-medium truncate">{photo.project_address}</p>
-                  {photo.category_name && <p className="text-white/70 text-xs truncate">{photo.category_name}</p>}
-                  <p className="text-white/60 text-xs">{format(new Date(photo.created_at), 'MMM d, yyyy')}</p>
+            {photos.map(photo => {
+              const src = `/uploads/${photo.project_id}/${photo.filename}`;
+              const isVideo = isVideoMedia(photo);
+              return (
+                <div
+                  key={photo.id}
+                  className="relative group aspect-square rounded-xl overflow-hidden bg-gray-100 cursor-pointer"
+                  onClick={() => openMedia(photo)}
+                >
+                  {isVideo ? (
+                    <video src={src} className="w-full h-full object-cover transition-transform group-hover:scale-105" preload="metadata" muted playsInline />
+                  ) : (
+                    <img src={src} alt={photo.original_name} className="w-full h-full object-cover transition-transform group-hover:scale-105" loading="lazy" />
+                  )}
+                  {isVideo && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                      <PlayCircle className="w-11 h-11 text-white drop-shadow" />
+                    </div>
+                  )}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <div className="absolute bottom-0 left-0 right-0 p-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <p className="text-white text-xs font-medium truncate">{photo.project_address}</p>
+                    {photo.category_name && <p className="text-white/70 text-xs truncate">{photo.category_name}</p>}
+                    <p className="text-white/60 text-xs">{format(new Date(photo.taken_at || photo.created_at), 'MMM d, yyyy')}</p>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="space-y-2">
-            {photos.map(photo => (
-              <div key={photo.id} className="bg-white rounded-xl border border-gray-200 p-3 flex items-center gap-3">
-                <div
-                  className="w-16 h-16 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0 cursor-pointer"
-                  onClick={() => setLightbox(`/uploads/${photo.project_id}/${photo.filename}`)}
-                >
-                  <img src={`/uploads/${photo.project_id}/${photo.filename}`} alt="" className="w-full h-full object-cover" />
+            {photos.map(photo => {
+              const src = `/uploads/${photo.project_id}/${photo.filename}`;
+              const isVideo = isVideoMedia(photo);
+              return (
+                <div key={photo.id} className="bg-white rounded-xl border border-gray-200 p-3 flex items-center gap-3">
+                  <div className="w-16 h-16 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0 cursor-pointer relative" onClick={() => openMedia(photo)}>
+                    {isVideo ? (
+                      <>
+                        <video src={src} className="w-full h-full object-cover" preload="metadata" muted playsInline />
+                        <PlayCircle className="absolute inset-0 m-auto w-7 h-7 text-white drop-shadow" />
+                      </>
+                    ) : (
+                      <img src={src} alt="" className="w-full h-full object-cover" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">{photo.project_address}</p>
+                    <p className="text-xs text-gray-500">{isVideo ? 'Project video' : 'Progress photo'} / {photo.uploader_name}</p>
+                    {photo.caption && <p className="text-xs text-gray-400 truncate">{photo.caption}</p>}
+                    <p className="text-xs text-gray-400">{format(new Date(photo.taken_at || photo.created_at), 'MMM d, yyyy h:mm a')}</p>
+                  </div>
+                  <Link to={`/projects/${photo.project_id}`} className="text-xs text-blue-600 hover:underline flex-shrink-0">View Project</Link>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900 truncate">{photo.project_address}</p>
-                  <p className="text-xs text-gray-500">{photo.category_name || 'Uncategorized'} · {photo.uploader_name}</p>
-                  {photo.caption && <p className="text-xs text-gray-400 truncate">{photo.caption}</p>}
-                  <p className="text-xs text-gray-400">{format(new Date(photo.created_at), 'MMM d, yyyy h:mm a')}</p>
-                </div>
-                <Link to={`/projects/${photo.project_id}`} className="text-xs text-blue-600 hover:underline flex-shrink-0">View Project</Link>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )
       )}
 
-      {/* Lightbox */}
       {lightbox && (
         <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4" onClick={() => setLightbox(null)}>
-          <img src={lightbox} alt="" className="max-w-full max-h-full object-contain rounded-lg" />
+          {lightbox.isVideo ? (
+            <video src={lightbox.src} controls autoPlay className="max-w-full max-h-full rounded-lg" onClick={e => e.stopPropagation()} />
+          ) : (
+            <img src={lightbox.src} alt="" className="max-w-full max-h-full object-contain rounded-lg" />
+          )}
           <button className="absolute top-4 right-4 text-white/70 hover:text-white" onClick={() => setLightbox(null)}>
-            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            <X className="w-8 h-8" />
           </button>
         </div>
       )}

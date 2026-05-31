@@ -81,14 +81,14 @@ export default function MobileHome() {
     if (managementUser) {
       return [
         { key: 'projects' as Tab, label: 'Projects', Icon: FolderOpen, color: '#2563EB' },
-        { key: 'photos' as Tab, label: 'Photos', Icon: Camera, color: '#D99D26' },
+        { key: 'photos' as Tab, label: 'Progress Photos', Icon: Camera, color: '#D99D26' },
         { key: 'contractors' as Tab, label: 'Contractors', Icon: Users, color: '#16A34A' },
         { key: 'suppliers' as Tab, label: 'Suppliers', Icon: Truck, color: '#7C3AED' },
       ];
     }
     return [
       { key: 'projects' as Tab, label: 'Projects', Icon: FolderOpen, color: '#2563EB' },
-      { key: 'photos' as Tab, label: 'Photos', Icon: Camera, color: '#D99D26' },
+      { key: 'photos' as Tab, label: 'Progress Photos', Icon: Camera, color: '#D99D26' },
       { key: 'invoices' as Tab, label: 'Invoice', Icon: FileText, color: '#7C3AED' },
     ];
   }, [managementUser]);
@@ -270,7 +270,7 @@ export default function MobileHome() {
                     <FolderOpen size={15} color="#2563EB" /> Open
                   </button>
                   <button onClick={() => navigate(`/mobile/photos?projectId=${project.id}`)} style={{ border: 'none', borderLeft: '1px solid #F3F4F6', background: '#FAFAFA', padding: '10px 4px', fontSize: 11, fontWeight: 850, color: '#D99D26', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
-                    <Camera size={15} color="#D99D26" /> Photos
+                    <Camera size={15} color="#D99D26" /> Progress
                   </button>
                   {!managementUser && (
                     <button onClick={() => navigate(`/mobile/project/${project.id}/invoice`)} style={{ border: 'none', borderLeft: '1px solid #F3F4F6', background: '#FAFAFA', padding: '10px 4px', fontSize: 11, fontWeight: 850, color: '#7C3AED', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
@@ -294,9 +294,9 @@ export default function MobileHome() {
                   <Camera size={22} color="white" />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ margin: 0, fontSize: 15, fontWeight: 900 }}>Add Project Photos</p>
+                  <p style={{ margin: 0, fontSize: 15, fontWeight: 900 }}>Add Progress Photos</p>
                   <p style={{ margin: '3px 0 0', fontSize: 12, opacity: 0.82, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {rememberedProject ? `Continue with ${rememberedProject.address}` : 'Choose a project before uploading'}
+                    {rememberedProject ? `Continue with ${rememberedProject.address}` : 'Choose a project before uploading photos or videos'}
                   </p>
                 </div>
                 <ChevronRight size={18} color="white" />
@@ -315,7 +315,7 @@ export default function MobileHome() {
                 <Camera size={18} color="#D99D26" />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <p style={{ color: '#111827', margin: 0, fontSize: 13, fontWeight: 850, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{project.address}</p>
-                  <p style={{ color: '#6B7280', margin: '2px 0 0', fontSize: 11 }}>Upload timestamped photos</p>
+                  <p style={{ color: '#6B7280', margin: '2px 0 0', fontSize: 11 }}>Upload timestamped photos or videos</p>
                 </div>
                 <ChevronRight size={16} color="#9CA3AF" />
               </button>

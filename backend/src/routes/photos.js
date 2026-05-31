@@ -12,6 +12,10 @@ router.use(authenticate);
 router.use(authorizeProjectAccess);
 
 const PHOTO_TYPES = new Set(['general', 'progress', 'note', 'construction_plan', 'material']);
+const IMAGE_EXTENSIONS = new Set(['.jpeg', '.jpg', '.png', '.gif', '.webp', '.heic', '.heif']);
+const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.m4v', '.webm', '.avi', '.mkv', '.mpeg', '.mpg', '.3gp']);
+const configuredMediaMaxMb = Number.parseInt(process.env.PROJECT_MEDIA_MAX_MB || '500', 10);
+const MEDIA_FILE_SIZE_LIMIT = (Number.isFinite(configuredMediaMaxMb) ? configuredMediaMaxMb : 500) * 1024 * 1024;
 
 function normalizePhotoType(value) {
   const requested = String(value || 'general').trim();
@@ -56,14 +60,15 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-  const allowed = /jpeg|jpg|png|gif|webp|heic|heif/;
-  const ext = allowed.test(path.extname(file.originalname).toLowerCase());
-  const mime = allowed.test(file.mimetype) || file.mimetype === 'image/heic' || file.mimetype === 'image/heif';
-  if (ext || mime) cb(null, true);
-  else cb(new Error('Only image files are allowed'));
+  const ext = path.extname(file.originalname).toLowerCase();
+  const mime = String(file.mimetype || '').toLowerCase();
+  const isImage = IMAGE_EXTENSIONS.has(ext) || mime.startsWith('image/') || mime === 'image/heic' || mime === 'image/heif';
+  const isVideo = VIDEO_EXTENSIONS.has(ext) || mime.startsWith('video/') || mime === 'application/mp4' || mime === 'application/quicktime';
+  if (isImage || isVideo) cb(null, true);
+  else cb(new Error('Only image or video files are allowed'));
 };
 
-const upload = multer({ storage, fileFilter, limits: { fileSize: 20 * 1024 * 1024 } }); // 20MB
+const upload = multer({ storage, fileFilter, limits: { fileSize: MEDIA_FILE_SIZE_LIMIT, files: 20 } });
 
 // GET /api/projects/:projectId/photos
 router.get('/', (req, res) => {
@@ -121,7 +126,7 @@ router.get('/progress', (req, res) => {
   res.json(photos);
 });
 
-// POST /api/projects/:projectId/photos - upload photos
+// POST /api/projects/:projectId/photos - upload project media
 router.post('/', upload.array('photos', 20), (req, res) => {
   try {
     if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No files uploaded' });
@@ -163,7 +168,7 @@ router.post('/', upload.array('photos', 20), (req, res) => {
       inserted.push({ id, filename: storedFilename, original_name: file.originalname, taken_at: takenAt });
     }
 
-    logActivity({ userId: req.user.id, projectId: req.params.projectId, action: 'photos_uploaded', entityType: 'photo', details: { count: req.files.length, type: photoType, note_id: note_id || null } });
+    logActivity({ userId: req.user.id, projectId: req.params.projectId, action: 'project_media_uploaded', entityType: 'photo', details: { count: req.files.length, type: photoType, note_id: note_id || null } });
     res.status(201).json({ uploaded: inserted.length, photos: inserted });
   } catch (err) {
     console.error(err);
