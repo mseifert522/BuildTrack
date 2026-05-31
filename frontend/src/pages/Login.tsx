@@ -4,6 +4,9 @@ import { useAuthStore } from '../store/authStore';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
 
+const DEVICE_TOKEN_KEY = 'bt_device_token';
+const DEVICE_TRUSTED_UNTIL_KEY = 'bt_device_trusted_until';
+
 const landingPathFor = (user: { role?: string; force_password_reset?: boolean }) => {
   if (user.force_password_reset) return '/change-password';
   return user.role === 'contractor' ? '/mobile' : '/dashboard';
@@ -19,6 +22,13 @@ const clearReviewSummaryDismissals = (user: { id?: string; role?: string }) => {
 const queueLoginReviewSummary = (user: { id?: string; role?: string }) => {
   if (!user.id || user.role === 'contractor') return;
   sessionStorage.setItem(`buildtrack-login-review-summary:${user.id}`, '1');
+};
+
+const saveTrustedDevice = (data: { device_token?: string; trusted_device_expires_at?: string }) => {
+  if (data.device_token) localStorage.setItem(DEVICE_TOKEN_KEY, data.device_token);
+  if (data.trusted_device_expires_at) {
+    localStorage.setItem(DEVICE_TRUSTED_UNTIL_KEY, data.trusted_device_expires_at);
+  }
 };
 
 export default function Login() {
@@ -43,15 +53,16 @@ export default function Login() {
     e.preventDefault();
     setLoading(true);
     try {
-      const deviceToken = localStorage.getItem('bt_device_token') || undefined;
+      const deviceToken = localStorage.getItem(DEVICE_TOKEN_KEY) || undefined;
       const res = await api.post('/auth/login', { email, password, device_token: deviceToken });
 
       if (res.data.requires_2fa) {
+        setTrustDevice(stayLoggedIn);
         setNeeds2FA(true);
         toast.success('Verification code sent to your email');
       } else {
         localStorage.setItem('stayLoggedIn', stayLoggedIn ? 'true' : 'false');
-        if (res.data.device_token) localStorage.setItem('bt_device_token', res.data.device_token);
+        saveTrustedDevice(res.data);
         setAuth(res.data.user, res.data.token);
         clearReviewSummaryDismissals(res.data.user);
         queueLoginReviewSummary(res.data.user);
@@ -68,12 +79,20 @@ export default function Login() {
     e.preventDefault();
     setTwofaLoading(true);
     try {
-      const res = await api.post('/auth/login', { email, password, twofa_code: twofaCode, trust_device: trustDevice });
+      const rememberThisDevice = trustDevice || stayLoggedIn;
+      const deviceToken = localStorage.getItem(DEVICE_TOKEN_KEY) || undefined;
+      const res = await api.post('/auth/login', {
+        email,
+        password,
+        twofa_code: twofaCode,
+        device_token: deviceToken,
+        trust_device: rememberThisDevice,
+      });
       if (res.data.requires_2fa) {
         toast.error('Invalid or expired code. Try again.');
       } else {
-        localStorage.setItem('stayLoggedIn', stayLoggedIn ? 'true' : 'false');
-        if (res.data.device_token) localStorage.setItem('bt_device_token', res.data.device_token);
+        localStorage.setItem('stayLoggedIn', rememberThisDevice ? 'true' : 'false');
+        saveTrustedDevice(res.data);
         setAuth(res.data.user, res.data.token);
         clearReviewSummaryDismissals(res.data.user);
         queueLoginReviewSummary(res.data.user);
@@ -268,12 +287,15 @@ export default function Login() {
                 <input
                   type="checkbox"
                   checked={trustDevice}
-                  onChange={e => setTrustDevice(e.target.checked)}
+                  onChange={e => {
+                    setTrustDevice(e.target.checked);
+                    setStayLoggedIn(e.target.checked);
+                  }}
                   className="mt-0.5 h-4 w-4 rounded border-gray-300"
                   style={{ accentColor: '#D99D26' }}
                 />
                 <span>
-                  <span className="block text-sm font-bold text-gray-900">Trust this device for 60 days</span>
+                  <span className="block text-sm font-bold text-gray-900">Remember this desktop for 60 days</span>
                   <span className="block text-xs text-gray-500 mt-0.5">Skip email verification on this computer until the trusted period expires.</span>
                 </span>
               </label>
@@ -390,12 +412,16 @@ export default function Login() {
               style={{ background: 'white', border: '2px solid #E5E7EB' }}
             >
               <div>
-                <p className="text-sm font-semibold text-gray-800">Keep me signed in</p>
-                <p className="text-xs text-gray-400 mt-0.5">Stay logged in on this device</p>
+                <p className="text-sm font-semibold text-gray-800">Remember this desktop</p>
+                <p className="text-xs text-gray-400 mt-0.5">Keep this browser trusted for email verification</p>
               </div>
               <button
                 type="button"
-                onClick={() => setStayLoggedIn(!stayLoggedIn)}
+                onClick={() => {
+                  const nextStayLoggedIn = !stayLoggedIn;
+                  setStayLoggedIn(nextStayLoggedIn);
+                  setTrustDevice(nextStayLoggedIn);
+                }}
                 className="relative flex-shrink-0 ml-4 transition-all duration-300"
                 style={{
                   width: 52,

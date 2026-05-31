@@ -13,6 +13,18 @@ const MANAGEMENT_ROLES = ['super_admin', 'operations_manager', 'project_manager'
 const TRUSTED_DEVICE_DAYS = 60;
 const SESSION_EXPIRES_IN = '45m';
 
+function sqliteDateTime(date) {
+  return date.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
+}
+
+function minutesFromNow(minutes) {
+  return sqliteDateTime(new Date(Date.now() + minutes * 60 * 1000));
+}
+
+function daysFromNow(days) {
+  return sqliteDateTime(new Date(Date.now() + days * 24 * 60 * 60 * 1000));
+}
+
 function generate2FACode() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
@@ -65,7 +77,7 @@ function issueSession(db, user, details) {
 function isDeviceTrusted(db, userId, deviceToken) {
   if (!deviceToken) return false;
   const device = db.prepare(
-    "SELECT id FROM trusted_devices WHERE user_id = ? AND device_token = ? AND expires_at > datetime('now')"
+    "SELECT id FROM trusted_devices WHERE user_id = ? AND device_token = ? AND datetime(expires_at) > datetime('now')"
   ).get(userId, deviceToken);
   return !!device;
 }
@@ -96,7 +108,7 @@ router.post('/login', async (req, res) => {
     if (twofa_code) {
       const codeRow = db.prepare(`
         SELECT * FROM two_factor_codes
-        WHERE user_id = ? AND code = ? AND used = 0 AND expires_at > datetime('now')
+        WHERE user_id = ? AND code = ? AND used = 0 AND datetime(expires_at) > datetime('now')
         ORDER BY created_at DESC LIMIT 1
       `).get(user.id, twofa_code);
 
@@ -109,7 +121,7 @@ router.post('/login', async (req, res) => {
 
       if (trust_device) {
         const newDeviceToken = crypto.randomBytes(32).toString('hex');
-        const expiresAt = new Date(Date.now() + TRUSTED_DEVICE_DAYS * 24 * 60 * 60 * 1000).toISOString();
+        const expiresAt = daysFromNow(TRUSTED_DEVICE_DAYS);
         db.prepare(`
           INSERT INTO trusted_devices (id, user_id, device_token, user_agent, ip_address, expires_at)
           VALUES (?, ?, ?, ?, ?, ?)
@@ -128,7 +140,7 @@ router.post('/login', async (req, res) => {
     db.prepare('UPDATE two_factor_codes SET used = 1 WHERE user_id = ? AND used = 0').run(user.id);
 
     const code = generate2FACode();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    const expiresAt = minutesFromNow(10);
     db.prepare(
       'INSERT INTO two_factor_codes (id, user_id, code, expires_at) VALUES (?, ?, ?, ?)'
     ).run(uuidv4(), user.id, code, expiresAt);
@@ -203,7 +215,7 @@ router.post('/forgot-password', async (req, res) => {
     if (!user) return res.json({ message: 'If that email exists, a reset link has been sent.' });
 
     const token = crypto.randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const expiresAt = minutesFromNow(60);
     db.prepare('UPDATE password_reset_tokens SET used = 1 WHERE user_id = ?').run(user.id);
     db.prepare(
       'INSERT INTO password_reset_tokens (id, user_id, token, expires_at) VALUES (?, ?, ?, ?)'
@@ -234,7 +246,7 @@ router.post('/reset-password', async (req, res) => {
 
     const db = getDb();
     const resetToken = db.prepare(
-      "SELECT * FROM password_reset_tokens WHERE token = ? AND used = 0 AND expires_at > datetime('now')"
+      "SELECT * FROM password_reset_tokens WHERE token = ? AND used = 0 AND datetime(expires_at) > datetime('now')"
     ).get(token);
     if (!resetToken) return res.status(400).json({ error: 'Invalid or expired reset link. Please request a new one.' });
 
