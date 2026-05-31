@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore, roleLabels, canManageUsers, canAccessSettings, isAdminRole } from '../store/authStore';
 import {
-  LayoutDashboard, FolderOpen, ClipboardList, FileText,
+  LayoutDashboard, FolderOpen, ClipboardList, FileText, BarChart3,
   Users, Settings, LogOut, Menu, X, Bell, ChevronRight,
   Camera, Search, Trash2, Truck
 } from 'lucide-react';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
 import ManagementChatWidget from './ManagementChatWidget';
+import { formatEasternDateTime, parseBuildTrackTimestamp } from '../lib/time';
 
 interface LayoutProps { children: React.ReactNode; }
 
@@ -142,6 +143,7 @@ export default function Layout({ children }: LayoutProps) {
   // Sidebar nav items
   const navItems = [
     { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+    { to: '/data-analytics', icon: BarChart3, label: 'Data Analytics' },
     { to: '/projects', icon: FolderOpen, label: 'Projects' },
     { to: '/invoices', icon: FileText, label: 'Invoices' },
     { to: '/contractors', icon: Users, label: 'Contractors' },
@@ -152,6 +154,7 @@ export default function Layout({ children }: LayoutProps) {
 
   const pageTitles: Record<string, string> = {
     '/dashboard': 'Dashboard',
+    '/data-analytics': 'Data Analytics',
     '/projects': 'Projects',
     '/invoices': 'Invoices',
     '/contractors': 'Contractors',
@@ -170,7 +173,7 @@ export default function Layout({ children }: LayoutProps) {
   const getPresenceState = (member: PresenceUser) => {
     if (Number(member.is_online) === 1) return { label: 'Online now', color: '#059669', bg: '#ECFDF5' };
     if (member.last_seen_at) {
-      const seenAt = new Date(member.last_seen_at).getTime();
+      const seenAt = parseBuildTrackTimestamp(member.last_seen_at)?.getTime() || 0;
       if (Number.isFinite(seenAt) && Date.now() - seenAt < 15 * 60 * 1000) {
         return { label: 'Recently active', color: '#D97706', bg: '#FFFBEB' };
       }
@@ -181,9 +184,8 @@ export default function Layout({ children }: LayoutProps) {
   const formatPresenceTime = (member: PresenceUser) => {
     const value = member.last_seen_at || member.last_login_at;
     if (!value) return 'No recent activity';
-    const time = new Date(value);
-    if (!Number.isFinite(time.getTime())) return 'No recent activity';
-    return `Last active ${time.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`;
+    if (!parseBuildTrackTimestamp(value)) return 'No recent activity';
+    return `Last active ${formatEasternDateTime(value, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`;
   };
 
   // Avatar display helper

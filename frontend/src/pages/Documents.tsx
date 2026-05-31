@@ -3,6 +3,7 @@ import { Download, FileText, FolderOpen, Search, Trash2, Upload } from 'lucide-r
 import toast from 'react-hot-toast';
 import api from '../lib/api';
 import { Loading } from '../components/ui';
+import { formatEasternDateTime } from '../lib/time';
 
 interface ProjectDocument {
   id: string;
@@ -30,9 +31,7 @@ const fileSize = (bytes: number) => {
 };
 
 const formatDate = (value: string) => {
-  const parsed = new Date(value);
-  if (!Number.isFinite(parsed.getTime())) return '-';
-  return parsed.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  return formatEasternDateTime(value, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 };
 
 export default function Documents() {

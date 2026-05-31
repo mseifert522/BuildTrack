@@ -7,6 +7,7 @@ import {
   ArrowLeft, Send, MessageSquare, Wifi, WifiOff,
   Clock, User, ChevronDown, Mic, Square,
 } from 'lucide-react';
+import { formatEasternDate, formatEasternDateTime, formatEasternRelative } from '../lib/time';
 
 interface Note {
   id: string;
@@ -29,25 +30,14 @@ const roleLabel: Record<string, { label: string; color: string; bg: string }> = 
 };
 
 function formatTime(iso: string) {
-  const d = new Date(iso);
-  const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
-  const diffHr = Math.floor(diffMin / 60);
-  const diffDay = Math.floor(diffHr / 24);
-
-  if (diffMin < 1) return 'Just now';
-  if (diffMin < 60) return `${diffMin}m ago`;
-  if (diffHr < 24) return `${diffHr}h ago`;
-  if (diffDay === 1) return 'Yesterday';
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: diffDay > 365 ? 'numeric' : undefined });
+  return formatEasternRelative(iso);
 }
 
 function formatFullTime(iso: string) {
-  return new Date(iso).toLocaleString('en-US', {
+  return `${formatEasternDateTime(iso, {
     weekday: 'short', month: 'short', day: 'numeric',
     year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
-  });
+  })} New York time`;
 }
 
 function getInitials(name: string) {
@@ -224,7 +214,7 @@ export default function MobileNotes() {
 
   // Group notes by date
   const groupedNotes = notes.reduce<{ date: string; notes: Note[] }[]>((groups, note) => {
-    const date = new Date(note.created_at).toLocaleDateString('en-US', {
+    const date = formatEasternDate(note.created_at, {
       weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
     });
     const last = groups[groups.length - 1];

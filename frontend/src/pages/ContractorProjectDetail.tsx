@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, MessageSquare, Camera, ClipboardList, Plus, Send, Trash2, Upload, FileText, Package } from 'lucide-react';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
-import { formatDistanceToNow } from 'date-fns';
+import { formatEasternRelative } from '../lib/time';
 
 type Tab = 'plan' | 'notes' | 'photos' | 'punch';
 
@@ -266,7 +266,7 @@ export default function ContractorProjectDetail() {
                 <div key={n.id} style={{ background: 'white', borderRadius: 14, padding: 14, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
                     <p style={{ fontSize: 13, fontWeight: 700, color: '#111827', margin: 0 }}>{n.user_name}</p>
-                    <p style={{ fontSize: 11, color: '#9CA3AF', margin: 0 }}>{formatDistanceToNow(new Date(n.created_at + 'Z'), { addSuffix: true })}</p>
+                    <p style={{ fontSize: 11, color: '#9CA3AF', margin: 0 }}>{formatEasternRelative(n.created_at)}</p>
                   </div>
                   <p style={{ fontSize: 14, color: '#374151', margin: 0, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{n.note}</p>
                 </div>

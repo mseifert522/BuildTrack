@@ -329,6 +329,7 @@ export default function Projects() {
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     {[
                       { label: 'Scope of Work', icon: FileText, hash: 'construction-plan', color: '#1D4ED8', bg: '#EFF6FF' },
+                      { label: 'Upload Quotes', icon: Upload, hash: 'quotes', color: '#0F766E', bg: '#CCFBF1' },
                       { label: p.open_punch_items > 0 ? 'Punch List' : 'Punch List: Not Started', icon: ClipboardList, hash: 'punch-list', color: '#C2410C', bg: '#FFF7ED' },
                       { label: 'Assigned Contractors', icon: Users, hash: 'assigned-contractors', color: '#047857', bg: '#ECFDF5' },
                     ].map(action => (

@@ -5,6 +5,7 @@ import { useAuthStore, canManageUsers, canAccessSettings } from './store/authSto
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
+import DataAnalytics from './pages/DataAnalytics';
 import Projects from './pages/Projects';
 import ProjectDetail from './pages/ProjectDetail';
 import PunchList from './pages/PunchList';
@@ -285,6 +286,11 @@ export default function App() {
         <Route path="/dashboard" element={
           <DesktopRoute>
             <Layout><Dashboard /></Layout>
+          </DesktopRoute>
+        } />
+        <Route path="/data-analytics" element={
+          <DesktopRoute>
+            <Layout><DataAnalytics /></Layout>
           </DesktopRoute>
         } />
         <Route path="/projects" element={

@@ -26,6 +26,7 @@ import toast from 'react-hot-toast';
 import api from '../lib/api';
 import { Loading, Modal } from '../components/ui';
 import { useAuthStore } from '../store/authStore';
+import { formatEasternDate, formatEasternDateTime, parseBuildTrackTimestamp } from '../lib/time';
 
 interface ContractorInvoice {
   id: string;
@@ -127,7 +128,7 @@ const fallbackCategories = [
 const money = (value?: number | null) =>
   Number(value || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 
-const dateValue = (value?: string | null) => value ? new Date(value).getTime() : 0;
+const dateValue = (value?: string | null) => parseBuildTrackTimestamp(value)?.getTime() || 0;
 
 const initials = (name?: string) =>
   (name || '?')
@@ -139,9 +140,7 @@ const initials = (name?: string) =>
 
 const formatDate = (value?: string | null) => {
   if (!value) return '-';
-  const parsed = new Date(value);
-  if (!Number.isFinite(parsed.getTime())) return '-';
-  return parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  return formatEasternDate(value, { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
 const isSetupComplete = (contractor: ContractorRow) =>
@@ -1087,7 +1086,7 @@ export default function Contractors() {
                                 <div className="flex items-center justify-between gap-2">
                                   <p className="text-sm font-black text-gray-900">{note.user_name}</p>
                                   <div className="flex items-center gap-2">
-                                    <span className="text-xs text-gray-400 whitespace-nowrap">{new Date(note.created_at).toLocaleString('en-US')}</span>
+                                    <span className="text-xs text-gray-400 whitespace-nowrap">{formatEasternDateTime(note.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} ET</span>
                                     <button
                                       type="button"
                                       onClick={() => deleteContractorNote(contractor.id, note.id)}
@@ -1320,7 +1319,7 @@ export default function Contractors() {
                       <div key={note.id} className="rounded-xl border border-gray-100 bg-white p-4">
                         <div className="mb-2 flex items-center justify-between gap-3">
                           <p className="text-sm font-black text-gray-900">{note.user_name}</p>
-                          <p className="text-xs font-semibold text-gray-400">{new Date(note.created_at).toLocaleString('en-US')}</p>
+                          <p className="text-xs font-semibold text-gray-400">{formatEasternDateTime(note.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} ET</p>
                         </div>
                         <p className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-700">{note.note}</p>
                       </div>
@@ -1332,7 +1331,7 @@ export default function Contractors() {
                       <div key={`${note.created_at}-${index}`} className="rounded-xl border border-gray-100 bg-white p-4">
                         <div className="mb-2 flex items-center justify-between gap-3">
                           <p className="text-sm font-black text-gray-900">{note.user_name}</p>
-                          <p className="text-xs font-semibold text-gray-400">{new Date(note.created_at).toLocaleString('en-US')}</p>
+                          <p className="text-xs font-semibold text-gray-400">{formatEasternDateTime(note.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} ET</p>
                         </div>
                         <p className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-700">{note.note}</p>
                       </div>

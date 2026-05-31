@@ -22,6 +22,66 @@ const DEFAULT_CONTRACTOR_CATEGORIES = [
   'Framing',
 ];
 
+const QUOTE_CATEGORY_DEFINITIONS = [
+  ['General', 'Demolition'],
+  ['General', 'Site work'],
+  ['General', 'Excavation'],
+  ['General', 'Grading'],
+  ['General', 'Concrete'],
+  ['General', 'Masonry'],
+  ['General', 'Structural steel'],
+  ['General', 'Framing'],
+  ['General', 'Rough carpentry'],
+  ['General', 'Finish carpentry'],
+  ['Exterior', 'Roofing'],
+  ['Exterior', 'Siding'],
+  ['Exterior', 'Gutters'],
+  ['Exterior', 'Windows'],
+  ['Exterior', 'Doors'],
+  ['Exterior', 'Exterior paint'],
+  ['Exterior', 'Decks'],
+  ['Exterior', 'Balconies'],
+  ['Exterior', 'Landscaping'],
+  ['Exterior', 'Irrigation'],
+  ['Exterior', 'Fencing'],
+  ['Exterior', 'Asphalt / paving'],
+  ['Interior', 'Drywall'],
+  ['Interior', 'Insulation'],
+  ['Interior', 'Interior paint'],
+  ['Interior', 'Flooring'],
+  ['Interior', 'Tile'],
+  ['Interior', 'Cabinets'],
+  ['Interior', 'Countertops'],
+  ['Interior', 'Trim'],
+  ['Interior', 'Hardware'],
+  ['Interior', 'Appliances'],
+  ['Interior', 'Fixtures'],
+  ['MEP', 'Plumbing'],
+  ['MEP', 'Electrical'],
+  ['MEP', 'HVAC'],
+  ['MEP', 'Fire protection'],
+  ['MEP', 'Low voltage'],
+  ['MEP', 'Security systems'],
+  ['MEP', 'Data/communications'],
+  ['Project Operations', 'Permits'],
+  ['Project Operations', 'Cleanup'],
+  ['Project Operations', 'Hauling'],
+  ['Project Operations', 'General labor'],
+  ['Project Operations', 'Supervision'],
+  ['Project Operations', 'Project management'],
+  ['Project Operations', 'Temporary utilities'],
+  ['Project Operations', 'Safety compliance'],
+  ['Project Operations', 'Miscellaneous'],
+];
+
+function slugify(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
 function getDb() {
   if (!db) {
     const dbPath = process.env.DB_PATH || './data/buildtrack.db';
@@ -155,6 +215,25 @@ function initializeSchema() {
 
     CREATE INDEX IF NOT EXISTS idx_construction_plan_project_order
       ON construction_plan_items(project_id, sort_order);
+
+    -- Multiple central scope-of-work sections per project.
+    CREATE TABLE IF NOT EXISTS project_scopes (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      section_name TEXT NOT NULL DEFAULT 'General',
+      scope_title TEXT NOT NULL,
+      scope_of_work TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('draft','active','on_hold','completed')),
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_project_scopes_project_order
+      ON project_scopes(project_id, sort_order);
 
     -- Supplies and materials tied to project construction plan timing
     CREATE TABLE IF NOT EXISTS construction_materials (
@@ -612,6 +691,142 @@ function initializeSchema() {
 
     CREATE INDEX IF NOT EXISTS idx_project_documents_project_created
       ON project_documents(project_id, created_at);
+
+    -- Standardized quote categories used for company-wide pricing intelligence.
+    CREATE TABLE IF NOT EXISTS quote_categories (
+      id TEXT PRIMARY KEY,
+      category_group TEXT NOT NULL,
+      name TEXT UNIQUE NOT NULL,
+      normalized_key TEXT UNIQUE NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Master contractor quote database. Every active property quote is stored here
+    -- with project/property snapshots so historical analysis stays stable even if a
+    -- property record changes later.
+    CREATE TABLE IF NOT EXISTS contractor_quotes (
+      id TEXT PRIMARY KEY,
+      quote_number TEXT UNIQUE NOT NULL,
+      project_id TEXT NOT NULL,
+      property_address TEXT NOT NULL,
+      project_name TEXT NOT NULL,
+      contractor_id TEXT,
+      contractor_profile_id TEXT,
+      contractor_name TEXT NOT NULL,
+      contractor_company TEXT,
+      contractor_email TEXT,
+      contractor_phone TEXT,
+      contractor_address TEXT,
+      quote_date TEXT NOT NULL,
+      quote_year INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','submitted','approved','rejected','paid','completed','historical')),
+      scope_description TEXT NOT NULL DEFAULT '',
+      notes TEXT,
+      total_quote_amount REAL NOT NULL DEFAULT 0,
+      labor_cost REAL NOT NULL DEFAULT 0,
+      material_cost REAL NOT NULL DEFAULT 0,
+      permit_costs REAL NOT NULL DEFAULT 0,
+      equipment_costs REAL NOT NULL DEFAULT 0,
+      disposal_cleanup_costs REAL NOT NULL DEFAULT 0,
+      tax REAL NOT NULL DEFAULT 0,
+      insurance REAL NOT NULL DEFAULT 0,
+      overhead REAL NOT NULL DEFAULT 0,
+      profit_margin REAL,
+      contingency REAL NOT NULL DEFAULT 0,
+      final_approved_amount REAL,
+      source_document_id TEXT,
+      source_file_name TEXT,
+      source_file_path TEXT,
+      source_file_mime_type TEXT,
+      source_file_size INTEGER,
+      source_file_hash TEXT,
+      imported_from TEXT NOT NULL DEFAULT 'manual',
+      data_quality_flags TEXT NOT NULL DEFAULT '[]',
+      uploaded_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      superseded_by_quote_id TEXT,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (contractor_id) REFERENCES users(id) ON DELETE SET NULL,
+      FOREIGN KEY (contractor_profile_id) REFERENCES contractor_profiles(id) ON DELETE SET NULL,
+      FOREIGN KEY (source_document_id) REFERENCES project_documents(id) ON DELETE SET NULL,
+      FOREIGN KEY (uploaded_by) REFERENCES users(id),
+      FOREIGN KEY (superseded_by_quote_id) REFERENCES contractor_quotes(id) ON DELETE SET NULL
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_contractor_quotes_project_file_hash
+      ON contractor_quotes(project_id, source_file_hash)
+      WHERE source_file_hash IS NOT NULL;
+
+    CREATE INDEX IF NOT EXISTS idx_contractor_quotes_year_status
+      ON contractor_quotes(quote_year, status);
+
+    CREATE INDEX IF NOT EXISTS idx_contractor_quotes_project_year
+      ON contractor_quotes(project_id, quote_year);
+
+    CREATE INDEX IF NOT EXISTS idx_contractor_quotes_contractor_year
+      ON contractor_quotes(contractor_name, contractor_company, quote_year);
+
+    CREATE INDEX IF NOT EXISTS idx_contractor_quotes_created
+      ON contractor_quotes(created_at);
+
+    CREATE TABLE IF NOT EXISTS quote_line_items (
+      id TEXT PRIMARY KEY,
+      quote_id TEXT NOT NULL,
+      category_id TEXT,
+      category_group TEXT NOT NULL,
+      category TEXT NOT NULL,
+      subcategory TEXT,
+      description TEXT NOT NULL,
+      quantity REAL NOT NULL DEFAULT 1,
+      unit TEXT,
+      unit_price REAL NOT NULL DEFAULT 0,
+      total_line_item_price REAL NOT NULL DEFAULT 0,
+      labor_amount REAL NOT NULL DEFAULT 0,
+      material_amount REAL NOT NULL DEFAULT 0,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (quote_id) REFERENCES contractor_quotes(id) ON DELETE CASCADE,
+      FOREIGN KEY (category_id) REFERENCES quote_categories(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_quote_line_items_quote
+      ON quote_line_items(quote_id, sort_order);
+
+    CREATE INDEX IF NOT EXISTS idx_quote_line_items_category
+      ON quote_line_items(category, category_group);
+
+    -- Append-only historical snapshots for quote creation/update events.
+    CREATE TABLE IF NOT EXISTS historical_quote_records (
+      id TEXT PRIMARY KEY,
+      quote_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      quote_year INTEGER NOT NULL,
+      action TEXT NOT NULL,
+      snapshot_json TEXT NOT NULL,
+      actor_id TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (quote_id) REFERENCES contractor_quotes(id) ON DELETE CASCADE,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (actor_id) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_historical_quote_records_quote
+      ON historical_quote_records(quote_id, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_historical_quote_records_year
+      ON historical_quote_records(quote_year, created_at);
+
+    -- Cached analytics snapshots can be populated by future scheduled jobs.
+    CREATE TABLE IF NOT EXISTS quote_trend_snapshots (
+      id TEXT PRIMARY KEY,
+      snapshot_key TEXT UNIQUE NOT NULL,
+      filter_json TEXT NOT NULL,
+      metrics_json TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // ── Runtime migrations (safe to run on every startup) ──
@@ -627,6 +842,7 @@ function initializeSchema() {
   try { db.exec(`ALTER TABLE project_notes ADD COLUMN edit_count INTEGER NOT NULL DEFAULT 0`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE project_notes ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'`); } catch (_) { /* already exists */ }
   try { db.exec(`UPDATE project_notes SET visibility = 'private' WHERE visibility IS NULL OR visibility NOT IN ('private','public')`); } catch (_) { /* best-effort */ }
+  try { db.exec(`ALTER TABLE contractor_quotes ADD COLUMN contractor_address TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE photos ADD COLUMN photo_type TEXT DEFAULT 'general'`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE photos ADD COLUMN taken_at TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE photos ADD COLUMN note_id TEXT`); } catch (_) { /* already exists */ }
@@ -759,9 +975,9 @@ function initializeSchema() {
     `);
   } catch (_) { /* profile backfill best-effort */ }
 
-  try {
-    const insertCategory = db.prepare(`
-      INSERT OR IGNORE INTO contractor_categories (id, name, created_by, created_at)
+	  try {
+	    const insertCategory = db.prepare(`
+	      INSERT OR IGNORE INTO contractor_categories (id, name, created_by, created_at)
       VALUES (?, ?, NULL, datetime('now'))
     `);
     for (const category of DEFAULT_CONTRACTOR_CATEGORIES) {
@@ -780,7 +996,18 @@ function initializeSchema() {
       FROM contractor_profiles
       WHERE contractor_category IS NOT NULL AND trim(contractor_category) != ''
     `);
-  } catch (_) { /* category bootstrap best-effort */ }
+	  } catch (_) { /* category bootstrap best-effort */ }
+
+  try {
+    const insertQuoteCategory = db.prepare(`
+      INSERT OR IGNORE INTO quote_categories (id, category_group, name, normalized_key, sort_order)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    QUOTE_CATEGORY_DEFINITIONS.forEach(([categoryGroup, name], index) => {
+      const normalizedKey = slugify(name);
+      insertQuoteCategory.run(normalizedKey, categoryGroup, name, normalizedKey, index + 1);
+    });
+  } catch (_) { /* quote category bootstrap best-effort */ }
 
   // Auto-assign PINs to existing users without one
   const usersWithoutPin = db.prepare("SELECT id FROM users WHERE pin IS NULL").all();
@@ -816,4 +1043,4 @@ function initializeSchema() {
   return db;
 }
 
-module.exports = { getDb, initializeSchema };
+module.exports = { getDb, initializeSchema, QUOTE_CATEGORY_DEFINITIONS };

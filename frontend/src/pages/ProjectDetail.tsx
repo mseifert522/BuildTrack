@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore, canManageProjects, isAdminRole } from '../store/authStore';
 import api from '../lib/api';
@@ -9,8 +9,9 @@ import { useForm } from 'react-hook-form';
 import { format } from 'date-fns';
 import GooglePlacesInput from '../components/GooglePlacesInput';
 import CurrencyInput from '../components/CurrencyInput';
+import { formatEasternDate, formatEasternDateTime } from '../lib/time';
 
-type Tab = 'overview' | 'construction-plan' | 'punch-list' | 'photos' | 'invoices' | 'activity' | 'notes' | 'team';
+type Tab = 'overview' | 'construction-plan' | 'quotes' | 'punch-list' | 'photos' | 'invoices' | 'activity' | 'notes' | 'team';
 
 const getInitials = (name?: string) =>
   (name || '?')
@@ -67,6 +68,7 @@ export default function ProjectDetail() {
   useEffect(() => {
     const hashTabMap: Record<string, Tab> = {
       '#construction-plan': 'construction-plan',
+      '#quotes': 'quotes',
       '#punch-list': 'punch-list',
       '#assigned-contractors': 'team',
     };
@@ -239,6 +241,7 @@ export default function ProjectDetail() {
   const tabs: { id: Tab; label: string; icon: any }[] = [
     { id: 'overview', label: 'Overview', icon: MapPin },
     { id: 'construction-plan', label: 'Scope of Work', icon: FileText },
+    { id: 'quotes', label: 'Upload Quotes', icon: FileText },
     { id: 'punch-list', label: 'Punch List', icon: ClipboardList },
     { id: 'team', label: 'Assigned Contractors', icon: Users },
     { id: 'activity', label: 'Activity', icon: Activity },
@@ -341,7 +344,7 @@ export default function ProjectDetail() {
                 <span className="text-sm font-medium text-gray-900 truncate">{note.user_name}</span>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${note.note_type === 'field' ? 'bg-green-100 text-green-700' : note.note_type === 'office' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>{note.note_type}</span>
-                  <span className="hidden sm:inline text-xs text-gray-400">{format(new Date(note.created_at), 'MMM d, h:mm a')}</span>
+                  <span className="hidden sm:inline text-xs text-gray-400">{formatEasternDateTime(note.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
                 </div>
               </div>
               {editingNoteId === note.id ? (
@@ -384,7 +387,7 @@ export default function ProjectDetail() {
                     </div>
                   )}
                   {note.edited_at && (
-                    <p className="text-xs text-gray-400 mt-2">Edited once by {note.edited_by_name || note.user_name} on {format(new Date(note.edited_at), 'MMM d, h:mm a')}</p>
+                    <p className="text-xs text-gray-400 mt-2">Edited once by {note.edited_by_name || note.user_name} on {formatEasternDateTime(note.edited_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time</p>
                   )}
                 </>
               )}
@@ -503,7 +506,11 @@ export default function ProjectDetail() {
 
               <button id="construction-plan" type="button" onClick={() => setTab('construction-plan')} className="w-full bg-white rounded-xl border border-gray-200 p-4 text-left hover:border-blue-300 hover:bg-blue-50 transition-colors">
                 <h3 className="font-semibold text-gray-900 mb-2 text-sm">Scope of Work</h3>
-                <p className="text-sm text-gray-600">Open the ordered rehab plan, materials schedule, supply timing, costs, and step photos.</p>
+                <p className="text-sm text-gray-600">Open project scope sections by house area, plus the execution plan, materials, costs, and step photos.</p>
+              </button>
+              <button id="quotes" type="button" onClick={() => setTab('quotes')} className="w-full bg-white rounded-xl border border-gray-200 p-4 text-left hover:border-blue-300 hover:bg-blue-50 transition-colors">
+                <h3 className="font-semibold text-gray-900 mb-2 text-sm">Upload Quotes</h3>
+                <p className="text-sm text-gray-600">Store contractor quotes directly against this property.</p>
               </button>
               </div>
               <div className="lg:col-span-3">
@@ -515,7 +522,11 @@ export default function ProjectDetail() {
         )}
 
         {tab === 'construction-plan' && (
-          <ConstructionPlanBoard projectId={id!} canManage={!!canEdit} />
+          <ScopeOfWorkTab projectId={id!} project={project} canManage={!!canEdit} />
+        )}
+
+        {tab === 'quotes' && (
+          <QuotesTab projectId={id!} project={project} />
         )}
 
         {/* Punch List Tab */}
@@ -579,7 +590,7 @@ export default function ProjectDetail() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-gray-900"><span className="font-medium">{log.user_name}</span> {log.action.replace(/_/g, ' ')}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">{format(new Date(log.created_at), 'MMM d, yyyy h:mm a')}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">{formatEasternDateTime(log.created_at, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time</p>
                 </div>
               </div>
             ))}
@@ -709,6 +720,245 @@ export default function ProjectDetail() {
 }
 
 // ---- Sub-components ----
+
+type ProjectScopeForm = {
+  section_name: string;
+  scope_title: string;
+  scope_of_work: string;
+  status: string;
+};
+
+const blankProjectScopeForm: ProjectScopeForm = {
+  section_name: '',
+  scope_title: '',
+  scope_of_work: '',
+  status: 'active',
+};
+
+function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; project: any; canManage: boolean }) {
+  const [scopes, setScopes] = useState<any[]>([]);
+  const [legacyScope, setLegacyScope] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [showEditor, setShowEditor] = useState(false);
+  const [editingScope, setEditingScope] = useState<any | null>(null);
+  const [scopeForm, setScopeForm] = useState<ProjectScopeForm>(blankProjectScopeForm);
+
+  const scopeStatusColors: Record<string, string> = {
+    draft: 'bg-gray-100 text-gray-700',
+    active: 'bg-blue-100 text-blue-700',
+    on_hold: 'bg-amber-100 text-amber-700',
+    completed: 'bg-green-100 text-green-700',
+  };
+
+  const loadScopes = async () => {
+    try {
+      const res = await api.get(`/projects/${projectId}/scopes`);
+      setScopes(Array.isArray(res.data?.scopes) ? res.data.scopes : []);
+      setLegacyScope(res.data?.legacy_scope_of_work || '');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to load scopes of work');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    setLoading(true);
+    loadScopes();
+  }, [projectId]);
+
+  const openAddScope = () => {
+    setEditingScope(null);
+    setScopeForm(blankProjectScopeForm);
+    setShowEditor(true);
+  };
+
+  const openEditScope = (scope: any) => {
+    if (!canManage) return;
+    setEditingScope(scope);
+    setScopeForm({
+      section_name: scope.section_name || '',
+      scope_title: scope.scope_title || '',
+      scope_of_work: scope.scope_of_work || '',
+      status: scope.status || 'active',
+    });
+    setShowEditor(true);
+  };
+
+  const saveScope = async () => {
+    const payload = {
+      section_name: scopeForm.section_name.trim() || 'General',
+      scope_title: scopeForm.scope_title.trim(),
+      scope_of_work: scopeForm.scope_of_work.trim(),
+      status: scopeForm.status || 'active',
+    };
+    if (!payload.scope_title) return toast.error('Enter a scope title');
+    if (!payload.scope_of_work) return toast.error('Enter the scope of work');
+
+    try {
+      if (editingScope) {
+        await api.put(`/projects/${projectId}/scopes/${editingScope.id}`, payload);
+        toast.success('Scope of work updated');
+      } else {
+        await api.post(`/projects/${projectId}/scopes`, payload);
+        toast.success('Scope of work added');
+      }
+      setShowEditor(false);
+      setEditingScope(null);
+      setScopeForm(blankProjectScopeForm);
+      loadScopes();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to save scope of work');
+    }
+  };
+
+  const deleteScope = async () => {
+    if (!editingScope) return;
+    if (!window.confirm('Delete this scope of work?')) return;
+    try {
+      await api.delete(`/projects/${projectId}/scopes/${editingScope.id}`);
+      setShowEditor(false);
+      setEditingScope(null);
+      setScopeForm(blankProjectScopeForm);
+      loadScopes();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to delete scope of work');
+    }
+  };
+
+  const moveScope = async (scopeId: string, direction: 'up' | 'down') => {
+    try {
+      await api.post(`/projects/${projectId}/scopes/${scopeId}/move`, { direction });
+      loadScopes();
+    } catch {
+      toast.error('Failed to reorder scope of work');
+    }
+  };
+
+  const completedCount = scopes.filter(scope => scope.status === 'completed').length;
+  const activeCount = scopes.filter(scope => scope.status === 'active').length;
+
+  return (
+    <div className="space-y-5">
+      <div className="bg-white rounded-2xl border border-gray-200 p-5" style={{ boxShadow: '0 10px 30px rgba(17,24,39,0.08)' }}>
+        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+          <div>
+            <h3 className="font-black text-gray-900">Scope of Work</h3>
+            <p className="text-sm text-gray-500 mt-1">Central scope sections for {project?.address}. Use one scope per house area, project phase, or work section.</p>
+          </div>
+          {canManage && (
+            <button type="button" onClick={openAddScope} className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-black hover:bg-blue-700">
+              <Plus className="w-4 h-4" /> Add Scope Section
+            </button>
+          )}
+        </div>
+        <div className="grid sm:grid-cols-3 gap-3 mt-4">
+          <div className="rounded-xl bg-blue-50 p-3">
+            <p className="text-xl font-black text-blue-700">{scopes.length}</p>
+            <p className="text-xs font-semibold text-blue-700">Scope sections</p>
+          </div>
+          <div className="rounded-xl bg-green-50 p-3">
+            <p className="text-xl font-black text-green-700">{activeCount}</p>
+            <p className="text-xs font-semibold text-green-700">Active scopes</p>
+          </div>
+          <div className="rounded-xl bg-gray-50 p-3">
+            <p className="text-xl font-black text-gray-700">{completedCount}</p>
+            <p className="text-xs font-semibold text-gray-700">Completed scopes</p>
+          </div>
+        </div>
+      </div>
+
+      {loading ? (
+        <Loading />
+      ) : (
+        <div className="space-y-3">
+          {legacyScope && scopes.length === 0 && (
+            <div className="bg-white rounded-2xl border border-amber-200 p-4">
+              <p className="text-xs font-black uppercase tracking-wide text-amber-700">Original project scope note</p>
+              <p className="text-sm text-gray-700 whitespace-pre-wrap mt-2">{legacyScope}</p>
+            </div>
+          )}
+
+          {scopes.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-dashed border-gray-300 p-10 text-center">
+              <FileText className="w-9 h-9 text-gray-300 mx-auto mb-3" />
+              <p className="text-sm font-black text-gray-700">No scope sections entered yet</p>
+              <p className="text-sm text-gray-500 mt-1">Add separate scopes for kitchen, bath, exterior, mechanicals, site work, or any project section.</p>
+              {canManage && (
+                <button type="button" onClick={openAddScope} className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-bold">
+                  <Plus className="w-4 h-4" /> Add first scope
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="grid lg:grid-cols-2 gap-3">
+              {scopes.map((scope, index) => (
+                <div key={scope.id} className="bg-white rounded-2xl border border-gray-200 p-4" style={{ boxShadow: '0 8px 24px rgba(17,24,39,0.06)' }}>
+                  <div className="flex items-start justify-between gap-3">
+                    <button type="button" onClick={() => openEditScope(scope)} className="text-left flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="inline-flex w-7 h-7 rounded-lg bg-gray-900 text-white items-center justify-center text-xs font-black">{scope.sort_order || index + 1}</span>
+                        <span className="text-xs font-black uppercase tracking-wide text-blue-700">{scope.section_name || 'General'}</span>
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${scopeStatusColors[scope.status] || scopeStatusColors.active}`}>{String(scope.status || 'active').replace(/_/g, ' ')}</span>
+                      </div>
+                      <h4 className="font-black text-gray-900 mt-3">{scope.scope_title}</h4>
+                      <p className="text-sm text-gray-700 mt-2 whitespace-pre-wrap">{scope.scope_of_work}</p>
+                      <p className="text-xs text-gray-400 mt-3">
+                        Updated {formatEasternDateTime(scope.updated_at || scope.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time
+                      </p>
+                    </button>
+                    {canManage && (
+                      <div className="flex flex-col gap-2 flex-shrink-0">
+                        <button type="button" disabled={index === 0} onClick={() => moveScope(scope.id, 'up')} className="p-2 rounded-lg border border-gray-200 disabled:opacity-30 hover:bg-gray-50">
+                          <ArrowUp className="w-4 h-4" />
+                        </button>
+                        <button type="button" disabled={index === scopes.length - 1} onClick={() => moveScope(scope.id, 'down')} className="p-2 rounded-lg border border-gray-200 disabled:opacity-30 hover:bg-gray-50">
+                          <ArrowDown className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <ConstructionPlanBoard projectId={projectId} canManage={canManage} />
+
+      <Modal isOpen={showEditor} onClose={() => setShowEditor(false)} title={editingScope ? 'Edit Scope of Work' : 'Add Scope of Work'} size="lg">
+        <div className="space-y-4">
+          <div className="grid md:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">House / Project Section</label>
+              <input value={scopeForm.section_name} onChange={e => setScopeForm(current => ({ ...current, section_name: e.target.value }))} placeholder="Kitchen, exterior, roof, site work..." className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+              <select value={scopeForm.status} onChange={e => setScopeForm(current => ({ ...current, status: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                {['draft', 'active', 'on_hold', 'completed'].map(status => <option key={status} value={status}>{status.replace(/_/g, ' ')}</option>)}
+              </select>
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Scope Title *</label>
+              <input value={scopeForm.scope_title} onChange={e => setScopeForm(current => ({ ...current, scope_title: e.target.value }))} placeholder="Kitchen cabinet and countertop replacement" className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Scope of Work *</label>
+              <textarea value={scopeForm.scope_of_work} onChange={e => setScopeForm(current => ({ ...current, scope_of_work: e.target.value }))} rows={8} placeholder="Enter the full scope for this section..." className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+            </div>
+          </div>
+          <div className="flex gap-3">
+            {editingScope && <button type="button" onClick={deleteScope} className="px-4 py-2.5 rounded-xl border border-red-200 text-red-700 text-sm font-black hover:bg-red-50">Delete</button>}
+            <button type="button" onClick={() => setShowEditor(false)} className="ml-auto px-4 py-2.5 rounded-xl border border-gray-300 text-sm font-black text-gray-700 hover:bg-gray-50">Cancel</button>
+            <button type="button" onClick={saveScope} className="px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-black hover:bg-blue-700">Save Scope</button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}
 
 function ConstructionPlanBoard({ projectId, canManage }: { projectId: string; canManage: boolean }) {
   const [items, setItems] = useState<any[]>([]);
@@ -949,7 +1199,7 @@ function ConstructionPlanBoard({ projectId, canManage }: { projectId: string; ca
       <div className="bg-white rounded-2xl border border-gray-200 p-5" style={{ boxShadow: '0 10px 30px rgba(17,24,39,0.08)' }}>
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div>
-            <h3 className="font-black text-gray-900">Scope of Work</h3>
+            <h3 className="font-black text-gray-900">Execution Plan & Materials</h3>
             <p className="text-sm text-gray-500 mt-1">{items.length} line item{items.length !== 1 ? 's' : ''} · {materials.length} material item{materials.length !== 1 ? 's' : ''}</p>
           </div>
           {canManage && (
@@ -982,7 +1232,7 @@ function ConstructionPlanBoard({ projectId, canManage }: { projectId: string; ca
       {items.length === 0 ? (
         <div className="bg-white rounded-2xl border border-dashed border-gray-300 p-10 text-center">
           <FileText className="w-9 h-9 text-gray-300 mx-auto mb-3" />
-          <p className="text-sm font-black text-gray-700">No scope of work lines yet</p>
+          <p className="text-sm font-black text-gray-700">No execution plan lines yet</p>
           {canManage && (
             <button type="button" onClick={openAddStep} className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-bold cursor-pointer">
               <Plus className="w-4 h-4" /> Add first line item
@@ -1753,7 +2003,7 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
               <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
               <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
                 <p className="text-white text-xs truncate">{photo.uploader_name}</p>
-                <p className="text-white/70 text-xs">{format(new Date(photo.created_at), 'MMM d')}</p>
+                <p className="text-white/70 text-xs">{formatEasternDate(photo.created_at, { month: 'short', day: 'numeric' })}</p>
               </div>
             </div>
           ))}
@@ -1810,7 +2060,7 @@ function InvoicesTab({ projectId, user, project }: { projectId: string; user: an
               </div>
               <div className="flex-1 min-w-0">
                 <p className="font-semibold text-gray-900 text-sm">#{inv.invoice_number}</p>
-                <p className="text-xs text-gray-500">{inv.contractor_name} · {format(new Date(inv.created_at), 'MMM d, yyyy')}</p>
+                <p className="text-xs text-gray-500">{inv.contractor_name} · {formatEasternDate(inv.created_at, { month: 'short', day: 'numeric', year: 'numeric' })}</p>
               </div>
               <div className="text-right">
                 <p className="font-bold text-gray-900">${Number(inv.total).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
@@ -1819,6 +2069,484 @@ function InvoicesTab({ projectId, user, project }: { projectId: string; user: an
             </div>
           ))}
           {invoices.length === 0 && <div className="text-center py-12 bg-white rounded-xl border border-gray-200"><FileText className="w-8 h-8 text-gray-300 mx-auto mb-2" /><p className="text-gray-400 text-sm">No invoices yet</p></div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type ProjectQuoteCategory = {
+  id: string;
+  category_group: string;
+  name: string;
+};
+
+type ProjectQuoteLineForm = {
+  category: string;
+  subcategory: string;
+  description: string;
+  quantity: string;
+  unit: string;
+  unit_price: string;
+  total_line_item_price: string;
+  labor_amount: string;
+  material_amount: string;
+};
+
+type ProjectQuoteForm = {
+  contractor_name: string;
+  contractor_address: string;
+  contractor_phone: string;
+  contractor_email: string;
+  quote_date: string;
+  status: string;
+  scope_description: string;
+  notes: string;
+  total_quote_amount: string;
+};
+
+const projectQuoteStatuses = ['draft', 'submitted', 'approved', 'rejected', 'paid', 'completed', 'historical'];
+
+const blankProjectQuoteForm = (): ProjectQuoteForm => ({
+  contractor_name: '',
+  contractor_address: '',
+  contractor_phone: '',
+  contractor_email: '',
+  quote_date: format(new Date(), 'yyyy-MM-dd'),
+  status: 'submitted',
+  scope_description: '',
+  notes: '',
+  total_quote_amount: '',
+});
+
+const blankProjectQuoteLineItem = (category = ''): ProjectQuoteLineForm => ({
+  category,
+  subcategory: '',
+  description: '',
+  quantity: '1',
+  unit: '',
+  unit_price: '',
+  total_line_item_price: '',
+  labor_amount: '',
+  material_amount: '',
+});
+
+const quoteNumberValue = (value: number | string | null | undefined) => {
+  const parsed = Number(value || 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const quoteMoney = (value: number | string | null | undefined) =>
+  quoteNumberValue(value).toLocaleString('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+const quoteStatusLabel = (status: string) =>
+  String(status || '').replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+
+function QuotesTab({ projectId, project }: { projectId: string; project: any }) {
+  const navigate = useNavigate();
+  const [quotes, setQuotes] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [quoteOptions, setQuoteOptions] = useState<{ categories: ProjectQuoteCategory[]; statuses: string[] }>({
+    categories: [],
+    statuses: projectQuoteStatuses,
+  });
+  const [showAddQuote, setShowAddQuote] = useState(false);
+  const [savingQuote, setSavingQuote] = useState(false);
+  const [quoteFile, setQuoteFile] = useState<File | null>(null);
+  const [quoteForm, setQuoteForm] = useState<ProjectQuoteForm>(() => blankProjectQuoteForm());
+  const [quoteLineItems, setQuoteLineItems] = useState<ProjectQuoteLineForm[]>(() => [blankProjectQuoteLineItem()]);
+
+  const load = async () => {
+    try {
+      const res = await api.get(`/projects/${projectId}/quotes`);
+      setQuotes(Array.isArray(res.data?.quotes) ? res.data.quotes : []);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to load project quotes');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadQuoteOptions = async () => {
+    try {
+      const res = await api.get('/quote-analytics/options');
+      setQuoteOptions({
+        categories: Array.isArray(res.data?.categories) ? res.data.categories : [],
+        statuses: Array.isArray(res.data?.statuses) && res.data.statuses.length > 0 ? res.data.statuses : projectQuoteStatuses,
+      });
+    } catch {
+      setQuoteOptions(current => ({ ...current, statuses: projectQuoteStatuses }));
+    }
+  };
+
+  useEffect(() => {
+    setLoading(true);
+    load();
+    loadQuoteOptions();
+  }, [projectId]);
+
+  useEffect(() => {
+    if (quoteOptions.categories.length === 0) return;
+    setQuoteLineItems(current => {
+      if (current.length !== 1 || current[0].category) return current;
+      return [blankProjectQuoteLineItem(quoteOptions.categories[0].name)];
+    });
+  }, [quoteOptions.categories]);
+
+  const categoriesByGroup = useMemo(() => {
+    const groups = new Map<string, ProjectQuoteCategory[]>();
+    for (const category of quoteOptions.categories) {
+      const group = category.category_group || 'Other';
+      groups.set(group, [...(groups.get(group) || []), category]);
+    }
+    return Array.from(groups.entries());
+  }, [quoteOptions.categories]);
+
+  const totalQuoted = quotes.reduce((sum, quote) => sum + quoteNumberValue(quote.total_quote_amount), 0);
+  const contractors = new Set(quotes.map(quote => quote.contractor_company || quote.contractor_name).filter(Boolean));
+  const categories = new Set(quotes.flatMap(quote => (quote.line_items || []).map((item: any) => item.category)).filter(Boolean));
+  const calculatedLineTotal = quoteLineItems.reduce((sum, item) => sum + quoteNumberValue(item.total_line_item_price), 0);
+  const defaultCategory = quoteOptions.categories[0]?.name || '';
+  const statusColors: Record<string, string> = {
+    draft: 'bg-gray-100 text-gray-600',
+    submitted: 'bg-blue-100 text-blue-700',
+    approved: 'bg-green-100 text-green-700',
+    rejected: 'bg-red-100 text-red-700',
+    paid: 'bg-emerald-100 text-emerald-700',
+    completed: 'bg-purple-100 text-purple-700',
+    historical: 'bg-amber-100 text-amber-700',
+  };
+
+  const categoryTotals = useMemo(() => {
+    const totals = new Map<string, { category: string; total: number; count: number }>();
+    for (const quote of quotes) {
+      for (const item of quote.line_items || []) {
+        const category = item.category || 'Uncategorized';
+        const current = totals.get(category) || { category, total: 0, count: 0 };
+        current.total += quoteNumberValue(item.total_line_item_price);
+        current.count += 1;
+        totals.set(category, current);
+      }
+    }
+    return Array.from(totals.values()).sort((a, b) => b.total - a.total);
+  }, [quotes]);
+
+  const resetQuoteForm = () => {
+    setQuoteForm(blankProjectQuoteForm());
+    setQuoteLineItems([blankProjectQuoteLineItem(defaultCategory)]);
+    setQuoteFile(null);
+  };
+
+  const updateQuoteLineItem = (index: number, patch: Partial<ProjectQuoteLineForm>) => {
+    setQuoteLineItems(current => current.map((item, itemIndex) => {
+      if (itemIndex !== index) return item;
+      const next = { ...item, ...patch };
+      if ((patch.quantity !== undefined || patch.unit_price !== undefined) && !String(next.total_line_item_price || '').trim()) {
+        next.total_line_item_price = String((quoteNumberValue(next.quantity) || 1) * quoteNumberValue(next.unit_price));
+      }
+      return next;
+    }));
+  };
+
+  const submitProjectQuote = async () => {
+    if (!quoteForm.contractor_name.trim()) return toast.error("Enter the contractor's name");
+
+    const lineItems = quoteLineItems
+      .map(item => ({
+        ...item,
+        description: item.description.trim() || item.category || 'Quote line item',
+        quantity: item.quantity || '1',
+      }))
+      .filter(item => item.category || item.total_line_item_price);
+
+    if (lineItems.length === 0 || lineItems.some(item => !item.category || quoteNumberValue(item.total_line_item_price) <= 0)) {
+      return toast.error('Each quote line needs a category and price');
+    }
+
+    setSavingQuote(true);
+    try {
+      const payload = {
+        ...quoteForm,
+        total_quote_amount: quoteForm.total_quote_amount || String(calculatedLineTotal),
+        line_items: lineItems,
+      };
+
+      if (quoteFile) {
+        const body = new FormData();
+        Object.entries(payload).forEach(([key, value]) => {
+          body.append(key, key === 'line_items' ? JSON.stringify(value) : String(value ?? ''));
+        });
+        body.append('quote_file', quoteFile);
+        await api.post(`/projects/${projectId}/quotes/upload`, body, { headers: { 'Content-Type': 'multipart/form-data' } });
+      } else {
+        await api.post(`/projects/${projectId}/quotes`, payload);
+      }
+
+      toast.success('Quote saved to this project and master analytics');
+      resetQuoteForm();
+      setShowAddQuote(false);
+      await load();
+    } catch (err: any) {
+      const errors = err.response?.data?.errors;
+      toast.error(Array.isArray(errors) ? errors[0] : err.response?.data?.error || 'Failed to save quote');
+    } finally {
+      setSavingQuote(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: 'Quotes Uploaded', value: quotes.length },
+          { label: 'Quoted Value', value: quoteMoney(totalQuoted) },
+          { label: 'Contractors', value: contractors.size },
+          { label: 'Categories', value: categories.size },
+        ].map(item => (
+          <div key={item.label} className="bg-white rounded-xl border border-gray-200 p-4">
+            <p className="text-2xl font-bold text-blue-600">{item.value}</p>
+            <p className="text-xs text-gray-500 mt-0.5">{item.label}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-3">
+        <button
+          type="button"
+          onClick={() => setShowAddQuote(current => !current)}
+          className="w-full flex items-center justify-center gap-2 py-3.5 bg-blue-600 text-white rounded-xl font-semibold text-sm hover:bg-blue-700 transition-colors shadow-sm"
+        >
+          <Plus className="w-5 h-5" /> ADD QUOTE TO THIS PROJECT
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate(`/data-analytics?project=${projectId}`)}
+          className="w-full flex items-center justify-center gap-2 py-3.5 bg-white border border-gray-200 text-gray-700 rounded-xl font-semibold text-sm hover:bg-gray-50 transition-colors"
+        >
+          <Activity className="w-5 h-5" /> VIEW PROPERTY QUOTE ANALYTICS
+        </button>
+      </div>
+
+      {showAddQuote && (
+        <div className="bg-white rounded-xl border border-blue-100 p-4" style={{ boxShadow: '0 8px 28px rgba(37,99,235,0.08)' }}>
+          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3 mb-4">
+            <div>
+              <h3 className="text-base font-black text-gray-900">Upload Quote For This Project</h3>
+              <p className="text-sm text-gray-500 mt-1">{project?.address} - quote data will also feed Data Analytics.</p>
+            </div>
+            <button type="button" onClick={() => { resetQuoteForm(); setShowAddQuote(false); }} className="px-3 py-2 rounded-xl text-xs font-black bg-gray-100 text-gray-600 hover:bg-gray-200">
+              Close
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
+            <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-black uppercase tracking-wide text-gray-500 mb-1">Contractor Name *</label>
+                <input value={quoteForm.contractor_name} onChange={e => setQuoteForm(current => ({ ...current, contractor_name: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-black uppercase tracking-wide text-gray-500 mb-1">Phone Number</label>
+                <input value={quoteForm.contractor_phone} onChange={e => setQuoteForm(current => ({ ...current, contractor_phone: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs font-black uppercase tracking-wide text-gray-500 mb-1">Contractor Address</label>
+                <input value={quoteForm.contractor_address} onChange={e => setQuoteForm(current => ({ ...current, contractor_address: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-black uppercase tracking-wide text-gray-500 mb-1">Email Address</label>
+                <input type="email" value={quoteForm.contractor_email} onChange={e => setQuoteForm(current => ({ ...current, contractor_email: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-black uppercase tracking-wide text-gray-500 mb-1">Quote Date</label>
+                <input type="date" value={quoteForm.quote_date} onChange={e => setQuoteForm(current => ({ ...current, quote_date: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-black uppercase tracking-wide text-gray-500 mb-1">Status</label>
+              <select value={quoteForm.status} onChange={e => setQuoteForm(current => ({ ...current, status: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                {quoteOptions.statuses.map(status => <option key={status} value={status}>{quoteStatusLabel(status)}</option>)}
+              </select>
+              <label className="block text-xs font-black uppercase tracking-wide text-gray-500 mt-3 mb-1">Total Quote</label>
+              <input value={quoteForm.total_quote_amount} onChange={e => setQuoteForm(current => ({ ...current, total_quote_amount: e.target.value }))} placeholder={quoteMoney(calculatedLineTotal)} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <label className="mt-3 flex items-center justify-center gap-2 px-3 py-3 rounded-xl border border-dashed border-gray-300 text-sm font-black text-gray-600 cursor-pointer hover:bg-gray-50">
+                <FileText className="w-4 h-4" />
+                {quoteFile ? quoteFile.name : 'Attach quote document'}
+                <input type="file" className="hidden" onChange={e => setQuoteFile(e.target.files?.[0] || null)} />
+              </label>
+            </div>
+
+            <div>
+              <label className="block text-xs font-black uppercase tracking-wide text-gray-500 mb-1">Scope</label>
+              <textarea value={quoteForm.scope_description} onChange={e => setQuoteForm(current => ({ ...current, scope_description: e.target.value }))} rows={3} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <label className="block text-xs font-black uppercase tracking-wide text-gray-500 mt-3 mb-1">Notes</label>
+              <textarea value={quoteForm.notes} onChange={e => setQuoteForm(current => ({ ...current, notes: e.target.value }))} rows={3} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+          </div>
+
+          <div className="mt-5">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div>
+                <h4 className="text-sm font-black text-gray-900">Quote Categories And Prices</h4>
+                <p className="text-xs text-gray-500">Add one row per category, scope, or line item in the contractor quote.</p>
+              </div>
+              <button type="button" onClick={() => setQuoteLineItems(current => [...current, blankProjectQuoteLineItem(defaultCategory)])} className="px-3 py-2 rounded-xl text-xs font-black text-blue-700 bg-blue-50 hover:bg-blue-100">
+                Add Category
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              {quoteLineItems.map((item, index) => (
+                <div key={index} className="grid grid-cols-1 md:grid-cols-12 gap-2">
+                  <select value={item.category} onChange={e => updateQuoteLineItem(index, { category: e.target.value })} className="md:col-span-3 px-3 py-2.5 rounded-lg border border-gray-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">Category *</option>
+                    {categoriesByGroup.map(([group, groupCategories]) => (
+                      <optgroup key={group} label={group}>
+                        {groupCategories.map(category => <option key={category.id} value={category.name}>{category.name}</option>)}
+                      </optgroup>
+                    ))}
+                  </select>
+                  <input value={item.description} onChange={e => updateQuoteLineItem(index, { description: e.target.value })} placeholder="Line item description" className="md:col-span-3 px-3 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <input value={item.quantity} onChange={e => updateQuoteLineItem(index, { quantity: e.target.value })} placeholder="Qty" className="md:col-span-1 px-3 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <input value={item.unit} onChange={e => updateQuoteLineItem(index, { unit: e.target.value })} placeholder="Unit" className="md:col-span-1 px-3 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <input value={item.unit_price} onChange={e => updateQuoteLineItem(index, { unit_price: e.target.value })} placeholder="Unit price" className="md:col-span-2 px-3 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <div className="md:col-span-2 flex gap-2">
+                    <input value={item.total_line_item_price} onChange={e => updateQuoteLineItem(index, { total_line_item_price: e.target.value })} placeholder="Line price *" className="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    {quoteLineItems.length > 1 && (
+                      <button type="button" onClick={() => setQuoteLineItems(current => current.filter((_, itemIndex) => itemIndex !== index))} className="px-3 rounded-lg bg-red-50 text-red-700 hover:bg-red-100">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mt-5 pt-4 border-t border-gray-100">
+            <p className="text-sm text-gray-600">Line item total: <span className="font-black text-gray-900">{quoteMoney(calculatedLineTotal)}</span></p>
+            <div className="flex gap-2">
+              <button type="button" onClick={resetQuoteForm} className="px-4 py-2.5 rounded-xl text-sm font-black bg-gray-100 text-gray-700 hover:bg-gray-200">Clear</button>
+              <button type="button" disabled={savingQuote} onClick={submitProjectQuote} className="px-4 py-2.5 rounded-xl text-sm font-black bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-60">
+                {savingQuote ? 'Saving...' : 'Save Quote To Project'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {categoryTotals.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div>
+              <h3 className="text-sm font-black text-gray-900">Category Pricing On This Project</h3>
+              <p className="text-xs text-gray-500">Aggregated from the quote line items below.</p>
+            </div>
+            <span className="text-xs font-black text-gray-400">{categoryTotals.length} categories</span>
+          </div>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2">
+            {categoryTotals.slice(0, 12).map(item => (
+              <div key={item.category} className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+                <p className="text-sm font-black text-gray-900 truncate">{item.category}</p>
+                <p className="text-lg font-black text-blue-700 mt-1">{quoteMoney(item.total)}</p>
+                <p className="text-xs text-gray-500">{item.count} line items</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {loading ? <Loading /> : (
+        <div className="space-y-3">
+          {quotes.map(quote => {
+            const lineItems = Array.isArray(quote.line_items) ? quote.line_items : [];
+            return (
+              <div key={quote.id} className="bg-white rounded-xl border border-gray-200 p-4">
+                <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-black text-gray-900 text-sm">{quote.quote_number}</p>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-black ${statusColors[quote.status] || 'bg-gray-100 text-gray-700'}`}>
+                        {quoteStatusLabel(quote.status)}
+                      </span>
+                      <span className="text-xs text-gray-400">{quote.quote_date}</span>
+                    </div>
+                    <div className="grid md:grid-cols-2 gap-2 mt-3 text-sm">
+                      <div>
+                        <p className="text-xs font-black uppercase tracking-wide text-gray-400">Contractor</p>
+                        <p className="font-black text-gray-900">{quote.contractor_company || quote.contractor_name}</p>
+                        {quote.contractor_name && quote.contractor_company && quote.contractor_name !== quote.contractor_company && <p className="text-xs text-gray-500">{quote.contractor_name}</p>}
+                      </div>
+                      <div>
+                        <p className="text-xs font-black uppercase tracking-wide text-gray-400">Contact</p>
+                        <p className="text-gray-700">{quote.contractor_phone || 'No phone'} - {quote.contractor_email || 'No email'}</p>
+                        {quote.contractor_address && <p className="text-xs text-gray-500 mt-0.5">{quote.contractor_address}</p>}
+                      </div>
+                    </div>
+                    {(quote.scope_description || quote.notes) && (
+                      <div className="mt-3 rounded-lg bg-gray-50 p-3">
+                        {quote.scope_description && <p className="text-sm text-gray-800">{quote.scope_description}</p>}
+                        {quote.notes && <p className="text-xs text-gray-500 mt-1">{quote.notes}</p>}
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-left lg:text-right flex-shrink-0">
+                    <p className="text-2xl font-black text-gray-900">{quoteMoney(quote.total_quote_amount)}</p>
+                    <p className="text-xs text-gray-500 mt-1">Total quote price</p>
+                    {quote.document_download_url && (
+                      <a href={quote.document_download_url} className="inline-flex mt-2 text-xs font-bold text-blue-700 hover:underline">
+                        Download quote
+                      </a>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-4 overflow-x-auto rounded-lg border border-gray-100">
+                  <table className="w-full min-w-[720px] text-sm">
+                    <thead className="bg-gray-50">
+                      <tr className="text-left text-xs uppercase tracking-wide text-gray-400">
+                        <th className="py-2.5 px-3">Category</th>
+                        <th className="py-2.5 px-3">Description</th>
+                        <th className="py-2.5 px-3 text-right">Qty</th>
+                        <th className="py-2.5 px-3">Unit</th>
+                        <th className="py-2.5 px-3 text-right">Unit Price</th>
+                        <th className="py-2.5 px-3 text-right">Line Price</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {lineItems.map((item: any, index: number) => (
+                        <tr key={item.id || `${quote.id}-${index}`}>
+                          <td className="py-2.5 px-3 font-black text-gray-900">{item.category || '-'}</td>
+                          <td className="py-2.5 px-3 text-gray-700">{item.description || item.subcategory || '-'}</td>
+                          <td className="py-2.5 px-3 text-right">{quoteNumberValue(item.quantity).toLocaleString('en-US')}</td>
+                          <td className="py-2.5 px-3 text-gray-600">{item.unit || '-'}</td>
+                          <td className="py-2.5 px-3 text-right">{quoteMoney(item.unit_price)}</td>
+                          <td className="py-2.5 px-3 text-right font-black text-gray-900">{quoteMoney(item.total_line_item_price)}</td>
+                        </tr>
+                      ))}
+                      {lineItems.length === 0 && (
+                        <tr>
+                          <td colSpan={6} className="py-6 text-center text-sm text-gray-400">No line items stored for this quote</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })}
+          {quotes.length === 0 && (
+            <div className="text-center py-12 bg-white rounded-xl border border-gray-200">
+              <FileText className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+              <p className="text-gray-400 text-sm">No quotes uploaded for this property yet</p>
+            </div>
+          )}
         </div>
       )}
     </div>

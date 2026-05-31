@@ -16,9 +16,9 @@ import {
   Search,
   WalletCards,
 } from 'lucide-react';
-import { format } from 'date-fns';
 import { useAuthStore, isAdminRole } from '../store/authStore';
 import toast from 'react-hot-toast';
+import { formatEasternDate, formatEasternDateTime, parseBuildTrackTimestamp } from '../lib/time';
 
 interface Invoice {
   id: string;
@@ -179,7 +179,9 @@ export default function Invoices() {
       }
       if (invoice.status === 'draft' || invoice.status === 'submitted') existing.new_count += 1;
       const invoiceDate = invoice.updated_at || invoice.submitted_at || invoice.created_at || '';
-      if (!existing.latest_at || new Date(invoiceDate).getTime() > new Date(existing.latest_at).getTime()) {
+      const invoiceTime = parseBuildTrackTimestamp(invoiceDate)?.getTime() || 0;
+      const existingTime = parseBuildTrackTimestamp(existing.latest_at)?.getTime() || 0;
+      if (!existing.latest_at || invoiceTime > existingTime) {
         existing.latest_at = invoiceDate;
       }
       byProject.set(invoice.project_id, existing);
@@ -261,9 +263,7 @@ export default function Invoices() {
 
   const formatEmailDate = (value?: string) => {
     if (!value) return '-';
-    const parsed = new Date(value);
-    if (!Number.isFinite(parsed.getTime())) return '-';
-    return format(parsed, 'MMM d, yyyy h:mm a');
+    return formatEasternDateTime(value, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
   };
 
   if (loading) return <Loading />;
@@ -594,8 +594,8 @@ export default function Invoices() {
                         <p className="text-sm font-black text-gray-900">#{invoice.invoice_number}</p>
                         <p className="text-xs text-gray-500">
                           {invoice.submitted_at
-                            ? `Submitted ${format(new Date(invoice.submitted_at), 'MMM d, yyyy')}`
-                            : `Created ${format(new Date(invoice.created_at), 'MMM d, yyyy')}`}
+                            ? `Submitted ${formatEasternDate(invoice.submitted_at, { month: 'short', day: 'numeric', year: 'numeric' })}`
+                            : `Created ${formatEasternDate(invoice.created_at, { month: 'short', day: 'numeric', year: 'numeric' })}`}
                         </p>
                       </div>
                       <div className="col-span-3 min-w-0">

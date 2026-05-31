@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { formatDistanceToNow } from 'date-fns';
 import { ChevronDown, MessageSquare, Send, User, Users } from 'lucide-react';
 import api from '../lib/api';
 import { useAuthStore, isAdminRole, roleLabels } from '../store/authStore';
+import { formatEasternRelative } from '../lib/time';
+import toast from 'react-hot-toast';
 
 interface ChatUser {
   id: string;
@@ -25,28 +26,66 @@ interface ChatMessage {
   recipient_name?: string | null;
 }
 
-const parseDate = (value: string) => new Date(/[zZ]|[+-]\d{2}:?\d{2}$/.test(value) ? value : `${value}Z`);
+let notificationAudioContext: AudioContext | null = null;
+let notificationAudioUnlocked = false;
 
-function playChime() {
+function getNotificationAudioContext() {
   try {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContextClass) return;
-    const context = new AudioContextClass();
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    oscillator.type = 'sine';
-    oscillator.frequency.setValueAtTime(880, context.currentTime);
-    oscillator.frequency.exponentialRampToValueAtTime(1320, context.currentTime + 0.12);
-    gain.gain.setValueAtTime(0.001, context.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.12, context.currentTime + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.22);
-    oscillator.connect(gain);
-    gain.connect(context.destination);
-    oscillator.start();
-    oscillator.stop(context.currentTime + 0.24);
-    setTimeout(() => context.close?.(), 500);
+    if (!AudioContextClass) return null;
+    if (!notificationAudioContext || notificationAudioContext.state === 'closed') {
+      notificationAudioContext = new AudioContextClass();
+    }
+    return notificationAudioContext;
   } catch {
-    // Browser audio can be blocked until the user interacts with the page.
+    return null;
+  }
+}
+
+async function primeNotificationAudio() {
+  try {
+    const context = getNotificationAudioContext();
+    if (!context) return;
+    if (context.state === 'suspended') await context.resume();
+
+    const source = context.createBufferSource();
+    const gain = context.createGain();
+    source.buffer = context.createBuffer(1, 1, context.sampleRate);
+    gain.gain.value = 0.0001;
+    source.connect(gain);
+    gain.connect(context.destination);
+    source.start();
+    notificationAudioUnlocked = true;
+  } catch {
+    // Browsers only allow notification audio after a user gesture.
+  }
+}
+
+async function playChime() {
+  try {
+    const context = getNotificationAudioContext();
+    if (!context) return;
+    if (context.state === 'suspended') await context.resume();
+    if (context.state !== 'running') return;
+    notificationAudioUnlocked = true;
+    const baseTime = context.currentTime + 0.01;
+    const playTone = (frequency: number, start: number, duration: number) => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(frequency, baseTime + start);
+      gain.gain.setValueAtTime(0.001, baseTime + start);
+      gain.gain.exponentialRampToValueAtTime(0.16, baseTime + start + 0.025);
+      gain.gain.exponentialRampToValueAtTime(0.001, baseTime + start + duration);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start(baseTime + start);
+      oscillator.stop(baseTime + start + duration + 0.02);
+    };
+    playTone(880, 0, 0.16);
+    playTone(1175, 0.17, 0.18);
+  } catch {
+    // The toast and unread badge still provide a visual notification if audio is blocked.
   }
 }
 
@@ -84,13 +123,41 @@ export default function ManagementChatWidget() {
     setMessages(nextMessages);
     if (initializedRef.current && incoming.length > 0) {
       if (minimized) setUnread(count => count + incoming.length);
-      playChime();
+      void playChime();
+      const newest = incoming[incoming.length - 1];
+      toast.custom(t => (
+        <button
+          type="button"
+          onClick={() => {
+            toast.dismiss(t.id);
+            setRecipientId(newest.recipient_id ? newest.sender_id : '');
+            setMinimized(false);
+          }}
+          className="pointer-events-auto flex w-80 max-w-[calc(100vw-1rem)] items-start gap-3 rounded-xl border border-amber-100 bg-white p-3 text-left shadow-xl"
+        >
+          <span className="mt-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-700">
+            <MessageSquare className="h-4 w-4" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-xs font-black uppercase tracking-wide text-amber-700">New IM message</span>
+            <span className="mt-0.5 block truncate text-sm font-bold text-gray-900">{newest.sender_name}</span>
+            <span className="mt-0.5 block line-clamp-2 text-xs text-gray-600">{newest.message}</span>
+          </span>
+        </button>
+      ), { duration: 6500, position: 'top-right' });
     }
     initializedRef.current = true;
   };
 
   useEffect(() => {
     if (!canChat) return;
+    const unlockNotificationAudio = () => {
+      if (!notificationAudioUnlocked) void primeNotificationAudio();
+    };
+
+    window.addEventListener('pointerdown', unlockNotificationAudio);
+    window.addEventListener('keydown', unlockNotificationAudio);
+    window.addEventListener('touchstart', unlockNotificationAudio);
     loadUsers().catch(() => {});
     loadMessages().catch(() => {});
     const timer = window.setInterval(() => {
@@ -98,6 +165,9 @@ export default function ManagementChatWidget() {
       loadMessages().catch(() => {});
     }, 5000);
     return () => {
+      window.removeEventListener('pointerdown', unlockNotificationAudio);
+      window.removeEventListener('keydown', unlockNotificationAudio);
+      window.removeEventListener('touchstart', unlockNotificationAudio);
       window.clearInterval(timer);
     };
   }, [canChat, user?.id, minimized]);
@@ -108,6 +178,19 @@ export default function ManagementChatWidget() {
       window.setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
     }
   }, [minimized, messages.length]);
+
+  useEffect(() => {
+    if (!canChat) return;
+    const openChat = (event: Event) => {
+      const detail = (event as CustomEvent<{ recipientId?: string }>).detail;
+      setRecipientId(detail?.recipientId || '');
+      setMinimized(false);
+      setUnread(0);
+      window.setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 80);
+    };
+    window.addEventListener('buildtrack-open-chat', openChat);
+    return () => window.removeEventListener('buildtrack-open-chat', openChat);
+  }, [canChat]);
 
   if (!canChat) return null;
 
@@ -222,7 +305,7 @@ export default function ManagementChatWidget() {
                       {direct && message.recipient_name ? ` to ${message.recipient_name}` : ''}
                     </span>
                     <span className={`text-[10px] flex-shrink-0 ${mine ? 'text-white/65' : 'text-gray-400'}`}>
-                      {formatDistanceToNow(parseDate(message.created_at), { addSuffix: true })}
+                      {formatEasternRelative(message.created_at)}
                     </span>
                   </div>
                   <p className="text-sm whitespace-pre-wrap break-words">{message.message}</p>

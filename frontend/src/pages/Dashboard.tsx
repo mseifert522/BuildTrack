@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore, isAdminRole, roleLabels } from '../store/authStore';
 import api from '../lib/api';
@@ -9,7 +9,7 @@ import {
   ArrowUpRight, Plus, ChevronRight, MapPin, MessageSquare, Camera,
   X, Bell
 } from 'lucide-react';
-import { formatDistanceToNow, format } from 'date-fns';
+import { EASTERN_TIME_ZONE, formatEasternDate, formatEasternRelative, formatEasternTime, parseBuildTrackTimestamp } from '../lib/time';
 
 interface Stats {
   total_projects: number;
@@ -60,6 +60,16 @@ interface RecentNote {
   project_status: string;
 }
 
+interface PresenceUser {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  avatar_url?: string | null;
+  last_seen_at?: string | null;
+  is_online?: number;
+}
+
 interface ReviewChange {
   id: string;
   action: string;
@@ -80,15 +90,18 @@ interface ProjectReviewSummary {
 }
 
 const greeting = () => {
-  const h = new Date().getHours();
+  const h = Number(new Intl.DateTimeFormat('en-US', {
+    timeZone: EASTERN_TIME_ZONE,
+    hour: 'numeric',
+    hour12: false,
+  }).format(new Date()));
   if (h < 12) return 'Good morning';
   if (h < 17) return 'Good afternoon';
   return 'Good evening';
 };
 
 const parseDate = (value: string) => {
-  if (!value) return new Date();
-  return new Date(/[zZ]|[+-]\d{2}:?\d{2}$/.test(value) ? value : `${value}Z`);
+  return parseBuildTrackTimestamp(value) || new Date();
 };
 
 const getInitials = (name?: string) =>
@@ -112,6 +125,7 @@ export default function Dashboard() {
   const [showReviewSummary, setShowReviewSummary] = useState(false);
   const [reviewDismissKey, setReviewDismissKey] = useState('');
   const [reviewLoginKey, setReviewLoginKey] = useState('');
+  const [presenceUsers, setPresenceUsers] = useState<PresenceUser[]>([]);
 
   const [loading, setLoading] = useState(true);
 
@@ -167,11 +181,40 @@ export default function Dashboard() {
     load();
   }, [user?.id, user?.role]);
 
+  useEffect(() => {
+    if (!user || !isAdminRole(user.role)) return;
+
+    const loadPresence = () => {
+      api.get('/users/presence')
+        .then(res => setPresenceUsers(Array.isArray(res.data) ? res.data : []))
+        .catch(() => setPresenceUsers([]));
+    };
+
+    loadPresence();
+    const timer = window.setInterval(loadPresence, 30000);
+    return () => window.clearInterval(timer);
+  }, [user?.id, user?.role]);
+
+  const presenceByUserId = useMemo(
+    () => new Map(presenceUsers.map(member => [member.id, member])),
+    [presenceUsers]
+  );
+  const currentPresence = user?.id ? presenceByUserId.get(user.id) : null;
+  const currentUserOnline = !!user && (!currentPresence || Number(currentPresence.is_online) === 1);
+
   if (loading) return <Loading />;
 
   const firstName = user?.name?.split(' ')[0] || 'there';
   const now = new Date();
   const reviewSummaryTotal = reviewSummaries.reduce((sum, project) => sum + project.change_count, 0);
+
+  const openDirectMessage = (event: React.MouseEvent, targetUserId: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    window.dispatchEvent(new CustomEvent('buildtrack-open-chat', {
+      detail: { recipientId: targetUserId === user?.id ? '' : targetUserId },
+    }));
+  };
 
   const closeReviewSummary = () => {
     if (reviewDismissKey) sessionStorage.setItem(reviewDismissKey, '1');
@@ -259,7 +302,7 @@ export default function Dashboard() {
               {greeting()}, {firstName}
             </h1>
             <p className="text-sm mt-1" style={{ color: 'rgba(255,255,255,0.45)' }}>
-              {format(now, "EEEE, MMMM d, yyyy")} · {roleLabels[user?.role || '']}
+              {formatEasternDate(now.toISOString(), { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} - {roleLabels[user?.role || '']}
             </p>
           </div>
           <div className="hidden md:flex items-center gap-3">
@@ -347,6 +390,20 @@ export default function Dashboard() {
                   <p className="text-xs text-gray-400">{recentNotes.length} notes across all projects</p>
                 </div>
               </div>
+              {user && (
+                <div
+                  className="hidden sm:inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black"
+                  style={{
+                    background: currentUserOnline ? '#ECFDF5' : '#F3F4F6',
+                    color: currentUserOnline ? '#047857' : '#6B7280',
+                    border: `1px solid ${currentUserOnline ? '#A7F3D0' : '#E5E7EB'}`,
+                  }}
+                  title="Your BuildTrack IM availability"
+                >
+                  <span className={`h-2.5 w-2.5 rounded-full ${currentUserOnline ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
+                  {currentUserOnline ? 'You are online - IM ready' : 'IM status offline'}
+                </div>
+              )}
             </div>
 
             {recentNotes.length === 0 ? (
@@ -363,31 +420,59 @@ export default function Dashboard() {
             ) : (
               <div className="divide-y divide-gray-50 max-h-[480px] overflow-y-auto">
                 {recentNotes.map((note) => {
+                  const notePresence = presenceByUserId.get(note.user_id);
+                  const noteUserOnline = Number(notePresence?.is_online) === 1 || note.user_id === user?.id;
                   return (
-                    <Link
+                    <div
                       key={note.id}
-                      to={`/projects/${note.project_id}`}
-                      className="flex items-start gap-3 px-6 py-3.5 hover:bg-gray-50 transition-colors"
+                      role="link"
+                      tabIndex={0}
+                      onClick={() => navigate(`/projects/${note.project_id}`)}
+                      onKeyDown={event => {
+                        if (event.key === 'Enter') navigate(`/projects/${note.project_id}`);
+                      }}
+                      className="flex cursor-pointer items-start gap-3 px-6 py-3.5 hover:bg-gray-50 transition-colors"
                     >
-                      {note.user_avatar_url ? (
-                        <img
-                          src={note.user_avatar_url}
-                          alt={note.user_name}
-                          className="w-8 h-8 rounded-lg object-cover flex-shrink-0 mt-0.5"
-                          style={{ objectPosition: 'center top' }}
+                      <div className="relative mt-0.5 flex-shrink-0">
+                        {note.user_avatar_url ? (
+                          <img
+                            src={note.user_avatar_url}
+                            alt={note.user_name}
+                            className="w-8 h-8 rounded-lg object-cover"
+                            style={{ objectPosition: 'center top' }}
+                          />
+                        ) : (
+                          <div
+                            className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-black text-white"
+                            style={{ background: 'linear-gradient(135deg, #D99D26, #C4891F)' }}
+                          >
+                            {getInitials(note.user_name)}
+                          </div>
+                        )}
+                        <span
+                          className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white ${noteUserOnline ? 'bg-green-500' : 'bg-gray-300'}`}
+                          title={noteUserOnline ? `${note.user_name} is online` : `${note.user_name} is offline`}
                         />
-                      ) : (
-                        <div
-                          className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 text-xs font-black text-white"
-                          style={{ background: 'linear-gradient(135deg, #D99D26, #C4891F)' }}
+                        <button
+                          type="button"
+                          onClick={event => openDirectMessage(event, note.user_id)}
+                          className="absolute -right-2.5 -top-2.5 flex h-6 w-6 items-center justify-center rounded-full border border-white bg-gray-900 text-white shadow-md transition-colors hover:bg-amber-600"
+                          title={note.user_id === user?.id ? 'Open IM chat' : `IM ${note.user_name}`}
+                          aria-label={note.user_id === user?.id ? 'Open IM chat' : `IM ${note.user_name}`}
                         >
-                          {getInitials(note.user_name)}
-                        </div>
-                      )}
+                          <MessageSquare className="h-3 w-3" />
+                        </button>
+                      </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm text-gray-900">
                           <span className="font-bold">{note.user_name}</span>{' '}
                           <span className="text-gray-500">added a note</span>
+                          {note.user_id === user?.id && currentUserOnline && (
+                            <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-green-700">
+                              <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                              Live
+                            </span>
+                          )}
                         </p>
                         <p className="text-sm text-gray-700 mt-1 line-clamp-2 whitespace-pre-wrap">
                           {note.note}
@@ -400,9 +485,9 @@ export default function Dashboard() {
                         )}
                       </div>
                       <span className="text-xs text-gray-400 flex-shrink-0 whitespace-nowrap mt-0.5">
-                        {formatDistanceToNow(parseDate(note.created_at), { addSuffix: true })}
+                        {formatEasternRelative(note.created_at)}
                       </span>
-                    </Link>
+                    </div>
                   );
                 })}
               </div>
@@ -476,7 +561,7 @@ export default function Dashboard() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-bold text-gray-900 truncate">{inv.contractor_name}</p>
-                      <p className="text-xs text-gray-400">{format(new Date(inv.created_at), 'MMM d, yyyy')}</p>
+                      <p className="text-xs text-gray-400">{formatEasternDate(inv.created_at, { month: 'short', day: 'numeric', year: 'numeric' })}</p>
                     </div>
                     <div className="text-right flex-shrink-0">
                       <p className="text-sm font-black text-gray-900">${Number(inv.total).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
@@ -491,7 +576,7 @@ export default function Dashboard() {
         {/* Footer */}
         <div className="flex items-center justify-between py-2">
           <p className="text-xs text-gray-400">© 2026 New Urban Development · BuildTrack Platform</p>
-          <p className="text-xs text-gray-400">Last updated: {format(now, 'h:mm a')}</p>
+          <p className="text-xs text-gray-400">Last updated: {formatEasternTime(now.toISOString())} New York time</p>
         </div>
       </div>
 
@@ -545,7 +630,7 @@ export default function Dashboard() {
                             <span className="font-bold">{change.user_name}</span> {change.summary}
                           </p>
                           <p className="text-xs text-gray-400 mt-0.5">
-                            {formatDistanceToNow(parseDate(change.created_at), { addSuffix: true })}
+                            {formatEasternRelative(change.created_at)}
                           </p>
                         </div>
                       </div>

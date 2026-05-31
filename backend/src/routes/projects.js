@@ -45,6 +45,16 @@ function getConstructionPlan(db, projectId) {
   });
 }
 
+function getProjectScopes(db, projectId) {
+  return db.prepare(`
+    SELECT ps.*, u.name as created_by_name
+    FROM project_scopes ps
+    LEFT JOIN users u ON u.id = ps.created_by
+    WHERE ps.project_id = ?
+    ORDER BY ps.sort_order ASC, datetime(ps.created_at) ASC
+  `).all(projectId);
+}
+
 function lifecycleFromStatus(status, fallback = 'under_construction') {
   switch (status) {
     case 'active_rehab':
@@ -99,6 +109,9 @@ const REVIEW_ACTIONS = [
   'construction_plan_item_created',
   'construction_plan_item_updated',
   'construction_plan_item_deleted',
+  'project_scope_created',
+  'project_scope_updated',
+  'project_scope_deleted',
   'material_created',
   'material_updated',
   'material_deleted',
@@ -143,6 +156,12 @@ function summarizeActivity(row) {
       return `Updated construction plan step${details.status ? ` to ${String(details.status).replace(/_/g, ' ')}` : ''}`;
     case 'construction_plan_item_deleted':
       return 'Deleted a construction plan step';
+    case 'project_scope_created':
+      return `Added scope of work${details.scope_title ? `: ${details.scope_title}` : ''}`;
+    case 'project_scope_updated':
+      return `Updated scope of work${details.scope_title ? `: ${details.scope_title}` : ''}`;
+    case 'project_scope_deleted':
+      return 'Deleted scope of work';
     case 'material_created':
       return `Added material${details.material_name ? `: ${details.material_name}` : ''}`;
     case 'material_updated':
@@ -373,6 +392,130 @@ router.get('/:id', authorizeProjectAccess, (req, res) => {
   `).all(req.params.id);
 
   res.json({ ...project, assignments, punch_stats: punchStats, recent_photos: recentPhotos, recent_invoices: recentInvoices });
+});
+
+const PROJECT_SCOPE_STATUSES = ['draft', 'active', 'on_hold', 'completed'];
+
+// GET /api/projects/:id/scopes - multiple scope-of-work sections for the project
+router.get('/:id/scopes', authorizeProjectAccess, (req, res) => {
+  const db = getDb();
+  const project = db.prepare('SELECT id, scope_of_work FROM projects WHERE id = ?').get(req.params.id);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  res.json({
+    scopes: getProjectScopes(db, req.params.id),
+    legacy_scope_of_work: project.scope_of_work || '',
+  });
+});
+
+// POST /api/projects/:id/scopes
+router.post('/:id/scopes', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, (req, res) => {
+  try {
+    const { section_name, scope_title, scope_of_work, status } = req.body;
+    const title = String(scope_title || '').trim();
+    const body = String(scope_of_work || '').trim();
+    const scopeStatus = PROJECT_SCOPE_STATUSES.includes(String(status || 'active')) ? String(status || 'active') : 'active';
+    if (!title) return res.status(400).json({ error: 'Scope title is required' });
+    if (!body) return res.status(400).json({ error: 'Scope of work is required' });
+
+    const db = getDb();
+    const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) as max FROM project_scopes WHERE project_id = ?').get(req.params.id);
+    const scopeId = uuidv4();
+    db.prepare(`
+      INSERT INTO project_scopes (id, project_id, section_name, scope_title, scope_of_work, status, sort_order, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      scopeId,
+      req.params.id,
+      String(section_name || 'General').trim() || 'General',
+      title,
+      body,
+      scopeStatus,
+      maxOrder.max + 1,
+      req.user.id
+    );
+    db.prepare("UPDATE projects SET updated_at = datetime('now') WHERE id = ?").run(req.params.id);
+    logActivity({ userId: req.user.id, projectId: req.params.id, action: 'project_scope_created', entityType: 'project_scope', entityId: scopeId, details: { scope_title: title, section_name } });
+    res.status(201).json({ id: scopeId });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create scope of work' });
+  }
+});
+
+// PUT /api/projects/:id/scopes/:scopeId
+router.put('/:id/scopes/:scopeId', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, (req, res) => {
+  try {
+    const db = getDb();
+    const scope = db.prepare('SELECT * FROM project_scopes WHERE id = ? AND project_id = ?').get(req.params.scopeId, req.params.id);
+    if (!scope) return res.status(404).json({ error: 'Scope of work not found' });
+
+    const nextStatus = req.body.status !== undefined && PROJECT_SCOPE_STATUSES.includes(String(req.body.status))
+      ? String(req.body.status)
+      : scope.status;
+    const nextTitle = req.body.scope_title !== undefined ? String(req.body.scope_title || '').trim() : scope.scope_title;
+    const nextScope = req.body.scope_of_work !== undefined ? String(req.body.scope_of_work || '').trim() : scope.scope_of_work;
+    if (!nextTitle) return res.status(400).json({ error: 'Scope title is required' });
+    if (!nextScope) return res.status(400).json({ error: 'Scope of work is required' });
+
+    db.prepare(`
+      UPDATE project_scopes
+      SET section_name = ?, scope_title = ?, scope_of_work = ?, status = ?, updated_at = datetime('now')
+      WHERE id = ? AND project_id = ?
+    `).run(
+      req.body.section_name !== undefined ? (String(req.body.section_name || '').trim() || 'General') : scope.section_name,
+      nextTitle,
+      nextScope,
+      nextStatus,
+      req.params.scopeId,
+      req.params.id
+    );
+    db.prepare("UPDATE projects SET updated_at = datetime('now') WHERE id = ?").run(req.params.id);
+    logActivity({ userId: req.user.id, projectId: req.params.id, action: 'project_scope_updated', entityType: 'project_scope', entityId: req.params.scopeId, details: { scope_title: nextTitle, status: nextStatus } });
+    res.json({ message: 'Scope of work updated' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update scope of work' });
+  }
+});
+
+// POST /api/projects/:id/scopes/:scopeId/move
+router.post('/:id/scopes/:scopeId/move', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, (req, res) => {
+  try {
+    const { direction } = req.body;
+    if (!['up', 'down'].includes(direction)) return res.status(400).json({ error: 'Direction must be up or down' });
+
+    const db = getDb();
+    const scope = db.prepare('SELECT * FROM project_scopes WHERE id = ? AND project_id = ?').get(req.params.scopeId, req.params.id);
+    if (!scope) return res.status(404).json({ error: 'Scope of work not found' });
+
+    const neighbor = direction === 'up'
+      ? db.prepare('SELECT * FROM project_scopes WHERE project_id = ? AND sort_order < ? ORDER BY sort_order DESC LIMIT 1').get(req.params.id, scope.sort_order)
+      : db.prepare('SELECT * FROM project_scopes WHERE project_id = ? AND sort_order > ? ORDER BY sort_order ASC LIMIT 1').get(req.params.id, scope.sort_order);
+    if (!neighbor) return res.json({ message: 'Scope is already at boundary' });
+
+    const update = db.prepare("UPDATE project_scopes SET sort_order = ?, updated_at = datetime('now') WHERE id = ?");
+    update.run(neighbor.sort_order, scope.id);
+    update.run(scope.sort_order, neighbor.id);
+    db.prepare("UPDATE projects SET updated_at = datetime('now') WHERE id = ?").run(req.params.id);
+    res.json({ message: 'Scope order updated' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to reorder scope of work' });
+  }
+});
+
+// DELETE /api/projects/:id/scopes/:scopeId
+router.delete('/:id/scopes/:scopeId', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, (req, res) => {
+  const db = getDb();
+  const scope = db.prepare('SELECT * FROM project_scopes WHERE id = ? AND project_id = ?').get(req.params.scopeId, req.params.id);
+  if (!scope) return res.status(404).json({ error: 'Scope of work not found' });
+  db.prepare('DELETE FROM project_scopes WHERE id = ? AND project_id = ?').run(req.params.scopeId, req.params.id);
+  db.prepare("UPDATE projects SET updated_at = datetime('now') WHERE id = ?").run(req.params.id);
+  logActivity({ userId: req.user.id, projectId: req.params.id, action: 'project_scope_deleted', entityType: 'project_scope', entityId: req.params.scopeId, details: { scope_title: scope.scope_title } });
+  res.json({ message: 'Scope of work deleted' });
 });
 
 // GET /api/projects/:id/construction-plan - ordered rehab plan with linked supplies
@@ -686,6 +829,13 @@ router.post('/', authorize('super_admin', 'operations_manager', 'project_manager
       insertCat.run(uuidv4(), id, cat, req.user.id);
     }
 
+    if (scope_of_work && String(scope_of_work).trim()) {
+      db.prepare(`
+        INSERT INTO project_scopes (id, project_id, section_name, scope_title, scope_of_work, status, sort_order, created_by)
+        VALUES (?, ?, 'General', 'Initial Scope of Work', ?, 'active', 1, ?)
+      `).run(uuidv4(), id, String(scope_of_work).trim(), req.user.id);
+    }
+
     logActivity({ userId: req.user.id, projectId: id, action: 'project_created', entityType: 'project', entityId: id, details: { address, job_name, status: projectStatus, lifecycle_status: projectLifecycle } });
 
     res.status(201).json({ id, address, job_name });
@@ -745,6 +895,16 @@ router.put('/:id', authorize('super_admin', 'operations_manager', 'project_manag
       lockbox_code !== undefined ? lockbox_code : project.lockbox_code,
       req.params.id
     );
+
+    if (scope_of_work !== undefined && String(scope_of_work || '').trim()) {
+      const scopeCount = db.prepare('SELECT COUNT(*) as count FROM project_scopes WHERE project_id = ?').get(req.params.id).count;
+      if (scopeCount === 0) {
+        db.prepare(`
+          INSERT INTO project_scopes (id, project_id, section_name, scope_title, scope_of_work, status, sort_order, created_by)
+          VALUES (?, ?, 'General', 'Project Scope of Work', ?, 'active', 1, ?)
+        `).run(uuidv4(), req.params.id, String(scope_of_work).trim(), req.user.id);
+      }
+    }
 
     const details = { status: nextStatus, lifecycle_status: newLifecycle };
     if (prevLifecycle !== newLifecycle) details.previous_lifecycle = prevLifecycle;
