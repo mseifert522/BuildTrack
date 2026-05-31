@@ -2,19 +2,33 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
+import { useAuthStore } from '../store/authStore';
 
 export default function PinLogin() {
   const [digits, setDigits] = useState(['', '', '', '', '']);
   const [loading, setLoading] = useState(false);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const navigate = useNavigate();
+  const { setAuth } = useAuthStore();
 
   useEffect(() => {
     // Check if already logged in
     const token = localStorage.getItem('contractor_token');
-    if (token) navigate('/app/home');
+    const appToken = localStorage.getItem('token');
+    if (appToken) navigate('/mobile');
+    else if (token) {
+      try {
+        const savedUser = JSON.parse(localStorage.getItem('contractor_user') || 'null');
+        if (savedUser) {
+          setAuth(savedUser, token);
+          navigate('/mobile');
+        }
+      } catch {
+        localStorage.removeItem('contractor_token');
+      }
+    }
     inputRefs.current[0]?.focus();
-  }, []);
+  }, [navigate, setAuth]);
 
   const handleChange = (index: number, value: string) => {
     if (!/^\d*$/.test(value)) return;
@@ -50,7 +64,8 @@ export default function PinLogin() {
       localStorage.setItem('contractor_session_started_at', now);
       localStorage.setItem('contractor_last_activity_at', now);
       localStorage.setItem('contractor_last_refresh_at', now);
-      navigate('/app/home');
+      setAuth(res.data.user, res.data.token);
+      navigate('/mobile');
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Invalid PIN');
       setDigits(['', '', '', '', '']);

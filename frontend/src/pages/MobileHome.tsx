@@ -1,13 +1,21 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuthStore, roleLabels } from '../store/authStore';
-import api from '../lib/api';
 import toast from 'react-hot-toast';
 import {
-  MapPin, ClipboardList, FileText, ChevronRight,
-  LogOut, AlertTriangle, CheckCircle2, Clock,
-  Search, FolderOpen, RefreshCw, Plus,
+  Camera,
+  ChevronRight,
+  FileText,
+  FolderOpen,
+  LogOut,
+  MapPin,
+  Plus,
+  RefreshCw,
+  Search,
+  Truck,
+  Users,
 } from 'lucide-react';
+import { useAuthStore, roleLabels, canCreateProjects } from '../store/authStore';
+import api from '../lib/api';
 
 interface Project {
   id: string;
@@ -17,457 +25,379 @@ interface Project {
   open_punch_items?: number;
 }
 
-interface PunchSummary {
-  project_id: string;
-  address: string;
-  job_name?: string;
-  total: number;
-  open: number;
-  completed: number;
-  in_progress: number;
+interface ContractorItem {
+  id: string;
+  name?: string;
+  company?: string;
+  contact_name?: string;
+  phone?: string;
+  email?: string;
+  category?: string;
+  contractor_category?: string;
+  connected_project_count?: number;
+  assigned_project_count?: number;
 }
 
+interface SupplierItem {
+  id: string;
+  name?: string;
+  contact?: string;
+  phone?: string;
+  email?: string;
+  category?: string;
+}
 
+type Tab = 'projects' | 'photos' | 'invoices' | 'contractors' | 'suppliers';
 
-type Tab = 'projects' | 'punchlists' | 'invoices';
+function isManagementRole(role?: string) {
+  return role === 'super_admin' || role === 'operations_manager' || role === 'project_manager';
+}
 
-const NAV_ITEMS: { key: Tab; label: string; Icon: any; color: string }[] = [
-  { key: 'projects',   label: 'Projects',   Icon: FolderOpen,    color: '#2563EB' },
-  { key: 'punchlists', label: 'Punch List',  Icon: ClipboardList, color: '#EA580C' },
-  { key: 'invoices',   label: 'Invoice',     Icon: FileText,      color: '#7C3AED' },
-];
+function statusLabel(status?: string) {
+  return (status || 'active').replace(/_/g, ' ');
+}
+
+function clearMobilePhotoProjectState() {
+  Object.keys(localStorage).forEach(key => {
+    if (key.startsWith('buildtrack-mobile-photo-project:')) localStorage.removeItem(key);
+  });
+}
 
 export default function MobileHome() {
+  const { user, logout } = useAuthStore();
+  const navigate = useNavigate();
+  const managementUser = isManagementRole(user?.role);
+  const storageKey = `buildtrack-mobile-photo-project:${user?.id || 'session'}`;
+
   const [tab, setTab] = useState<Tab>('projects');
   const [projects, setProjects] = useState<Project[]>([]);
-  const [punchSummaries, setPunchSummaries] = useState<PunchSummary[]>([]);
+  const [contractors, setContractors] = useState<ContractorItem[]>([]);
+  const [suppliers, setSuppliers] = useState<SupplierItem[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const { user, logout } = useAuthStore();
-  const navigate = useNavigate();
+
+  const navItems = useMemo(() => {
+    if (managementUser) {
+      return [
+        { key: 'projects' as Tab, label: 'Projects', Icon: FolderOpen, color: '#2563EB' },
+        { key: 'photos' as Tab, label: 'Photos', Icon: Camera, color: '#D99D26' },
+        { key: 'contractors' as Tab, label: 'Contractors', Icon: Users, color: '#16A34A' },
+        { key: 'suppliers' as Tab, label: 'Suppliers', Icon: Truck, color: '#7C3AED' },
+      ];
+    }
+    return [
+      { key: 'projects' as Tab, label: 'Projects', Icon: FolderOpen, color: '#2563EB' },
+      { key: 'photos' as Tab, label: 'Photos', Icon: Camera, color: '#D99D26' },
+      { key: 'invoices' as Tab, label: 'Invoice', Icon: FileText, color: '#7C3AED' },
+    ];
+  }, [managementUser]);
 
   const loadData = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
-    else setRefreshing(true);
-    try {
-      const projRes = await api.get('/projects');
-      const projs: Project[] = projRes.data;
-      setProjects(projs);
+    if (silent) setRefreshing(true);
+    else setLoading(true);
 
-      const summaries: PunchSummary[] = [];
-      await Promise.all(
-        projs.map(async (p) => {
-          try {
-            const res = await api.get(`/projects/${p.id}/punch-list`);
-            const items = res.data;
-            if (items.length > 0) {
-              summaries.push({
-                project_id: p.id,
-                address: p.address,
-                job_name: p.job_name,
-                total: items.length,
-                open: items.filter((i: any) => i.status === 'not_started' || i.status === 'open').length,
-                completed: items.filter((i: any) => i.status === 'rehab_completed' || i.status === 'closed_sold' || i.status === 'completed').length,
-                in_progress: items.filter((i: any) => i.status === 'active_rehab' || i.status === 'in_progress').length,
-              });
-            }
-          } catch {}
-        })
-      );
-      setPunchSummaries(summaries);
+    try {
+      const projectRes = await api.get('/projects');
+      setProjects(Array.isArray(projectRes.data) ? projectRes.data : []);
+
+      if (managementUser) {
+        const [contractorRes, supplierRes] = await Promise.all([
+          api.get('/users/contractors/directory').catch(() => ({ data: { contractors: [] } })),
+          api.get('/users/suppliers').catch(() => ({ data: [] })),
+        ]);
+        setContractors(Array.isArray(contractorRes.data?.contractors) ? contractorRes.data.contractors : []);
+        setSuppliers(Array.isArray(supplierRes.data) ? supplierRes.data : []);
+      }
     } catch {
-      toast.error('Failed to load data');
+      toast.error('Failed to load mobile data');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [managementUser]);
 
-  useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => {
-    const interval = setInterval(() => loadData(true), 20000);
-    return () => clearInterval(interval);
+    loadData();
   }, [loadData]);
 
-  const handleLogout = () => { logout(); navigate('/login'); };
+  useEffect(() => {
+    const timer = window.setInterval(() => loadData(true), 30000);
+    return () => window.clearInterval(timer);
+  }, [loadData]);
 
-  const filteredProjects = projects.filter(p =>
-    p.address.toLowerCase().includes(search.toLowerCase()) ||
-    (p.job_name || '').toLowerCase().includes(search.toLowerCase())
+  useEffect(() => {
+    if (!navItems.some(item => item.key === tab)) setTab('projects');
+  }, [navItems, tab]);
+
+  const normalizedSearch = search.trim().toLowerCase();
+  const filteredProjects = projects.filter(project =>
+    project.address.toLowerCase().includes(normalizedSearch) ||
+    (project.job_name || '').toLowerCase().includes(normalizedSearch)
   );
-  const filteredPunch = punchSummaries.filter(s =>
-    s.address.toLowerCase().includes(search.toLowerCase()) ||
-    (s.job_name || '').toLowerCase().includes(search.toLowerCase())
+  const filteredContractors = contractors.filter(contractor =>
+    (contractor.name || contractor.company || contractor.contact_name || '').toLowerCase().includes(normalizedSearch) ||
+    (contractor.email || '').toLowerCase().includes(normalizedSearch) ||
+    (contractor.phone || '').toLowerCase().includes(normalizedSearch)
   );
+  const filteredSuppliers = suppliers.filter(supplier =>
+    (supplier.name || supplier.contact || '').toLowerCase().includes(normalizedSearch) ||
+    (supplier.email || '').toLowerCase().includes(normalizedSearch) ||
+    (supplier.phone || '').toLowerCase().includes(normalizedSearch)
+  );
+
+  const rememberedProject = projects.find(project => project.id === localStorage.getItem(storageKey));
+
+  const handleLogout = () => {
+    logout();
+    localStorage.removeItem('contractor_token');
+    localStorage.removeItem('contractor_user');
+    localStorage.removeItem('contractor_projects');
+    localStorage.removeItem('contractor_session_started_at');
+    localStorage.removeItem('contractor_last_activity_at');
+    localStorage.removeItem('contractor_last_refresh_at');
+    clearMobilePhotoProjectState();
+    navigate('/login');
+  };
 
   if (loading) {
     return (
       <div className="mobile-shell" style={{ background: '#0D1117', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{
-          width: 56, height: 56, borderRadius: 16,
-          background: 'linear-gradient(135deg, #D99D26, #C4891F)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          marginBottom: 20, boxShadow: '0 8px 24px rgba(217,157,38,0.4)',
-        }}>
-          <MapPin size={28} color="white" />
+        <div style={{ width: 54, height: 54, borderRadius: 16, background: 'linear-gradient(135deg, #D99D26, #C4891F)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 18 }}>
+          <MapPin size={27} color="white" />
         </div>
-        <div style={{
-          width: 36, height: 36, borderRadius: '50%',
-          border: '3px solid rgba(217,157,38,0.2)',
-          borderTopColor: '#D99D26',
-          animation: 'spin 0.8s linear infinite',
-        }} />
-        <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginTop: 14, fontWeight: 500 }}>Loading BuildTrack...</p>
+        <RefreshCw size={34} color="#D99D26" style={{ animation: 'spin 0.8s linear infinite' }} />
+        <p style={{ color: 'rgba(255,255,255,0.55)', fontSize: 13, marginTop: 13 }}>Loading BuildTrack...</p>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
 
   return (
-    <div className="mobile-shell">
-      {/* ── Fixed Header ── */}
+    <div className="mobile-shell" style={{ background: '#F4F5F7' }}>
       <div className="mobile-header" style={{ background: 'linear-gradient(135deg, #0D1117 0%, #181D25 100%)' }}>
-        {/* Top bar */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px 10px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{
-              width: 38, height: 38, borderRadius: 12,
-              background: 'linear-gradient(135deg, #D99D26, #C4891F)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: '0 4px 12px rgba(217,157,38,0.35)',
-              flexShrink: 0,
-            }}>
-              <MapPin size={18} color="white" />
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '14px 14px 10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 12, background: 'linear-gradient(135deg, #D99D26, #C4891F)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <MapPin size={19} color="white" />
             </div>
-            <div>
-              <p style={{ color: 'white', fontWeight: 800, fontSize: 15, lineHeight: 1.2, margin: 0 }}>BuildTrack</p>
-              <p style={{ color: '#D99D26', fontSize: 11, fontWeight: 600, margin: 0 }}>
-                {user?.name?.split(' ')[0]} · {roleLabels[user?.role || '']}
+            <div style={{ minWidth: 0 }}>
+              <p style={{ color: 'white', fontSize: 15, fontWeight: 850, margin: 0 }}>BuildTrack</p>
+              <p style={{ color: '#D99D26', fontSize: 11, fontWeight: 700, margin: '1px 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {user?.name?.split(' ')[0] || 'User'} / {roleLabels[user?.role || ''] || 'Mobile'}
               </p>
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {refreshing && <RefreshCw size={15} color="rgba(255,255,255,0.4)" style={{ animation: 'spin 0.8s linear infinite' }} />}
+            {refreshing && <RefreshCw size={15} color="rgba(255,255,255,0.45)" style={{ animation: 'spin 0.8s linear infinite' }} />}
+            {canCreateProjects(user?.role || '') && (
+              <button
+                onClick={() => navigate('/mobile/add-project')}
+                style={{ width: 36, height: 36, borderRadius: 10, border: 'none', background: 'rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <Plus size={17} color="rgba(255,255,255,0.76)" />
+              </button>
+            )}
             <button
               onClick={handleLogout}
-              style={{
-                width: 36, height: 36, borderRadius: 10,
-                background: 'rgba(255,255,255,0.08)',
-                border: 'none', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}
+              style={{ width: 36, height: 36, borderRadius: 10, border: 'none', background: 'rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
-              <LogOut size={16} color="rgba(255,255,255,0.7)" />
+              <LogOut size={16} color="rgba(255,255,255,0.76)" />
             </button>
           </div>
         </div>
 
-        {/* Search */}
-        <div style={{ padding: '0 16px 12px' }}>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 10,
-            background: 'rgba(255,255,255,0.08)',
-            borderRadius: 14, padding: '10px 14px',
-          }}>
-            <Search size={15} color="rgba(255,255,255,0.4)" />
+        <div style={{ padding: '0 14px 12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, background: 'rgba(255,255,255,0.08)', borderRadius: 14, padding: '10px 12px' }}>
+            <Search size={15} color="rgba(255,255,255,0.45)" />
             <input
               type="text"
               value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search projects or addresses..."
-              style={{
-                flex: 1, background: 'transparent', border: 'none', outline: 'none',
-                color: 'white', fontSize: 14, fontFamily: 'inherit',
-              }}
+              onChange={event => setSearch(event.target.value)}
+              placeholder={managementUser ? 'Search projects, contractors, suppliers' : 'Search assigned projects'}
+              style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'white', fontSize: 14 }}
             />
           </div>
         </div>
 
-        {/* Tab bar */}
         <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-          {NAV_ITEMS.map(item => {
+          {navItems.map(item => {
             const active = tab === item.key;
             return (
               <button
                 key={item.key}
                 onClick={() => setTab(item.key)}
-                style={{
-                  flex: 1, display: 'flex', flexDirection: 'column',
-                  alignItems: 'center', gap: 4, padding: '10px 4px',
-                  background: 'none', border: 'none', cursor: 'pointer',
-                  borderBottom: active ? `2px solid ${item.color}` : '2px solid transparent',
-                  color: active ? item.color : 'rgba(255,255,255,0.45)',
-                  transition: 'color 0.15s',
-                }}
+                style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '10px 3px', border: 'none', borderBottom: active ? `2px solid ${item.color}` : '2px solid transparent', background: 'transparent', color: active ? item.color : 'rgba(255,255,255,0.46)' }}
               >
                 <item.Icon size={18} />
-                <span style={{ fontSize: 11, fontWeight: 700 }}>{item.label}</span>
+                <span style={{ maxWidth: '100%', fontSize: 10, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.label}</span>
               </button>
             );
           })}
         </div>
       </div>
 
-      {/* ── Scrollable Content ── */}
-      <div className="mobile-content" style={{ padding: '12px 14px 16px' }}>
-
-        {/* ══ PROJECTS ══ */}
+      <div className="mobile-content" style={{ padding: '12px 14px 86px' }}>
         {tab === 'projects' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <p style={{ fontSize: 11, fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '4px 2px 0' }}>
-              {filteredProjects.length} Project{filteredProjects.length !== 1 ? 's' : ''}
+            <p style={{ color: '#6B7280', fontSize: 11, fontWeight: 850, letterSpacing: '0.08em', textTransform: 'uppercase', margin: '2px 2px 0' }}>
+              {filteredProjects.length} Project{filteredProjects.length === 1 ? '' : 's'}
             </p>
 
             {filteredProjects.length === 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 20px', gap: 8 }}>
-                <FolderOpen size={44} color="#D1D5DB" />
-                <p style={{ color: '#9CA3AF', fontWeight: 600, fontSize: 14, margin: 0 }}>No projects found</p>
+              <div style={{ textAlign: 'center', background: 'white', borderRadius: 18, padding: '48px 20px' }}>
+                <FolderOpen size={42} color="#D1D5DB" />
+                <p style={{ color: '#6B7280', fontSize: 14, fontWeight: 800, margin: '10px 0 0' }}>No projects found</p>
               </div>
-            ) : (
-              filteredProjects.map(p => (
-                <div key={p.id} style={{ background: 'white', borderRadius: 18, overflow: 'hidden', boxShadow: '0 2px 12px rgba(0,0,0,0.07)' }}>
-                  {/* Project info */}
-                  <div style={{ padding: '14px 14px 10px' }}>
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                      <div style={{
-                        width: 38, height: 38, borderRadius: 10,
-                        background: 'rgba(217,157,38,0.1)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                      }}>
-                        <MapPin size={18} color="#D99D26" />
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ fontWeight: 700, fontSize: 13, color: '#111827', margin: 0, lineHeight: 1.3 }}>{p.address}</p>
-                        {p.job_name && <p style={{ fontSize: 11, color: '#9CA3AF', margin: '2px 0 0' }}>{p.job_name}</p>}
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-                          {(p.open_punch_items || 0) > 0 && (
-                            <span style={{
-                              background: 'rgba(234,88,12,0.1)', color: '#EA580C',
-                              borderRadius: 20, padding: '3px 10px',
-                              fontSize: 11, fontWeight: 700,
-                              display: 'flex', alignItems: 'center', gap: 4,
-                            }}>
-                              <AlertTriangle size={10} /> {p.open_punch_items} open
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 3 action buttons */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderTop: '1px solid #F3F4F6' }}>
-                    {[
-                      { label: 'Punch List', icon: ClipboardList, color: '#EA580C', path: `/mobile/project/${p.id}/punch-list` },
-                      { label: 'Invoice',    icon: FileText,      color: '#7C3AED', path: `/mobile/project/${p.id}/invoice`, border: true },
-                      { label: 'Details',    icon: FolderOpen,    color: '#2563EB', path: `/mobile/project/${p.id}` },
-                    ].map(btn => {
-                      const BtnIcon = btn.icon;
-                      return (
-                        <button
-                          key={btn.label}
-                          onClick={() => navigate(btn.path)}
-                          style={{
-                            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-                            padding: '12px 4px', background: 'none', border: 'none', cursor: 'pointer',
-                            borderLeft: (btn as any).border ? '1px solid #F3F4F6' : 'none',
-                            borderRight: (btn as any).border ? '1px solid #F3F4F6' : 'none',
-                            transition: 'background 0.1s',
-                          }}
-                          onTouchStart={e => (e.currentTarget.style.background = '#F9FAFB')}
-                          onTouchEnd={e => (e.currentTarget.style.background = 'none')}
-                        >
-                          <BtnIcon size={18} color={btn.color} />
-                          <span style={{ fontSize: 11, fontWeight: 700, color: '#4B5563' }}>{btn.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        )}
-
-        {/* ══ PUNCH LISTS ══ */}
-        {tab === 'punchlists' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <p style={{ fontSize: 11, fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '4px 2px 0' }}>
-              {filteredPunch.length} Punch List{filteredPunch.length !== 1 ? 's' : ''}
-            </p>
-
-            {filteredPunch.length === 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '60px 20px', gap: 10 }}>
-                <ClipboardList size={44} color="#D1D5DB" />
-                <p style={{ color: '#9CA3AF', fontWeight: 600, fontSize: 14, margin: 0 }}>No punch lists yet</p>
-                <p style={{ color: '#D1D5DB', fontSize: 12, margin: 0, textAlign: 'center' }}>Open a project and tap Punch List to get started</p>
+            ) : filteredProjects.map(project => (
+              <div key={project.id} style={{ background: 'white', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 8px rgba(0,0,0,0.07)' }}>
                 <button
-                  onClick={() => setTab('projects')}
-                  style={{
-                    marginTop: 8, background: 'linear-gradient(135deg, #D99D26, #C4891F)',
-                    color: 'white', border: 'none', borderRadius: 12,
-                    padding: '10px 20px', fontSize: 13, fontWeight: 700, cursor: 'pointer',
-                    display: 'flex', alignItems: 'center', gap: 6,
-                  }}
+                  onClick={() => navigate(`/mobile/project/${project.id}`)}
+                  style={{ width: '100%', border: 'none', background: 'white', textAlign: 'left', padding: 13, display: 'flex', gap: 10, alignItems: 'center' }}
                 >
-                  <FolderOpen size={15} /> Go to Projects
+                  <div style={{ width: 39, height: 39, borderRadius: 10, background: 'rgba(217,157,38,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <MapPin size={18} color="#D99D26" />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ color: '#111827', fontSize: 13, fontWeight: 850, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{project.address}</p>
+                    <p style={{ color: '#6B7280', fontSize: 11, margin: '2px 0 0', textTransform: 'capitalize' }}>{project.job_name || statusLabel(project.status)}</p>
+                  </div>
+                  <ChevronRight size={16} color="#9CA3AF" />
                 </button>
-              </div>
-            ) : (
-              filteredPunch.map(s => {
-                const pct = s.total > 0 ? Math.round((s.completed / s.total) * 100) : 0;
-                return (
-                  <button
-                    key={s.project_id}
-                    onClick={() => navigate(`/mobile/project/${s.project_id}/punch-list`)}
-                    style={{
-                      background: 'white', borderRadius: 18, overflow: 'hidden',
-                      boxShadow: '0 2px 12px rgba(0,0,0,0.07)',
-                      border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left',
-                      transition: 'transform 0.1s',
-                    }}
-                    onTouchStart={e => (e.currentTarget.style.transform = 'scale(0.99)')}
-                    onTouchEnd={e => (e.currentTarget.style.transform = 'scale(1)')}
-                  >
-                    {/* Progress bar */}
-                    <div style={{ height: 4, background: '#F3F4F6' }}>
-                      <div style={{
-                        height: '100%', width: `${pct}%`,
-                        background: pct === 100 ? 'linear-gradient(90deg,#22C55E,#16A34A)' : 'linear-gradient(90deg,#D99D26,#C4891F)',
-                        transition: 'width 0.5s ease',
-                      }} />
-                    </div>
-                    <div style={{ padding: '14px' }}>
-                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                        <div style={{
-                          width: 38, height: 38, borderRadius: 10, flexShrink: 0,
-                          background: pct === 100 ? 'rgba(34,197,94,0.1)' : 'rgba(234,88,12,0.1)',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        }}>
-                          {pct === 100
-                            ? <CheckCircle2 size={18} color="#22C55E" />
-                            : <ClipboardList size={18} color="#EA580C" />
-                          }
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <p style={{ fontWeight: 700, fontSize: 13, color: '#111827', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.address}</p>
-                          {s.job_name && <p style={{ fontSize: 11, color: '#9CA3AF', margin: '2px 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.job_name}</p>}
-                          <div style={{ display: 'flex', gap: 10, marginTop: 8, flexWrap: 'wrap' }}>
-                            <span style={{ fontSize: 11, fontWeight: 600, color: '#EA580C', display: 'flex', alignItems: 'center', gap: 3 }}>
-                              <Clock size={11} /> {s.open} open
-                            </span>
-                            <span style={{ fontSize: 11, fontWeight: 600, color: '#3B82F6', display: 'flex', alignItems: 'center', gap: 3 }}>
-                              <RefreshCw size={11} /> {s.in_progress} active
-                            </span>
-                            <span style={{ fontSize: 11, fontWeight: 600, color: '#22C55E', display: 'flex', alignItems: 'center', gap: 3 }}>
-                              <CheckCircle2 size={11} /> {s.completed} done
-                            </span>
-                          </div>
-                        </div>
-                        <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                          <p style={{ fontSize: 20, fontWeight: 900, color: pct === 100 ? '#22C55E' : '#D99D26', margin: 0 }}>{pct}%</p>
-                          <p style={{ fontSize: 11, color: '#9CA3AF', margin: 0 }}>{s.total} items</p>
-                        </div>
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px', borderTop: '1px solid #F3F4F6', background: '#FAFAFA' }}>
-                      <span style={{ fontSize: 11, fontWeight: 600, color: '#9CA3AF' }}>Tap to open punch list</span>
-                      <ChevronRight size={14} color="#9CA3AF" />
-                    </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: managementUser ? '1fr 1fr' : '1fr 1fr 1fr', borderTop: '1px solid #F3F4F6' }}>
+                  <button onClick={() => navigate(`/mobile/project/${project.id}`)} style={{ border: 'none', background: '#FAFAFA', padding: '10px 4px', fontSize: 11, fontWeight: 850, color: '#2563EB', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                    <FolderOpen size={15} color="#2563EB" /> Open
                   </button>
-                );
-              })
-            )}
+                  <button onClick={() => navigate(`/mobile/photos?projectId=${project.id}`)} style={{ border: 'none', borderLeft: '1px solid #F3F4F6', background: '#FAFAFA', padding: '10px 4px', fontSize: 11, fontWeight: 850, color: '#D99D26', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                    <Camera size={15} color="#D99D26" /> Photos
+                  </button>
+                  {!managementUser && (
+                    <button onClick={() => navigate(`/mobile/project/${project.id}/invoice`)} style={{ border: 'none', borderLeft: '1px solid #F3F4F6', background: '#FAFAFA', padding: '10px 4px', fontSize: 11, fontWeight: 850, color: '#7C3AED', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                      <FileText size={15} color="#7C3AED" /> Invoice
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
-        {/* ══ INVOICES ══ */}
+        {tab === 'photos' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <button
+              onClick={() => navigate(rememberedProject ? `/mobile/photos?projectId=${rememberedProject.id}` : '/mobile/photos')}
+              style={{ width: '100%', border: 'none', borderRadius: 18, padding: 16, textAlign: 'left', background: 'linear-gradient(135deg, #D99D26, #C4891F)', color: 'white', boxShadow: '0 8px 18px rgba(217,157,38,0.22)' }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 44, height: 44, borderRadius: 13, background: 'rgba(255,255,255,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Camera size={22} color="white" />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ margin: 0, fontSize: 15, fontWeight: 900 }}>Add Project Photos</p>
+                  <p style={{ margin: '3px 0 0', fontSize: 12, opacity: 0.82, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {rememberedProject ? `Continue with ${rememberedProject.address}` : 'Choose a project before uploading'}
+                  </p>
+                </div>
+                <ChevronRight size={18} color="white" />
+              </div>
+            </button>
+
+            <p style={{ color: '#6B7280', fontSize: 11, fontWeight: 850, letterSpacing: '0.08em', textTransform: 'uppercase', margin: '4px 2px 0' }}>
+              Select Project
+            </p>
+            {filteredProjects.map(project => (
+              <button
+                key={project.id}
+                onClick={() => navigate(`/mobile/photos?projectId=${project.id}`)}
+                style={{ width: '100%', border: 'none', background: 'white', borderRadius: 15, padding: 13, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10, boxShadow: '0 1px 8px rgba(0,0,0,0.06)' }}
+              >
+                <Camera size={18} color="#D99D26" />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ color: '#111827', margin: 0, fontSize: 13, fontWeight: 850, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{project.address}</p>
+                  <p style={{ color: '#6B7280', margin: '2px 0 0', fontSize: 11 }}>Upload timestamped photos</p>
+                </div>
+                <ChevronRight size={16} color="#9CA3AF" />
+              </button>
+            ))}
+          </div>
+        )}
+
         {tab === 'invoices' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <p style={{ fontSize: 11, fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '4px 2px 0' }}>
-              Select a Project to Invoice
+            <p style={{ color: '#6B7280', fontSize: 11, fontWeight: 850, letterSpacing: '0.08em', textTransform: 'uppercase', margin: '2px 2px 0' }}>
+              Select Project to Invoice
             </p>
+            {filteredProjects.map(project => (
+              <button
+                key={project.id}
+                onClick={() => navigate(`/mobile/project/${project.id}/invoice`)}
+                style={{ width: '100%', border: 'none', background: 'white', borderRadius: 15, padding: 13, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10, boxShadow: '0 1px 8px rgba(0,0,0,0.06)' }}
+              >
+                <FileText size={18} color="#7C3AED" />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ color: '#111827', margin: 0, fontSize: 13, fontWeight: 850, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{project.address}</p>
+                  <p style={{ color: '#6B7280', margin: '2px 0 0', fontSize: 11 }}>Create invoice</p>
+                </div>
+                <ChevronRight size={16} color="#9CA3AF" />
+              </button>
+            ))}
+          </div>
+        )}
 
-            {projects.length === 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '60px 20px', gap: 8 }}>
-                <FileText size={44} color="#D1D5DB" />
-                <p style={{ color: '#9CA3AF', fontWeight: 600, fontSize: 14, margin: 0 }}>No projects available</p>
+        {tab === 'contractors' && managementUser && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <p style={{ color: '#6B7280', fontSize: 11, fontWeight: 850, letterSpacing: '0.08em', textTransform: 'uppercase', margin: '2px 2px 0' }}>
+              {filteredContractors.length} Contractor{filteredContractors.length === 1 ? '' : 's'}
+            </p>
+            {filteredContractors.slice(0, 80).map(contractor => (
+              <div key={contractor.id} style={{ background: 'white', borderRadius: 15, padding: 13, display: 'flex', gap: 10, alignItems: 'center', boxShadow: '0 1px 8px rgba(0,0,0,0.06)' }}>
+                <div style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(22,163,74,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Users size={18} color="#16A34A" />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ color: '#111827', margin: 0, fontSize: 13, fontWeight: 850, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{contractor.name || contractor.company || contractor.contact_name || 'Contractor'}</p>
+                  <p style={{ color: '#6B7280', margin: '2px 0 0', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{contractor.contractor_category || contractor.category || contractor.email || contractor.phone || 'Contractor'}</p>
+                </div>
+                <span style={{ color: '#16A34A', fontSize: 11, fontWeight: 850 }}>{contractor.connected_project_count ?? contractor.assigned_project_count ?? 0}</span>
               </div>
-            ) : (
-              projects
-                .filter(p =>
-                  p.address.toLowerCase().includes(search.toLowerCase()) ||
-                  (p.job_name || '').toLowerCase().includes(search.toLowerCase())
-                )
-                .map(p => (
-                  <button
-                    key={p.id}
-                    onClick={() => navigate(`/mobile/project/${p.id}/invoice`)}
-                    style={{
-                      background: 'white', borderRadius: 18, overflow: 'hidden',
-                      boxShadow: '0 2px 12px rgba(0,0,0,0.07)',
-                      border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left',
-                      transition: 'transform 0.1s',
-                    }}
-                    onTouchStart={e => (e.currentTarget.style.transform = 'scale(0.99)')}
-                    onTouchEnd={e => (e.currentTarget.style.transform = 'scale(1)')}
-                  >
-                    <div style={{ padding: '14px', display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <div style={{
-                        width: 38, height: 38, borderRadius: 10, flexShrink: 0,
-                        background: 'rgba(124,58,237,0.1)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      }}>
-                        <FileText size={18} color="#7C3AED" />
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ fontWeight: 700, fontSize: 13, color: '#111827', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.address}</p>
-                        {p.job_name && <p style={{ fontSize: 11, color: '#9CA3AF', margin: '2px 0 0' }}>{p.job_name}</p>}
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                        <span style={{
-                          background: 'linear-gradient(135deg,#7C3AED,#6D28D9)',
-                          color: 'white', borderRadius: 10, padding: '6px 12px',
-                          fontSize: 12, fontWeight: 700,
-                          display: 'flex', alignItems: 'center', gap: 4,
-                        }}>
-                          <Plus size={12} /> Invoice
-                        </span>
-                        <ChevronRight size={14} color="#9CA3AF" />
-                      </div>
-                    </div>
-                  </button>
-                ))
-            )}
+            ))}
+          </div>
+        )}
+
+        {tab === 'suppliers' && managementUser && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <p style={{ color: '#6B7280', fontSize: 11, fontWeight: 850, letterSpacing: '0.08em', textTransform: 'uppercase', margin: '2px 2px 0' }}>
+              {filteredSuppliers.length} Supplier{filteredSuppliers.length === 1 ? '' : 's'}
+            </p>
+            {filteredSuppliers.slice(0, 80).map(supplier => (
+              <div key={supplier.id} style={{ background: 'white', borderRadius: 15, padding: 13, display: 'flex', gap: 10, alignItems: 'center', boxShadow: '0 1px 8px rgba(0,0,0,0.06)' }}>
+                <div style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(124,58,237,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Truck size={18} color="#7C3AED" />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ color: '#111827', margin: 0, fontSize: 13, fontWeight: 850, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{supplier.name || supplier.contact || 'Supplier'}</p>
+                  <p style={{ color: '#6B7280', margin: '2px 0 0', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{supplier.category || supplier.email || supplier.phone || 'Supplier'}</p>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
 
-      {/* ── Fixed Bottom Nav ── */}
-      <div className="mobile-bottom-nav" style={{ background: 'white', borderTop: '1px solid #E5E7EB', boxShadow: '0 -4px 20px rgba(0,0,0,0.08)' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr' }}>
-          {NAV_ITEMS.map(item => {
+      <div className="mobile-bottom-nav" style={{ background: 'white', borderTop: '1px solid #E5E7EB', boxShadow: '0 -4px 18px rgba(0,0,0,0.08)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${navItems.length}, 1fr)` }}>
+          {navItems.map(item => {
             const active = tab === item.key;
             return (
               <button
                 key={item.key}
                 onClick={() => setTab(item.key)}
-                style={{
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-                  padding: '10px 4px 8px', background: 'none', border: 'none', cursor: 'pointer',
-                  color: active ? item.color : '#9CA3AF',
-                  position: 'relative', transition: 'color 0.15s',
-                }}
+                style={{ minWidth: 0, position: 'relative', border: 'none', background: 'transparent', padding: '10px 2px 8px', color: active ? item.color : '#9CA3AF', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}
               >
-                {active && (
-                  <div style={{
-                    position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)',
-                    width: 32, height: 3, borderRadius: '0 0 3px 3px', background: item.color,
-                  }} />
-                )}
+                {active && <span style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)', width: 28, height: 3, borderRadius: '0 0 3px 3px', background: item.color }} />}
                 <item.Icon size={20} />
-                <span style={{ fontSize: 10, fontWeight: 700 }}>{item.label}</span>
+                <span style={{ maxWidth: '100%', fontSize: 10, fontWeight: 850, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.label}</span>
               </button>
             );
           })}

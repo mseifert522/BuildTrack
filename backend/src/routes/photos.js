@@ -11,11 +11,36 @@ const router = express.Router({ mergeParams: true });
 router.use(authenticate);
 router.use(authorizeProjectAccess);
 
+const PHOTO_TYPES = new Set(['general', 'progress', 'note', 'construction_plan', 'material']);
+
+function normalizePhotoType(value) {
+  const requested = String(value || 'general').trim();
+  return PHOTO_TYPES.has(requested) ? requested : 'general';
+}
+
+function normalizeTakenAt(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+}
+
+function parseTakenAtValues(rawValue) {
+  if (!rawValue) return [];
+  try {
+    const parsed = JSON.parse(rawValue);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(normalizeTakenAt);
+  } catch {
+    return [];
+  }
+}
+
 // Configure multer storage — photos go into uploads/{projectId}/progress/
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     // Determine subfolder: 'progress' for progress photos, projectId root for punch list photos
-    const subFolder = req.query.type === 'progress' ? 'progress' : '';
+    const subFolder = normalizePhotoType(req.query.type) === 'progress' ? 'progress' : '';
     const uploadDir = subFolder
       ? path.join(process.env.UPLOADS_PATH || './uploads', req.params.projectId, subFolder)
       : path.join(process.env.UPLOADS_PATH || './uploads', req.params.projectId);
@@ -43,7 +68,7 @@ const upload = multer({ storage, fileFilter, limits: { fileSize: 20 * 1024 * 102
 // GET /api/projects/:projectId/photos
 router.get('/', (req, res) => {
   const db = getDb();
-  const { category_id, punch_list_item_id, note_id, construction_plan_item_id, material_id } = req.query;
+  const { category_id, punch_list_item_id, note_id, construction_plan_item_id, material_id, type, photo_type } = req.query;
   let query = `
     SELECT ph.*, u.name as uploader_name, pc.name as category_name
     FROM photos ph
@@ -57,7 +82,8 @@ router.get('/', (req, res) => {
   if (note_id) { query += ' AND ph.note_id = ?'; params.push(note_id); }
   if (construction_plan_item_id) { query += ' AND ph.construction_plan_item_id = ?'; params.push(construction_plan_item_id); }
   if (material_id) { query += ' AND ph.material_id = ?'; params.push(material_id); }
-  query += ' ORDER BY ph.created_at DESC';
+  if (type || photo_type) { query += ' AND ph.photo_type = ?'; params.push(normalizePhotoType(type || photo_type)); }
+  query += ' ORDER BY datetime(COALESCE(ph.taken_at, ph.created_at)) DESC, ph.created_at DESC';
   res.json(db.prepare(query).all(...params));
 });
 
@@ -100,12 +126,13 @@ router.post('/', upload.array('photos', 20), (req, res) => {
   try {
     if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No files uploaded' });
     const db = getDb();
-    const { category_id, punch_list_item_id, note_id, construction_plan_item_id, material_id, caption } = req.body;
+    const { category_id, punch_list_item_id, note_id, construction_plan_item_id, material_id, caption, photo_type, taken_at, taken_at_values } = req.body;
     const photoType = construction_plan_item_id ? 'construction_plan'
       : material_id ? 'material'
       : note_id ? 'note'
-      : (req.query.type === 'progress' ? 'progress' : 'general');
-    const takenAt = new Date().toISOString(); // server-side timestamp
+      : normalizePhotoType(req.query.type || photo_type);
+    const fallbackTakenAt = normalizeTakenAt(taken_at) || new Date().toISOString();
+    const perFileTakenAt = parseTakenAtValues(taken_at_values);
     const inserted = [];
 
     if (note_id) {
@@ -124,10 +151,11 @@ router.post('/', upload.array('photos', 20), (req, res) => {
     // Determine the file path prefix based on type
     const subFolder = photoType === 'progress' ? 'progress' : '';
 
-    for (const file of req.files) {
+    for (const [index, file] of req.files.entries()) {
       const id = uuidv4();
       // Store relative path including subfolder so we can serve it correctly
       const storedFilename = subFolder ? `progress/${file.filename}` : file.filename;
+      const takenAt = perFileTakenAt[index] || fallbackTakenAt;
       db.prepare(`
         INSERT INTO photos (id, project_id, category_id, punch_list_item_id, note_id, construction_plan_item_id, material_id, filename, original_name, mime_type, size, caption, uploaded_by, photo_type, taken_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

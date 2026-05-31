@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
-import { useAuthStore, canManageProjects } from '../store/authStore';
-import { ArrowLeft, Camera, Upload, X, ZoomIn } from 'lucide-react';
+import { ArrowLeft, Camera, X, ZoomIn } from 'lucide-react';
 
 interface ProgressPhoto {
   id: string;
@@ -40,8 +39,6 @@ function groupByDate(photos: ProgressPhoto[]) {
 export default function MobileProgress() {
   const { id: projectId } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuthStore();
-  const canManage = user ? canManageProjects(user.role) : false;
 
   const [projectAddress, setProjectAddress] = useState('');
   const [photos, setPhotos] = useState<ProgressPhoto[]>([]);
@@ -82,9 +79,11 @@ export default function MobileProgress() {
       previewFiles.forEach(f => formData.append('photos', f));
       if (caption.trim()) formData.append('caption', caption.trim());
       formData.append('photo_type', 'progress');
-      formData.append('taken_at', new Date().toISOString());
+      formData.append('taken_at_values', JSON.stringify(
+        previewFiles.map(file => new Date(file.lastModified || Date.now()).toISOString())
+      ));
 
-      await api.post(`/projects/${projectId}/photos`, formData, {
+      await api.post(`/projects/${projectId}/photos?type=progress`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 
@@ -135,8 +134,7 @@ export default function MobileProgress() {
           </div>
         </div>
         {/* Upload bar */}
-        {canManage && (
-          <div style={{ padding: '0 16px 12px', display: 'flex', gap: 8 }}>
+        <div style={{ padding: '0 16px 12px', display: 'flex', gap: 8 }}>
             <label
               style={{
                 flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
@@ -158,8 +156,7 @@ export default function MobileProgress() {
                 style={{ display: 'none' }}
               />
             </label>
-          </div>
-        )}
+        </div>
       </div>
 
       {/* Upload preview sheet */}
@@ -177,7 +174,7 @@ export default function MobileProgress() {
             {/* Timestamp notice */}
             <div style={{ background: '#FEF3C7', borderRadius: 10, padding: '8px 12px', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 13, color: '#92400E', fontWeight: 600 }}>
-                📅 Date & time stamp: {new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
+                Date and time stamp: {new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
               </span>
             </div>
 
@@ -248,7 +245,7 @@ export default function MobileProgress() {
             </div>
             <p style={{ color: 'rgba(255,255,255,0.7)', fontWeight: 700, fontSize: 16, margin: '0 0 8px' }}>No progress photos yet</p>
             <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, margin: 0 }}>
-              {canManage ? 'Tap "Take / Upload Photo" to document construction progress' : 'No photos have been uploaded yet'}
+              Tap "Take / Upload Photo" to document construction progress
             </p>
           </div>
         ) : (
@@ -268,7 +265,7 @@ export default function MobileProgress() {
                 {group.photos.map(photo => {
                   const src = photo.filename.startsWith('http')
                     ? photo.filename
-                    : `${photoBaseUrl}/uploads/${photo.filename}`;
+                    : `${photoBaseUrl}/uploads/${projectId}/${photo.filename}`;
                   return (
                     <div
                       key={photo.id}

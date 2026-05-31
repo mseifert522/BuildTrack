@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
-import { useAuthStore, canManageUsers, canAccessSettings, isAdminRole } from './store/authStore';
+import { useAuthStore, canManageUsers, canAccessSettings } from './store/authStore';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -27,11 +27,8 @@ import MobileInvoice from './pages/MobileInvoice';
 import MobileAddProject from './pages/MobileAddProject';
 import MobileNotes from './pages/MobileNotes';
 import MobileProgress from './pages/MobileProgress';
+import MobilePhotos from './pages/MobilePhotos';
 import PinLogin from './pages/PinLogin';
-import ContractorHome from './pages/ContractorHome';
-import ContractorProjects from './pages/ContractorProjects';
-import ContractorInvoice from './pages/ContractorInvoice';
-import ContractorProjectDetail from './pages/ContractorProjectDetail';
 
 const IDLE_TIMEOUT_MS = 45 * 60 * 1000;
 const ACTIVITY_WRITE_INTERVAL_MS = 15 * 1000;
@@ -50,18 +47,11 @@ function clearContractorSession() {
   localStorage.removeItem(CONTRACTOR_LAST_REFRESH_KEY);
 }
 
-/** Redirect /mobile to the public mobile invoice app. */
-function MobileRedirect() {
-  window.location.href = 'https://invoices.newurbandev.com/app';
-  return null;
-}
-
 /** After login, redirect to the right experience based on role */
 function SmartHomeRedirect() {
   const { user } = useAuthStore();
   if (user?.role === 'contractor') {
-    window.location.href = 'https://invoices.newurbandev.com/app';
-    return null;
+    return <Navigate to="/mobile" replace />;
   }
   return <Navigate to="/dashboard" replace />;
 }
@@ -71,6 +61,19 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   if (!token || !user) return <Navigate to="/login" replace />;
   if (user.force_password_reset) return <Navigate to="/change-password" replace />;
   return <>{children}</>;
+}
+
+function MobileRoute({ children }: { children: React.ReactNode }) {
+  const { user, token } = useAuthStore();
+  if (!token || !user) return <Navigate to="/login" replace />;
+  const isPinSession = user.role === 'contractor' && localStorage.getItem('contractor_token') === token;
+  if (user.force_password_reset && !isPinSession) return <Navigate to="/change-password" replace />;
+  return <>{children}</>;
+}
+
+function LegacyMobileProjectRedirect() {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={id ? `/mobile/project/${id}` : '/mobile'} replace />;
 }
 
 /** Redirect contractors away from desktop — they should use mobile */
@@ -266,8 +269,17 @@ export default function App() {
         {/* Root redirect — smart device detection */}
         <Route path="/" element={<ProtectedRoute><SmartHomeRedirect /></ProtectedRoute>} />
 
-        {/* Mobile redirect to invoices.newurbandev.com/app */}
-        <Route path="/mobile/*" element={<MobileRedirect />} />
+        {/* Mobile BuildTrack app */}
+        <Route path="/mobile" element={<MobileRoute><MobileHome /></MobileRoute>} />
+        <Route path="/mobile/projects" element={<MobileRoute><MobileProjects /></MobileRoute>} />
+        <Route path="/mobile/photos" element={<MobileRoute><MobilePhotos /></MobileRoute>} />
+        <Route path="/mobile/project/:id" element={<MobileRoute><MobileProjectHub /></MobileRoute>} />
+        <Route path="/mobile/project/:id/punch-list" element={<MobileRoute><MobilePunchList /></MobileRoute>} />
+        <Route path="/mobile/project/:id/invoice" element={<MobileRoute><MobileInvoice /></MobileRoute>} />
+        <Route path="/mobile/project/:id/notes" element={<MobileRoute><MobileNotes /></MobileRoute>} />
+        <Route path="/mobile/project/:id/progress" element={<MobileRoute><MobileProgress /></MobileRoute>} />
+        <Route path="/mobile/add-project" element={<MobileRoute><MobileAddProject /></MobileRoute>} />
+        <Route path="/mobile/*" element={<MobileRoute><Navigate to="/mobile" replace /></MobileRoute>} />
 
         {/* ── Desktop Routes (contractors are redirected to /mobile) ── */}
         <Route path="/dashboard" element={
@@ -339,12 +351,12 @@ export default function App() {
           </SettingsRoute>
         } />
 
-        {/* Contractor App (invoices.newurbandev.com/app) */}
+        {/* Legacy contractor app entry points */}
         <Route path="/app" element={<PinLogin />} />
-        <Route path="/app/home" element={<ContractorHome />} />
-        <Route path="/app/projects" element={<ContractorProjects />} />
-        <Route path="/app/project/:id" element={<ContractorProjectDetail />} />
-        <Route path="/app/invoice" element={<ContractorInvoice />} />
+        <Route path="/app/home" element={<MobileRoute><Navigate to="/mobile" replace /></MobileRoute>} />
+        <Route path="/app/projects" element={<MobileRoute><Navigate to="/mobile/projects" replace /></MobileRoute>} />
+        <Route path="/app/project/:id" element={<MobileRoute><LegacyMobileProjectRedirect /></MobileRoute>} />
+        <Route path="/app/invoice" element={<MobileRoute><Navigate to="/mobile" replace /></MobileRoute>} />
 
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/login" replace />} />

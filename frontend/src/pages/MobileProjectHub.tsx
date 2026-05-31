@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../lib/api';
-import { useAuthStore, canManageProjects } from '../store/authStore';
 
 interface Project {
   id: string;
@@ -15,8 +14,6 @@ interface Project {
 export default function MobileProjectHub() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuthStore();
-  const canManage = user ? canManageProjects(user.role) : false;
   const [project, setProject] = useState<Project | null>(null);
   const [punchCount, setPunchCount] = useState(0);
   const [openCount, setOpenCount] = useState(0);
