@@ -12,6 +12,7 @@ router.use(authenticate);
 router.use(authorizeProjectAccess);
 
 const PHOTO_TYPES = new Set(['general', 'progress', 'note', 'construction_plan', 'material']);
+const CAPTURE_SOURCES = new Set(['batch_camera', 'device_camera', 'library', 'desktop', 'unknown']);
 const IMAGE_EXTENSIONS = new Set(['.jpeg', '.jpg', '.png', '.gif', '.webp', '.heic', '.heif']);
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.m4v', '.webm', '.avi', '.mkv', '.mpeg', '.mpg', '.3gp']);
 const configuredMediaMaxMb = Number.parseInt(process.env.PROJECT_MEDIA_MAX_MB || '500', 10);
@@ -38,6 +39,40 @@ function parseTakenAtValues(rawValue) {
   } catch {
     return [];
   }
+}
+
+function parseStringValues(rawValue) {
+  if (!rawValue) return [];
+  try {
+    const parsed = JSON.parse(rawValue);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(value => String(value || '').trim());
+  } catch {
+    return [];
+  }
+}
+
+function normalizeCaptureSource(value) {
+  const requested = String(value || 'unknown').trim();
+  return CAPTURE_SOURCES.has(requested) ? requested : 'unknown';
+}
+
+function normalizeNumber(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function getClientIp(req) {
+  const forwardedFor = String(req.headers['x-forwarded-for'] || '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean);
+  return forwardedFor[0]
+    || String(req.headers['x-real-ip'] || '').trim()
+    || req.ip
+    || req.socket?.remoteAddress
+    || '';
 }
 
 // Configure multer storage — photos go into uploads/{projectId}/progress/
@@ -75,10 +110,19 @@ router.get('/', (req, res) => {
   const db = getDb();
   const { category_id, punch_list_item_id, note_id, construction_plan_item_id, material_id, type, photo_type } = req.query;
   let query = `
-    SELECT ph.*, u.name as uploader_name, pc.name as category_name
+    SELECT
+      ph.*,
+      u.name as uploader_name,
+      pc.name as category_name,
+      n.note as note_text,
+      n.note_type as note_type,
+      n.created_at as note_created_at,
+      nu.name as note_user_name
     FROM photos ph
     LEFT JOIN users u ON u.id = ph.uploaded_by
     LEFT JOIN photo_categories pc ON pc.id = ph.category_id
+    LEFT JOIN project_notes n ON n.id = ph.note_id
+    LEFT JOIN users nu ON nu.id = n.user_id
     WHERE ph.project_id = ?
   `;
   const params = [req.params.projectId];
@@ -117,9 +161,17 @@ router.post('/categories', (req, res) => {
 router.get('/progress', (req, res) => {
   const db = getDb();
   const photos = db.prepare(`
-    SELECT ph.*, u.name as uploader_name
+    SELECT
+      ph.*,
+      u.name as uploader_name,
+      n.note as note_text,
+      n.note_type as note_type,
+      n.created_at as note_created_at,
+      nu.name as note_user_name
     FROM photos ph
     LEFT JOIN users u ON u.id = ph.uploaded_by
+    LEFT JOIN project_notes n ON n.id = ph.note_id
+    LEFT JOIN users nu ON nu.id = n.user_id
     WHERE ph.project_id = ? AND ph.photo_type = 'progress'
     ORDER BY ph.taken_at DESC, ph.created_at DESC
   `).all(req.params.projectId);
@@ -131,13 +183,37 @@ router.post('/', upload.array('photos', 20), (req, res) => {
   try {
     if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No files uploaded' });
     const db = getDb();
-    const { category_id, punch_list_item_id, note_id, construction_plan_item_id, material_id, caption, photo_type, taken_at, taken_at_values } = req.body;
+    const {
+      category_id,
+      punch_list_item_id,
+      note_id,
+      construction_plan_item_id,
+      material_id,
+      caption,
+      photo_type,
+      taken_at,
+      taken_at_values,
+      capture_latitude,
+      capture_longitude,
+      capture_accuracy,
+      capture_recorded_at,
+      capture_source,
+      capture_source_values,
+      upload_session_id,
+    } = req.body;
     const photoType = construction_plan_item_id ? 'construction_plan'
       : material_id ? 'material'
-      : note_id ? 'note'
-      : normalizePhotoType(req.query.type || photo_type);
+      : normalizePhotoType(req.query.type || photo_type || (note_id ? 'note' : 'general'));
     const fallbackTakenAt = normalizeTakenAt(taken_at) || new Date().toISOString();
     const perFileTakenAt = parseTakenAtValues(taken_at_values);
+    const perFileCaptureSource = parseStringValues(capture_source_values);
+    const uploadIpAddress = getClientIp(req);
+    const uploadUserAgent = String(req.headers['user-agent'] || '').slice(0, 500);
+    const latitude = normalizeNumber(capture_latitude);
+    const longitude = normalizeNumber(capture_longitude);
+    const accuracy = normalizeNumber(capture_accuracy);
+    const recordedAt = normalizeTakenAt(capture_recorded_at) || new Date().toISOString();
+    const sessionId = String(upload_session_id || uuidv4()).slice(0, 120);
     const inserted = [];
 
     if (note_id) {
@@ -161,14 +237,37 @@ router.post('/', upload.array('photos', 20), (req, res) => {
       // Store relative path including subfolder so we can serve it correctly
       const storedFilename = subFolder ? `progress/${file.filename}` : file.filename;
       const takenAt = perFileTakenAt[index] || fallbackTakenAt;
+      const source = normalizeCaptureSource(perFileCaptureSource[index] || capture_source);
       db.prepare(`
-        INSERT INTO photos (id, project_id, category_id, punch_list_item_id, note_id, construction_plan_item_id, material_id, filename, original_name, mime_type, size, caption, uploaded_by, photo_type, taken_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(id, req.params.projectId, category_id || null, punch_list_item_id || null, note_id || null, construction_plan_item_id || null, material_id || null, storedFilename, file.originalname, file.mimetype, file.size, caption || null, req.user.id, photoType, takenAt);
-      inserted.push({ id, filename: storedFilename, original_name: file.originalname, taken_at: takenAt });
+        INSERT INTO photos (
+          id, project_id, category_id, punch_list_item_id, note_id, construction_plan_item_id, material_id,
+          filename, original_name, mime_type, size, caption, uploaded_by, photo_type, taken_at,
+          upload_ip_address, upload_user_agent, capture_latitude, capture_longitude, capture_accuracy,
+          capture_recorded_at, capture_source, upload_session_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        id, req.params.projectId, category_id || null, punch_list_item_id || null, note_id || null, construction_plan_item_id || null, material_id || null,
+        storedFilename, file.originalname, file.mimetype, file.size, caption || null, req.user.id, photoType, takenAt,
+        uploadIpAddress, uploadUserAgent, latitude, longitude, accuracy, recordedAt, source, sessionId
+      );
+      inserted.push({ id, filename: storedFilename, original_name: file.originalname, taken_at: takenAt, note_id: note_id || null, capture_source: source });
     }
 
-    logActivity({ userId: req.user.id, projectId: req.params.projectId, action: 'project_media_uploaded', entityType: 'photo', details: { count: req.files.length, type: photoType, note_id: note_id || null } });
+    logActivity({
+      userId: req.user.id,
+      projectId: req.params.projectId,
+      action: 'project_media_uploaded',
+      entityType: 'photo',
+      details: {
+        count: req.files.length,
+        type: photoType,
+        note_id: note_id || null,
+        upload_ip_address: uploadIpAddress,
+        has_capture_location: latitude !== null && longitude !== null,
+        upload_session_id: sessionId,
+      },
+    });
     res.status(201).json({ uploaded: inserted.length, photos: inserted });
   } catch (err) {
     console.error(err);

@@ -6,8 +6,23 @@ import { useAuthStore } from '../store/authStore';
 import {
   ArrowLeft, Send, MessageSquare, Wifi, WifiOff,
   Clock, ChevronDown, Mic, Square, Edit2, Check, X,
+  Camera, ImagePlus, PlayCircle,
 } from 'lucide-react';
 import { formatEasternDate, formatEasternDateTime, formatEasternRelative } from '../lib/time';
+import { appendProgressUploadAudit } from '../lib/progressUpload';
+
+interface NotePhoto {
+  id: string;
+  filename: string;
+  original_name: string;
+  caption?: string | null;
+  mime_type?: string | null;
+  taken_at?: string | null;
+  created_at: string;
+  uploader_name?: string | null;
+  capture_latitude?: number | null;
+  upload_ip_address?: string | null;
+}
 
 interface Note {
   id: string;
@@ -22,6 +37,11 @@ interface Note {
   edit_count?: number;
   edited_at?: string | null;
   edited_by_name?: string | null;
+  photos?: NotePhoto[];
+  photo_id?: string | null;
+  photo_filename?: string | null;
+  photo_original_name?: string | null;
+  photo_caption?: string | null;
   created_at: string;
 }
 
@@ -81,6 +101,22 @@ function avatarColor(userId: string) {
   return colors[Math.abs(hash) % colors.length];
 }
 
+function notePhotos(note: Note): NotePhoto[] {
+  if (Array.isArray(note.photos) && note.photos.length) return note.photos;
+  if (!note.photo_filename) return [];
+  return [{
+    id: note.photo_id || note.photo_filename,
+    filename: note.photo_filename,
+    original_name: note.photo_original_name || 'Progress photo',
+    caption: note.photo_caption || null,
+    created_at: note.created_at,
+  }];
+}
+
+function isVideoAttachment(photo: NotePhoto) {
+  return Boolean(photo.mime_type?.startsWith('video/')) || /\.(mp4|mov|m4v|webm|avi|mkv|mpeg|mpg|3gp)$/i.test(photo.filename);
+}
+
 export default function MobileNotes() {
   const { id: projectId } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -97,9 +133,16 @@ export default function MobileNotes() {
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
+  const [noteFiles, setNoteFiles] = useState<File[]>([]);
+  const [noteFileUrls, setNoteFileUrls] = useState<string[]>([]);
+  const [attachToNoteId, setAttachToNoteId] = useState<string | null>(null);
+  const [attachingNoteId, setAttachingNoteId] = useState<string | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const noteFileInputRef = useRef<HTMLInputElement>(null);
+  const noteFileUrlsRef = useRef<string[]>([]);
+  const attachExistingInputRef = useRef<HTMLInputElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const recognitionRef = useRef<any>(null);
 
@@ -122,6 +165,14 @@ export default function MobileNotes() {
       setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
     }
   }, [notes.length, loading]);
+
+  useEffect(() => {
+    noteFileUrlsRef.current = noteFileUrls;
+  }, [noteFileUrls]);
+
+  useEffect(() => () => {
+    noteFileUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
+  }, []);
 
   // SSE real-time connection
   useEffect(() => {
@@ -170,9 +221,64 @@ export default function MobileNotes() {
   // Also update the SSE auth — backend needs to accept token via query param
   // We'll handle this in the backend middleware patch below
 
+  const clearNoteFiles = useCallback(() => {
+    setNoteFiles([]);
+    setNoteFileUrls(current => {
+      current.forEach(url => URL.revokeObjectURL(url));
+      return [];
+    });
+    if (noteFileInputRef.current) noteFileInputRef.current.value = '';
+  }, []);
+
+  const queueNoteFiles = useCallback((files?: FileList | null) => {
+    const nextFiles = Array.from(files || []);
+    if (!nextFiles.length) return;
+    setNoteFiles(current => [...current, ...nextFiles]);
+    setNoteFileUrls(current => [...current, ...nextFiles.map(file => URL.createObjectURL(file))]);
+    if (noteFileInputRef.current) noteFileInputRef.current.value = '';
+  }, []);
+
+  const uploadFilesToNote = useCallback(async (noteId: string, files: File[]) => {
+    if (!projectId || !files.length) return;
+    const formData = new FormData();
+    files.forEach(file => formData.append('photos', file));
+    formData.append('note_id', noteId);
+    formData.append('photo_type', 'progress');
+    formData.append('caption', 'Progress pictures attached to project note');
+    await appendProgressUploadAudit(formData, files, files.map(() => 'library'));
+    await api.post(`/projects/${projectId}/photos?type=progress`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  }, [projectId]);
+
+  const refreshNotes = useCallback(async () => {
+    if (!projectId) return;
+    const notesRes = await api.get(`/projects/${projectId}/notes`);
+    setNotes(Array.isArray(notesRes.data) ? notesRes.data : []);
+  }, [projectId]);
+
+  const attachFilesToExistingNote = useCallback(async (files?: FileList | null) => {
+    const selectedFiles = Array.from(files || []);
+    const noteId = attachToNoteId;
+    if (!noteId || !selectedFiles.length) return;
+    setAttachingNoteId(noteId);
+    try {
+      await uploadFilesToNote(noteId, selectedFiles);
+      await refreshNotes();
+      toast.success(`${selectedFiles.length} progress picture${selectedFiles.length === 1 ? '' : 's'} attached`);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to attach progress pictures');
+    } finally {
+      setAttachingNoteId(null);
+      setAttachToNoteId(null);
+      if (attachExistingInputRef.current) attachExistingInputRef.current.value = '';
+    }
+  }, [attachToNoteId, refreshNotes, uploadFilesToNote]);
+
   const handleSend = useCallback(async () => {
     if (!text.trim() || sending) return;
     setSending(true);
+    const filesForNote = [...noteFiles];
     const optimisticNote: Note = {
       id: `temp-${Date.now()}`,
       project_id: projectId!,
@@ -182,6 +288,7 @@ export default function MobileNotes() {
       user_avatar_url: user!.avatar_url || null,
       note: text.trim(),
       note_type: 'general',
+      photos: [],
       created_at: new Date().toISOString(),
     };
     // Optimistic update
@@ -191,8 +298,14 @@ export default function MobileNotes() {
 
     try {
       const res = await api.post(`/projects/${projectId}/notes`, { note: text.trim() });
-      // Replace optimistic note with real one
-      setNotes(prev => prev.map(n => n.id === optimisticNote.id ? res.data : n));
+      if (filesForNote.length) {
+        await uploadFilesToNote(res.data.id, filesForNote);
+        await refreshNotes();
+      } else {
+        // Replace optimistic note with real one
+        setNotes(prev => prev.map(n => n.id === optimisticNote.id ? res.data : n));
+      }
+      clearNoteFiles();
     } catch {
       toast.error('Failed to post note');
       setNotes(prev => prev.filter(n => n.id !== optimisticNote.id));
@@ -200,7 +313,7 @@ export default function MobileNotes() {
     } finally {
       setSending(false);
     }
-  }, [text, sending, projectId, user]);
+  }, [clearNoteFiles, noteFiles, refreshNotes, sending, projectId, text, uploadFilesToNote, user]);
 
   const startEdit = useCallback((note: Note) => {
     setEditingNoteId(note.id);
@@ -387,6 +500,7 @@ export default function MobileNotes() {
                   const isExpanded = expandedNote === note.id;
                   const isEditing = editingNoteId === note.id;
                   const editable = canEditNote(note, user);
+                  const attachments = notePhotos(note);
 
                   return (
                     <div key={note.id} className={`flex gap-3 ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}>
@@ -472,12 +586,37 @@ export default function MobileNotes() {
                               </div>
                             </div>
                           ) : (
-                            <p
-                              className="text-sm leading-relaxed whitespace-pre-wrap"
-                              style={{ color: isOwn ? 'white' : '#111827' }}
-                            >
-                              {note.note}
-                            </p>
+                            <>
+                              <p
+                                className="text-sm leading-relaxed whitespace-pre-wrap"
+                                style={{ color: isOwn ? 'white' : '#111827' }}
+                              >
+                                {note.note}
+                              </p>
+                              {attachments.length > 0 && (
+                                <div className="grid grid-cols-2 gap-1.5 mt-3">
+                                  {attachments.map(photo => {
+                                    const src = `/uploads/${note.project_id}/${photo.filename}`;
+                                    const isVideo = isVideoAttachment(photo);
+                                    return (
+                                      <div key={photo.id} className="relative aspect-square rounded-xl overflow-hidden" style={{ background: 'rgba(0,0,0,0.12)' }}>
+                                        {isVideo ? (
+                                          <>
+                                            <video src={src} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                                            <PlayCircle className="absolute inset-0 m-auto w-7 h-7 text-white drop-shadow" />
+                                          </>
+                                        ) : (
+                                          <img src={src} alt={photo.original_name || 'Progress picture'} className="w-full h-full object-cover" loading="lazy" />
+                                        )}
+                                        <div className="absolute left-1 bottom-1 rounded-full px-1.5 py-0.5 text-[9px] font-black text-white" style={{ background: 'rgba(17,24,39,0.72)' }}>
+                                          {formatEasternDateTime(photo.taken_at || photo.created_at, { hour: 'numeric', minute: '2-digit' })}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </>
                           )}
                         </div>
 
@@ -500,6 +639,21 @@ export default function MobileNotes() {
                             >
                               <Edit2 className="w-3 h-3" />
                               {editWindowLabel(note, user)}
+                            </button>
+                          )}
+                          {!isEditing && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAttachToNoteId(note.id);
+                                attachExistingInputRef.current?.click();
+                              }}
+                              disabled={attachingNoteId === note.id}
+                              className="flex items-center gap-1 text-xs font-bold disabled:opacity-50"
+                              style={{ color: '#D99D26' }}
+                            >
+                              <ImagePlus className="w-3 h-3" />
+                              {attachingNoteId === note.id ? 'Attaching...' : 'Attach pictures'}
                             </button>
                           )}
                         </div>
@@ -538,6 +692,22 @@ export default function MobileNotes() {
           paddingBottom: 'max(12px, env(safe-area-inset-bottom))',
         }}
       >
+        <input
+          ref={noteFileInputRef}
+          type="file"
+          accept="image/*,video/*"
+          multiple
+          className="hidden"
+          onChange={event => queueNoteFiles(event.target.files)}
+        />
+        <input
+          ref={attachExistingInputRef}
+          type="file"
+          accept="image/*,video/*"
+          multiple
+          className="hidden"
+          onChange={event => attachFilesToExistingNote(event.target.files)}
+        />
         {/* Current user indicator */}
         <div className="flex items-center gap-2 mb-2 px-1">
           <div
@@ -561,7 +731,39 @@ export default function MobileNotes() {
           </div>
         )}
 
+        {noteFiles.length > 0 && (
+          <div className="mb-2 rounded-2xl border border-amber-100 bg-amber-50 p-2">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <span className="text-xs font-black text-amber-900">{noteFiles.length} progress picture{noteFiles.length === 1 ? '' : 's'} ready for this note</span>
+              <button type="button" onClick={clearNoteFiles} className="text-xs font-black text-amber-800">Clear</button>
+            </div>
+            <div className="flex gap-2 overflow-x-auto">
+              {noteFileUrls.map((url, index) => (
+                <div key={url} className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-xl bg-white">
+                  {noteFiles[index]?.type.startsWith('video/') ? (
+                    <>
+                      <video src={url} className="h-full w-full object-cover" muted playsInline />
+                      <PlayCircle className="absolute inset-0 m-auto h-5 w-5 text-white drop-shadow" />
+                    </>
+                  ) : (
+                    <img src={url} alt={`Queued progress picture ${index + 1}`} className="h-full w-full object-cover" />
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="flex items-end gap-3">
+          <button
+            type="button"
+            onClick={() => noteFileInputRef.current?.click()}
+            className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 transition-all active:scale-95"
+            style={{ background: '#FFFBEB', border: '1px solid #F3D08A' }}
+            aria-label="Attach progress pictures to note"
+          >
+            <Camera className="w-5 h-5" style={{ color: '#D99D26' }} />
+          </button>
           <div
             className="flex-1 rounded-2xl px-4 py-3"
             style={{

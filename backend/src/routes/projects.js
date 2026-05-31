@@ -14,6 +14,41 @@ router.use(authenticate);
 const MANAGEMENT_ROLES = ['super_admin', 'operations_manager', 'project_manager'];
 const PROJECT_STATUSES = ['active_rehab', 'rehab_completed'];
 
+function attachPhotosToNotes(db, notes) {
+  if (!notes.length) return notes;
+  const noteIds = notes.map(note => note.id);
+  const placeholders = noteIds.map(() => '?').join(',');
+  const photos = db.prepare(`
+    SELECT
+      ph.*,
+      u.name as uploader_name
+    FROM photos ph
+    LEFT JOIN users u ON u.id = ph.uploaded_by
+    WHERE ph.note_id IN (${placeholders})
+    ORDER BY datetime(COALESCE(ph.taken_at, ph.created_at)) DESC, ph.created_at DESC
+  `).all(...noteIds);
+
+  const photosByNote = new Map();
+  for (const photo of photos) {
+    const bucket = photosByNote.get(photo.note_id) || [];
+    bucket.push(photo);
+    photosByNote.set(photo.note_id, bucket);
+  }
+
+  return notes.map(note => {
+    const attachedPhotos = photosByNote.get(note.id) || [];
+    const firstPhoto = attachedPhotos[0] || null;
+    return {
+      ...note,
+      photos: attachedPhotos,
+      photo_id: firstPhoto?.id || null,
+      photo_filename: firstPhoto?.filename || null,
+      photo_original_name: firstPhoto?.original_name || null,
+      photo_caption: firstPhoto?.caption || null,
+    };
+  });
+}
+
 function getConstructionPlan(db, projectId) {
   const items = db.prepare(`
     SELECT cpi.*, u.name as assigned_to_name, cb.name as created_by_name
@@ -966,15 +1001,10 @@ router.get('/:id/notes', authorizeProjectAccess, (req, res) => {
       u.name as user_name,
       u.role as user_role,
       u.avatar_url as user_avatar_url,
-      eu.name as edited_by_name,
-      ph.id as photo_id,
-      ph.filename as photo_filename,
-      ph.original_name as photo_original_name,
-      ph.caption as photo_caption
+      eu.name as edited_by_name
     FROM project_notes pn
     JOIN users u ON u.id = pn.user_id
     LEFT JOIN users eu ON eu.id = pn.edited_by
-    LEFT JOIN photos ph ON ph.note_id = pn.id
     WHERE pn.project_id = ?
       AND (
         ? != 'contractor'
@@ -983,7 +1013,7 @@ router.get('/:id/notes', authorizeProjectAccess, (req, res) => {
       )
     ORDER BY datetime(pn.created_at) DESC, pn.created_at DESC
   `).all(req.params.id, req.user.role, req.user.id);
-  res.json(notes);
+  res.json(attachPhotosToNotes(db, notes));
 });
 
 // POST /api/projects/:id/notes - add note
@@ -1016,6 +1046,7 @@ router.post('/:id/notes', authorizeProjectAccess, (req, res) => {
     photo_filename: null,
     photo_original_name: null,
     photo_caption: null,
+    photos: [],
     created_at: new Date().toISOString(),
   });
 });
@@ -1049,19 +1080,14 @@ router.put('/:id/notes/:noteId', authorizeProjectAccess, (req, res) => {
       u.name as user_name,
       u.role as user_role,
       u.avatar_url as user_avatar_url,
-      eu.name as edited_by_name,
-      ph.id as photo_id,
-      ph.filename as photo_filename,
-      ph.original_name as photo_original_name,
-      ph.caption as photo_caption
+      eu.name as edited_by_name
     FROM project_notes pn
     JOIN users u ON u.id = pn.user_id
     LEFT JOIN users eu ON eu.id = pn.edited_by
-    LEFT JOIN photos ph ON ph.note_id = pn.id
     WHERE pn.id = ? AND pn.project_id = ?
   `).get(req.params.noteId, req.params.id);
 
-  res.json(updated);
+  res.json(attachPhotosToNotes(db, updated ? [updated] : [])[0] || updated);
 });
 
 module.exports = router;

@@ -3,13 +3,14 @@ import { useParams, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore, canManageProjects, isAdminRole } from '../store/authStore';
 import api from '../lib/api';
 import { Loading, StatusBadge, Modal } from '../components/ui';
-import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileText, ClipboardList, Activity, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown } from 'lucide-react';
+import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileText, ClipboardList, Activity, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useForm } from 'react-hook-form';
 import { format } from 'date-fns';
 import GooglePlacesInput from '../components/GooglePlacesInput';
 import CurrencyInput from '../components/CurrencyInput';
 import { formatEasternDate, formatEasternDateTime } from '../lib/time';
+import { appendProgressUploadAudit, type ProgressCaptureSource } from '../lib/progressUpload';
 
 type Tab = 'overview' | 'construction-plan' | 'quotes' | 'punch-list' | 'photos' | 'invoices' | 'activity' | 'notes' | 'team';
 
@@ -20,6 +21,37 @@ const getInitials = (name?: string) =>
     .slice(0, 2)
     .map(part => part[0]?.toUpperCase())
     .join('') || '?';
+
+const getNotePhotos = (note: any) => {
+  if (Array.isArray(note.photos) && note.photos.length) return note.photos;
+  if (!note.photo_filename) return [];
+  return [{
+    id: note.photo_id || note.photo_filename,
+    filename: note.photo_filename,
+    original_name: note.photo_original_name || 'Progress picture',
+    caption: note.photo_caption || null,
+    mime_type: null,
+    taken_at: note.created_at,
+    created_at: note.created_at,
+  }];
+};
+
+const isVideoMedia = (item: { filename?: string; mime_type?: string | null }) =>
+  Boolean(item.mime_type?.startsWith('video/')) || /\.(mp4|mov|m4v|webm|avi|mkv|mpeg|mpg|3gp)$/i.test(item.filename || '');
+
+const groupMediaByDay = (photos: any[]) =>
+  photos.reduce<{ date: string; photos: any[] }[]>((groups, photo) => {
+    const date = formatEasternDate(photo.taken_at || photo.created_at, {
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    });
+    const last = groups[groups.length - 1];
+    if (last && last.date === date) last.photos.push(photo);
+    else groups.push({ date, photos: [photo] });
+    return groups;
+  }, []);
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
@@ -37,7 +69,9 @@ export default function ProjectDetail() {
   const [noteType, setNoteType] = useState('general');
   const [noteVisibility, setNoteVisibility] = useState<'private' | 'public'>('private');
   const [listeningNote, setListeningNote] = useState(false);
-  const [notePhotoFile, setNotePhotoFile] = useState<File | null>(null);
+  const [notePhotoFiles, setNotePhotoFiles] = useState<File[]>([]);
+  const [attachNoteId, setAttachNoteId] = useState<string | null>(null);
+  const [attachingNoteId, setAttachingNoteId] = useState<string | null>(null);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editingNoteText, setEditingNoteText] = useState('');
   const [editingNoteType, setEditingNoteType] = useState('general');
@@ -51,6 +85,7 @@ export default function ProjectDetail() {
   const [editClosingCosts, setEditClosingCosts] = useState('');
   const { register, handleSubmit, reset, setValue, formState: { isSubmitting } } = useForm();
   const noteRecognitionRef = useRef<any>(null);
+  const attachExistingNoteInputRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
     try {
@@ -158,21 +193,45 @@ export default function ProjectDetail() {
     }
   };
 
+  const uploadProgressPicturesToNote = async (noteId: string, files: File[], source: ProgressCaptureSource = 'desktop') => {
+    if (!files.length) return;
+    const formData = new FormData();
+    files.forEach(file => formData.append('photos', file));
+    formData.append('note_id', noteId);
+    formData.append('photo_type', 'progress');
+    formData.append('caption', 'Progress pictures attached to project note');
+    await appendProgressUploadAudit(formData, files, files.map(() => source));
+    await api.post(`/projects/${id}/photos?type=progress`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  };
+
+  const attachProgressPicturesToExistingNote = async (files?: FileList | null) => {
+    const selectedFiles = Array.from(files || []);
+    if (!attachNoteId || selectedFiles.length === 0) return;
+    setAttachingNoteId(attachNoteId);
+    try {
+      await uploadProgressPicturesToNote(attachNoteId, selectedFiles);
+      toast.success(`${selectedFiles.length} progress picture${selectedFiles.length === 1 ? '' : 's'} attached`);
+      await loadNotes();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to attach progress pictures');
+    } finally {
+      setAttachNoteId(null);
+      setAttachingNoteId(null);
+      if (attachExistingNoteInputRef.current) attachExistingNoteInputRef.current.value = '';
+    }
+  };
+
   const addNote = async () => {
     if (!newNote.trim()) return;
     try {
       const noteRes = await api.post(`/projects/${id}/notes`, { note: newNote, note_type: noteType, visibility: noteVisibility });
-      if (notePhotoFile) {
-        const formData = new FormData();
-        formData.append('photos', notePhotoFile);
-        formData.append('note_id', noteRes.data.id);
-        formData.append('caption', 'Photo attached to project note');
-        await api.post(`/projects/${id}/photos`, formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
+      if (notePhotoFiles.length) {
+        await uploadProgressPicturesToNote(noteRes.data.id, notePhotoFiles);
       }
       setNewNote('');
-      setNotePhotoFile(null);
+      setNotePhotoFiles([]);
       loadNotes();
     } catch (err) {
       toast.error('Failed to add note');
@@ -243,6 +302,7 @@ export default function ProjectDetail() {
     { id: 'construction-plan', label: 'Scope of Work', icon: FileText },
     { id: 'quotes', label: 'Upload Quotes', icon: FileText },
     { id: 'punch-list', label: 'Punch List', icon: ClipboardList },
+    { id: 'photos', label: 'Progress Photos', icon: Camera },
     { id: 'team', label: 'Assigned Contractors', icon: Users },
     { id: 'activity', label: 'Activity', icon: Activity },
   ];
@@ -252,6 +312,14 @@ export default function ProjectDetail() {
 
   const notesPanel = (compact = false) => (
     <div className="bg-white rounded-xl border border-gray-200 p-4 h-full">
+      <input
+        ref={attachExistingNoteInputRef}
+        type="file"
+        multiple
+        accept="image/*,video/*"
+        className="hidden"
+        onChange={event => attachProgressPicturesToExistingNote(event.target.files)}
+      />
       <div className="flex items-center justify-between gap-3 mb-3">
         <div>
           <h3 className="font-semibold text-gray-900 text-sm">Project Notes</h3>
@@ -292,12 +360,13 @@ export default function ProjectDetail() {
         <label className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer">
           <input
             type="file"
-            accept="image/*"
+            accept="image/*,video/*"
+            multiple
             className="hidden"
-            onChange={e => setNotePhotoFile(e.target.files?.[0] || null)}
+            onChange={e => setNotePhotoFiles(Array.from(e.target.files || []))}
           />
           <Camera className="w-4 h-4" />
-          {notePhotoFile ? 'Photo ready' : 'Photo'}
+          {notePhotoFiles.length ? `${notePhotoFiles.length} ready` : 'Progress pictures'}
         </label>
         <button
           type="button"
@@ -323,10 +392,10 @@ export default function ProjectDetail() {
           </span>
         </div>
       )}
-      {notePhotoFile && (
+      {notePhotoFiles.length > 0 && (
         <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
-          <span className="text-xs font-semibold text-blue-700 truncate">Attached to this note: {notePhotoFile.name}</span>
-          <button type="button" onClick={() => setNotePhotoFile(null)} className="text-xs font-bold text-blue-700 hover:underline">Remove</button>
+          <span className="text-xs font-semibold text-blue-700 truncate">{notePhotoFiles.length} progress picture{notePhotoFiles.length === 1 ? '' : 's'} will attach to this note</span>
+          <button type="button" onClick={() => setNotePhotoFiles([])} className="text-xs font-bold text-blue-700 hover:underline">Remove</button>
         </div>
       )}
       <div className={`space-y-3 ${compact ? 'max-h-80 overflow-y-auto pr-1' : ''}`}>
@@ -380,10 +449,30 @@ export default function ProjectDetail() {
                   <span className={`inline-flex mt-2 px-2 py-0.5 rounded-full text-xs font-bold ${note.visibility === 'public' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
                     {note.visibility === 'public' ? 'Public to contractors' : 'Private management note'}
                   </span>
-                  {note.photo_filename && (
-                    <div className="mt-3 rounded-xl border border-gray-200 overflow-hidden bg-gray-50">
-                      <img src={`/uploads/${note.project_id}/${note.photo_filename}`} alt={note.photo_original_name || 'Note attachment'} className="w-full max-h-72 object-cover" />
-                      <p className="px-3 py-2 text-xs font-semibold text-gray-500">Photo attached to this note</p>
+                  {getNotePhotos(note).length > 0 && (
+                    <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-2">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {getNotePhotos(note).map((photo: any) => {
+                          const src = `/uploads/${note.project_id}/${photo.filename}`;
+                          const isVideo = isVideoMedia(photo);
+                          return (
+                            <div key={photo.id} className="relative aspect-square overflow-hidden rounded-lg bg-white">
+                              {isVideo ? (
+                                <>
+                                  <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+                                  <PlayCircle className="absolute inset-0 m-auto h-7 w-7 text-white drop-shadow" />
+                                </>
+                              ) : (
+                                <img src={src} alt={photo.original_name || 'Note attachment'} className="h-full w-full object-cover" loading="lazy" />
+                              )}
+                              <div className="absolute bottom-1 left-1 rounded-full bg-black/65 px-1.5 py-0.5 text-[10px] font-black text-white">
+                                {formatEasternDateTime(photo.taken_at || photo.created_at, { hour: 'numeric', minute: '2-digit' })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <p className="px-1 pt-2 text-xs font-semibold text-gray-500">Progress pictures attached to this note</p>
                     </div>
                   )}
                   {note.edited_at && (
@@ -404,6 +493,20 @@ export default function ProjectDetail() {
                 >
                   <Edit2 className="w-3 h-3" />
                   Edit note
+                </button>
+              )}
+              {editingNoteId !== note.id && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAttachNoteId(note.id);
+                    attachExistingNoteInputRef.current?.click();
+                  }}
+                  disabled={attachingNoteId === note.id}
+                  className="mt-2 ml-3 inline-flex items-center gap-1 text-xs font-bold text-amber-600 hover:underline disabled:opacity-50"
+                >
+                  <ImagePlus className="w-3 h-3" />
+                  {attachingNoteId === note.id ? 'Attaching...' : 'Attach progress pictures'}
                 </button>
               )}
             </div>
@@ -1935,14 +2038,15 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
   const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState('');
   const [uploading, setUploading] = useState(false);
-  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<{ src: string; isVideo: boolean } | null>(null);
   const [showNewCat, setShowNewCat] = useState(false);
   const [newCatName, setNewCatName] = useState('');
+  const groupedPhotos = groupMediaByDay(photos);
 
   const load = async () => {
     try {
       const [photosRes, catsRes] = await Promise.all([
-        api.get(`/projects/${projectId}/photos${selectedCategory ? `?category_id=${selectedCategory}` : ''}`),
+        api.get(`/projects/${projectId}/photos?type=progress${selectedCategory ? `&category_id=${selectedCategory}` : ''}`),
         api.get(`/projects/${projectId}/photos/categories`),
       ]);
       setPhotos(photosRes.data);
@@ -1958,8 +2062,10 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
     const formData = new FormData();
     Array.from(e.target.files).forEach(f => formData.append('photos', f));
     if (selectedCategory) formData.append('category_id', selectedCategory);
+    formData.append('photo_type', 'progress');
+    await appendProgressUploadAudit(formData, Array.from(e.target.files), Array.from(e.target.files).map(() => 'desktop'));
     try {
-      await api.post(`/projects/${projectId}/photos`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      await api.post(`/projects/${projectId}/photos?type=progress`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       toast.success(`${e.target.files.length} photo(s) uploaded`);
       load();
     } catch (err) {
@@ -1984,9 +2090,9 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
     <div className="space-y-4">
       {/* Upload button */}
       <label className={`flex items-center justify-center gap-2 py-3 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${uploading ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50'}`}>
-        <input type="file" multiple accept="image/*" onChange={handleUpload} className="hidden" disabled={uploading} />
+        <input type="file" multiple accept="image/*,video/*" onChange={handleUpload} className="hidden" disabled={uploading} />
         <Camera className="w-5 h-5 text-blue-500" />
-        <span className="text-sm font-medium text-blue-600">{uploading ? 'Uploading...' : 'Tap to Upload Photos'}</span>
+        <span className="text-sm font-medium text-blue-600">{uploading ? 'Uploading...' : 'Upload Progress Pictures'}</span>
       </label>
 
       {/* Categories */}
@@ -2007,16 +2113,44 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
       )}
 
       {loading ? <Loading /> : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-          {photos.map(photo => (
-            <div key={photo.id} className="relative group aspect-square rounded-xl overflow-hidden bg-gray-100 cursor-pointer" onClick={() => setLightbox(`/uploads/${projectId}/${photo.filename}`)}>
-              <img src={`/uploads/${projectId}/${photo.filename}`} alt={photo.original_name} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
-              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
-              <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
-                <p className="text-white text-xs truncate">{photo.uploader_name}</p>
-                <p className="text-white/70 text-xs">{formatEasternDate(photo.created_at, { month: 'short', day: 'numeric' })}</p>
+        <div className="space-y-5">
+          {groupedPhotos.map(group => (
+            <section key={group.date} className="rounded-xl border border-gray-200 bg-white p-3">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-black text-gray-900">{group.date}</h3>
+                  <p className="text-xs font-semibold text-gray-500">{group.photos.length} item{group.photos.length === 1 ? '' : 's'} ordered by time taken</p>
+                </div>
+                <span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-black text-blue-700">Historical record</span>
               </div>
-            </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                {group.photos.map(photo => {
+                  const src = `/uploads/${projectId}/${photo.filename}`;
+                  const isVideo = isVideoMedia(photo);
+                  return (
+                    <div key={photo.id} className="relative group aspect-square rounded-xl overflow-hidden bg-gray-100 cursor-pointer" onClick={() => setLightbox({ src, isVideo })}>
+                      {isVideo ? (
+                        <>
+                          <video src={src} className="w-full h-full object-cover transition-transform group-hover:scale-105" muted playsInline preload="metadata" />
+                          <PlayCircle className="absolute inset-0 m-auto h-10 w-10 text-white drop-shadow" />
+                        </>
+                      ) : (
+                        <img src={src} alt={photo.original_name} className="w-full h-full object-cover transition-transform group-hover:scale-105" loading="lazy" />
+                      )}
+                      {photo.note_id && (
+                        <span className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-black text-white">Note</span>
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent opacity-100 transition-opacity" />
+                      <div className="absolute bottom-0 left-0 right-0 p-2">
+                        <p className="text-white text-xs font-bold truncate">{photo.uploader_name || 'Unknown user'}</p>
+                        <p className="text-white/80 text-xs">{formatEasternDateTime(photo.taken_at || photo.created_at, { hour: 'numeric', minute: '2-digit' })}</p>
+                        <p className="text-white/70 text-[10px] truncate">{photo.capture_latitude ? 'GPS recorded' : 'IP recorded'}{photo.upload_ip_address ? ` / ${photo.upload_ip_address}` : ''}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
           ))}
           {photos.length === 0 && (
             <div className="col-span-full text-center py-12">
@@ -2030,7 +2164,11 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
       {/* Lightbox */}
       {lightbox && (
         <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4" onClick={() => setLightbox(null)}>
-          <img src={lightbox} alt="" className="max-w-full max-h-full object-contain rounded-lg" />
+          {lightbox.isVideo ? (
+            <video src={lightbox.src} controls autoPlay className="max-w-full max-h-full rounded-lg" onClick={event => event.stopPropagation()} />
+          ) : (
+            <img src={lightbox.src} alt="" className="max-w-full max-h-full object-contain rounded-lg" />
+          )}
           <button className="absolute top-4 right-4 text-white/70 hover:text-white" onClick={() => setLightbox(null)}>
             <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
           </button>

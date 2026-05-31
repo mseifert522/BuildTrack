@@ -5,6 +5,7 @@ import { Loading } from '../components/ui';
 import { Camera, Grid, List, PlayCircle, X } from 'lucide-react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
+import { appendProgressUploadAudit } from '../lib/progressUpload';
 
 interface Photo {
   id: string;
@@ -18,6 +19,14 @@ interface Photo {
   mime_type?: string;
   project_id: string;
   project_address?: string;
+  note_id?: string | null;
+  note_text?: string | null;
+  note_user_name?: string | null;
+  upload_ip_address?: string | null;
+  capture_latitude?: number | null;
+  capture_longitude?: number | null;
+  capture_accuracy?: number | null;
+  capture_source?: string | null;
 }
 
 interface LightboxMedia {
@@ -33,6 +42,16 @@ function mediaLabel(count: number) {
   return `${count} progress item${count === 1 ? '' : 's'}`;
 }
 
+function groupPhotosByDay(photos: Photo[]) {
+  return photos.reduce<{ date: string; photos: Photo[] }[]>((groups, photo) => {
+    const date = format(new Date(photo.taken_at || photo.created_at), 'EEEE, MMMM d, yyyy');
+    const last = groups[groups.length - 1];
+    if (last && last.date === date) last.photos.push(photo);
+    else groups.push({ date, photos: [photo] });
+    return groups;
+  }, []);
+}
+
 export default function Photos() {
   const [searchParams] = useSearchParams();
   const requestedProjectId = searchParams.get('projectId') || '';
@@ -45,6 +64,7 @@ export default function Photos() {
   const [selectedProject, setSelectedProject] = useState(requestedProjectId);
   const [caption, setCaption] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const groupedPhotos = groupPhotosByDay(photos);
 
   const load = async () => {
     setLoading(true);
@@ -95,12 +115,11 @@ export default function Photos() {
     setUploading(true);
     try {
       const formData = new FormData();
-      Array.from(files).forEach(file => formData.append('photos', file));
+      const uploadFiles = Array.from(files);
+      uploadFiles.forEach(file => formData.append('photos', file));
       if (caption.trim()) formData.append('caption', caption.trim());
       formData.append('photo_type', 'progress');
-      formData.append('taken_at_values', JSON.stringify(
-        Array.from(files).map(file => new Date(file.lastModified || Date.now()).toISOString())
-      ));
+      await appendProgressUploadAudit(formData, uploadFiles, uploadFiles.map(() => 'desktop'));
 
       await api.post(`/projects/${selectedProject}/photos?type=progress`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -187,63 +206,85 @@ export default function Photos() {
             <p className="text-gray-400 text-sm mt-1">Select a project above to upload photos or videos</p>
           </div>
         ) : view === 'grid' ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
-            {photos.map(photo => {
-              const src = `/uploads/${photo.project_id}/${photo.filename}`;
-              const isVideo = isVideoMedia(photo);
-              return (
-                <div
-                  key={photo.id}
-                  className="relative group aspect-square rounded-xl overflow-hidden bg-gray-100 cursor-pointer"
-                  onClick={() => openMedia(photo)}
-                >
-                  {isVideo ? (
-                    <video src={src} className="w-full h-full object-cover transition-transform group-hover:scale-105" preload="metadata" muted playsInline />
-                  ) : (
-                    <img src={src} alt={photo.original_name} className="w-full h-full object-cover transition-transform group-hover:scale-105" loading="lazy" />
-                  )}
-                  {isVideo && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/20">
-                      <PlayCircle className="w-11 h-11 text-white drop-shadow" />
-                    </div>
-                  )}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                  <div className="absolute bottom-0 left-0 right-0 p-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <p className="text-white text-xs font-medium truncate">{photo.project_address}</p>
-                    {photo.category_name && <p className="text-white/70 text-xs truncate">{photo.category_name}</p>}
-                    <p className="text-white/60 text-xs">{format(new Date(photo.taken_at || photo.created_at), 'MMM d, yyyy')}</p>
+          <div className="space-y-6">
+            {groupedPhotos.map(group => (
+              <section key={group.date} className="rounded-2xl border border-gray-200 bg-white p-4">
+                <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 className="text-sm font-black text-gray-900">{group.date}</h2>
+                    <p className="text-xs font-semibold text-gray-500">{group.photos.length} progress item{group.photos.length === 1 ? '' : 's'} ordered by capture time</p>
                   </div>
+                  <span className="w-fit rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-black text-emerald-700">User / timestamp / IP audit</span>
                 </div>
-              );
-            })}
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
+                  {group.photos.map(photo => {
+                    const src = `/uploads/${photo.project_id}/${photo.filename}`;
+                    const isVideo = isVideoMedia(photo);
+                    return (
+                      <div
+                        key={photo.id}
+                        className="relative group aspect-square rounded-xl overflow-hidden bg-gray-100 cursor-pointer"
+                        onClick={() => openMedia(photo)}
+                      >
+                        {isVideo ? (
+                          <video src={src} className="w-full h-full object-cover transition-transform group-hover:scale-105" preload="metadata" muted playsInline />
+                        ) : (
+                          <img src={src} alt={photo.original_name} className="w-full h-full object-cover transition-transform group-hover:scale-105" loading="lazy" />
+                        )}
+                        {isVideo && (
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                            <PlayCircle className="w-11 h-11 text-white drop-shadow" />
+                          </div>
+                        )}
+                        {photo.note_id && <span className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-black text-white">Note</span>}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent opacity-100 transition-opacity" />
+                        <div className="absolute bottom-0 left-0 right-0 p-2">
+                          <p className="text-white text-xs font-bold truncate">{photo.project_address}</p>
+                          <p className="text-white/80 text-xs truncate">{photo.uploader_name || 'Unknown user'} / {format(new Date(photo.taken_at || photo.created_at), 'h:mm a')}</p>
+                          <p className="text-white/70 text-[10px] truncate">{photo.capture_latitude ? 'GPS recorded' : 'IP recorded'}{photo.upload_ip_address ? ` / ${photo.upload_ip_address}` : ''}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
           </div>
         ) : (
-          <div className="space-y-2">
-            {photos.map(photo => {
-              const src = `/uploads/${photo.project_id}/${photo.filename}`;
-              const isVideo = isVideoMedia(photo);
-              return (
-                <div key={photo.id} className="bg-white rounded-xl border border-gray-200 p-3 flex items-center gap-3">
-                  <div className="w-16 h-16 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0 cursor-pointer relative" onClick={() => openMedia(photo)}>
-                    {isVideo ? (
-                      <>
-                        <video src={src} className="w-full h-full object-cover" preload="metadata" muted playsInline />
-                        <PlayCircle className="absolute inset-0 m-auto w-7 h-7 text-white drop-shadow" />
-                      </>
-                    ) : (
-                      <img src={src} alt="" className="w-full h-full object-cover" />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{photo.project_address}</p>
-                    <p className="text-xs text-gray-500">{isVideo ? 'Project video' : 'Progress photo'} / {photo.uploader_name}</p>
-                    {photo.caption && <p className="text-xs text-gray-400 truncate">{photo.caption}</p>}
-                    <p className="text-xs text-gray-400">{format(new Date(photo.taken_at || photo.created_at), 'MMM d, yyyy h:mm a')}</p>
-                  </div>
-                  <Link to={`/projects/${photo.project_id}`} className="text-xs text-blue-600 hover:underline flex-shrink-0">View Project</Link>
+          <div className="space-y-5">
+            {groupedPhotos.map(group => (
+              <section key={group.date}>
+                <h2 className="mb-2 text-xs font-black uppercase tracking-wide text-gray-500">{group.date}</h2>
+                <div className="space-y-2">
+                  {group.photos.map(photo => {
+                    const src = `/uploads/${photo.project_id}/${photo.filename}`;
+                    const isVideo = isVideoMedia(photo);
+                    return (
+                      <div key={photo.id} className="bg-white rounded-xl border border-gray-200 p-3 flex items-center gap-3">
+                        <div className="w-16 h-16 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0 cursor-pointer relative" onClick={() => openMedia(photo)}>
+                          {isVideo ? (
+                            <>
+                              <video src={src} className="w-full h-full object-cover" preload="metadata" muted playsInline />
+                              <PlayCircle className="absolute inset-0 m-auto w-7 h-7 text-white drop-shadow" />
+                            </>
+                          ) : (
+                            <img src={src} alt="" className="w-full h-full object-cover" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">{photo.project_address}</p>
+                          <p className="text-xs text-gray-500">{isVideo ? 'Project video' : 'Progress photo'} / {photo.uploader_name || 'Unknown user'}</p>
+                          {photo.note_text && <p className="text-xs font-semibold text-amber-700 truncate">Note: {photo.note_text}</p>}
+                          {photo.caption && <p className="text-xs text-gray-400 truncate">{photo.caption}</p>}
+                          <p className="text-xs text-gray-400">{format(new Date(photo.taken_at || photo.created_at), 'MMM d, yyyy h:mm a')} / {photo.capture_latitude ? 'GPS recorded' : 'IP recorded'}{photo.upload_ip_address ? ` / ${photo.upload_ip_address}` : ''}</p>
+                        </div>
+                        <Link to={`/projects/${photo.project_id}`} className="text-xs text-blue-600 hover:underline flex-shrink-0">View Project</Link>
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })}
+              </section>
+            ))}
           </div>
         )
       )}

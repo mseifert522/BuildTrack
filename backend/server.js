@@ -25,6 +25,7 @@ const quoteAnalyticsRoutes = require('./src/routes/quoteAnalytics');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+app.set('trust proxy', true);
 
 // Ensure uploads directory exists
 const uploadsPath = process.env.UPLOADS_PATH || './uploads';
@@ -115,17 +116,36 @@ app.get('/api/notes/recent', authenticate, (req, res) => {
       u.name as user_name,
       u.role as user_role,
       u.avatar_url as user_avatar_url,
-      ph.id as photo_id,
-      ph.filename as photo_filename,
-      ph.original_name as photo_original_name,
-      ph.caption as photo_caption,
+      (
+        SELECT ph.id FROM photos ph
+        WHERE ph.note_id = n.id
+        ORDER BY datetime(COALESCE(ph.taken_at, ph.created_at)) DESC, ph.created_at DESC
+        LIMIT 1
+      ) as photo_id,
+      (
+        SELECT ph.filename FROM photos ph
+        WHERE ph.note_id = n.id
+        ORDER BY datetime(COALESCE(ph.taken_at, ph.created_at)) DESC, ph.created_at DESC
+        LIMIT 1
+      ) as photo_filename,
+      (
+        SELECT ph.original_name FROM photos ph
+        WHERE ph.note_id = n.id
+        ORDER BY datetime(COALESCE(ph.taken_at, ph.created_at)) DESC, ph.created_at DESC
+        LIMIT 1
+      ) as photo_original_name,
+      (
+        SELECT ph.caption FROM photos ph
+        WHERE ph.note_id = n.id
+        ORDER BY datetime(COALESCE(ph.taken_at, ph.created_at)) DESC, ph.created_at DESC
+        LIMIT 1
+      ) as photo_caption,
       p.address as project_address,
       p.job_name as project_job_name,
       p.status as project_status
     FROM project_notes n
     JOIN users u ON u.id = n.user_id
     JOIN projects p ON p.id = n.project_id
-    LEFT JOIN photos ph ON ph.note_id = n.id
     ${assignmentJoin}
       ${contractorOnly ? "AND (n.user_id = ? OR n.visibility = 'public')" : ''}
     ORDER BY datetime(n.created_at) DESC, n.created_at DESC

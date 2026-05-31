@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import api from '../lib/api';
 import { useAuthStore } from '../store/authStore';
+import { appendProgressUploadAudit, MAX_PROGRESS_UPLOAD_FILES, type ProgressCaptureSource } from '../lib/progressUpload';
 
 interface Project {
   id: string;
@@ -35,14 +36,21 @@ interface ProjectPhoto {
   mime_type?: string;
   uploader_name?: string;
   uploaded_by_name?: string;
+  note_id?: string | null;
+  note_text?: string | null;
+  note_user_name?: string | null;
+  upload_ip_address?: string | null;
+  capture_latitude?: number | null;
+  capture_longitude?: number | null;
+  capture_accuracy?: number | null;
+  capture_source?: string | null;
+  capture_recorded_at?: string | null;
 }
 
 interface LightboxMedia {
   src: string;
   isVideo: boolean;
 }
-
-const MAX_PROGRESS_UPLOAD_FILES = 20;
 
 function formatDateTime(value?: string) {
   if (!value) return 'Just now';
@@ -65,6 +73,30 @@ function isVideoMedia(item: Pick<ProjectPhoto, 'filename' | 'mime_type'> | File)
   return Boolean(item.mime_type?.startsWith('video/')) || /\.(mp4|mov|m4v|webm|avi|mkv|mpeg|mpg|3gp)$/i.test(item.filename);
 }
 
+function groupPhotosByDay(photos: ProjectPhoto[]) {
+  return photos.reduce<{ date: string; photos: ProjectPhoto[] }[]>((groups, photo) => {
+    const value = photo.taken_at || photo.created_at;
+    const date = new Date(value).toLocaleDateString('en-US', {
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    });
+    const last = groups[groups.length - 1];
+    if (last && last.date === date) last.photos.push(photo);
+    else groups.push({ date, photos: [photo] });
+    return groups;
+  }, []);
+}
+
+function auditLabel(photo: ProjectPhoto) {
+  if (photo.capture_source === 'batch_camera') return 'Live camera';
+  if (photo.capture_source === 'device_camera') return 'Device camera';
+  if (photo.capture_source === 'library') return 'Library import';
+  if (photo.capture_source === 'desktop') return 'Desktop upload';
+  return 'Upload audit';
+}
+
 export default function MobilePhotos() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -84,6 +116,7 @@ export default function MobilePhotos() {
   const [photos, setPhotos] = useState<ProjectPhoto[]>([]);
   const [previewFiles, setPreviewFiles] = useState<File[]>([]);
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
+  const [previewSources, setPreviewSources] = useState<ProgressCaptureSource[]>([]);
   const [loading, setLoading] = useState(true);
   const [photosLoading, setPhotosLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -129,6 +162,7 @@ export default function MobilePhotos() {
     setShowProjectSelector(false);
     setProjectSearch('');
     setPreviewFiles([]);
+    setPreviewSources([]);
     setPreviewUrls(current => {
       clearPreviewUrls(current);
       return [];
@@ -177,7 +211,7 @@ export default function MobilePhotos() {
 
   const fileKey = (file: File) => `${file.name}:${file.size}:${file.lastModified}`;
 
-  const addPreviewFiles = (files: File[]) => {
+  const addPreviewFiles = (files: File[], source: ProgressCaptureSource = 'library') => {
     if (!files.length) return;
     setPreviewFiles(current => {
       const existing = new Set(current.map(fileKey));
@@ -190,6 +224,7 @@ export default function MobilePhotos() {
       }
       if (!acceptedFiles.length) return current;
       setPreviewUrls(urls => [...urls, ...acceptedFiles.map(file => URL.createObjectURL(file))]);
+      setPreviewSources(currentSources => [...currentSources, ...acceptedFiles.map(() => source)]);
       return [...current, ...acceptedFiles];
     });
   };
@@ -261,7 +296,7 @@ export default function MobilePhotos() {
         type: 'image/jpeg',
         lastModified: capturedAt,
       });
-      addPreviewFiles([file]);
+      addPreviewFiles([file], 'batch_camera');
     }, 'image/jpeg', 0.9);
   };
 
@@ -276,12 +311,13 @@ export default function MobilePhotos() {
 
     const files = Array.from(event.target.files || []);
     if (!files.length) return;
-    addPreviewFiles(files);
+    addPreviewFiles(files, event.currentTarget === cameraInputRef.current ? 'device_camera' : 'library');
     event.currentTarget.value = '';
   };
 
   const cancelUpload = () => {
     setPreviewFiles([]);
+    setPreviewSources([]);
     setPreviewUrls(current => {
       clearPreviewUrls(current);
       return [];
@@ -309,9 +345,7 @@ export default function MobilePhotos() {
       previewFiles.forEach(file => formData.append('photos', file));
       if (caption.trim()) formData.append('caption', caption.trim());
       formData.append('photo_type', 'progress');
-      formData.append('taken_at_values', JSON.stringify(
-        previewFiles.map(file => new Date(file.lastModified || Date.now()).toISOString())
-      ));
+      await appendProgressUploadAudit(formData, previewFiles, previewSources);
 
       await api.post(`/projects/${selectedProjectId}/photos?type=progress`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -415,6 +449,8 @@ export default function MobilePhotos() {
       </div>
     </div>
   );
+
+  const groupedPhotos = groupPhotosByDay(photos);
 
   if (loading) {
     return (
@@ -580,38 +616,59 @@ export default function MobilePhotos() {
             <p style={{ margin: 0, color: '#9CA3AF', fontSize: 12 }}>Choose multiple pictures at once, or open the camera and add shots before uploading.</p>
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 9 }}>
-            {photos.map(photo => {
-              const src = photo.filename.startsWith('http')
-                ? photo.filename
-                : `${photoBaseUrl}/uploads/${selectedProjectId}/${photo.filename}`;
-              const isVideo = isVideoMedia(photo);
-              return (
-                <button
-                  key={photo.id}
-                  onClick={() => setLightbox({ src, isVideo })}
-                  style={{ border: 'none', background: 'white', borderRadius: 14, overflow: 'hidden', padding: 0, textAlign: 'left', boxShadow: '0 1px 8px rgba(0,0,0,0.08)' }}
-                >
-                  <div style={{ aspectRatio: '1 / 1', background: '#E5E7EB' }}>
-                    {isVideo ? (
-                      <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-                        <video src={src} style={{ width: '100%', height: '100%', objectFit: 'cover' }} preload="metadata" muted playsInline />
-                        <PlayCircle size={30} color="white" style={{ position: 'absolute', inset: 0, margin: 'auto', filter: 'drop-shadow(0 1px 4px rgba(0,0,0,0.65))' }} />
-                      </div>
-                    ) : (
-                      <img src={src} alt={photo.caption || photo.original_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                    )}
+          <div style={{ display: 'grid', gap: 16 }}>
+            {groupedPhotos.map(group => (
+              <section key={group.date}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 9 }}>
+                  <div>
+                    <p style={{ margin: 0, color: '#111827', fontSize: 14, fontWeight: 900 }}>{group.date}</p>
+                    <p style={{ margin: '2px 0 0', color: '#6B7280', fontSize: 11, fontWeight: 700 }}>{group.photos.length} progress item{group.photos.length === 1 ? '' : 's'}</p>
                   </div>
-                  <div style={{ padding: 9 }}>
-                    <p style={{ margin: 0, color: '#111827', fontSize: 11, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{photo.caption || photo.original_name || (isVideo ? 'Project video' : 'Progress photo')}</p>
-                    <p style={{ margin: '3px 0 0', color: '#6B7280', fontSize: 10 }}>{formatDateTime(photo.taken_at || photo.created_at)}</p>
-                    {(photo.uploader_name || photo.uploaded_by_name) && (
-                      <p style={{ margin: '2px 0 0', color: '#D99D26', fontSize: 10, fontWeight: 700 }}>{photo.uploader_name || photo.uploaded_by_name}</p>
-                    )}
-                  </div>
-                </button>
-              );
-            })}
+                  <span style={{ borderRadius: 999, background: '#EEF2FF', color: '#3730A3', padding: '5px 8px', fontSize: 10, fontWeight: 900 }}>
+                    By time taken
+                  </span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 9 }}>
+                  {group.photos.map(photo => {
+                    const src = photo.filename.startsWith('http')
+                      ? photo.filename
+                      : `${photoBaseUrl}/uploads/${selectedProjectId}/${photo.filename}`;
+                    const isVideo = isVideoMedia(photo);
+                    return (
+                      <button
+                        key={photo.id}
+                        onClick={() => setLightbox({ src, isVideo })}
+                        style={{ border: 'none', background: 'white', borderRadius: 14, overflow: 'hidden', padding: 0, textAlign: 'left', boxShadow: '0 1px 8px rgba(0,0,0,0.08)' }}
+                      >
+                        <div style={{ aspectRatio: '1 / 1', background: '#E5E7EB', position: 'relative' }}>
+                          {isVideo ? (
+                            <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+                              <video src={src} style={{ width: '100%', height: '100%', objectFit: 'cover' }} preload="metadata" muted playsInline />
+                              <PlayCircle size={30} color="white" style={{ position: 'absolute', inset: 0, margin: 'auto', filter: 'drop-shadow(0 1px 4px rgba(0,0,0,0.65))' }} />
+                            </div>
+                          ) : (
+                            <img src={src} alt={photo.caption || photo.original_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          )}
+                          {photo.note_id && (
+                            <span style={{ position: 'absolute', left: 6, top: 6, borderRadius: 999, background: 'rgba(17,24,39,0.78)', color: 'white', padding: '4px 7px', fontSize: 9, fontWeight: 900 }}>
+                              Note
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ padding: 9 }}>
+                          <p style={{ margin: 0, color: '#111827', fontSize: 11, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{photo.caption || photo.note_text || photo.original_name || (isVideo ? 'Project video' : 'Progress photo')}</p>
+                          <p style={{ margin: '3px 0 0', color: '#6B7280', fontSize: 10 }}>{formatDateTime(photo.taken_at || photo.created_at)}</p>
+                          {(photo.uploader_name || photo.uploaded_by_name) && (
+                            <p style={{ margin: '2px 0 0', color: '#D99D26', fontSize: 10, fontWeight: 700 }}>{photo.uploader_name || photo.uploaded_by_name}</p>
+                          )}
+                          <p style={{ margin: '2px 0 0', color: photo.capture_latitude ? '#16A34A' : '#9CA3AF', fontSize: 10, fontWeight: 750 }}>{auditLabel(photo)}{photo.capture_latitude ? ' / GPS' : ''}</p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
           </div>
         )}
       </div>
