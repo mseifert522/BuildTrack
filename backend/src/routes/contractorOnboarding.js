@@ -7,6 +7,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
 const { sendContractorSetupEmail, sendContractorSetupCodeEmail, sendContractorSubmissionPdfEmail } = require('../utils/email');
 const { encryptJson, decryptJson } = require('../utils/secureFields');
+const { ensureContractorMobileAccount, ensureSelfSignupContractor } = require('../utils/contractorAccess');
 
 const router = express.Router();
 const MANAGEMENT_ROLES = ['super_admin', 'operations_manager', 'project_manager'];
@@ -244,6 +245,79 @@ function verifySetupSession(req) {
   }
 }
 
+// Public action: contractor starts their own secure setup from the login screen.
+router.post('/self-signup', async (req, res) => {
+  const db = getDb();
+  let requestId;
+  try {
+    const account = db.transaction(() => ensureSelfSignupContractor(db, {
+      name: req.body?.name,
+      company: req.body?.company,
+      email: req.body?.email,
+      phone: req.body?.phone,
+    }))();
+
+    const contractor = account.contractor;
+    const user = account.user;
+    if (!contractor || !user) return res.status(400).json({ error: 'Valid contractor information is required' });
+
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    requestId = uuidv4();
+    const now = new Date().toISOString();
+    const expiresAt = new Date(Date.now() + REQUEST_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const email = user.email.toLowerCase().trim();
+    const setupUrl = `${baseUrl()}/contractor-setup?token=${rawToken}`;
+
+    db.transaction(() => {
+      db.prepare(`
+        UPDATE contractor_onboarding_requests
+        SET status = 'revoked', updated_at = datetime('now')
+        WHERE contractor_id = ? AND status IN ('sent', 'verified')
+      `).run(contractor.id);
+      db.prepare(`
+        INSERT INTO contractor_onboarding_requests (
+          id, contractor_id, token_hash, email, status, expires_at, last_sent_at, requested_by, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'sent', ?, ?, ?, ?, ?)
+      `).run(requestId, contractor.id, tokenHash(rawToken), email, expiresAt, now, user.id, now, now);
+    })();
+
+    await sendContractorSetupEmail({
+      contractorName: contractor.vendor_name,
+      contactName: contractor.contact_name,
+      email,
+      setupUrl,
+      expiresAt,
+      requestedBy: 'Contractor self signup',
+    });
+
+    logActivity({
+      userId: user.id,
+      action: 'contractor_self_signup_requested',
+      entityType: 'contractor_profile',
+      entityId: contractor.id,
+      details: { contractor_name: contractor.vendor_name, email, expires_at: expiresAt },
+    });
+
+    res.status(201).json({
+      message: 'Check your email for the secure contractor setup link.',
+      status: 'sent',
+      expires_at: expiresAt,
+    });
+  } catch (err) {
+    if (requestId) {
+      try {
+        db.prepare(`
+          UPDATE contractor_onboarding_requests
+          SET status = 'revoked', updated_at = datetime('now')
+          WHERE id = ?
+        `).run(requestId);
+      } catch (_) {}
+    }
+    console.error('Contractor self signup failed:', err);
+    res.status(err.statusCode || 500).json({ error: err.message || 'Unable to start contractor signup' });
+  }
+});
+
 // Management action: send a secure setup email to a contractor.
 router.post('/contractors/:id/request', authenticate, authorize(...MANAGEMENT_ROLES), async (req, res) => {
   const db = getDb();
@@ -262,6 +336,7 @@ router.post('/contractors/:id/request', authenticate, authorize(...MANAGEMENT_RO
 
   try {
     const createRequest = db.transaction(() => {
+      ensureContractorMobileAccount(db, contractor.id, { email, assignedBy: req.user.id });
       db.prepare(`
         UPDATE contractor_onboarding_requests
         SET status = 'revoked', updated_at = datetime('now')
@@ -589,6 +664,13 @@ router.post('/submit', async (req, res) => {
           updated_at = datetime('now')
         WHERE id = ?
       `).run(payload.legal_name, payload.email, payload.phone, safeAddress, request.contractor_id);
+
+      ensureContractorMobileAccount(db, request.contractor_id, {
+        email: payload.email || request.email,
+        contact_name: payload.legal_name,
+        phone: payload.phone,
+        assignedBy: request.requested_by,
+      });
 
       db.prepare(`
         UPDATE contractor_onboarding_requests

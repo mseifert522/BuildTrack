@@ -11,6 +11,7 @@ import {
   Mail,
   ShieldCheck,
   Smartphone,
+  UserPlus,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import api from '../lib/api';
@@ -26,6 +27,7 @@ const CONTRACTOR_LAST_ACTIVITY_KEY = 'contractor_last_activity_at';
 const CONTRACTOR_LAST_REFRESH_KEY = 'contractor_last_refresh_at';
 
 type LoginMode = 'password' | 'pin';
+type ContractorAccessMode = 'pin' | 'email' | 'forgot' | 'signup';
 
 type LoginProps = {
   initialMode?: LoginMode;
@@ -120,7 +122,13 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
   const [trustDevice, setTrustDevice] = useState(false);
   const [twofaLoading, setTwofaLoading] = useState(false);
   const [loginMode, setLoginMode] = useState<LoginMode>(initialMode);
+  const [contractorAccessMode, setContractorAccessMode] = useState<ContractorAccessMode>('pin');
   const [pinDigits, setPinDigits] = useState('');
+  const [contractorEmail, setContractorEmail] = useState('');
+  const [contractorEmailCode, setContractorEmailCode] = useState('');
+  const [contractorEmailCodeSent, setContractorEmailCodeSent] = useState(false);
+  const [contractorActionLoading, setContractorActionLoading] = useState(false);
+  const [signupForm, setSignupForm] = useState({ name: '', company: '', email: '', phone: '' });
   const [focusedField, setFocusedField] = useState<string | null>(null);
   const { setAuth } = useAuthStore();
   const navigate = useNavigate();
@@ -236,6 +244,67 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
       setPinDigits('');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const requestContractorEmailCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setContractorActionLoading(true);
+    try {
+      await api.post('/auth/contractor/email-login/request', { email: contractorEmail });
+      setContractorEmailCodeSent(true);
+      toast.success('If that email is on file, a login code was sent.');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Unable to send login code');
+    } finally {
+      setContractorActionLoading(false);
+    }
+  };
+
+  const verifyContractorEmailCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (contractorEmailCode.length !== 6) return;
+    setContractorActionLoading(true);
+    try {
+      const res = await api.post('/auth/contractor/email-login/verify', {
+        email: contractorEmail,
+        code: contractorEmailCode,
+      });
+      completeLogin(res.data);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Invalid or expired login code');
+      setContractorEmailCode('');
+    } finally {
+      setContractorActionLoading(false);
+    }
+  };
+
+  const sendContractorPin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setContractorActionLoading(true);
+    try {
+      await api.post('/auth/contractor/forgot-pin', { email: contractorEmail });
+      toast.success('If that email is on file, BuildTrack sent the PIN.');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Unable to send PIN');
+    } finally {
+      setContractorActionLoading(false);
+    }
+  };
+
+  const submitContractorSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setContractorActionLoading(true);
+    try {
+      await api.post('/contractor-onboarding/self-signup', signupForm);
+      setContractorEmail(signupForm.email);
+      setContractorAccessMode('email');
+      setContractorEmailCodeSent(false);
+      toast.success('Check your email for the secure setup link.');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Unable to start contractor signup');
+    } finally {
+      setContractorActionLoading(false);
     }
   };
 
@@ -588,48 +657,205 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                   </button>
                 </form>
               ) : (
-                <form onSubmit={handlePinLogin} className="space-y-4">
-                  <div
-                    className="rounded-lg p-5 text-center"
-                    style={{ background: 'white', border: '1px solid #E5E7EB' }}
-                  >
-                    <div className="w-12 h-12 rounded-lg flex items-center justify-center mx-auto mb-4" style={{ background: 'rgba(217,157,38,0.1)' }}>
-                      <Smartphone className="w-6 h-6" style={{ color: '#D99D26' }} />
-                    </div>
-                    <h3 className="font-black text-gray-900 text-lg">Contractor PIN Access</h3>
-                    <p className="text-sm text-gray-500 mt-1 mb-5">Enter the contractor PIN to open assigned projects.</p>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={5}
-                      value={pinDigits}
-                      onChange={e => setPinDigits(e.target.value.replace(/\D/g, '').slice(0, 5))}
-                      autoComplete="one-time-code"
-                      className="w-full text-center text-3xl font-black py-4 rounded-lg focus:outline-none"
-                      style={{ border: '2px solid #E5E7EB' }}
-                      placeholder="00000"
-                    />
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { id: 'pin' as ContractorAccessMode, label: 'Use PIN', icon: KeyRound },
+                      { id: 'email' as ContractorAccessMode, label: 'Email Code', icon: Mail },
+                      { id: 'forgot' as ContractorAccessMode, label: 'Forgot PIN', icon: ShieldCheck },
+                      { id: 'signup' as ContractorAccessMode, label: 'Sign Up', icon: UserPlus },
+                    ].map(item => {
+                      const Icon = item.icon;
+                      const selected = contractorAccessMode === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setContractorAccessMode(item.id)}
+                          className="flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-xs font-black transition-all"
+                          style={{
+                            background: selected ? '#111827' : 'white',
+                            color: selected ? 'white' : '#374151',
+                            border: selected ? '1px solid #111827' : '1px solid #E5E7EB',
+                          }}
+                        >
+                          <Icon className="w-3.5 h-3.5" />
+                          {item.label}
+                        </button>
+                      );
+                    })}
                   </div>
 
-                  <button
-                    type="submit"
-                    disabled={loading || pinDigits.length !== 5}
-                    className="w-full py-4 rounded-lg font-bold text-sm transition-all duration-200 text-white disabled:opacity-50"
-                    style={{ background: 'linear-gradient(135deg, #D99D26 0%, #C4891F 100%)', boxShadow: '0 8px 24px rgba(217,157,38,0.28)' }}
-                  >
-                    {loading ? (
-                      <span className="flex items-center justify-center gap-3">
-                        <span className="w-5 h-5 rounded-full animate-spin" style={{ border: '2px solid rgba(255,255,255,0.25)', borderTopColor: 'white' }} />
-                        Verifying PIN...
-                      </span>
-                    ) : (
-                      <span className="flex items-center justify-center gap-2">
-                        Open Assigned Projects
-                        <ArrowRight className="w-4 h-4" />
-                      </span>
-                    )}
-                  </button>
-                </form>
+                  {contractorAccessMode === 'pin' && (
+                    <form onSubmit={handlePinLogin} className="space-y-4">
+                      <div
+                        className="rounded-lg p-5 text-center"
+                        style={{ background: 'white', border: '1px solid #E5E7EB' }}
+                      >
+                        <div className="w-12 h-12 rounded-lg flex items-center justify-center mx-auto mb-4" style={{ background: 'rgba(217,157,38,0.1)' }}>
+                          <Smartphone className="w-6 h-6" style={{ color: '#D99D26' }} />
+                        </div>
+                        <h3 className="font-black text-gray-900 text-lg">Contractor PIN Access</h3>
+                        <p className="text-sm text-gray-500 mt-1 mb-5">Enter the contractor PIN to open assigned projects.</p>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={5}
+                          value={pinDigits}
+                          onChange={e => setPinDigits(e.target.value.replace(/\D/g, '').slice(0, 5))}
+                          autoComplete="one-time-code"
+                          className="w-full text-center text-3xl font-black py-4 rounded-lg focus:outline-none"
+                          style={{ border: '2px solid #E5E7EB' }}
+                          placeholder="00000"
+                        />
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={loading || pinDigits.length !== 5}
+                        className="w-full py-4 rounded-lg font-bold text-sm transition-all duration-200 text-white disabled:opacity-50"
+                        style={{ background: 'linear-gradient(135deg, #D99D26 0%, #C4891F 100%)', boxShadow: '0 8px 24px rgba(217,157,38,0.28)' }}
+                      >
+                        {loading ? (
+                          <span className="flex items-center justify-center gap-3">
+                            <span className="w-5 h-5 rounded-full animate-spin" style={{ border: '2px solid rgba(255,255,255,0.25)', borderTopColor: 'white' }} />
+                            Verifying PIN...
+                          </span>
+                        ) : (
+                          <span className="flex items-center justify-center gap-2">
+                            Open Assigned Projects
+                            <ArrowRight className="w-4 h-4" />
+                          </span>
+                        )}
+                      </button>
+                    </form>
+                  )}
+
+                  {contractorAccessMode === 'email' && (
+                    <form onSubmit={contractorEmailCodeSent ? verifyContractorEmailCode : requestContractorEmailCode} className="space-y-4">
+                      <div className="rounded-lg p-5" style={{ background: 'white', border: '1px solid #E5E7EB' }}>
+                        <div className="w-12 h-12 rounded-lg flex items-center justify-center mx-auto mb-4" style={{ background: 'rgba(217,157,38,0.1)' }}>
+                          <Mail className="w-6 h-6" style={{ color: '#D99D26' }} />
+                        </div>
+                        <h3 className="text-center font-black text-gray-900 text-lg">Contractor Email Login</h3>
+                        <p className="text-center text-sm text-gray-500 mt-1 mb-5">Use your contractor email to receive a 6-digit login code.</p>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Contractor Email</label>
+                        <input
+                          type="email"
+                          value={contractorEmail}
+                          onChange={e => setContractorEmail(e.target.value)}
+                          required
+                          className="w-full rounded-lg px-4 py-3 text-sm font-semibold text-gray-900 focus:outline-none"
+                          style={{ border: '2px solid #E5E7EB' }}
+                          placeholder="contractor@email.com"
+                        />
+                        {contractorEmailCodeSent && (
+                          <div className="mt-4">
+                            <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Login Code</label>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              maxLength={6}
+                              value={contractorEmailCode}
+                              onChange={e => setContractorEmailCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                              className="w-full rounded-lg px-4 py-3 text-center text-2xl font-black text-gray-900 focus:outline-none"
+                              style={{ border: '2px solid #E5E7EB' }}
+                              placeholder="000000"
+                            />
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={contractorActionLoading || (contractorEmailCodeSent && contractorEmailCode.length !== 6)}
+                        className="w-full py-4 rounded-lg font-bold text-sm text-white disabled:opacity-50"
+                        style={{ background: 'linear-gradient(135deg, #D99D26 0%, #C4891F 100%)' }}
+                      >
+                        {contractorActionLoading ? 'Working...' : contractorEmailCodeSent ? 'Verify Code and Open Projects' : 'Email Me a Login Code'}
+                      </button>
+                    </form>
+                  )}
+
+                  {contractorAccessMode === 'forgot' && (
+                    <form onSubmit={sendContractorPin} className="space-y-4">
+                      <div className="rounded-lg p-5" style={{ background: 'white', border: '1px solid #E5E7EB' }}>
+                        <h3 className="font-black text-gray-900 text-lg">Forgot PIN or Login?</h3>
+                        <p className="text-sm text-gray-500 mt-1 mb-5">Enter the email management has on file. BuildTrack will email the contractor PIN if the account exists.</p>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Contractor Email</label>
+                        <input
+                          type="email"
+                          value={contractorEmail}
+                          onChange={e => setContractorEmail(e.target.value)}
+                          required
+                          className="w-full rounded-lg px-4 py-3 text-sm font-semibold text-gray-900 focus:outline-none"
+                          style={{ border: '2px solid #E5E7EB' }}
+                          placeholder="contractor@email.com"
+                        />
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={contractorActionLoading}
+                        className="w-full py-4 rounded-lg font-bold text-sm text-white disabled:opacity-50"
+                        style={{ background: '#111827' }}
+                      >
+                        {contractorActionLoading ? 'Sending...' : 'Email My PIN'}
+                      </button>
+                    </form>
+                  )}
+
+                  {contractorAccessMode === 'signup' && (
+                    <form onSubmit={submitContractorSignup} className="space-y-4">
+                      <div className="rounded-lg p-5" style={{ background: 'white', border: '1px solid #E5E7EB' }}>
+                        <h3 className="font-black text-gray-900 text-lg">Contractor Sign Up</h3>
+                        <p className="text-sm text-gray-500 mt-1 mb-5">Start your secure contractor setup and 1099 information form.</p>
+                        <div className="grid gap-3">
+                          <input
+                            type="text"
+                            value={signupForm.name}
+                            onChange={e => setSignupForm(prev => ({ ...prev, name: e.target.value }))}
+                            required
+                            className="w-full rounded-lg px-4 py-3 text-sm font-semibold text-gray-900 focus:outline-none"
+                            style={{ border: '2px solid #E5E7EB' }}
+                            placeholder="Your name"
+                          />
+                          <input
+                            type="text"
+                            value={signupForm.company}
+                            onChange={e => setSignupForm(prev => ({ ...prev, company: e.target.value }))}
+                            className="w-full rounded-lg px-4 py-3 text-sm font-semibold text-gray-900 focus:outline-none"
+                            style={{ border: '2px solid #E5E7EB' }}
+                            placeholder="Company name"
+                          />
+                          <input
+                            type="email"
+                            value={signupForm.email}
+                            onChange={e => setSignupForm(prev => ({ ...prev, email: e.target.value }))}
+                            required
+                            className="w-full rounded-lg px-4 py-3 text-sm font-semibold text-gray-900 focus:outline-none"
+                            style={{ border: '2px solid #E5E7EB' }}
+                            placeholder="Email address"
+                          />
+                          <input
+                            type="tel"
+                            value={signupForm.phone}
+                            onChange={e => setSignupForm(prev => ({ ...prev, phone: e.target.value }))}
+                            className="w-full rounded-lg px-4 py-3 text-sm font-semibold text-gray-900 focus:outline-none"
+                            style={{ border: '2px solid #E5E7EB' }}
+                            placeholder="Phone number"
+                          />
+                        </div>
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={contractorActionLoading}
+                        className="w-full py-4 rounded-lg font-bold text-sm text-white disabled:opacity-50"
+                        style={{ background: 'linear-gradient(135deg, #D99D26 0%, #C4891F 100%)' }}
+                      >
+                        {contractorActionLoading ? 'Starting Setup...' : 'Start Secure Contractor Setup'}
+                      </button>
+                    </form>
+                  )}
+                </div>
               )}
             </div>
           )}

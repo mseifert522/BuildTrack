@@ -6,12 +6,14 @@ const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/schema');
 const { authenticate } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
-const { sendPasswordResetEmail, send2FACodeEmail } = require('../utils/email');
+const { sendPasswordResetEmail, send2FACodeEmail, sendContractorPinEmail } = require('../utils/email');
+const { ensureContractorMobileAccountByEmail, normalizeEmail } = require('../utils/contractorAccess');
 
 const router = express.Router();
 const MANAGEMENT_ROLES = ['super_admin', 'operations_manager', 'project_manager'];
 const TRUSTED_DEVICE_DAYS = 60;
 const SESSION_EXPIRES_IN = '45m';
+const CONTRACTOR_EMAIL_LOGIN_MESSAGE = 'If that contractor email is on file, BuildTrack will send login instructions.';
 
 function sqliteDateTime(date) {
   return date.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
@@ -241,6 +243,99 @@ router.post('/pin-login', async (req, res) => {
   } catch (err) {
     console.error('PIN login error:', err);
     res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// POST /api/auth/contractor/forgot-pin - email a contractor their mobile PIN.
+router.post('/contractor/forgot-pin', async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email);
+    if (!email) return res.status(400).json({ error: 'Valid contractor email is required' });
+
+    const db = getDb();
+    const account = ensureContractorMobileAccountByEmail(db, email);
+    if (account.user?.role === 'contractor' && account.user.pin) {
+      await sendContractorPinEmail({
+        name: account.user.name,
+        email: account.user.email,
+        pin: account.user.pin,
+      });
+      logActivity({
+        userId: account.user.id,
+        action: 'contractor_pin_recovery_requested',
+        entityType: 'user',
+        entityId: account.user.id,
+      });
+    }
+
+    res.json({ message: CONTRACTOR_EMAIL_LOGIN_MESSAGE });
+  } catch (err) {
+    console.error('Contractor PIN recovery error:', err);
+    res.status(err.statusCode || 500).json({ error: err.message || 'Unable to send contractor login instructions' });
+  }
+});
+
+// POST /api/auth/contractor/email-login/request - send a 2FA code for contractor mobile login.
+router.post('/contractor/email-login/request', async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email);
+    if (!email) return res.status(400).json({ error: 'Valid contractor email is required' });
+
+    const db = getDb();
+    const account = ensureContractorMobileAccountByEmail(db, email);
+    if (account.user?.role === 'contractor') {
+      db.prepare('UPDATE two_factor_codes SET used = 1 WHERE user_id = ? AND used = 0').run(account.user.id);
+      const code = generate2FACode();
+      const expiresAt = minutesFromNow(10);
+      db.prepare(
+        'INSERT INTO two_factor_codes (id, user_id, code, expires_at) VALUES (?, ?, ?, ?)'
+      ).run(uuidv4(), account.user.id, code, expiresAt);
+      await send2FACodeEmail({ name: account.user.name, email: account.user.email, code });
+      logActivity({
+        userId: account.user.id,
+        action: 'contractor_email_login_code_requested',
+        entityType: 'user',
+        entityId: account.user.id,
+      });
+    }
+
+    res.json({ message: CONTRACTOR_EMAIL_LOGIN_MESSAGE });
+  } catch (err) {
+    console.error('Contractor email login request error:', err);
+    res.status(err.statusCode || 500).json({ error: err.message || 'Unable to send contractor login code' });
+  }
+});
+
+// POST /api/auth/contractor/email-login/verify - verify 2FA code and open the mobile app.
+router.post('/contractor/email-login/verify', async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email);
+    const code = String(req.body?.code || '').replace(/\D/g, '').slice(0, 6);
+    if (!email || code.length !== 6) {
+      return res.status(400).json({ error: 'Valid contractor email and 6-digit code are required' });
+    }
+
+    const db = getDb();
+    const account = ensureContractorMobileAccountByEmail(db, email);
+    const user = account.user;
+    if (!user || user.role !== 'contractor') return res.status(401).json({ error: 'Invalid or expired verification code' });
+
+    const codeRow = db.prepare(`
+      SELECT * FROM two_factor_codes
+      WHERE user_id = ? AND code = ? AND used = 0 AND datetime(expires_at) > datetime('now')
+      ORDER BY created_at DESC LIMIT 1
+    `).get(user.id, code);
+
+    if (!codeRow) return res.status(401).json({ error: 'Invalid or expired verification code' });
+
+    db.prepare('UPDATE two_factor_codes SET used = 1 WHERE id = ?').run(codeRow.id);
+    const payload = issueSession(db, user, { contractor_email_2fa: true });
+    payload.projects = getLoginProjects(db, user);
+
+    res.json(payload);
+  } catch (err) {
+    console.error('Contractor email login verify error:', err);
+    res.status(err.statusCode || 500).json({ error: err.message || 'Login failed' });
   }
 });
 

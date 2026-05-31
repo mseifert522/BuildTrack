@@ -9,19 +9,7 @@ const { getDb } = require('../db/schema');
 const { authenticate, authorize, authorizeOverUser, blacklistToken } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
 const { sendInviteEmail } = require('../utils/email');
-
-// Generate unique 5-digit PIN
-function generatePin(db) {
-  let pin;
-  let attempts = 0;
-  do {
-    pin = String(Math.floor(10000 + Math.random() * 90000));
-    const existing = db.prepare('SELECT id FROM users WHERE pin = ?').get(pin);
-    if (!existing) return pin;
-    attempts++;
-  } while (attempts < 100);
-  return pin;
-}
+const { ensureContractorMobileAccount, generatePin, syncContractorProjectAssignments } = require('../utils/contractorAccess');
 
 router.use(authenticate);
 
@@ -527,7 +515,7 @@ router.get('/contractors/directory', authorize('super_admin', 'operations_manage
 });
 
 function requireContractor(db, contractorId) {
-  return db.prepare("SELECT id, vendor_name as name FROM contractor_profiles WHERE id = ?").get(contractorId);
+  return db.prepare("SELECT *, vendor_name as name FROM contractor_profiles WHERE id = ?").get(contractorId);
 }
 
 // POST /api/users/contractors/profile - add a contractor directory record
@@ -598,6 +586,9 @@ router.post('/contractors/profile', authorize('super_admin', 'operations_manager
       for (const projectId of projectIds) {
         insertLink.run(uuidv4(), contractorId, projectId, req.user.id);
       }
+      if (nextEmail) {
+        ensureContractorMobileAccount(db, contractorId, { email: nextEmail, assignedBy: req.user.id });
+      }
     });
 
     createProfile();
@@ -644,6 +635,10 @@ router.put('/contractors/:id/profile', authorize('super_admin', 'operations_mana
 
     const nextName = String(vendor_name || '').trim();
     if (!nextName) return res.status(400).json({ error: 'Contractor name is required' });
+    const nextEmail = email ? String(email).trim().toLowerCase() : null;
+    if (nextEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
+      return res.status(400).json({ error: 'Valid contractor email is required' });
+    }
     const contractorCategories = validateContractorCategories(db, contractor_categories, contractor_category, contractor_secondary_category);
     const primaryCategory = contractorCategories[0] || null;
     const secondaryCategory = contractorCategories[1] || null;
@@ -666,7 +661,7 @@ router.put('/contractors/:id/profile', authorize('super_admin', 'operations_mana
     `).run(
       nextName,
       contact_name ? String(contact_name).trim() : null,
-      email ? String(email).trim().toLowerCase() : null,
+      nextEmail,
       phone ? String(phone).trim() : null,
       billing_address ? String(billing_address).trim() : null,
       account_number ? String(account_number).trim() : null,
@@ -677,8 +672,11 @@ router.put('/contractors/:id/profile', authorize('super_admin', 'operations_mana
       req.params.id
     );
 
-    const updatedProfile = db.prepare('SELECT linked_user_id FROM contractor_profiles WHERE id = ?').get(req.params.id);
-    if (updatedProfile?.linked_user_id) {
+    let updatedProfile = db.prepare('SELECT * FROM contractor_profiles WHERE id = ?').get(req.params.id);
+    if (nextEmail) {
+      const account = ensureContractorMobileAccount(db, req.params.id, { email: nextEmail, assignedBy: req.user.id });
+      updatedProfile = account.contractor || updatedProfile;
+    } else if (updatedProfile?.linked_user_id) {
       db.prepare(`
         UPDATE users
         SET contractor_category = ?, contractor_secondary_category = ?, updated_at = datetime('now')
@@ -771,6 +769,10 @@ router.put('/contractors/:id/projects', authorize('super_admin', 'operations_man
       }
     });
     replaceLinks();
+    const updatedContractor = db.prepare('SELECT linked_user_id FROM contractor_profiles WHERE id = ?').get(req.params.id);
+    if (updatedContractor?.linked_user_id) {
+      syncContractorProjectAssignments(db, req.params.id, updatedContractor.linked_user_id, req.user.id, { mirror: true });
+    }
 
     logActivity({
       userId: req.user.id,

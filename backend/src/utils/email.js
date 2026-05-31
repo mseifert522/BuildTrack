@@ -234,7 +234,7 @@ async function sendInviteEmail({ name, email, tempPassword, role, invitedBy, pin
         ${pin ? `<tr><td style="padding: 6px 0; font-size: 13px; color: #6B7280;">Quick Access PIN</td><td style="padding: 6px 0; font-size: 13px; color: #111827; font-weight: 600; font-family: monospace; font-size: 18px; letter-spacing: 4px;">${pin}</td></tr>` : ''}
       </table>
     </div>
-    ${pin ? `<a href="https://invoices.newurbandev.com/app" style="display: block; text-align: center; background: #181D25; color: white; padding: 14px 24px; border-radius: 12px; text-decoration: none; font-weight: 700; font-size: 14px; margin-bottom: 8px;">Open Mobile App (PIN Login)</a>` : ''}
+    ${pin ? `<a href="${BRAND.url}/app" style="display: block; text-align: center; background: #181D25; color: white; padding: 14px 24px; border-radius: 12px; text-decoration: none; font-weight: 700; font-size: 14px; margin-bottom: 8px;">Open Mobile App (PIN Login)</a>` : ''}
     <a href="${BRAND.url}" style="display: block; text-align: center; background: ${BRAND.color}; color: white; padding: 14px 24px; border-radius: 12px; text-decoration: none; font-weight: 700; font-size: 14px; margin-bottom: 16px;">
       Sign In to BuildTrack
     </a>
@@ -247,6 +247,39 @@ async function sendInviteEmail({ name, email, tempPassword, role, invitedBy, pin
     from: process.env.EMAIL_FROM || `BuildTrack <noreply@newurbandev.com>`,
     to: email,
     subject: `You're invited to BuildTrack — ${BRAND.name}`,
+    html,
+  });
+}
+
+async function sendContractorPinEmail({ name, email, pin }) {
+  const transporter = createTransporter();
+  const displayName = escapeHtml(name || 'there');
+
+  const html = emailWrapper(`
+    <h2 style="color: #111827; font-size: 20px; font-weight: 700; margin: 0 0 8px;">Your BuildTrack contractor PIN</h2>
+    <p style="color: #6B7280; font-size: 14px; line-height: 1.6; margin: 0 0 24px;">
+      Hi ${displayName}, use this 5-digit PIN to open your assigned projects in the BuildTrack mobile app.
+    </p>
+    <div style="text-align: center; margin: 0 0 24px;">
+      <span style="display: inline-block; background: #111827; border-radius: 16px; padding: 18px 34px; font-size: 34px; font-weight: 900; letter-spacing: 9px; color: #ffffff; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;">
+        ${pin}
+      </span>
+    </div>
+    <a href="${BRAND.url}/app" style="display: block; text-align: center; background: ${BRAND.color}; color: white; padding: 14px 24px; border-radius: 12px; text-decoration: none; font-weight: 700; font-size: 14px; margin-bottom: 14px;">
+      Open BuildTrack Mobile
+    </a>
+    <p style="color: #6B7280; font-size: 12px; line-height: 1.6; text-align: center; margin: 0 0 14px;">
+      If you do not want to use a PIN, you can request an email login code on the same screen.
+    </p>
+    <p style="color: #9CA3AF; font-size: 12px; text-align: center; margin: 0;">
+      If you did not request this PIN, contact New Urban Development.
+    </p>
+  `);
+
+  await transporter.sendMail({
+    from: process.env.EMAIL_FROM || `BuildTrack <noreply@newurbandev.com>`,
+    to: email,
+    subject: `Your BuildTrack contractor PIN`,
     html,
   });
 }
@@ -443,6 +476,7 @@ async function sendInvoiceEmail({ invoice, project, contractor, pdfBuffer }) {
 module.exports = {
   sendInvoiceEmail,
   sendInviteEmail,
+  sendContractorPinEmail,
   sendPasswordResetEmail,
   send2FACodeEmail,
   sendContractorSetupEmail,
