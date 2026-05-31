@@ -290,12 +290,34 @@ export default function MobileHome() {
                   <ChevronRight size={16} color="#9CA3AF" />
                 </button>
 
-                <div style={{ display: 'grid', gridTemplateColumns: managementUser ? '1fr 1fr' : '1fr 1fr 1fr', borderTop: '1px solid #F3F4F6' }}>
+                <div style={{ padding: '0 12px 12px' }}>
+                  <button
+                    onClick={() => navigate(`/mobile/photos?projectId=${project.id}`)}
+                    style={{
+                      minHeight: 48,
+                      width: '100%',
+                      border: 'none',
+                      borderRadius: 13,
+                      background: 'linear-gradient(135deg, #D99D26, #C4891F)',
+                      color: 'white',
+                      fontSize: 13,
+                      fontWeight: 900,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
+                      boxShadow: '0 6px 14px rgba(217,157,38,0.22)',
+                    }}
+                    aria-label={`Add progress picture to ${project.address}`}
+                  >
+                    <Camera size={18} color="white" />
+                    Add Progress Picture
+                  </button>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: managementUser ? '1fr' : '1fr 1fr', borderTop: '1px solid #F3F4F6' }}>
                   <button onClick={() => navigate(`/mobile/project/${project.id}`)} style={{ border: 'none', background: '#FAFAFA', padding: '10px 4px', fontSize: 11, fontWeight: 850, color: '#2563EB', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
                     <FolderOpen size={15} color="#2563EB" /> Open
-                  </button>
-                  <button onClick={() => navigate(`/mobile/photos?projectId=${project.id}`)} style={{ border: 'none', borderLeft: '1px solid #F3F4F6', background: '#FAFAFA', padding: '10px 4px', fontSize: 11, fontWeight: 850, color: '#D99D26', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
-                    <Camera size={15} color="#D99D26" /> Progress
                   </button>
                   {!managementUser && (
                     <button onClick={() => navigate(`/mobile/project/${project.id}/invoice`)} style={{ border: 'none', borderLeft: '1px solid #F3F4F6', background: '#FAFAFA', padding: '10px 4px', fontSize: 11, fontWeight: 850, color: '#7C3AED', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
@@ -319,7 +341,7 @@ export default function MobileHome() {
                   <Camera size={22} color="white" />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ margin: 0, fontSize: 15, fontWeight: 900 }}>Add Progress Photos</p>
+                  <p style={{ margin: 0, fontSize: 15, fontWeight: 900 }}>Add Progress Picture</p>
                   <p style={{ margin: '3px 0 0', fontSize: 12, opacity: 0.82, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {rememberedProject ? `Continue with ${rememberedProject.address}` : 'Choose a project before uploading photos or videos'}
                   </p>

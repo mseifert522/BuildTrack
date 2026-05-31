@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Camera } from 'lucide-react';
 import { useAuthStore, canManageProjects } from '../store/authStore';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
@@ -167,9 +168,17 @@ export default function MobileProjects() {
           </div>
         ) : (
           filtered.map(project => (
-            <button
+            <div
               key={project.id}
               onClick={() => navigate(`/mobile/project/${project.id}`)}
+              onKeyDown={event => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  navigate(`/mobile/project/${project.id}`);
+                }
+              }}
+              role="button"
+              tabIndex={0}
               className="w-full text-left bg-white rounded-2xl shadow-sm p-4 active:scale-98 transition-all hover:shadow-md border border-gray-100"
             >
               <div className="flex items-start justify-between gap-3">
@@ -207,7 +216,20 @@ export default function MobileProjects() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                 </svg>
               </div>
-            </button>
+              <button
+                type="button"
+                onClick={event => {
+                  event.stopPropagation();
+                  navigate(`/mobile/photos?projectId=${project.id}`);
+                }}
+                className="mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl text-sm font-black text-white shadow-sm"
+                style={{ background: 'linear-gradient(135deg, #D99D26, #C4891F)', boxShadow: '0 6px 14px rgba(217,157,38,0.22)' }}
+                aria-label={`Add progress picture to ${project.address}`}
+              >
+                <Camera className="h-4 w-4" />
+                Add Progress Picture
+              </button>
+            </div>
           ))
         )}
       </div>

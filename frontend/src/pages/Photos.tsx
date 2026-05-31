@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import api from '../lib/api';
 import { Loading } from '../components/ui';
 import { Camera, Grid, List, PlayCircle, Upload, X } from 'lucide-react';
@@ -34,13 +34,15 @@ function mediaLabel(count: number) {
 }
 
 export default function Photos() {
+  const [searchParams] = useSearchParams();
+  const requestedProjectId = searchParams.get('projectId') || '';
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [lightbox, setLightbox] = useState<LightboxMedia | null>(null);
-  const [selectedProject, setSelectedProject] = useState('');
+  const [selectedProject, setSelectedProject] = useState(requestedProjectId);
   const [caption, setCaption] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -75,6 +77,12 @@ export default function Photos() {
   useEffect(() => {
     load();
   }, [selectedProject]);
+
+  useEffect(() => {
+    if (requestedProjectId && requestedProjectId !== selectedProject) {
+      setSelectedProject(requestedProjectId);
+    }
+  }, [requestedProjectId, selectedProject]);
 
   const uploadMedia = async (files?: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -117,16 +125,25 @@ export default function Photos() {
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex flex-col gap-3 mb-5 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-bold text-gray-900">Progress Photos</h1>
           <p className="text-sm text-gray-500 mt-0.5">{mediaLabel(photos.length)}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setView('grid')} className={`p-2 rounded-lg transition-colors ${view === 'grid' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={!selectedProject || uploading}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-black text-white shadow-sm transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
+          >
+            <Camera className="h-4 w-4" />
+            {uploading ? 'Uploading...' : 'Add Progress Picture'}
+          </button>
+          <button onClick={() => setView('grid')} className={`min-h-11 min-w-11 p-2 rounded-lg transition-colors ${view === 'grid' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`} aria-label="Show photo grid">
             <Grid className="w-4 h-4" />
           </button>
-          <button onClick={() => setView('list')} className={`p-2 rounded-lg transition-colors ${view === 'list' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
+          <button onClick={() => setView('list')} className={`min-h-11 min-w-11 p-2 rounded-lg transition-colors ${view === 'list' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`} aria-label="Show photo list">
             <List className="w-4 h-4" />
           </button>
         </div>
@@ -157,7 +174,7 @@ export default function Photos() {
                 className="hidden"
               />
               {uploading ? <Upload className="w-4 h-4 animate-pulse" /> : <Camera className="w-4 h-4" />}
-              {uploading ? 'Uploading...' : 'Upload Progress Photos / Videos'}
+              {uploading ? 'Uploading...' : 'Add Progress Picture or Video'}
             </label>
           </div>
           <p className="text-xs text-gray-500 mt-2">

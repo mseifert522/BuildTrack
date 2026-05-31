@@ -324,10 +324,10 @@ export default function MobilePhotos() {
           </button>
           <button
             onClick={openFilePicker}
-            style={{ border: 'none', borderRadius: 13, padding: '10px 14px', background: 'linear-gradient(135deg, #D99D26, #C4891F)', color: 'white', fontSize: 13, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 7 }}
+            style={{ border: 'none', borderRadius: 13, padding: '10px 14px', background: 'linear-gradient(135deg, #D99D26, #C4891F)', color: 'white', fontSize: 13, fontWeight: 900, display: 'flex', alignItems: 'center', gap: 7, whiteSpace: 'nowrap' }}
           >
             <Camera size={17} color="white" />
-            Add
+            Add Progress Picture
           </button>
         </div>
       </div>
@@ -349,7 +349,7 @@ export default function MobilePhotos() {
             style={{ width: '100%', border: '1px dashed #D99D26', background: '#FFFBEB', borderRadius: 16, padding: 18, color: '#92400E', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
           >
             <FolderOpen size={18} color="#D99D26" />
-            Choose a project to add progress photos
+            Choose a project to add progress picture
           </button>
         )}
 

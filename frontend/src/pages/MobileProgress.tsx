@@ -150,13 +150,13 @@ export default function MobileProgress() {
               style={{
                 flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
                 background: 'linear-gradient(135deg, #D99D26, #C4891F)',
-                color: 'white', borderRadius: 12, padding: '10px 16px',
-                fontSize: 14, fontWeight: 700, cursor: 'pointer',
+                color: 'white', borderRadius: 12, padding: '12px 16px',
+                fontSize: 14, fontWeight: 900, cursor: 'pointer',
                 boxShadow: '0 4px 12px rgba(217,157,38,0.35)',
               }}
             >
               <Camera size={16} color="white" />
-            Add Photo or Video
+            Add Progress Picture
               <input
                 ref={fileInputRef}
                 type="file"
@@ -176,7 +176,7 @@ export default function MobileProgress() {
           <div style={{ width: '100%', background: 'white', borderRadius: '24px 24px 0 0', padding: '20px 16px 32px', maxHeight: '80vh', overflowY: 'auto' }}>
             <div style={{ width: 40, height: 4, background: '#E5E7EB', borderRadius: 2, margin: '0 auto 16px' }} />
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-              <p style={{ fontWeight: 800, fontSize: 17, color: '#111827', margin: 0 }}>Add Progress Photos</p>
+              <p style={{ fontWeight: 800, fontSize: 17, color: '#111827', margin: 0 }}>Add Progress Picture</p>
               <button onClick={cancelUpload} style={{ background: '#F3F4F6', border: 'none', borderRadius: 8, padding: 6, cursor: 'pointer' }}>
                 <X size={18} color="#6B7280" />
               </button>
@@ -267,7 +267,7 @@ export default function MobileProgress() {
             </div>
             <p style={{ color: 'rgba(255,255,255,0.7)', fontWeight: 700, fontSize: 16, margin: '0 0 8px' }}>No progress photos yet</p>
             <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, margin: 0 }}>
-              Tap "Add Photo or Video" to document construction progress
+              Tap "Add Progress Picture" to document construction progress
             </p>
           </div>
         ) : (

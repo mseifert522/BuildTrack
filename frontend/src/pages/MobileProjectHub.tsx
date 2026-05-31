@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { Camera } from 'lucide-react';
 import api from '../lib/api';
 
 interface Project {
@@ -115,6 +116,39 @@ export default function MobileProjectHub() {
         <p style={{ color: '#9CA3AF', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', margin: '4px 0 0' }}>
           Select Action
         </p>
+
+        <button
+          onClick={() => navigate(`/mobile/photos?projectId=${id}`)}
+          style={{
+            width: '100%',
+            textAlign: 'left',
+            background: 'linear-gradient(135deg, #D99D26, #C4891F)',
+            color: 'white',
+            borderRadius: 18,
+            boxShadow: '0 10px 22px rgba(217,157,38,0.26)',
+            padding: 20,
+            border: 'none',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            minHeight: 88,
+          }}
+          aria-label="Add progress picture"
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Camera size={28} color="white" />
+            </div>
+            <div>
+              <p style={{ fontWeight: 900, color: 'white', fontSize: 17, margin: 0 }}>Add Progress Picture</p>
+              <p style={{ color: 'rgba(255,255,255,0.82)', fontSize: 13, margin: '4px 0 0' }}>Take or upload photos and videos for this project</p>
+            </div>
+          </div>
+          <svg width="20" height="20" fill="none" stroke="white" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
 
         {/* Punch List Card */}
         <button

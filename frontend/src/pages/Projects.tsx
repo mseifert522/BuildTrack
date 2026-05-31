@@ -327,6 +327,20 @@ export default function Projects() {
                     )}
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={e => {
+                        e.stopPropagation();
+                        navigate(`/photos?projectId=${p.id}`);
+                      }}
+                      className="relative z-20 inline-flex min-h-10 items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-black text-white shadow-sm transition-colors cursor-pointer hover:bg-amber-600"
+                      style={{ background: '#D99D26', border: '1px solid #B7791F' }}
+                      title="Add timestamped progress photos or videos to this project"
+                      aria-label={`Add progress picture to ${p.address}`}
+                    >
+                      <Camera className="w-3.5 h-3.5" />
+                      Add Progress Picture
+                    </button>
                     {[
                       { label: 'Scope of Work', icon: FileText, hash: 'construction-plan', color: '#1D4ED8', bg: '#EFF6FF' },
                       { label: 'Upload Quotes', icon: Upload, hash: 'quotes', color: '#0F766E', bg: '#CCFBF1' },
