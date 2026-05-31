@@ -42,6 +42,8 @@ interface LightboxMedia {
   isVideo: boolean;
 }
 
+const MAX_PROGRESS_UPLOAD_FILES = 20;
+
 function formatDateTime(value?: string) {
   if (!value) return 'Just now';
   return new Date(value).toLocaleString('en-US', {
@@ -72,6 +74,8 @@ export default function MobilePhotos() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const previewUrlsRef = useRef<string[]>([]);
+  const batchCameraVideoRef = useRef<HTMLVideoElement>(null);
+  const batchCameraStreamRef = useRef<MediaStream | null>(null);
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState('');
@@ -84,6 +88,10 @@ export default function MobilePhotos() {
   const [photosLoading, setPhotosLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [showProjectSelector, setShowProjectSelector] = useState(false);
+  const [showUploadOptions, setShowUploadOptions] = useState(false);
+  const [showBatchCamera, setShowBatchCamera] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [cameraError, setCameraError] = useState('');
   const [lightbox, setLightbox] = useState<LightboxMedia | null>(null);
 
   const selectedProject = useMemo(
@@ -175,9 +183,86 @@ export default function MobilePhotos() {
       const existing = new Set(current.map(fileKey));
       const nextFiles = files.filter(file => !existing.has(fileKey(file)));
       if (!nextFiles.length) return current;
-      setPreviewUrls(urls => [...urls, ...nextFiles.map(file => URL.createObjectURL(file))]);
-      return [...current, ...nextFiles];
+      const availableSlots = Math.max(0, MAX_PROGRESS_UPLOAD_FILES - current.length);
+      const acceptedFiles = nextFiles.slice(0, availableSlots);
+      if (acceptedFiles.length < nextFiles.length) {
+        window.setTimeout(() => toast.error(`Upload batches are limited to ${MAX_PROGRESS_UPLOAD_FILES} items`), 0);
+      }
+      if (!acceptedFiles.length) return current;
+      setPreviewUrls(urls => [...urls, ...acceptedFiles.map(file => URL.createObjectURL(file))]);
+      return [...current, ...acceptedFiles];
     });
+  };
+
+  const stopBatchCamera = useCallback(() => {
+    batchCameraStreamRef.current?.getTracks().forEach(track => track.stop());
+    batchCameraStreamRef.current = null;
+    setCameraReady(false);
+  }, []);
+
+  const startBatchCamera = useCallback(async () => {
+    setCameraError('');
+    setCameraReady(false);
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError('This device does not support the in-app batch camera. Use the device camera fallback below.');
+      return;
+    }
+
+    try {
+      stopBatchCamera();
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false,
+      });
+      batchCameraStreamRef.current = stream;
+      if (batchCameraVideoRef.current) {
+        batchCameraVideoRef.current.srcObject = stream;
+        await batchCameraVideoRef.current.play();
+      }
+      setCameraReady(true);
+    } catch {
+      setCameraError('Camera access was not available. Use the device camera fallback or choose photos from the library.');
+    }
+  }, [stopBatchCamera]);
+
+  useEffect(() => {
+    if (!showBatchCamera) {
+      stopBatchCamera();
+      return;
+    }
+    void startBatchCamera();
+    return () => stopBatchCamera();
+  }, [showBatchCamera, startBatchCamera, stopBatchCamera]);
+
+  const captureBatchPhoto = () => {
+    const video = batchCameraVideoRef.current;
+    if (!video || !cameraReady || !video.videoWidth || !video.videoHeight) {
+      toast.error('Camera is still getting ready');
+      return;
+    }
+
+    const capturedAt = Date.now();
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const context = canvas.getContext('2d');
+    if (!context) {
+      toast.error('Camera capture failed');
+      return;
+    }
+
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(blob => {
+      if (!blob) {
+        toast.error('Camera capture failed');
+        return;
+      }
+      const file = new File([blob], `progress-${capturedAt}.jpg`, {
+        type: 'image/jpeg',
+        lastModified: capturedAt,
+      });
+      addPreviewFiles([file]);
+    }, 'image/jpeg', 0.9);
   };
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -213,6 +298,10 @@ export default function MobilePhotos() {
       return;
     }
     if (!previewFiles.length) return;
+    if (previewFiles.length > MAX_PROGRESS_UPLOAD_FILES) {
+      toast.error(`Upload batches are limited to ${MAX_PROGRESS_UPLOAD_FILES} items`);
+      return;
+    }
 
     setUploading(true);
     try {
@@ -252,6 +341,28 @@ export default function MobilePhotos() {
       return;
     }
     cameraInputRef.current?.click();
+  };
+
+  const openUploadOptions = () => {
+    if (!selectedProjectId) {
+      setShowProjectSelector(true);
+      return;
+    }
+    setShowUploadOptions(true);
+  };
+
+  const openBatchCamera = () => {
+    if (!selectedProjectId) {
+      setShowProjectSelector(true);
+      return;
+    }
+    setShowUploadOptions(false);
+    setShowBatchCamera(true);
+  };
+
+  const closeBatchCamera = () => {
+    setShowBatchCamera(false);
+    stopBatchCamera();
   };
 
   const projectSelector = (
@@ -350,18 +461,11 @@ export default function MobilePhotos() {
             </span>
           </button>
           <button
-            onClick={openFilePicker}
+            onClick={openUploadOptions}
             style={{ minHeight: 48, width: '100%', border: 'none', borderRadius: 13, padding: '10px 14px', background: 'linear-gradient(135deg, #D99D26, #C4891F)', color: 'white', fontSize: 13, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, whiteSpace: 'normal', textAlign: 'center', lineHeight: 1.15 }}
           >
             <Camera size={17} color="white" />
             Upload Progress Pictures
-          </button>
-          <button
-            onClick={openCamera}
-            style={{ minHeight: 44, width: '100%', border: '1px solid rgba(217,157,38,0.38)', borderRadius: 13, padding: '10px 14px', background: 'rgba(217,157,38,0.13)', color: '#FBD38D', fontSize: 13, fontWeight: 850, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}
-          >
-            <Camera size={16} color="#FBD38D" />
-            Open Camera
           </button>
         </div>
       </div>
@@ -443,12 +547,12 @@ export default function MobilePhotos() {
                 Add More
               </button>
               <button
-                onClick={openCamera}
+                onClick={openBatchCamera}
                 type="button"
                 style={{ minHeight: 44, border: '1px solid #D1D5DB', borderRadius: 12, background: '#F9FAFB', color: '#374151', fontSize: 12, fontWeight: 850, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
               >
                 <Camera size={15} color="#374151" />
-                Camera
+                Batch Camera
               </button>
             </div>
             <button
@@ -513,6 +617,165 @@ export default function MobilePhotos() {
       </div>
 
       {showProjectSelector && projectSelector}
+
+      {showUploadOptions && (
+        <div
+          onClick={() => setShowUploadOptions(false)}
+          style={{ position: 'fixed', inset: 0, zIndex: 230, background: 'rgba(13,17,23,0.78)', display: 'flex', alignItems: 'flex-end' }}
+        >
+          <div
+            onClick={event => event.stopPropagation()}
+            style={{ width: '100%', background: 'white', borderRadius: '22px 22px 0 0', padding: '18px 14px 24px', boxShadow: '0 -14px 30px rgba(0,0,0,0.18)' }}
+          >
+            <div style={{ width: 42, height: 4, background: '#E5E7EB', borderRadius: 2, margin: '0 auto 14px' }} />
+            <p style={{ margin: 0, color: '#111827', fontSize: 18, fontWeight: 900 }}>Upload Progress Pictures</p>
+            <p style={{ margin: '4px 0 16px', color: '#6B7280', fontSize: 12, lineHeight: 1.45 }}>
+              Add a whole batch before sending it to the project.
+            </p>
+            <div style={{ display: 'grid', gap: 10 }}>
+              <button
+                type="button"
+                onClick={openBatchCamera}
+                style={{ minHeight: 64, border: 'none', borderRadius: 16, background: 'linear-gradient(135deg, #D99D26, #C4891F)', color: 'white', padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left' }}
+              >
+                <Camera size={22} color="white" />
+                <span style={{ display: 'block' }}>
+                  <span style={{ display: 'block', fontSize: 14, fontWeight: 900 }}>Start Batch Camera</span>
+                  <span style={{ display: 'block', marginTop: 2, fontSize: 11, fontWeight: 700, opacity: 0.82 }}>Take several photos without leaving this screen</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowUploadOptions(false);
+                  openFilePicker();
+                }}
+                style={{ minHeight: 58, border: '1px solid #E5E7EB', borderRadius: 16, background: '#F9FAFB', color: '#111827', padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left' }}
+              >
+                <ImagePlus size={21} color="#D99D26" />
+                <span style={{ display: 'block' }}>
+                  <span style={{ display: 'block', fontSize: 14, fontWeight: 900 }}>Choose Multiple From Library</span>
+                  <span style={{ display: 'block', marginTop: 2, fontSize: 11, fontWeight: 700, color: '#6B7280' }}>Select many photos or videos at one time</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowUploadOptions(false)}
+                style={{ minHeight: 44, border: 'none', borderRadius: 14, background: '#F3F4F6', color: '#6B7280', fontSize: 13, fontWeight: 850 }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBatchCamera && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 250, background: '#05070A', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px', color: 'white', background: 'linear-gradient(180deg, rgba(0,0,0,0.78), rgba(0,0,0,0))', zIndex: 2 }}>
+            <button
+              type="button"
+              onClick={closeBatchCamera}
+              style={{ minWidth: 44, minHeight: 44, borderRadius: 14, border: 'none', background: 'rgba(255,255,255,0.12)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              aria-label="Close batch camera"
+            >
+              <X size={20} color="white" />
+            </button>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 900 }}>Batch Camera</p>
+              <p style={{ margin: '2px 0 0', fontSize: 11, opacity: 0.72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {selectedProject?.address || 'Selected project'}
+              </p>
+            </div>
+            <div style={{ borderRadius: 999, background: 'rgba(217,157,38,0.18)', color: '#FBD38D', padding: '8px 11px', fontSize: 12, fontWeight: 900 }}>
+              {previewFiles.length}/{MAX_PROGRESS_UPLOAD_FILES} queued
+            </div>
+          </div>
+
+          <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+            <video
+              ref={batchCameraVideoRef}
+              autoPlay
+              muted
+              playsInline
+              style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#111827' }}
+            />
+            {cameraError && (
+              <div style={{ position: 'absolute', left: 14, right: 14, bottom: 18, borderRadius: 18, background: 'rgba(255,255,255,0.94)', padding: 16, textAlign: 'center', boxShadow: '0 14px 30px rgba(0,0,0,0.24)' }}>
+                <p style={{ margin: 0, color: '#111827', fontSize: 14, fontWeight: 900 }}>Camera unavailable</p>
+                <p style={{ margin: '6px 0 14px', color: '#6B7280', fontSize: 12, lineHeight: 1.45 }}>{cameraError}</p>
+                <div style={{ display: 'grid', gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={openCamera}
+                    style={{ minHeight: 44, border: 'none', borderRadius: 12, background: '#D99D26', color: 'white', fontSize: 13, fontWeight: 900 }}
+                  >
+                    Use Device Camera
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      closeBatchCamera();
+                      openFilePicker();
+                    }}
+                    style={{ minHeight: 44, border: '1px solid #E5E7EB', borderRadius: 12, background: 'white', color: '#374151', fontSize: 13, fontWeight: 850 }}
+                  >
+                    Choose From Library
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div style={{ background: 'rgba(5,7,10,0.96)', padding: '10px 14px 18px', color: 'white' }}>
+            {previewUrls.length > 0 && (
+              <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 10 }}>
+                {previewUrls.slice(-8).map((url, offset) => {
+                  const index = Math.max(0, previewUrls.length - 8) + offset;
+                  const file = previewFiles[index];
+                  return (
+                    <div key={url} style={{ width: 52, height: 52, borderRadius: 12, overflow: 'hidden', background: '#111827', border: '1px solid rgba(255,255,255,0.12)', flexShrink: 0 }}>
+                      {file && isVideoMedia(file) ? (
+                        <video src={url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted playsInline />
+                      ) : (
+                        <img src={url} alt={`Queued ${index + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 76px 1fr', alignItems: 'center', gap: 12 }}>
+              <button
+                type="button"
+                onClick={openFilePicker}
+                disabled={previewFiles.length >= MAX_PROGRESS_UPLOAD_FILES}
+                style={{ minHeight: 46, border: '1px solid rgba(255,255,255,0.14)', borderRadius: 14, background: 'rgba(255,255,255,0.08)', color: 'white', fontSize: 12, fontWeight: 850, opacity: previewFiles.length >= MAX_PROGRESS_UPLOAD_FILES ? 0.48 : 1 }}
+              >
+                Add Library
+              </button>
+              <button
+                type="button"
+                onClick={captureBatchPhoto}
+                disabled={!cameraReady || Boolean(cameraError) || previewFiles.length >= MAX_PROGRESS_UPLOAD_FILES}
+                style={{ width: 76, height: 76, borderRadius: 38, border: '5px solid rgba(255,255,255,0.65)', background: cameraReady && !cameraError && previewFiles.length < MAX_PROGRESS_UPLOAD_FILES ? '#D99D26' : '#6B7280', boxShadow: '0 0 0 5px rgba(255,255,255,0.14)', opacity: cameraReady && !cameraError && previewFiles.length < MAX_PROGRESS_UPLOAD_FILES ? 1 : 0.6 }}
+                aria-label="Capture progress photo"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  closeBatchCamera();
+                  if (previewFiles.length) void handleUpload();
+                }}
+                disabled={!previewFiles.length || uploading}
+                style={{ minHeight: 46, border: 'none', borderRadius: 14, background: previewFiles.length ? '#16A34A' : 'rgba(255,255,255,0.12)', color: 'white', fontSize: 12, fontWeight: 900, opacity: uploading ? 0.7 : 1 }}
+              >
+                {uploading ? 'Uploading...' : `Upload ${previewFiles.length || ''}`.trim()}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {lightbox && (
         <div onClick={() => setLightbox(null)} style={{ position: 'fixed', inset: 0, zIndex: 260, background: 'rgba(0,0,0,0.95)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
