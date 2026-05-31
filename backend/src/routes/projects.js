@@ -6,16 +6,12 @@ const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/schema');
 const { authenticate, authorize, authorizeProjectAccess } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
+const { getNoteEditPermission } = require('../utils/projectNotes');
 
 const router = express.Router();
 router.use(authenticate);
 
 const MANAGEMENT_ROLES = ['super_admin', 'operations_manager', 'project_manager'];
-const NOTE_ADMIN_ROLES = ['super_admin', 'operations_manager'];
-
-function canOverrideNoteEdit(req) {
-  return NOTE_ADMIN_ROLES.includes(req.user.role);
-}
 const PROJECT_STATUSES = ['active_rehab', 'rehab_completed'];
 
 function getConstructionPlan(db, projectId) {
@@ -1024,7 +1020,7 @@ router.post('/:id/notes', authorizeProjectAccess, (req, res) => {
   });
 });
 
-// PUT /api/projects/:id/notes/:noteId - users may edit their own note one time; admins can correct notes.
+// PUT /api/projects/:id/notes/:noteId - contractors can edit their own notes for 24 hours; admins can correct notes.
 router.put('/:id/notes/:noteId', authorizeProjectAccess, (req, res) => {
   const { note, note_type, visibility } = req.body;
   if (!note || !note.trim()) return res.status(400).json({ error: 'Note content required' });
@@ -1032,14 +1028,8 @@ router.put('/:id/notes/:noteId', authorizeProjectAccess, (req, res) => {
   const db = getDb();
   const existing = db.prepare('SELECT * FROM project_notes WHERE id = ? AND project_id = ?').get(req.params.noteId, req.params.id);
   if (!existing) return res.status(404).json({ error: 'Note not found' });
-  const isOwner = existing.user_id === req.user.id;
-  const canOverride = canOverrideNoteEdit(req);
-  if (!isOwner && !canOverride) {
-    return res.status(403).json({ error: 'You can only edit your own notes' });
-  }
-  if (!canOverride && Number(existing.edit_count || 0) >= 1) {
-    return res.status(403).json({ error: 'This note has already been edited once' });
-  }
+  const permission = getNoteEditPermission(req.user, existing);
+  if (!permission.allowed) return res.status(permission.status).json({ error: permission.error });
 
   const editedAt = new Date().toISOString();
   const nextVisibility = req.user.role === 'contractor'

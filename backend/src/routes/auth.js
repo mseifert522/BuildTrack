@@ -82,6 +82,25 @@ function isDeviceTrusted(db, userId, deviceToken) {
   return !!device;
 }
 
+function getLoginProjects(db, user) {
+  if (MANAGEMENT_ROLES.includes(user.role)) {
+    return db.prepare(`
+      SELECT p.id, p.address, p.job_name, p.status, p.budget
+      FROM projects p
+      WHERE p.status != 'archived'
+      ORDER BY p.updated_at DESC
+    `).all();
+  }
+
+  return db.prepare(`
+    SELECT p.id, p.address, p.job_name, p.status, p.budget
+    FROM projects p
+    JOIN project_assignments pa ON pa.project_id = p.id AND pa.user_id = ?
+    WHERE p.status != 'archived'
+    ORDER BY p.updated_at DESC
+  `).all(user.id);
+}
+
 // POST /api/auth/login - management users receive an email 2FA code unless this device is trusted.
 router.post('/login', async (req, res) => {
   try {
@@ -162,6 +181,40 @@ router.post('/login', async (req, res) => {
   }
 });
 
+// POST /api/auth/trusted-device-login - continue from a browser previously approved by 2FA.
+router.post('/trusted-device-login', async (req, res) => {
+  try {
+    const { device_token } = req.body;
+    if (!device_token) return res.status(400).json({ error: 'Trusted device approval is required' });
+
+    const db = getDb();
+    const user = db.prepare(`
+      SELECT td.expires_at as trusted_device_expires_at, u.*
+      FROM trusted_devices td
+      JOIN users u ON u.id = td.user_id
+      WHERE td.device_token = ?
+        AND datetime(td.expires_at) > datetime('now')
+        AND u.is_active = 1
+      ORDER BY datetime(td.expires_at) DESC
+      LIMIT 1
+    `).get(device_token);
+
+    if (!user) {
+      return res.status(401).json({ error: 'This trusted device approval has expired. Please sign in again.' });
+    }
+
+    const payload = issueSession(db, user, { trusted_device_quick_login: true });
+    payload.device_token = device_token;
+    payload.trusted_device_expires_at = user.trusted_device_expires_at;
+    if (user.role === 'contractor') payload.projects = getLoginProjects(db, user);
+
+    return res.json(payload);
+  } catch (err) {
+    console.error('Trusted device login error:', err);
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
 // POST /api/auth/pin-login - contractor quick login via 5-digit PIN
 router.post('/pin-login', async (req, res) => {
   try {
@@ -173,24 +226,11 @@ router.post('/pin-login', async (req, res) => {
     const db = getDb();
     const user = db.prepare('SELECT * FROM users WHERE pin = ? AND is_active = 1').get(pin);
     if (!user) return res.status(401).json({ error: 'Invalid PIN' });
-
-    let projects;
-    if (MANAGEMENT_ROLES.includes(user.role)) {
-      projects = db.prepare(`
-        SELECT p.id, p.address, p.job_name, p.status, p.budget
-        FROM projects p
-        WHERE p.status != 'archived'
-        ORDER BY p.updated_at DESC
-      `).all();
-    } else {
-      projects = db.prepare(`
-        SELECT p.id, p.address, p.job_name, p.status, p.budget
-        FROM projects p
-        JOIN project_assignments pa ON pa.project_id = p.id AND pa.user_id = ?
-        WHERE p.status != 'archived'
-        ORDER BY p.updated_at DESC
-      `).all(user.id);
+    if (user.role !== 'contractor') {
+      return res.status(403).json({ error: 'PIN login is only available for contractor accounts' });
     }
+
+    const projects = getLoginProjects(db, user);
 
     const token = createSessionToken(user);
 

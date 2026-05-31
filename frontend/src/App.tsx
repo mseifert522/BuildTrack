@@ -29,7 +29,6 @@ import MobileAddProject from './pages/MobileAddProject';
 import MobileNotes from './pages/MobileNotes';
 import MobileProgress from './pages/MobileProgress';
 import MobilePhotos from './pages/MobilePhotos';
-import PinLogin from './pages/PinLogin';
 
 const IDLE_TIMEOUT_MS = 45 * 60 * 1000;
 const ACTIVITY_WRITE_INTERVAL_MS = 15 * 1000;
@@ -358,7 +357,7 @@ export default function App() {
         } />
 
         {/* Legacy contractor app entry points */}
-        <Route path="/app" element={<PinLogin />} />
+        <Route path="/app" element={<AuthRoute><Login initialMode="pin" /></AuthRoute>} />
         <Route path="/app/home" element={<MobileRoute><Navigate to="/mobile" replace /></MobileRoute>} />
         <Route path="/app/projects" element={<MobileRoute><Navigate to="/mobile/projects" replace /></MobileRoute>} />
         <Route path="/app/project/:id" element={<MobileRoute><LegacyMobileProjectRedirect /></MobileRoute>} />

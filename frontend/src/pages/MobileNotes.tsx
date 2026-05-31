@@ -5,7 +5,7 @@ import toast from 'react-hot-toast';
 import { useAuthStore } from '../store/authStore';
 import {
   ArrowLeft, Send, MessageSquare, Wifi, WifiOff,
-  Clock, User, ChevronDown, Mic, Square,
+  Clock, ChevronDown, Mic, Square, Edit2, Check, X,
 } from 'lucide-react';
 import { formatEasternDate, formatEasternDateTime, formatEasternRelative } from '../lib/time';
 
@@ -18,6 +18,10 @@ interface Note {
   user_avatar_url?: string | null;
   note: string;
   note_type: string;
+  visibility?: 'private' | 'public';
+  edit_count?: number;
+  edited_at?: string | null;
+  edited_by_name?: string | null;
   created_at: string;
 }
 
@@ -38,6 +42,32 @@ function formatFullTime(iso: string) {
     weekday: 'short', month: 'short', day: 'numeric',
     year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
   })} New York time`;
+}
+
+const CONTRACTOR_NOTE_EDIT_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+function noteCreatedAtMs(note: Note) {
+  const raw = note.created_at || '';
+  const normalized = raw.includes('T') ? raw : `${raw.replace(' ', 'T')}Z`;
+  const timestamp = new Date(normalized).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function canEditNote(note: Note, user?: { id?: string; role?: string } | null) {
+  if (!user || note.user_id !== user.id) return false;
+  if (user.role === 'contractor') {
+    const createdAt = noteCreatedAtMs(note);
+    return Boolean(createdAt && Date.now() - createdAt <= CONTRACTOR_NOTE_EDIT_WINDOW_MS);
+  }
+  return Number(note.edit_count || 0) < 1;
+}
+
+function editWindowLabel(note: Note, user?: { role?: string } | null) {
+  if (user?.role !== 'contractor') return 'Edit note';
+  const createdAt = noteCreatedAtMs(note);
+  const remainingMs = Math.max(CONTRACTOR_NOTE_EDIT_WINDOW_MS - (Date.now() - createdAt), 0);
+  const remainingHours = Math.max(Math.ceil(remainingMs / (60 * 60 * 1000)), 1);
+  return `Edit note (${remainingHours}h left)`;
 }
 
 function getInitials(name: string) {
@@ -64,6 +94,9 @@ export default function MobileNotes() {
   const [listening, setListening] = useState(false);
   const [connected, setConnected] = useState(false);
   const [expandedNote, setExpandedNote] = useState<string | null>(null);
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -168,6 +201,35 @@ export default function MobileNotes() {
       setSending(false);
     }
   }, [text, sending, projectId, user]);
+
+  const startEdit = useCallback((note: Note) => {
+    setEditingNoteId(note.id);
+    setEditingText(note.note);
+  }, []);
+
+  const cancelEdit = useCallback(() => {
+    setEditingNoteId(null);
+    setEditingText('');
+  }, []);
+
+  const saveNoteEdit = useCallback(async (note: Note) => {
+    if (!projectId || !editingText.trim() || savingEdit) return;
+    setSavingEdit(true);
+    try {
+      const res = await api.put(`/projects/${projectId}/notes/${note.id}`, {
+        note: editingText.trim(),
+        note_type: note.note_type || 'general',
+        visibility: note.visibility || 'private',
+      });
+      setNotes(prev => prev.map(item => item.id === note.id ? res.data : item));
+      cancelEdit();
+      toast.success('Note updated');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to update note');
+    } finally {
+      setSavingEdit(false);
+    }
+  }, [cancelEdit, editingText, projectId, savingEdit]);
 
   const startDictation = useCallback(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -323,6 +385,8 @@ export default function MobileNotes() {
                   const rl = roleLabel[note.user_role] || { label: note.user_role, color: '#6B7280', bg: '#F3F4F6' };
                   const color = avatarColor(note.user_id);
                   const isExpanded = expandedNote === note.id;
+                  const isEditing = editingNoteId === note.id;
+                  const editable = canEditNote(note, user);
 
                   return (
                     <div key={note.id} className={`flex gap-3 ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}>
@@ -360,20 +424,61 @@ export default function MobileNotes() {
                         <div
                           className="rounded-2xl px-4 py-3 relative"
                           style={{
-                            background: isOwn
+                            background: isEditing
+                              ? 'white'
+                              : isOwn
                               ? 'linear-gradient(135deg, #D99D26, #C4891F)'
                               : 'white',
                             boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                            border: isEditing ? '1px solid #D99D26' : 'none',
                             borderBottomRightRadius: isOwn ? 4 : 16,
                             borderBottomLeftRadius: isOwn ? 16 : 4,
                           }}
                         >
-                          <p
-                            className="text-sm leading-relaxed whitespace-pre-wrap"
-                            style={{ color: isOwn ? 'white' : '#111827' }}
-                          >
-                            {note.note}
-                          </p>
+                          {isEditing ? (
+                            <div className="space-y-3">
+                              <textarea
+                                value={editingText}
+                                onChange={e => setEditingText(e.target.value)}
+                                rows={3}
+                                autoFocus
+                                className="w-full text-sm leading-relaxed text-gray-900 bg-white focus:outline-none resize-none"
+                                style={{ minWidth: 220 }}
+                              />
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={cancelEdit}
+                                  className="w-9 h-9 rounded-xl flex items-center justify-center"
+                                  style={{ background: '#F3F4F6', color: '#6B7280' }}
+                                  aria-label="Cancel note edit"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => saveNoteEdit(note)}
+                                  disabled={savingEdit || !editingText.trim()}
+                                  className="w-9 h-9 rounded-xl flex items-center justify-center disabled:opacity-50"
+                                  style={{ background: '#D99D26', color: 'white' }}
+                                  aria-label="Save note edit"
+                                >
+                                  {savingEdit ? (
+                                    <span className="w-4 h-4 rounded-full animate-spin" style={{ border: '2px solid rgba(255,255,255,0.35)', borderTopColor: 'white' }} />
+                                  ) : (
+                                    <Check className="w-4 h-4" />
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <p
+                              className="text-sm leading-relaxed whitespace-pre-wrap"
+                              style={{ color: isOwn ? 'white' : '#111827' }}
+                            >
+                              {note.note}
+                            </p>
+                          )}
                         </div>
 
                         {/* Timestamp + actions */}
@@ -386,13 +491,31 @@ export default function MobileNotes() {
                             {formatTime(note.created_at)}
                             <ChevronDown className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                           </button>
+                          {editable && !isEditing && (
+                            <button
+                              type="button"
+                              onClick={() => startEdit(note)}
+                              className="flex items-center gap-1 text-xs font-bold"
+                              style={{ color: '#2563EB' }}
+                            >
+                              <Edit2 className="w-3 h-3" />
+                              {editWindowLabel(note, user)}
+                            </button>
+                          )}
                         </div>
 
                         {/* Expanded full timestamp */}
                         {isExpanded && (
-                          <p className="text-xs text-gray-400 mt-0.5 px-1">
-                            {formatFullTime(note.created_at)}
-                          </p>
+                          <div className="mt-0.5 px-1">
+                            <p className="text-xs text-gray-400">
+                              {formatFullTime(note.created_at)}
+                            </p>
+                            {note.edited_at && (
+                              <p className="text-xs text-gray-400 mt-0.5">
+                                Edited by {note.edited_by_name || note.user_name} on {formatFullTime(note.edited_at)}
+                              </p>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>

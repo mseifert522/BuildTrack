@@ -1,11 +1,48 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import {
+  ArrowRight,
+  Building2,
+  CheckCircle2,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Lock,
+  Mail,
+  ShieldCheck,
+  Smartphone,
+} from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
 
 const DEVICE_TOKEN_KEY = 'bt_device_token';
 const DEVICE_TRUSTED_UNTIL_KEY = 'bt_device_trusted_until';
+const CONTRACTOR_TOKEN_KEY = 'contractor_token';
+const CONTRACTOR_USER_KEY = 'contractor_user';
+const CONTRACTOR_PROJECTS_KEY = 'contractor_projects';
+const CONTRACTOR_SESSION_STARTED_KEY = 'contractor_session_started_at';
+const CONTRACTOR_LAST_ACTIVITY_KEY = 'contractor_last_activity_at';
+const CONTRACTOR_LAST_REFRESH_KEY = 'contractor_last_refresh_at';
+
+type LoginMode = 'password' | 'pin';
+
+type LoginProps = {
+  initialMode?: LoginMode;
+};
+
+type LoginPayload = {
+  token: string;
+  user: {
+    id?: string;
+    role?: string;
+    force_password_reset?: boolean;
+    [key: string]: any;
+  };
+  projects?: any[];
+  device_token?: string;
+  trusted_device_expires_at?: string;
+};
 
 const landingPathFor = (user: { role?: string; force_password_reset?: boolean }) => {
   if (user.force_password_reset) return '/change-password';
@@ -24,6 +61,26 @@ const queueLoginReviewSummary = (user: { id?: string; role?: string }) => {
   sessionStorage.setItem(`buildtrack-login-review-summary:${user.id}`, '1');
 };
 
+const clearContractorSession = () => {
+  localStorage.removeItem(CONTRACTOR_TOKEN_KEY);
+  localStorage.removeItem(CONTRACTOR_USER_KEY);
+  localStorage.removeItem(CONTRACTOR_PROJECTS_KEY);
+  localStorage.removeItem(CONTRACTOR_SESSION_STARTED_KEY);
+  localStorage.removeItem(CONTRACTOR_LAST_ACTIVITY_KEY);
+  localStorage.removeItem(CONTRACTOR_LAST_REFRESH_KEY);
+};
+
+const saveContractorSession = (data: LoginPayload) => {
+  if (data.user?.role !== 'contractor') return;
+  const now = String(Date.now());
+  localStorage.setItem(CONTRACTOR_TOKEN_KEY, data.token);
+  localStorage.setItem(CONTRACTOR_USER_KEY, JSON.stringify(data.user));
+  localStorage.setItem(CONTRACTOR_PROJECTS_KEY, JSON.stringify(data.projects || []));
+  localStorage.setItem(CONTRACTOR_SESSION_STARTED_KEY, now);
+  localStorage.setItem(CONTRACTOR_LAST_ACTIVITY_KEY, now);
+  localStorage.setItem(CONTRACTOR_LAST_REFRESH_KEY, now);
+};
+
 const saveTrustedDevice = (data: { device_token?: string; trusted_device_expires_at?: string }) => {
   if (data.device_token) localStorage.setItem(DEVICE_TOKEN_KEY, data.device_token);
   if (data.trusted_device_expires_at) {
@@ -31,7 +88,24 @@ const saveTrustedDevice = (data: { device_token?: string; trusted_device_expires
   }
 };
 
-export default function Login() {
+const parseTrustedUntil = (value?: string | null) => {
+  if (!value) return 0;
+  const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`;
+  const timestamp = new Date(normalized).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
+const getTrustedDeviceState = () => {
+  const token = localStorage.getItem(DEVICE_TOKEN_KEY);
+  const trustedUntil = localStorage.getItem(DEVICE_TRUSTED_UNTIL_KEY);
+  return {
+    token,
+    trustedUntil,
+    available: Boolean(token && trustedUntil && parseTrustedUntil(trustedUntil) > Date.now()),
+  };
+};
+
+export default function Login({ initialMode = 'password' }: LoginProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [stayLoggedIn, setStayLoggedIn] = useState(
@@ -39,15 +113,68 @@ export default function Login() {
   );
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [trustedDeviceLoading, setTrustedDeviceLoading] = useState(false);
+  const [trustedDeviceReady, setTrustedDeviceReady] = useState(() => getTrustedDeviceState().available);
   const [needs2FA, setNeeds2FA] = useState(false);
   const [twofaCode, setTwofaCode] = useState('');
   const [trustDevice, setTrustDevice] = useState(false);
   const [twofaLoading, setTwofaLoading] = useState(false);
-  const [showPinLogin, setShowPinLogin] = useState(false);
+  const [loginMode, setLoginMode] = useState<LoginMode>(initialMode);
   const [pinDigits, setPinDigits] = useState('');
   const [focusedField, setFocusedField] = useState<string | null>(null);
   const { setAuth } = useAuthStore();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    setTrustedDeviceReady(getTrustedDeviceState().available);
+
+    const contractorToken = localStorage.getItem(CONTRACTOR_TOKEN_KEY);
+    if (!localStorage.getItem('token') && contractorToken) {
+      try {
+        const contractorUser = JSON.parse(localStorage.getItem(CONTRACTOR_USER_KEY) || 'null');
+        if (contractorUser) {
+          setAuth(contractorUser, contractorToken);
+          navigate('/mobile', { replace: true });
+        }
+      } catch {
+        clearContractorSession();
+      }
+    }
+  }, [navigate, setAuth]);
+
+  const completeLogin = (data: LoginPayload) => {
+    if (data.user?.role === 'contractor') saveContractorSession(data);
+    else clearContractorSession();
+    saveTrustedDevice(data);
+    setAuth(data.user as any, data.token);
+    clearReviewSummaryDismissals(data.user);
+    queueLoginReviewSummary(data.user);
+    navigate(landingPathFor(data.user));
+  };
+
+  const handleTrustedDeviceLogin = async () => {
+    const device = getTrustedDeviceState();
+    if (!device.available || !device.token) {
+      setTrustedDeviceReady(false);
+      toast.error('Trusted device approval has expired. Please sign in again.');
+      return;
+    }
+
+    setTrustedDeviceLoading(true);
+    try {
+      const res = await api.post('/auth/trusted-device-login', { device_token: device.token });
+      localStorage.setItem('stayLoggedIn', 'true');
+      completeLogin(res.data);
+      toast.success('Signed in from this trusted device');
+    } catch (err: any) {
+      localStorage.removeItem(DEVICE_TOKEN_KEY);
+      localStorage.removeItem(DEVICE_TRUSTED_UNTIL_KEY);
+      setTrustedDeviceReady(false);
+      toast.error(err.response?.data?.error || 'Trusted device sign-in failed');
+    } finally {
+      setTrustedDeviceLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,11 +189,7 @@ export default function Login() {
         toast.success('Verification code sent to your email');
       } else {
         localStorage.setItem('stayLoggedIn', stayLoggedIn ? 'true' : 'false');
-        saveTrustedDevice(res.data);
-        setAuth(res.data.user, res.data.token);
-        clearReviewSummaryDismissals(res.data.user);
-        queueLoginReviewSummary(res.data.user);
-        navigate(landingPathFor(res.data.user));
+        completeLogin(res.data);
       }
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Invalid credentials. Please try again.');
@@ -92,11 +215,7 @@ export default function Login() {
         toast.error('Invalid or expired code. Try again.');
       } else {
         localStorage.setItem('stayLoggedIn', rememberThisDevice ? 'true' : 'false');
-        saveTrustedDevice(res.data);
-        setAuth(res.data.user, res.data.token);
-        clearReviewSummaryDismissals(res.data.user);
-        queueLoginReviewSummary(res.data.user);
-        navigate(landingPathFor(res.data.user));
+        completeLogin(res.data);
       }
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Invalid code');
@@ -111,12 +230,9 @@ export default function Login() {
     setLoading(true);
     try {
       const res = await api.post('/auth/pin-login', { pin: pinDigits });
-      setAuth(res.data.user, res.data.token);
-      clearReviewSummaryDismissals(res.data.user);
-      queueLoginReviewSummary(res.data.user);
-      navigate(landingPathFor(res.data.user));
+      completeLogin(res.data);
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Invalid PIN');
+      toast.error(err.response?.data?.error || 'Invalid contractor PIN');
       setPinDigits('');
     } finally {
       setLoading(false);
@@ -134,140 +250,115 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex" style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
-      {/* ── LEFT PANEL — Branding ── */}
       <div
-        className="hidden lg:flex lg:w-[55%] relative flex-col justify-between p-12 overflow-hidden"
-        style={{
-          background: 'linear-gradient(145deg, #0D1117 0%, #181D25 40%, #1E2530 70%, #0D1117 100%)',
-        }}
+        className="hidden lg:flex lg:w-[52%] relative flex-col justify-between p-12 overflow-hidden"
+        style={{ background: 'linear-gradient(145deg, #0D1117 0%, #151B24 58%, #1E2530 100%)' }}
       >
-        {/* Animated grid background */}
         <div
-          className="absolute inset-0 opacity-[0.04]"
+          className="absolute inset-0 opacity-[0.05]"
           style={{
-            backgroundImage: `
-              linear-gradient(rgba(217,157,38,0.8) 1px, transparent 1px),
-              linear-gradient(90deg, rgba(217,157,38,0.8) 1px, transparent 1px)
-            `,
-            backgroundSize: '60px 60px',
+            backgroundImage: 'linear-gradient(rgba(217,157,38,0.8) 1px, transparent 1px), linear-gradient(90deg, rgba(217,157,38,0.8) 1px, transparent 1px)',
+            backgroundSize: '64px 64px',
           }}
         />
 
-        {/* Glowing orbs */}
-        <div
-          className="absolute top-[-10%] right-[-5%] w-[500px] h-[500px] rounded-full opacity-[0.07]"
-          style={{ background: 'radial-gradient(circle, #D99D26 0%, transparent 70%)' }}
-        />
-        <div
-          className="absolute bottom-[-15%] left-[-10%] w-[600px] h-[600px] rounded-full opacity-[0.05]"
-          style={{ background: 'radial-gradient(circle, #3B82F6 0%, transparent 70%)' }}
-        />
-
-        {/* Top logo */}
         <div className="relative z-10 flex items-center gap-4">
           <div
-            className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-2xl overflow-hidden border-2"
-            style={{ borderColor: 'rgba(217,157,38,0.4)', background: 'rgba(217,157,38,0.1)' }}
+            className="w-12 h-12 rounded-lg flex items-center justify-center overflow-hidden border-2"
+            style={{ borderColor: 'rgba(217,157,38,0.5)', background: 'rgba(217,157,38,0.1)' }}
           >
             <img src="/buildtrack-logo.png" alt="BuildTrack" className="w-full h-full object-cover" />
           </div>
           <div>
-            <p className="text-white font-bold text-lg leading-tight tracking-tight">BuildTrack</p>
-            <p className="text-xs font-medium tracking-widest uppercase" style={{ color: '#D99D26' }}>
+            <p className="text-white font-bold text-lg leading-tight">BuildTrack</p>
+            <p className="text-xs font-semibold uppercase" style={{ color: '#D99D26' }}>
               Construction Management
             </p>
           </div>
         </div>
 
-        {/* Center content */}
-        <div className="relative z-10">
+        <div className="relative z-10 max-w-3xl">
           <div
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-semibold mb-8 tracking-wider uppercase"
-            style={{ background: 'rgba(217,157,38,0.12)', border: '1px solid rgba(217,157,38,0.25)', color: '#D99D26' }}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold mb-7 uppercase"
+            style={{ background: 'rgba(217,157,38,0.12)', border: '1px solid rgba(217,157,38,0.3)', color: '#D99D26' }}
           >
-            <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
-            Enterprise Construction Management
+            <Building2 className="w-4 h-4" />
+            Enterprise field operations
           </div>
 
-          <h1 className="text-5xl font-black text-white leading-[1.1] mb-6 tracking-tight">
+          <h1 className="text-5xl font-black text-white leading-[1.08] mb-6">
             Build smarter.<br />
             <span style={{ color: '#D99D26' }}>Track everything.</span>
           </h1>
 
-          <p className="text-lg leading-relaxed mb-10" style={{ color: 'rgba(255,255,255,0.55)' }}>
-            Unified field operations, punch list management, photo documentation, and invoicing — all in one platform built for construction professionals.
+          <p className="text-lg leading-relaxed mb-10" style={{ color: 'rgba(255,255,255,0.62)' }}>
+            Unified project tracking, progress photos, field notes, invoices, contractors, and suppliers in one controlled construction platform.
           </p>
 
-          {/* Feature pills */}
-          <div className="flex flex-wrap gap-3">
-            {['Project Tracking', 'Punch Lists', 'Photo Docs', 'Invoice Management', 'Field Reports'].map(f => (
-              <span
-                key={f}
-                className="px-4 py-2 rounded-full text-sm font-medium"
-                style={{
-                  background: 'rgba(255,255,255,0.05)',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  color: 'rgba(255,255,255,0.7)',
-                }}
+          <div className="grid grid-cols-2 gap-3 max-w-xl">
+            {[
+              'Progress Photos',
+              'Project Notes',
+              'Contractor Access',
+              'Invoice Uploads',
+            ].map(item => (
+              <div
+                key={item}
+                className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold"
+                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.78)' }}
               >
-                {f}
-              </span>
+                <CheckCircle2 className="w-4 h-4" style={{ color: '#D99D26' }} />
+                {item}
+              </div>
             ))}
           </div>
         </div>
 
-        {/* Bottom stats */}
         <div className="relative z-10 grid grid-cols-3 gap-6">
           {[
-            { value: '100%', label: 'Mobile Ready' },
-            { value: 'Real-time', label: 'Field Updates' },
-            { value: 'Secure', label: 'Role-Based Access' },
-          ].map(s => (
-            <div key={s.label}>
-              <p className="text-2xl font-black text-white mb-1">{s.value}</p>
-              <p className="text-xs font-medium" style={{ color: 'rgba(255,255,255,0.4)' }}>{s.label}</p>
+            { value: 'Mobile', label: 'Field Ready' },
+            { value: 'Secure', label: '2FA + Trust' },
+            { value: 'Tracked', label: 'Project Media' },
+          ].map(item => (
+            <div key={item.label}>
+              <p className="text-2xl font-black text-white mb-1">{item.value}</p>
+              <p className="text-xs font-medium" style={{ color: 'rgba(255,255,255,0.48)' }}>{item.label}</p>
             </div>
           ))}
         </div>
       </div>
 
-      {/* ── RIGHT PANEL — Login Form ── */}
       <div
-        className="flex-1 flex flex-col items-center justify-center p-6 md:p-12 relative"
+        className="flex-1 flex flex-col items-center justify-center px-4 py-8 sm:px-6 md:px-10 relative"
         style={{ background: '#F8F9FC' }}
       >
-        {/* Mobile logo */}
-        <div className="lg:hidden flex flex-col items-center mb-10">
+        <div className="lg:hidden flex items-center gap-3 mb-6 w-full max-w-[460px]">
           <div
-            className="w-20 h-20 rounded-3xl overflow-hidden border-4 shadow-2xl mb-4"
+            className="w-12 h-12 rounded-lg overflow-hidden border-2 shadow-sm"
             style={{ borderColor: '#D99D26' }}
           >
             <img src="/buildtrack-logo.png" alt="BuildTrack" className="w-full h-full object-cover" />
           </div>
-          <h1 className="text-2xl font-black text-gray-900 text-center">BuildTrack</h1>
-          <p className="text-sm font-semibold mt-1 tracking-wide" style={{ color: '#D99D26' }}>
-            Construction Management
-          </p>
+          <div>
+            <h1 className="text-xl font-black text-gray-900">BuildTrack</h1>
+            <p className="text-xs font-semibold uppercase" style={{ color: '#D99D26' }}>Construction Management</p>
+          </div>
         </div>
 
-        <div className="w-full max-w-[420px]">
-          {/* Header */}
-          <div className="mb-8">
-            <h2 className="text-3xl font-black text-gray-900 tracking-tight">Welcome back</h2>
-            <p className="text-gray-500 mt-2 text-sm">Sign in to your account to continue</p>
+        <div className="w-full max-w-[460px]">
+          <div className="mb-6">
+            <h2 className="text-3xl font-black text-gray-900">Welcome back</h2>
+            <p className="text-gray-500 mt-2 text-sm">Choose the secure sign-in method for this device.</p>
           </div>
 
-          {/* Form */}
           {needs2FA ? (
-            <form onSubmit={handleVerify2FA} className="space-y-5">
-              <div className="bg-white rounded-2xl p-6 text-center" style={{ border: '2px solid #E5E7EB' }}>
-                <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4" style={{ background: 'rgba(217,157,38,0.1)' }}>
-                  <svg className="w-7 h-7" style={{ color: '#D99D26' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                  </svg>
+            <form onSubmit={handleVerify2FA} className="space-y-4">
+              <div className="bg-white rounded-lg p-5 text-center" style={{ border: '1px solid #E5E7EB' }}>
+                <div className="w-12 h-12 rounded-lg flex items-center justify-center mx-auto mb-4" style={{ background: 'rgba(217,157,38,0.1)' }}>
+                  <Mail className="w-6 h-6" style={{ color: '#D99D26' }} />
                 </div>
                 <h3 className="font-bold text-gray-900 text-lg mb-1">Check your email</h3>
-                <p className="text-sm text-gray-500 mb-6">We sent a 6-digit verification code to <strong>{email}</strong></p>
+                <p className="text-sm text-gray-500 mb-5">Enter the 6-digit verification code sent to <strong>{email}</strong>.</p>
                 <input
                   type="text"
                   inputMode="numeric"
@@ -275,14 +366,14 @@ export default function Login() {
                   value={twofaCode}
                   onChange={e => setTwofaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                   autoFocus
-                  className="w-full text-center text-3xl font-black tracking-[0.4em] py-4 rounded-2xl focus:outline-none"
-                  style={{ border: '2px solid #E5E7EB', letterSpacing: '0.4em' }}
+                  className="w-full text-center text-3xl font-black py-4 rounded-lg focus:outline-none"
+                  style={{ border: '2px solid #E5E7EB' }}
                   placeholder="000000"
                 />
               </div>
               <label
-                className="flex items-start gap-3 p-4 rounded-2xl cursor-pointer"
-                style={{ background: 'white', border: '2px solid #E5E7EB' }}
+                className="flex items-start gap-3 p-4 rounded-lg cursor-pointer"
+                style={{ background: 'white', border: '1px solid #E5E7EB' }}
               >
                 <input
                   type="checkbox"
@@ -295,17 +386,17 @@ export default function Login() {
                   style={{ accentColor: '#D99D26' }}
                 />
                 <span>
-                  <span className="block text-sm font-bold text-gray-900">Remember this desktop for 60 days</span>
-                  <span className="block text-xs text-gray-500 mt-0.5">Skip email verification on this computer until the trusted period expires.</span>
+                  <span className="block text-sm font-bold text-gray-900">Trust this device for 60 days</span>
+                  <span className="block text-xs text-gray-500 mt-0.5">Skip email verification on this approved browser.</span>
                 </span>
               </label>
               <button
                 type="submit"
                 disabled={twofaLoading || twofaCode.length !== 6}
-                className="w-full py-4 rounded-2xl font-bold text-sm text-white disabled:opacity-50"
-                style={{ background: 'linear-gradient(135deg, #D99D26, #C4891F)', boxShadow: '0 8px 24px rgba(217,157,38,0.35)' }}
+                className="w-full py-4 rounded-lg font-bold text-sm text-white disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg, #D99D26, #C4891F)', boxShadow: '0 8px 24px rgba(217,157,38,0.25)' }}
               >
-                {twofaLoading ? 'Verifying...' : 'Verify & Sign In'}
+                {twofaLoading ? 'Verifying...' : 'Verify and Sign In'}
               </button>
               <div className="flex items-center justify-between">
                 <button type="button" onClick={() => { setNeeds2FA(false); setTwofaCode(''); }} className="text-sm font-medium text-gray-500 hover:text-gray-700">
@@ -317,161 +408,234 @@ export default function Login() {
               </div>
             </form>
           ) : (
-          <form onSubmit={handleSubmit} className="space-y-5">
-            {/* Email */}
-            <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">
-                Email Address
-              </label>
-              <div
-                className="relative rounded-2xl transition-all duration-200"
-                style={{
-                  background: 'white',
-                  border: `2px solid ${focusedField === 'email' ? '#D99D26' : '#E5E7EB'}`,
-                  boxShadow: focusedField === 'email' ? '0 0 0 4px rgba(217,157,38,0.1)' : '0 1px 3px rgba(0,0,0,0.06)',
-                }}
-              >
-                <div className="absolute left-4 top-1/2 -translate-y-1/2">
-                  <svg className="w-5 h-5" style={{ color: focusedField === 'email' ? '#D99D26' : '#9CA3AF' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                  </svg>
-                </div>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  onFocus={() => setFocusedField('email')}
-                  onBlur={() => setFocusedField(null)}
-                  required
-                  autoComplete="email"
-                  className="w-full pl-12 pr-4 py-4 bg-transparent text-gray-900 text-sm font-medium placeholder-gray-400 focus:outline-none rounded-2xl"
-                  placeholder="you@company.com"
-                />
-              </div>
-            </div>
-
-            {/* Password */}
-            <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">
-                Password
-              </label>
-              <div
-                className="relative rounded-2xl transition-all duration-200"
-                style={{
-                  background: 'white',
-                  border: `2px solid ${focusedField === 'password' ? '#D99D26' : '#E5E7EB'}`,
-                  boxShadow: focusedField === 'password' ? '0 0 0 4px rgba(217,157,38,0.1)' : '0 1px 3px rgba(0,0,0,0.06)',
-                }}
-              >
-                <div className="absolute left-4 top-1/2 -translate-y-1/2">
-                  <svg className="w-5 h-5" style={{ color: focusedField === 'password' ? '#D99D26' : '#9CA3AF' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                  </svg>
-                </div>
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  onFocus={() => setFocusedField('password')}
-                  onBlur={() => setFocusedField(null)}
-                  required
-                  autoComplete="current-password"
-                  className="w-full pl-12 pr-14 py-4 bg-transparent text-gray-900 text-sm font-medium placeholder-gray-400 focus:outline-none rounded-2xl"
-                  placeholder="••••••••••••"
-                />
+            <div className="space-y-4">
+              {trustedDeviceReady && (
                 <button
                   type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 p-1 rounded-lg transition-colors"
-                  style={{ color: '#9CA3AF' }}
+                  onClick={handleTrustedDeviceLogin}
+                  disabled={trustedDeviceLoading}
+                  className="w-full flex items-center justify-between gap-3 p-4 rounded-lg text-left transition-all disabled:opacity-60"
+                  style={{ background: '#111827', color: 'white', boxShadow: '0 10px 26px rgba(17,24,39,0.18)' }}
                 >
-                  {showPassword ? (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                    </svg>
+                  <span className="flex items-center gap-3 min-w-0">
+                    <span className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(217,157,38,0.18)' }}>
+                      <ShieldCheck className="w-5 h-5" style={{ color: '#D99D26' }} />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-black">Continue on this trusted device</span>
+                      <span className="block text-xs mt-0.5" style={{ color: 'rgba(255,255,255,0.62)' }}>Open your approved BuildTrack session.</span>
+                    </span>
+                  </span>
+                  {trustedDeviceLoading ? (
+                    <span className="w-5 h-5 rounded-full animate-spin flex-shrink-0" style={{ border: '2px solid rgba(255,255,255,0.25)', borderTopColor: '#D99D26' }} />
                   ) : (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                    </svg>
+                    <ArrowRight className="w-5 h-5 flex-shrink-0" />
                   )}
                 </button>
-              </div>
-            </div>
-
-            {/* Forgot Password */}
-            <div className="text-right -mt-2">
-              <Link to="/forgot-password" className="text-xs font-bold hover:underline" style={{ color: '#D99D26' }}>
-                Forgot password?
-              </Link>
-            </div>
-
-            {/* Stay Logged In */}
-            <div
-              className="flex items-center justify-between p-4 rounded-2xl"
-              style={{ background: 'white', border: '2px solid #E5E7EB' }}
-            >
-              <div>
-                <p className="text-sm font-semibold text-gray-800">Remember this desktop</p>
-                <p className="text-xs text-gray-400 mt-0.5">Keep this browser trusted for email verification</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  const nextStayLoggedIn = !stayLoggedIn;
-                  setStayLoggedIn(nextStayLoggedIn);
-                  setTrustDevice(nextStayLoggedIn);
-                }}
-                className="relative flex-shrink-0 ml-4 transition-all duration-300"
-                style={{
-                  width: 52,
-                  height: 28,
-                  borderRadius: 14,
-                  backgroundColor: stayLoggedIn ? '#D99D26' : '#D1D5DB',
-                }}
-              >
-                <span
-                  className="absolute top-1 w-5 h-5 bg-white rounded-full shadow-md transition-all duration-300"
-                  style={{ left: stayLoggedIn ? 28 : 4 }}
-                />
-              </button>
-            </div>
-
-            {/* Submit */}
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-4 rounded-2xl font-bold text-sm tracking-wide transition-all duration-200 text-white relative overflow-hidden"
-              style={{
-                background: loading
-                  ? '#B8832A'
-                  : 'linear-gradient(135deg, #D99D26 0%, #C4891F 50%, #D99D26 100%)',
-                boxShadow: loading ? 'none' : '0 8px 24px rgba(217,157,38,0.35)',
-                transform: loading ? 'scale(0.98)' : 'scale(1)',
-              }}
-            >
-              {loading ? (
-                <span className="flex items-center justify-center gap-3">
-                  <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  Authenticating...
-                </span>
-              ) : (
-                <span className="flex items-center justify-center gap-2">
-                  Sign In to Platform
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                  </svg>
-                </span>
               )}
-            </button>
-          </form>
+
+              <div className="grid grid-cols-2 gap-2 rounded-lg p-1" style={{ background: '#E8ECF3' }}>
+                <button
+                  type="button"
+                  onClick={() => setLoginMode('password')}
+                  className="flex items-center justify-center gap-2 rounded-md py-2.5 text-sm font-bold transition-all"
+                  style={{
+                    background: loginMode === 'password' ? 'white' : 'transparent',
+                    color: loginMode === 'password' ? '#111827' : '#64748B',
+                    boxShadow: loginMode === 'password' ? '0 1px 4px rgba(15,23,42,0.12)' : 'none',
+                  }}
+                >
+                  <Mail className="w-4 h-4" />
+                  Email Login
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLoginMode('pin')}
+                  className="flex items-center justify-center gap-2 rounded-md py-2.5 text-sm font-bold transition-all"
+                  style={{
+                    background: loginMode === 'pin' ? 'white' : 'transparent',
+                    color: loginMode === 'pin' ? '#111827' : '#64748B',
+                    boxShadow: loginMode === 'pin' ? '0 1px 4px rgba(15,23,42,0.12)' : 'none',
+                  }}
+                >
+                  <KeyRound className="w-4 h-4" />
+                  Contractor PIN
+                </button>
+              </div>
+
+              {loginMode === 'password' ? (
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase mb-2">
+                      Email Address
+                    </label>
+                    <div
+                      className="relative rounded-lg transition-all duration-200"
+                      style={{
+                        background: 'white',
+                        border: `2px solid ${focusedField === 'email' ? '#D99D26' : '#E5E7EB'}`,
+                        boxShadow: focusedField === 'email' ? '0 0 0 4px rgba(217,157,38,0.1)' : '0 1px 3px rgba(0,0,0,0.06)',
+                      }}
+                    >
+                      <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5" style={{ color: focusedField === 'email' ? '#D99D26' : '#9CA3AF' }} />
+                      <input
+                        type="email"
+                        value={email}
+                        onChange={e => setEmail(e.target.value)}
+                        onFocus={() => setFocusedField('email')}
+                        onBlur={() => setFocusedField(null)}
+                        required
+                        autoComplete="email"
+                        className="w-full pl-12 pr-4 py-4 bg-transparent text-gray-900 text-sm font-medium placeholder-gray-400 focus:outline-none rounded-lg"
+                        placeholder="you@company.com"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase mb-2">
+                      Password
+                    </label>
+                    <div
+                      className="relative rounded-lg transition-all duration-200"
+                      style={{
+                        background: 'white',
+                        border: `2px solid ${focusedField === 'password' ? '#D99D26' : '#E5E7EB'}`,
+                        boxShadow: focusedField === 'password' ? '0 0 0 4px rgba(217,157,38,0.1)' : '0 1px 3px rgba(0,0,0,0.06)',
+                      }}
+                    >
+                      <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5" style={{ color: focusedField === 'password' ? '#D99D26' : '#9CA3AF' }} />
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        value={password}
+                        onChange={e => setPassword(e.target.value)}
+                        onFocus={() => setFocusedField('password')}
+                        onBlur={() => setFocusedField(null)}
+                        required
+                        autoComplete="current-password"
+                        className="w-full pl-12 pr-14 py-4 bg-transparent text-gray-900 text-sm font-medium placeholder-gray-400 focus:outline-none rounded-lg"
+                        placeholder="Password"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-md transition-colors"
+                        style={{ color: '#9CA3AF' }}
+                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4">
+                    <Link to="/forgot-password" className="text-xs font-bold hover:underline" style={{ color: '#D99D26' }}>
+                      Forgot password?
+                    </Link>
+                  </div>
+
+                  <div
+                    className="flex items-center justify-between gap-4 p-4 rounded-lg"
+                    style={{ background: 'white', border: '1px solid #E5E7EB' }}
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-gray-800">Trust this device after verification</p>
+                      <p className="text-xs text-gray-400 mt-0.5">Use 2FA once, then continue faster next time.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextStayLoggedIn = !stayLoggedIn;
+                        setStayLoggedIn(nextStayLoggedIn);
+                        setTrustDevice(nextStayLoggedIn);
+                      }}
+                      className="relative flex-shrink-0 transition-all duration-300"
+                      style={{
+                        width: 52,
+                        height: 28,
+                        borderRadius: 999,
+                        backgroundColor: stayLoggedIn ? '#D99D26' : '#D1D5DB',
+                      }}
+                      aria-pressed={stayLoggedIn}
+                    >
+                      <span
+                        className="absolute top-1 w-5 h-5 bg-white rounded-full shadow-md transition-all duration-300"
+                        style={{ left: stayLoggedIn ? 28 : 4 }}
+                      />
+                    </button>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full py-4 rounded-lg font-bold text-sm transition-all duration-200 text-white relative overflow-hidden"
+                    style={{
+                      background: loading ? '#B8832A' : 'linear-gradient(135deg, #D99D26 0%, #C4891F 100%)',
+                      boxShadow: loading ? 'none' : '0 8px 24px rgba(217,157,38,0.28)',
+                    }}
+                  >
+                    {loading ? (
+                      <span className="flex items-center justify-center gap-3">
+                        <span className="w-5 h-5 rounded-full animate-spin" style={{ border: '2px solid rgba(255,255,255,0.25)', borderTopColor: 'white' }} />
+                        Authenticating...
+                      </span>
+                    ) : (
+                      <span className="flex items-center justify-center gap-2">
+                        Sign In to BuildTrack
+                        <ArrowRight className="w-4 h-4" />
+                      </span>
+                    )}
+                  </button>
+                </form>
+              ) : (
+                <form onSubmit={handlePinLogin} className="space-y-4">
+                  <div
+                    className="rounded-lg p-5 text-center"
+                    style={{ background: 'white', border: '1px solid #E5E7EB' }}
+                  >
+                    <div className="w-12 h-12 rounded-lg flex items-center justify-center mx-auto mb-4" style={{ background: 'rgba(217,157,38,0.1)' }}>
+                      <Smartphone className="w-6 h-6" style={{ color: '#D99D26' }} />
+                    </div>
+                    <h3 className="font-black text-gray-900 text-lg">Contractor PIN Access</h3>
+                    <p className="text-sm text-gray-500 mt-1 mb-5">Enter the contractor PIN to open assigned projects.</p>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={5}
+                      value={pinDigits}
+                      onChange={e => setPinDigits(e.target.value.replace(/\D/g, '').slice(0, 5))}
+                      autoComplete="one-time-code"
+                      className="w-full text-center text-3xl font-black py-4 rounded-lg focus:outline-none"
+                      style={{ border: '2px solid #E5E7EB' }}
+                      placeholder="00000"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={loading || pinDigits.length !== 5}
+                    className="w-full py-4 rounded-lg font-bold text-sm transition-all duration-200 text-white disabled:opacity-50"
+                    style={{ background: 'linear-gradient(135deg, #D99D26 0%, #C4891F 100%)', boxShadow: '0 8px 24px rgba(217,157,38,0.28)' }}
+                  >
+                    {loading ? (
+                      <span className="flex items-center justify-center gap-3">
+                        <span className="w-5 h-5 rounded-full animate-spin" style={{ border: '2px solid rgba(255,255,255,0.25)', borderTopColor: 'white' }} />
+                        Verifying PIN...
+                      </span>
+                    ) : (
+                      <span className="flex items-center justify-center gap-2">
+                        Open Assigned Projects
+                        <ArrowRight className="w-4 h-4" />
+                      </span>
+                    )}
+                  </button>
+                </form>
+              )}
+            </div>
           )}
 
           <p className="text-center text-xs text-gray-400 mt-8">
-            © 2026 New Urban Development · All rights reserved
+            (c) 2026 New Urban Development. All rights reserved.
           </p>
         </div>
       </div>

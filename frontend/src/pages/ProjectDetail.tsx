@@ -370,7 +370,7 @@ export default function ProjectDetail() {
                       />
                       Public
                     </label>
-                    <button type="button" onClick={() => saveNoteEdit(note.id)} className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-bold">Save one-time edit</button>
+                    <button type="button" onClick={() => saveNoteEdit(note.id)} className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-bold">Save edit</button>
                     <button type="button" onClick={() => setEditingNoteId(null)} className="px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-bold text-gray-600">Cancel</button>
                   </div>
                 </div>
@@ -387,7 +387,7 @@ export default function ProjectDetail() {
                     </div>
                   )}
                   {note.edited_at && (
-                    <p className="text-xs text-gray-400 mt-2">Edited once by {note.edited_by_name || note.user_name} on {formatEasternDateTime(note.edited_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time</p>
+                    <p className="text-xs text-gray-400 mt-2">Edited by {note.edited_by_name || note.user_name} on {formatEasternDateTime(note.edited_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time</p>
                   )}
                 </>
               )}
@@ -403,7 +403,7 @@ export default function ProjectDetail() {
                   className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:underline"
                 >
                   <Edit2 className="w-3 h-3" />
-                  Edit note one time
+                  Edit note
                 </button>
               )}
             </div>
