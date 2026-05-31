@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthStore, canCreateProjects, isAdminRole } from '../store/authStore';
 import api from '../lib/api';
 import { Loading, StatusBadge, Modal, PageHeader } from '../components/ui';
-import { Camera, CheckCircle2, FileText, Plus, Search, MapPin, Users, ClipboardList, ChevronRight, Bell, KeyRound, Upload } from 'lucide-react';
+import { Activity, Camera, CheckCircle2, FileText, Plus, Search, MapPin, Users, ClipboardList, ChevronRight, Bell, KeyRound, Upload } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useForm } from 'react-hook-form';
 import GooglePlacesInput from '../components/GooglePlacesInput';
@@ -340,6 +340,20 @@ export default function Projects() {
                     >
                       <Camera className="w-3.5 h-3.5" />
                       Upload Progress Pictures
+                    </button>
+                    <button
+                      type="button"
+                      onClick={e => {
+                        e.stopPropagation();
+                        navigate(`/projects/${p.id}#progress-history`);
+                      }}
+                      className="relative z-20 inline-flex min-h-10 items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-black text-white shadow-sm transition-colors cursor-pointer hover:bg-slate-800"
+                      style={{ background: '#0F172A', border: '1px solid #020617' }}
+                      title="View progress pictures, notes, timestamps, and historical project activity"
+                      aria-label={`View progress pictures and notes for ${p.address}`}
+                    >
+                      <Activity className="w-3.5 h-3.5" />
+                      View Progress, Pictures, and Notes
                     </button>
                     {[
                       { label: 'Scope of Work', icon: FileText, hash: 'construction-plan', color: '#1D4ED8', bg: '#EFF6FF' },

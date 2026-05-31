@@ -12,7 +12,7 @@ import CurrencyInput from '../components/CurrencyInput';
 import { formatEasternDate, formatEasternDateTime } from '../lib/time';
 import { appendProgressUploadAudit, type ProgressCaptureSource } from '../lib/progressUpload';
 
-type Tab = 'overview' | 'construction-plan' | 'quotes' | 'punch-list' | 'photos' | 'invoices' | 'activity' | 'notes' | 'team';
+type Tab = 'overview' | 'progress-history' | 'construction-plan' | 'quotes' | 'punch-list' | 'photos' | 'invoices' | 'activity' | 'notes' | 'team';
 
 const getInitials = (name?: string) =>
   (name || '?')
@@ -50,6 +50,20 @@ const groupMediaByDay = (photos: any[]) =>
     const last = groups[groups.length - 1];
     if (last && last.date === date) last.photos.push(photo);
     else groups.push({ date, photos: [photo] });
+    return groups;
+  }, []);
+
+const groupEventsByDay = (events: any[]) =>
+  events.reduce<{ date: string; events: any[] }[]>((groups, event) => {
+    const date = formatEasternDate(event.timestamp, {
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    });
+    const last = groups[groups.length - 1];
+    if (last && last.date === date) last.events.push(event);
+    else groups.push({ date, events: [event] });
     return groups;
   }, []);
 
@@ -102,6 +116,7 @@ export default function ProjectDetail() {
 
   useEffect(() => {
     const hashTabMap: Record<string, Tab> = {
+      '#progress-history': 'progress-history',
       '#construction-plan': 'construction-plan',
       '#quotes': 'quotes',
       '#punch-list': 'punch-list',
@@ -299,6 +314,7 @@ export default function ProjectDetail() {
 
   const tabs: { id: Tab; label: string; icon: any }[] = [
     { id: 'overview', label: 'Overview', icon: MapPin },
+    { id: 'progress-history', label: 'Progress, Pictures & Notes', icon: Activity },
     { id: 'construction-plan', label: 'Scope of Work', icon: FileText },
     { id: 'quotes', label: 'Upload Quotes', icon: FileText },
     { id: 'punch-list', label: 'Punch List', icon: ClipboardList },
@@ -633,6 +649,10 @@ export default function ProjectDetail() {
             </div>
 
           </div>
+        )}
+
+        {tab === 'progress-history' && (
+          <ProgressHistoryTab projectId={id!} project={project} />
         )}
 
         {tab === 'construction-plan' && (
@@ -2030,6 +2050,232 @@ function PunchListTab({ projectId, user }: { projectId: string; user: any }) {
       </Modal>
     </div>
   );
+}
+
+function ProgressHistoryTab({ projectId, project }: { projectId: string; project: any }) {
+  const [notes, setNotes] = useState<any[]>([]);
+  const [photos, setPhotos] = useState<any[]>([]);
+  const [activity, setActivity] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<{ src: string; isVideo: boolean } | null>(null);
+
+  const load = async () => {
+    try {
+      const [notesRes, photosRes, activityRes] = await Promise.all([
+        api.get(`/projects/${projectId}/notes`).catch(() => ({ data: [] })),
+        api.get(`/projects/${projectId}/photos?type=progress`).catch(() => ({ data: [] })),
+        api.get(`/projects/${projectId}/activity`).catch(() => ({ data: [] })),
+      ]);
+      setNotes(Array.isArray(notesRes.data) ? notesRes.data : []);
+      setPhotos(Array.isArray(photosRes.data) ? photosRes.data : []);
+      setActivity(Array.isArray(activityRes.data) ? activityRes.data : []);
+      setLastUpdated(new Date().toISOString());
+    } catch {
+      toast.error('Failed to load project progress history');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    const interval = window.setInterval(load, 30000);
+    return () => window.clearInterval(interval);
+  }, [projectId]);
+
+  const photoEvents = photos.map(photo => ({
+    id: `photo-${photo.id}`,
+    kind: 'photo',
+    timestamp: photo.taken_at || photo.created_at,
+    userName: photo.uploader_name || 'Unknown user',
+    title: isVideoMedia(photo) ? 'Project video added' : 'Progress picture added',
+    detail: photo.caption || photo.note_text || photo.original_name || 'Progress media',
+    noteText: photo.note_text,
+    photo,
+    photos: [photo],
+  }));
+
+  const noteEvents = notes.map(note => ({
+    id: `note-${note.id}`,
+    kind: 'note',
+    timestamp: note.created_at,
+    userName: note.user_name || 'Unknown user',
+    title: 'Project note added',
+    detail: note.note,
+    note,
+    photos: getNotePhotos(note),
+  }));
+
+  const activityEvents = activity.map(log => ({
+    id: `activity-${log.id}`,
+    kind: 'activity',
+    timestamp: log.created_at,
+    userName: log.user_name || 'Unknown user',
+    title: String(log.action || 'Project activity').replace(/_/g, ' '),
+    detail: log.details ? JSON.stringify(log.details) : '',
+    log,
+    photos: [],
+  }));
+
+  const events = [...photoEvents, ...noteEvents, ...activityEvents]
+    .filter(event => event.timestamp)
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  const groupedEvents = groupEventsByDay(events);
+
+  const eventTone = (kind: string) => {
+    if (kind === 'photo') return { bg: 'bg-amber-50', text: 'text-amber-700', Icon: Camera, label: 'Picture' };
+    if (kind === 'note') return { bg: 'bg-blue-50', text: 'text-blue-700', Icon: MessageSquare, label: 'Note' };
+    return { bg: 'bg-slate-100', text: 'text-slate-700', Icon: Activity, label: 'Activity' };
+  };
+
+  if (loading) return <Loading />;
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-gray-200 bg-white p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase tracking-wide text-gray-500">Historical Record</p>
+            <h2 className="mt-1 text-lg font-black text-gray-900">Progress, Pictures, and Notes</h2>
+            <p className="mt-1 text-sm text-gray-500">
+              {project?.address} / photos, notes, users, dates, timestamps, and audit signals in one project record.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-black text-emerald-700">
+              Auto-refreshes every 30s
+            </span>
+            <button
+              type="button"
+              onClick={load}
+              className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-black text-white hover:bg-slate-800"
+            >
+              Refresh now
+            </button>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-2 sm:grid-cols-4">
+          <div className="rounded-xl bg-gray-50 p-3">
+            <p className="text-xl font-black text-gray-900">{events.length}</p>
+            <p className="text-xs font-semibold text-gray-500">Total records</p>
+          </div>
+          <div className="rounded-xl bg-amber-50 p-3">
+            <p className="text-xl font-black text-amber-700">{photos.length}</p>
+            <p className="text-xs font-semibold text-amber-700">Progress media</p>
+          </div>
+          <div className="rounded-xl bg-blue-50 p-3">
+            <p className="text-xl font-black text-blue-700">{notes.length}</p>
+            <p className="text-xs font-semibold text-blue-700">Notes</p>
+          </div>
+          <div className="rounded-xl bg-slate-100 p-3">
+            <p className="text-sm font-black text-slate-800">{lastUpdated ? formatEasternDateTime(lastUpdated, { hour: 'numeric', minute: '2-digit' }) : '-'}</p>
+            <p className="text-xs font-semibold text-slate-500">Last refreshed</p>
+          </div>
+        </div>
+      </div>
+
+      {events.length === 0 ? (
+        <div className="rounded-2xl border border-gray-200 bg-white p-10 text-center">
+          <Activity className="mx-auto mb-3 h-10 w-10 text-gray-300" />
+          <p className="font-bold text-gray-600">No progress history yet</p>
+          <p className="mt-1 text-sm text-gray-400">Progress pictures, notes, and project activity will appear here.</p>
+        </div>
+      ) : (
+        groupedEvents.map(group => (
+          <section key={group.date} className="rounded-2xl border border-gray-200 bg-white p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-black text-gray-900">{group.date}</h3>
+                <p className="text-xs font-semibold text-gray-500">{group.events.length} dated record{group.events.length === 1 ? '' : 's'}</p>
+              </div>
+              <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-black text-gray-600">Newest first</span>
+            </div>
+            <div className="space-y-3">
+              {group.events.map(event => {
+                const tone = eventTone(event.kind);
+                const Icon = tone.Icon;
+                return (
+                  <div key={event.id} className="grid gap-3 rounded-xl border border-gray-100 bg-gray-50 p-3 lg:grid-cols-[180px_1fr]">
+                    <div>
+                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-black ${tone.bg} ${tone.text}`}>
+                        <Icon className="h-3.5 w-3.5" />
+                        {tone.label}
+                      </span>
+                      <p className="mt-2 text-sm font-black text-gray-900">{formatEasternDateTime(event.timestamp, { hour: 'numeric', minute: '2-digit' })}</p>
+                      <p className="text-xs font-semibold text-gray-500">{event.userName}</p>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-black capitalize text-gray-900">{event.title}</p>
+                      {event.detail && (
+                        <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-gray-600">{event.detail}</p>
+                      )}
+                      {event.noteText && (
+                        <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">Linked note: {event.noteText}</p>
+                      )}
+                      {event.photos.length > 0 && (
+                        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                          {event.photos.slice(0, 8).map((photo: any) => {
+                            const src = `/uploads/${projectId}/${photo.filename}`;
+                            const isVideo = isVideoMedia(photo);
+                            return (
+                              <button
+                                key={photo.id || photo.filename}
+                                type="button"
+                                onClick={() => setLightbox({ src, isVideo })}
+                                className="relative aspect-square overflow-hidden rounded-xl bg-gray-200 text-left"
+                              >
+                                {isVideo ? (
+                                  <>
+                                    <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+                                    <PlayCircle className="absolute inset-0 m-auto h-8 w-8 text-white drop-shadow" />
+                                  </>
+                                ) : (
+                                  <img src={src} alt={photo.original_name || 'Progress picture'} className="h-full w-full object-cover" loading="lazy" />
+                                )}
+                                <div className="absolute bottom-1 left-1 rounded-full bg-black/70 px-1.5 py-0.5 text-[10px] font-black text-white">
+                                  {formatEasternDateTime(photo.taken_at || photo.created_at, { hour: 'numeric', minute: '2-digit' })}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {event.kind === 'photo' && event.photo && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <span className="rounded-full bg-white px-2 py-1 text-xs font-bold text-gray-500">Taken: {formatEasternDateTime(event.photo.taken_at || event.photo.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
+                          <span className="rounded-full bg-white px-2 py-1 text-xs font-bold text-gray-500">Uploaded: {formatEasternDateTime(event.photo.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
+                          <span className={`rounded-full px-2 py-1 text-xs font-black ${event.photo.capture_latitude ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>{event.photo.capture_latitude ? 'GPS recorded' : 'IP recorded'}</span>
+                          {event.photo.upload_ip_address && <span className="rounded-full bg-gray-100 px-2 py-1 text-xs font-bold text-gray-500">IP {event.photo.upload_ip_address}</span>}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        ))
+      )}
+
+      {lightbox && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4" onClick={() => setLightbox(null)}>
+          {lightbox.isVideo ? (
+            <video src={lightbox.src} controls autoPlay className="max-h-full max-w-full rounded-lg" onClick={event => event.stopPropagation()} />
+          ) : (
+            <img src={lightbox.src} alt="Progress record" className="max-h-full max-w-full rounded-lg object-contain" />
+          )}
+          <button className="absolute right-4 top-4 text-white/70 hover:text-white" onClick={() => setLightbox(null)}>
+            <XIcon />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function XIcon() {
+  return <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>;
 }
 
 function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
