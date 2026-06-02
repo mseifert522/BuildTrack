@@ -226,7 +226,7 @@ export default function Projects() {
       </div>
 
       {loading ? <Loading /> : (
-        <div className="grid min-w-0 gap-3">
+        <div className="grid min-w-0 gap-4">
           {projects.length === 0 ? (
             <div className="text-center py-16 bg-white rounded-xl border border-gray-200">
               <MapPin className="w-10 h-10 text-gray-300 mx-auto mb-3" />
@@ -243,8 +243,11 @@ export default function Projects() {
               <div
                 key={p.id}
                 onClick={() => navigate(`/projects/${p.id}`)}
-                className="bt-horizontal-lock group relative flex w-full min-w-0 cursor-pointer flex-col items-stretch gap-3 overflow-hidden rounded-2xl border border-gray-200 bg-white p-4 transition-all hover:border-blue-300 hover:bg-blue-50/20 hover:shadow-lg sm:flex-row sm:items-center sm:gap-4"
-                style={{ boxShadow: '0 8px 24px rgba(17,24,39,0.06)' }}
+                className="bt-horizontal-lock group relative flex w-full min-w-0 cursor-pointer flex-col items-stretch gap-3 overflow-hidden rounded-[1.35rem] border border-slate-300 bg-gradient-to-br from-white via-white to-blue-50/45 p-4 transition-all hover:border-blue-400 hover:bg-blue-50/35 hover:shadow-xl sm:flex-row sm:items-center sm:gap-4"
+                style={{
+                  boxShadow: '0 10px 28px rgba(15,23,42,0.10), 0 1px 0 rgba(15,23,42,0.04)',
+                  borderLeft: '5px solid #2563EB',
+                }}
               >
                 <button
                   type="button"
@@ -253,11 +256,11 @@ export default function Projects() {
                     e.stopPropagation();
                     navigate(`/projects/${p.id}`);
                   }}
-                  className="absolute inset-0 z-10 rounded-2xl cursor-pointer bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                  className="absolute inset-0 z-10 rounded-[1.35rem] cursor-pointer bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
                 />
                 <label
-                  className={`relative w-20 h-16 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden ${canManageProjectActions && !p.main_photo_url ? 'z-20 cursor-pointer' : 'z-0 cursor-pointer'}`}
-                  style={{ background: '#EFF6FF' }}
+                  className={`relative w-20 h-16 rounded-xl border border-blue-200 shadow-sm flex items-center justify-center flex-shrink-0 overflow-hidden ${canManageProjectActions && !p.main_photo_url ? 'z-20 cursor-pointer' : 'z-0 cursor-pointer'}`}
+                  style={{ background: 'linear-gradient(135deg, #EFF6FF, #DBEAFE)' }}
                   onClick={e => {
                     if (canManageProjectActions && !p.main_photo_url) e.stopPropagation();
                   }}
