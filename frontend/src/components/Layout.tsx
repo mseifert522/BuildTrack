@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore, roleLabels, canManageUsers, canAccessSettings, isAdminRole } from '../store/authStore';
 import {
-  LayoutDashboard, FolderOpen, ClipboardList, FileText, BarChart3,
+  LayoutDashboard, FolderOpen, ClipboardList, FileText,
   Users, Settings, LogOut, Menu, X, Bell, ChevronRight,
   Camera, Search, Trash2, Truck
 } from 'lucide-react';
@@ -143,7 +143,6 @@ export default function Layout({ children }: LayoutProps) {
   // Sidebar nav items
   const navItems = [
     { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-    { to: '/data-analytics', icon: BarChart3, label: 'Data Analytics' },
     { to: '/projects', icon: FolderOpen, label: 'Projects' },
     { to: '/invoices', icon: FileText, label: 'Invoices' },
     { to: '/contractors', icon: Users, label: 'Contractors' },
@@ -154,7 +153,6 @@ export default function Layout({ children }: LayoutProps) {
 
   const pageTitles: Record<string, string> = {
     '/dashboard': 'Dashboard',
-    '/data-analytics': 'Data Analytics',
     '/projects': 'Projects',
     '/invoices': 'Invoices',
     '/contractors': 'Contractors',

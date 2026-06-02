@@ -2722,7 +2722,7 @@ function QuotesTab({ projectId, project }: { projectId: string; project: any }) 
         await api.post(`/projects/${projectId}/quotes`, payload);
       }
 
-      toast.success('Quote saved to this project and master analytics');
+      toast.success('Quote saved to this project');
       resetQuoteForm();
       setShowAddQuote(false);
       await load();
@@ -2750,20 +2750,13 @@ function QuotesTab({ projectId, project }: { projectId: string; project: any }) 
         ))}
       </div>
 
-      <div className="grid md:grid-cols-2 gap-3">
+      <div>
         <button
           type="button"
           onClick={() => setShowAddQuote(current => !current)}
           className="w-full flex items-center justify-center gap-2 py-3.5 bg-blue-600 text-white rounded-xl font-semibold text-sm hover:bg-blue-700 transition-colors shadow-sm"
         >
           <Plus className="w-5 h-5" /> ADD QUOTE TO THIS PROJECT
-        </button>
-        <button
-          type="button"
-          onClick={() => navigate(`/data-analytics?project=${projectId}`)}
-          className="w-full flex items-center justify-center gap-2 py-3.5 bg-white border border-gray-200 text-gray-700 rounded-xl font-semibold text-sm hover:bg-gray-50 transition-colors"
-        >
-          <Activity className="w-5 h-5" /> VIEW PROPERTY QUOTE ANALYTICS
         </button>
       </div>
 
@@ -2772,7 +2765,7 @@ function QuotesTab({ projectId, project }: { projectId: string; project: any }) 
           <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3 mb-4">
             <div>
               <h3 className="text-base font-black text-gray-900">Upload Quote For This Project</h3>
-              <p className="text-sm text-gray-500 mt-1">{project?.address} - quote data will also feed Data Analytics.</p>
+              <p className="text-sm text-gray-500 mt-1">{project?.address} - quote data will be saved with this project record.</p>
             </div>
             <button type="button" onClick={() => { resetQuoteForm(); setShowAddQuote(false); }} className="px-3 py-2 rounded-xl text-xs font-black bg-gray-100 text-gray-600 hover:bg-gray-200">
               Close
