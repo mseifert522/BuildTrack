@@ -111,6 +111,47 @@ const groupProgressRecordsByDay = (records: any[]) =>
     return groups;
   }, []);
 
+const groupStandaloneProgressMedia = (photos: any[], maxPerCard = 20) => {
+  const ordered = photos
+    .filter(photo => getProgressTimestamp(photo))
+    .sort((a, b) => new Date(getProgressTimestamp(b)).getTime() - new Date(getProgressTimestamp(a)).getTime());
+  const buckets = new Map<string, any[]>();
+
+  ordered.forEach(photo => {
+    const timestamp = getProgressTimestamp(photo);
+    const dayKey = formatEasternDate(timestamp, { year: 'numeric', month: '2-digit', day: '2-digit' });
+    const current = buckets.get(dayKey) || [];
+    current.push(photo);
+    buckets.set(dayKey, current);
+  });
+
+  return Array.from(buckets.entries()).flatMap(([dayKey, bucket]) => {
+    const chunks: any[][] = [];
+    for (let index = 0; index < bucket.length; index += maxPerCard) {
+      chunks.push(bucket.slice(index, index + maxPerCard));
+    }
+
+    return chunks.map((chunk, chunkIndex) => {
+      const uploaderNames = [...new Set(chunk.map(photo => photo.uploader_name || 'Unknown user'))];
+      const mediaTypes = new Set(chunk.map(photo => (isVideoMedia(photo) ? 'video' : 'picture')));
+      const notes = [...new Set(chunk
+        .map(photo => photo.individual_note || photo.batch_note || photo.caption)
+        .filter(Boolean)
+        .map(String))];
+
+      return {
+        id: `media-group-${dayKey}-${chunkIndex}`,
+        kind: 'media',
+        timestamp: getProgressTimestamp(chunk[0]),
+        userName: uploaderNames.length === 1 ? uploaderNames[0] : `${uploaderNames.length} users`,
+        mediaType: mediaTypes.has('video') && mediaTypes.size === 1 ? 'video' : mediaTypes.has('video') ? 'mixed' : 'picture',
+        noteText: notes.length === 1 ? notes[0] : null,
+        photos: chunk,
+      };
+    });
+  });
+};
+
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuthStore();
@@ -2372,7 +2413,7 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
   const [photos, setPhotos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
-  const [lightbox, setLightbox] = useState<{ src: string; isVideo: boolean } | null>(null);
+  const [lightbox, setLightbox] = useState<{ src: string; isVideo: boolean; name?: string } | null>(null);
 
   const load = async () => {
     try {
@@ -2436,17 +2477,7 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
         photos: getNotePhotos(note),
       }));
 
-    const mediaRecords = standalonePhotos
-      .filter(photo => getProgressTimestamp(photo))
-      .map(photo => ({
-        id: `media-${photo.id || photo.filename}`,
-        kind: 'media',
-        timestamp: getProgressTimestamp(photo),
-        userName: photo.uploader_name || 'Unknown user',
-        mediaType: isVideoMedia(photo) ? 'video' : 'picture',
-        noteText: photo.individual_note || photo.batch_note || photo.caption || null,
-        photos: [photo],
-      }));
+    const mediaRecords = groupStandaloneProgressMedia(standalonePhotos, 20);
 
     return [...noteRecords, ...mediaRecords]
       .filter(record => record.timestamp)
@@ -2537,7 +2568,12 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
                       ) : (
                         <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">
                           <Camera className="h-3.5 w-3.5" />
-                          {record.mediaType === 'video' ? 'Video' : 'Picture'}
+                          Progress Pictures
+                        </span>
+                      )}
+                      {record.kind === 'media' && (
+                        <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-bold text-amber-700">
+                          {record.photos.length} item{record.photos.length === 1 ? '' : 's'}
                         </span>
                       )}
                       {record.kind === 'note' && (
@@ -2550,14 +2586,14 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
                       )}
                     </div>
                     {record.noteText && (
-                      <div className="mt-2 max-h-28 overflow-y-auto whitespace-pre-wrap pr-2 text-sm leading-6 text-slate-700">
+                      <div className={`${record.kind === 'media' ? 'mt-2 max-h-16' : 'mt-2 max-h-28'} overflow-y-auto whitespace-pre-wrap pr-2 text-sm leading-6 text-slate-700`}>
                         {record.noteText}
                       </div>
                     )}
                     <ProgressMediaGrid
                       projectId={projectId}
                       photos={record.photos}
-                      maxItems={record.kind === 'note' ? 10 : 6}
+                      maxItems={20}
                       onLightbox={setLightbox}
                     />
                   </div>
@@ -2571,9 +2607,14 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
       {lightbox && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4" onClick={() => setLightbox(null)}>
           {lightbox.isVideo ? (
-            <video src={lightbox.src} controls autoPlay className="max-h-full max-w-full rounded-lg" onClick={event => event.stopPropagation()} />
+            <video src={lightbox.src} controls autoPlay className="max-h-[88vh] max-w-[92vw] rounded-lg" onClick={event => event.stopPropagation()} />
           ) : (
-            <img src={lightbox.src} alt="Progress record" className="max-h-full max-w-full rounded-lg object-contain" />
+            <img src={lightbox.src} alt={lightbox.name || 'Progress record'} className="max-h-[88vh] max-w-[92vw] rounded-lg object-contain" onClick={event => event.stopPropagation()} />
+          )}
+          {lightbox.name && (
+            <div className="absolute bottom-4 left-1/2 max-w-[80vw] -translate-x-1/2 rounded-lg bg-black/70 px-3 py-2 text-sm font-semibold text-white">
+              {lightbox.name}
+            </div>
           )}
           <button className="absolute right-4 top-4 text-white/70 hover:text-white" onClick={() => setLightbox(null)}>
             <XIcon />
@@ -2593,14 +2634,14 @@ function ProgressMediaGrid({
   projectId: string;
   photos: any[];
   maxItems: number;
-  onLightbox: (value: { src: string; isVideo: boolean }) => void;
+  onLightbox: (value: { src: string; isVideo: boolean; name?: string }) => void;
 }) {
   if (!photos.length) return null;
   const visiblePhotos = photos.slice(0, maxItems);
   const hiddenCount = photos.length - visiblePhotos.length;
 
   return (
-    <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5 xl:grid-cols-6">
+    <div className="mt-3 flex flex-wrap gap-2 rounded-lg border border-slate-100 bg-slate-50/70 p-2">
       {visiblePhotos.map(photo => {
         const src = `/uploads/${projectId}/${photo.filename}`;
         const mediaKind = getProgressMediaKind(photo);
@@ -2613,20 +2654,25 @@ function ProgressMediaGrid({
             type="button"
             onClick={() => {
               if (mediaKind === 'file') window.open(src, '_blank', 'noopener,noreferrer');
-              else onLightbox({ src, isVideo });
+              else onLightbox({ src, isVideo, name: photo.original_name || photo.filename });
             }}
-            className="relative aspect-square overflow-hidden rounded-lg border border-slate-200 bg-slate-100 text-left"
+            className="group relative h-20 w-20 flex-shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-md md:h-24 md:w-24"
             aria-label={photo.original_name || 'Open progress media'}
           >
             {isVideo ? (
               <>
                 <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
-                <PlayCircle className="absolute inset-0 m-auto h-8 w-8 text-white drop-shadow" />
+                <PlayCircle className="absolute inset-0 m-auto h-7 w-7 text-white drop-shadow" />
               </>
             ) : mediaKind === 'image' ? (
               <img src={src} alt={photo.original_name || 'Progress picture'} className="h-full w-full object-cover" loading="lazy" />
             ) : (
               <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
+            )}
+            {mediaKind !== 'file' && (
+              <div className="absolute inset-x-0 top-0 bg-gradient-to-b from-black/45 to-transparent px-1.5 py-1 text-[10px] font-black uppercase tracking-wide text-white opacity-0 transition-opacity group-hover:opacity-100">
+                Click to expand
+              </div>
             )}
             {timestamp && (
               <div className="absolute bottom-1 left-1 rounded bg-black/75 px-1.5 py-0.5 text-[10px] font-black text-white">
@@ -2637,7 +2683,7 @@ function ProgressMediaGrid({
         );
       })}
       {hiddenCount > 0 && (
-        <div className="flex aspect-square items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 text-sm font-black text-slate-500">
+        <div className="flex h-20 w-20 flex-shrink-0 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white text-sm font-black text-slate-500 md:h-24 md:w-24">
           +{hiddenCount}
         </div>
       )}
