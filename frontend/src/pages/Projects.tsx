@@ -59,6 +59,12 @@ const DOCUMENT_CATEGORIES = [
   { value: 'insurance_documents', label: 'Insurance Documents' },
 ];
 
+function isMobileCaptureContext() {
+  if (typeof window === 'undefined') return false;
+  const userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent;
+  return Boolean(window.matchMedia?.('(max-width: 767px)').matches) || /Android|iPhone|iPad|iPod|Mobile/i.test(userAgent);
+}
+
 export default function Projects() {
   const { user } = useAuthStore();
   const navigate = useNavigate();
@@ -340,15 +346,16 @@ export default function Projects() {
                       type="button"
                       onClick={e => {
                         e.stopPropagation();
-                        navigate(`/photos?projectId=${p.id}`);
+                        navigate(isMobileCaptureContext() ? `/mobile/photos?projectId=${p.id}&camera=1` : `/photos?projectId=${p.id}`);
                       }}
                       className="relative z-20 inline-flex min-h-10 w-full max-w-full items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-center text-xs font-black leading-tight text-white shadow-sm transition-colors cursor-pointer hover:bg-amber-600 sm:w-auto"
                       style={{ background: '#D99D26', border: '1px solid #B7791F' }}
-                      title="Upload timestamped progress photos or videos to this project"
-                      aria-label={`Upload progress pictures to ${p.address}`}
+                      title="Take timestamped progress pictures for this project"
+                      aria-label={`Take progress pictures for ${p.address}`}
                     >
                       <Camera className="h-3.5 w-3.5 flex-shrink-0" />
-                      <span className="min-w-0 whitespace-normal">Upload Progress Pictures</span>
+                      <span className="min-w-0 whitespace-normal sm:hidden">Take Pictures</span>
+                      <span className="hidden min-w-0 whitespace-normal sm:inline">Upload Progress Pictures</span>
                     </button>
                     <button
                       type="button"

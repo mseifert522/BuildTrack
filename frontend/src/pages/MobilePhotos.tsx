@@ -731,7 +731,7 @@ export default function MobilePhotos() {
             style={{ minHeight: 50, width: '100%', border: 'none', borderRadius: 13, padding: '11px 14px', background: 'linear-gradient(135deg, #D99D26, #C4891F)', color: 'white', fontSize: 14, fontWeight: 950, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, whiteSpace: 'normal', textAlign: 'center', lineHeight: 1.15, boxShadow: '0 10px 20px rgba(217,157,38,0.24)' }}
           >
             <Camera size={18} color="white" />
-            Take Progress Pictures
+            Take Pictures
           </button>
           <button
             onClick={openUploadOptions}
@@ -872,6 +872,10 @@ export default function MobilePhotos() {
                         <Trash2 size={15} color="#6B7280" />
                       </button>
                     </div>
+                    <p style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 5, color: '#4B5563', fontSize: 10.5, fontWeight: 850 }}>
+                      <Clock size={12} color="#D99D26" />
+                      Captured {formatDateTime(previewFiles[index]?.lastModified ? new Date(previewFiles[index].lastModified).toISOString() : undefined)}
+                    </p>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 6 }}>
                       <label style={{ display: 'flex', alignItems: 'center', gap: 6, border: '1px solid #E5E7EB', borderRadius: 10, padding: '7px 8px', background: 'white' }}>
                         <Tag size={13} color="#D99D26" />
@@ -998,7 +1002,7 @@ export default function MobilePhotos() {
               style={{ marginTop: 16, width: '100%', minHeight: 46, border: 'none', borderRadius: 13, background: 'linear-gradient(135deg, #D99D26, #C4891F)', color: 'white', fontSize: 13, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}
             >
               <Camera size={17} color="white" />
-              Take Progress Pictures
+              Take Pictures
             </button>
           </div>
         ) : visiblePhotos.length === 0 ? (
@@ -1094,7 +1098,7 @@ export default function MobilePhotos() {
               >
                 <Camera size={22} color="white" />
                 <span style={{ display: 'block' }}>
-                  <span style={{ display: 'block', fontSize: 14, fontWeight: 900 }}>Take Progress Pictures</span>
+                  <span style={{ display: 'block', fontSize: 14, fontWeight: 900 }}>Take Pictures</span>
                   <span style={{ display: 'block', marginTop: 2, fontSize: 11, fontWeight: 700, opacity: 0.82 }}>Take several photos without leaving this screen</span>
                 </span>
               </button>
@@ -1136,7 +1140,7 @@ export default function MobilePhotos() {
               <X size={20} color="white" />
             </button>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <p style={{ margin: 0, fontSize: 14, fontWeight: 900 }}>Take Progress Pictures</p>
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 900 }}>Take Pictures</p>
               <p style={{ margin: '2px 0 0', fontSize: 11, opacity: 0.72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {selectedProject?.address || 'Selected project'}
               </p>
@@ -1235,7 +1239,7 @@ export default function MobilePhotos() {
                 disabled={!previewFiles.length || uploading}
                 style={{ minHeight: 46, border: 'none', borderRadius: 14, background: previewFiles.length ? '#16A34A' : 'rgba(255,255,255,0.12)', color: 'white', fontSize: 12, fontWeight: 900, opacity: uploading ? 0.7 : 1 }}
               >
-                {uploading ? 'Uploading...' : `Upload ${previewFiles.length || ''}`.trim()}
+                {uploading ? 'Uploading...' : previewFiles.length ? `Upload ${previewFiles.length}` : 'Upload'}
               </button>
             </div>
           </div>

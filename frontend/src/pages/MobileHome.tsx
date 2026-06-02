@@ -311,7 +311,7 @@ export default function MobileHome() {
                     aria-label={`Take progress pictures for ${project.address}`}
                   >
                     <Camera size={18} color="white" />
-                    Take Progress Pictures
+                    Take Pictures
                   </button>
                 </div>
 
@@ -341,7 +341,7 @@ export default function MobileHome() {
                   <Camera size={22} color="white" />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ margin: 0, fontSize: 15, fontWeight: 900 }}>Take Progress Pictures</p>
+                  <p style={{ margin: 0, fontSize: 15, fontWeight: 900 }}>Take Pictures</p>
                   <p style={{ margin: '3px 0 0', fontSize: 12, opacity: 0.82, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {rememberedProject ? `Continue with ${rememberedProject.address}` : 'Choose a project before uploading photos or videos'}
                   </p>

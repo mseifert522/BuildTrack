@@ -159,6 +159,12 @@ const groupStandaloneProgressMedia = (photos: any[], maxPerCard = 20) => {
   });
 };
 
+function isMobileCaptureContext() {
+  if (typeof window === 'undefined') return false;
+  const userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent;
+  return Boolean(window.matchMedia?.('(max-width: 767px)').matches) || /Android|iPhone|iPad|iPod|Mobile/i.test(userAgent);
+}
+
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuthStore();
@@ -176,6 +182,7 @@ export default function ProjectDetail() {
   const [noteVisibility, setNoteVisibility] = useState<'private' | 'public'>('private');
   const [listeningNote, setListeningNote] = useState(false);
   const [notePhotoFiles, setNotePhotoFiles] = useState<File[]>([]);
+  const [notePhotoSource, setNotePhotoSource] = useState<ProgressCaptureSource>('desktop');
   const [attachNoteId, setAttachNoteId] = useState<string | null>(null);
   const [attachingNoteId, setAttachingNoteId] = useState<string | null>(null);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
@@ -192,6 +199,8 @@ export default function ProjectDetail() {
   const { register, handleSubmit, reset, setValue, formState: { isSubmitting } } = useForm();
   const noteRecognitionRef = useRef<any>(null);
   const attachExistingNoteInputRef = useRef<HTMLInputElement>(null);
+  const noteMediaInputRef = useRef<HTMLInputElement>(null);
+  const noteCameraInputRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
     try {
@@ -323,7 +332,7 @@ export default function ProjectDetail() {
     if (!attachNoteId || selectedFiles.length === 0) return;
     setAttachingNoteId(attachNoteId);
     try {
-      await uploadProgressPicturesToNote(attachNoteId, selectedFiles);
+      await uploadProgressPicturesToNote(attachNoteId, selectedFiles, isMobileCaptureContext() ? 'device_camera' : 'desktop');
       toast.success(`${selectedFiles.length} progress picture${selectedFiles.length === 1 ? '' : 's'} attached`);
       await loadNotes();
     } catch (err: any) {
@@ -335,15 +344,24 @@ export default function ProjectDetail() {
     }
   };
 
+  const chooseNoteProgressPictures = () => {
+    if (isMobileCaptureContext()) {
+      noteCameraInputRef.current?.click();
+      return;
+    }
+    noteMediaInputRef.current?.click();
+  };
+
   const addNote = async () => {
     if (!newNote.trim()) return;
     try {
       const noteRes = await api.post(`/projects/${id}/notes`, { note: newNote, note_type: noteType, visibility: noteVisibility });
       if (notePhotoFiles.length) {
-        await uploadProgressPicturesToNote(noteRes.data.id, notePhotoFiles);
+        await uploadProgressPicturesToNote(noteRes.data.id, notePhotoFiles, notePhotoSource);
       }
       setNewNote('');
       setNotePhotoFiles([]);
+      setNotePhotoSource('desktop');
       loadNotes();
     } catch (err) {
       toast.error('Failed to add note');
@@ -424,6 +442,16 @@ export default function ProjectDetail() {
   const canEdit = user && canManageProjects(user.role);
   const canAssign = user && isAdminRole(user.role);
 
+  const openProjectPhotoCapture = () => {
+    const projectId = id || project?.id;
+    if (!projectId) return;
+    if (isMobileCaptureContext()) {
+      navigate(`/mobile/photos?projectId=${projectId}&camera=1`);
+      return;
+    }
+    navigate(`/photos?projectId=${projectId}`);
+  };
+
   const notesPanel = (compact = false) => (
     <div className="h-full rounded-xl border border-slate-400 bg-[#D8E0EA] p-3 shadow-[0_10px_24px_rgba(15,23,42,0.12)] sm:p-4">
       <input
@@ -493,22 +521,44 @@ export default function ProjectDetail() {
           <span className="text-center leading-tight sm:hidden">Public</span>
           <span className="hidden sm:inline">Public to contractors</span>
         </label>
-        <label className="inline-flex min-h-[46px] cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 sm:min-w-[150px]">
-          <input
-            type="file"
-            accept={PROGRESS_MEDIA_ACCEPT}
-            multiple
-            className="hidden"
-            onChange={e => setNotePhotoFiles(Array.from(e.target.files || []))}
-          />
+        <input
+          ref={noteMediaInputRef}
+          type="file"
+          accept={PROGRESS_MEDIA_ACCEPT}
+          multiple
+          className="hidden"
+          onChange={e => {
+            setNotePhotoSource('desktop');
+            setNotePhotoFiles(Array.from(e.target.files || []));
+            e.currentTarget.value = '';
+          }}
+        />
+        <input
+          ref={noteCameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          multiple
+          className="hidden"
+          onChange={e => {
+            setNotePhotoSource('device_camera');
+            setNotePhotoFiles(Array.from(e.target.files || []));
+            e.currentTarget.value = '';
+          }}
+        />
+        <button
+          type="button"
+          onClick={chooseNoteProgressPictures}
+          className="inline-flex min-h-[46px] cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 sm:min-w-[150px]"
+        >
           <Camera className="w-4 h-4" />
           {notePhotoFiles.length ? `${notePhotoFiles.length} ready` : (
             <>
-              <span className="sm:hidden">Pictures</span>
+              <span className="sm:hidden">Take Pictures</span>
               <span className="hidden sm:inline">Progress pictures</span>
             </>
           )}
-        </label>
+        </button>
         <button
           type="button"
           onClick={listeningNote ? stopNoteDictation : startNoteDictation}
@@ -543,7 +593,7 @@ export default function ProjectDetail() {
       {notePhotoFiles.length > 0 && (
         <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 shadow-sm">
           <span className="text-xs font-semibold text-blue-700 truncate">{notePhotoFiles.length} progress picture{notePhotoFiles.length === 1 ? '' : 's'} will attach to this note</span>
-          <button type="button" onClick={() => setNotePhotoFiles([])} className="text-xs font-bold text-blue-700 hover:underline">Remove</button>
+          <button type="button" onClick={() => { setNotePhotoFiles([]); setNotePhotoSource('desktop'); }} className="text-xs font-bold text-blue-700 hover:underline">Remove</button>
         </div>
       )}
       </div>
@@ -706,14 +756,14 @@ export default function ProjectDetail() {
             </div>
             <button
               type="button"
-              onClick={() => navigate(`/photos?projectId=${id}`)}
+              onClick={openProjectPhotoCapture}
               className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-amber-500 px-3 py-2 text-xs font-black text-white shadow-sm transition hover:bg-amber-600"
-              title="Upload timestamped progress pictures or videos"
-              aria-label="Upload progress pictures"
+              title="Take timestamped progress pictures for this project"
+              aria-label="Take progress pictures"
             >
               <Camera className="h-4 w-4" />
               <span className="hidden md:inline">Upload Progress Pictures</span>
-              <span className="md:hidden">Upload</span>
+              <span className="md:hidden">Take Pictures</span>
             </button>
             {canEdit && (
               <button onClick={() => { setShowEdit(true); setEditAddress(project.address || ''); setEditBudget(project.budget ? String(project.budget) : ''); setEditPurchasePrice(project.purchase_price ? String(project.purchase_price) : ''); setEditArv(project.arv ? String(project.arv) : ''); setEditClosingCosts(project.closing_costs ? String(project.closing_costs) : ''); Object.entries(project).forEach(([k, v]) => setValue(k, v)); }} className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors">
