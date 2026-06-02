@@ -141,8 +141,8 @@ export default function MobileProjectHub() {
               <Camera size={28} color="white" />
             </div>
             <div>
-              <p style={{ fontWeight: 900, color: 'white', fontSize: 17, margin: 0 }}>Upload Progress Pictures</p>
-              <p style={{ color: 'rgba(255,255,255,0.82)', fontSize: 13, margin: '4px 0 0' }}>Take or upload photos and videos for this project</p>
+              <p style={{ fontWeight: 900, color: 'white', fontSize: 17, margin: 0 }}>Add Photos</p>
+              <p style={{ color: 'rgba(255,255,255,0.82)', fontSize: 13, margin: '4px 0 0' }}>Capture or upload a full progress batch</p>
             </div>
           </div>
           <svg width="20" height="20" fill="none" stroke="white" viewBox="0 0 24 24">

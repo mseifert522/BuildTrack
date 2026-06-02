@@ -227,7 +227,7 @@ export default function MobileProjects() {
                 aria-label={`Upload progress pictures to ${project.address}`}
               >
                 <Camera className="h-4 w-4" />
-                Upload Progress Pictures
+                Add Photos
               </button>
             </div>
           ))

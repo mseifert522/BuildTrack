@@ -13,10 +13,54 @@ router.use(authorizeProjectAccess);
 
 const PHOTO_TYPES = new Set(['general', 'progress', 'note', 'construction_plan', 'material']);
 const CAPTURE_SOURCES = new Set(['batch_camera', 'device_camera', 'library', 'desktop', 'unknown']);
+const PHOTO_LABELS = new Set([
+  'Before',
+  'During',
+  'After',
+  'Issue',
+  'Damage',
+  'Inspection',
+  'Materials',
+  'Progress',
+  'Completed Work',
+  'Change Order',
+  'Safety Concern',
+  'Other',
+]);
 const IMAGE_EXTENSIONS = new Set(['.jpeg', '.jpg', '.png', '.gif', '.webp', '.heic', '.heif']);
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.m4v', '.webm', '.avi', '.mkv', '.mpeg', '.mpg', '.3gp']);
 const configuredMediaMaxMb = Number.parseInt(process.env.PROJECT_MEDIA_MAX_MB || '500', 10);
 const MEDIA_FILE_SIZE_LIMIT = (Number.isFinite(configuredMediaMaxMb) ? configuredMediaMaxMb : 500) * 1024 * 1024;
+const MAX_BATCH_FILES = 20;
+
+function sanitizePathSegment(value, fallback) {
+  const cleaned = String(value || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 120);
+  return cleaned || fallback;
+}
+
+function uploadRoot() {
+  return process.env.UPLOADS_PATH || './uploads';
+}
+
+function getBatchContext(req) {
+  if (req._photoBatchContext) return req._photoBatchContext;
+  const now = new Date();
+  const batchId = sanitizePathSegment(req.body?.batch_id || req.body?.upload_session_id || uuidv4(), uuidv4());
+  req._photoBatchContext = {
+    batchId,
+    uploadedAt: now.toISOString(),
+    year: String(now.getUTCFullYear()),
+    month: String(now.getUTCMonth() + 1).padStart(2, '0'),
+    stamp: now.toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-'),
+    sequence: 0,
+  };
+  return req._photoBatchContext;
+}
 
 function normalizePhotoType(value) {
   const requested = String(value || 'general').trim();
@@ -52,9 +96,30 @@ function parseStringValues(rawValue) {
   }
 }
 
+function parseNumberValues(rawValue) {
+  if (!rawValue) return [];
+  try {
+    const parsed = JSON.parse(rawValue);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(normalizeNumber);
+  } catch {
+    return [];
+  }
+}
+
+function normalizeLabel(value) {
+  const requested = String(value || '').trim();
+  return PHOTO_LABELS.has(requested) ? requested : null;
+}
+
 function normalizeCaptureSource(value) {
   const requested = String(value || 'unknown').trim();
   return CAPTURE_SOURCES.has(requested) ? requested : 'unknown';
+}
+
+function normalizeTimezone(value) {
+  const timezone = String(value || 'UTC').trim().slice(0, 80);
+  return timezone || 'UTC';
 }
 
 function normalizeNumber(value) {
@@ -78,19 +143,21 @@ function getClientIp(req) {
 // Configure multer storage — photos go into uploads/{projectId}/progress/
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    // Determine subfolder: 'progress' for progress photos, projectId root for punch list photos
-    const subFolder = normalizePhotoType(req.query.type) === 'progress' ? 'progress' : '';
-    const uploadDir = subFolder
-      ? path.join(process.env.UPLOADS_PATH || './uploads', req.params.projectId, subFolder)
-      : path.join(process.env.UPLOADS_PATH || './uploads', req.params.projectId);
+    const batch = getBatchContext(req);
+    const uploadDir = path.join(uploadRoot(), req.params.projectId, 'photos', batch.year, batch.month, batch.batchId);
     if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    // Embed timestamp in filename for easy sorting
-    const ts = new Date().toISOString().replace(/[:.]/g, '-');
-    cb(null, `${ts}_${uuidv4()}${ext}`);
+    const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
+    const batch = getBatchContext(req);
+    batch.sequence += 1;
+    const requestedSequence = Number.parseInt(req.body?.batch_sequence, 10);
+    const sequence = Number.isFinite(requestedSequence) && requestedSequence > 0 ? requestedSequence : batch.sequence;
+    const sequenceLabel = String(sequence).padStart(3, '0');
+    const projectId = sanitizePathSegment(req.params.projectId, 'project');
+    const userId = sanitizePathSegment(req.user?.id || 'user', 'user');
+    cb(null, `BuildTrack_Project-${projectId}_User-${userId}_${batch.stamp}_Sequence-${sequenceLabel}${ext}`);
   },
 });
 
@@ -103,12 +170,49 @@ const fileFilter = (req, file, cb) => {
   else cb(new Error('Only image or video files are allowed'));
 };
 
-const upload = multer({ storage, fileFilter, limits: { fileSize: MEDIA_FILE_SIZE_LIMIT, files: 20 } });
+const upload = multer({ storage, fileFilter, limits: { fileSize: MEDIA_FILE_SIZE_LIMIT, files: MAX_BATCH_FILES } });
+
+function uploadProjectPhotos(req, res, next) {
+  upload.array('photos', MAX_BATCH_FILES)(req, res, err => {
+    if (!err) return next();
+    cleanupUploadedFiles(req.files);
+    const status = err.code === 'LIMIT_FILE_SIZE' || err.code === 'LIMIT_FILE_COUNT' ? 413 : 400;
+    const message = err.code === 'LIMIT_FILE_SIZE'
+      ? `Each file must be ${configuredMediaMaxMb}MB or less`
+      : err.code === 'LIMIT_FILE_COUNT'
+        ? `Upload batches are limited to ${MAX_BATCH_FILES} files`
+        : err.message || 'Upload rejected';
+    return res.status(status).json({ error: message });
+  });
+}
+
+function cleanupUploadedFiles(files = []) {
+  for (const file of files) {
+    try {
+      if (file?.path && fs.existsSync(file.path)) fs.unlinkSync(file.path);
+    } catch (err) {
+      console.warn('Failed to clean up rejected upload file:', err.message || err);
+    }
+  }
+}
 
 // GET /api/projects/:projectId/photos
 router.get('/', (req, res) => {
   const db = getDb();
-  const { category_id, punch_list_item_id, note_id, construction_plan_item_id, material_id, type, photo_type } = req.query;
+  const {
+    category_id,
+    punch_list_item_id,
+    note_id,
+    construction_plan_item_id,
+    material_id,
+    type,
+    photo_type,
+    label,
+    uploaded_by,
+    date_from,
+    date_to,
+    sort,
+  } = req.query;
   let query = `
     SELECT
       ph.*,
@@ -132,7 +236,18 @@ router.get('/', (req, res) => {
   if (construction_plan_item_id) { query += ' AND ph.construction_plan_item_id = ?'; params.push(construction_plan_item_id); }
   if (material_id) { query += ' AND ph.material_id = ?'; params.push(material_id); }
   if (type || photo_type) { query += ' AND ph.photo_type = ?'; params.push(normalizePhotoType(type || photo_type)); }
-  query += ' ORDER BY datetime(COALESCE(ph.taken_at, ph.created_at)) DESC, ph.created_at DESC';
+  if (label) { query += ' AND ph.label = ?'; params.push(String(label)); }
+  if (uploaded_by) { query += ' AND ph.uploaded_by = ?'; params.push(String(uploaded_by)); }
+  if (date_from) {
+    query += " AND datetime(COALESCE(ph.captured_at, ph.taken_at, ph.uploaded_at, ph.created_at)) >= datetime(?)";
+    params.push(String(date_from));
+  }
+  if (date_to) {
+    query += " AND datetime(COALESCE(ph.captured_at, ph.taken_at, ph.uploaded_at, ph.created_at)) <= datetime(?)";
+    params.push(String(date_to));
+  }
+  const sortDirection = String(sort || 'newest') === 'oldest' ? 'ASC' : 'DESC';
+  query += ` ORDER BY datetime(COALESCE(ph.captured_at, ph.taken_at, ph.uploaded_at, ph.created_at)) ${sortDirection}, ph.created_at ${sortDirection}`;
   res.json(db.prepare(query).all(...params));
 });
 
@@ -173,13 +288,13 @@ router.get('/progress', (req, res) => {
     LEFT JOIN project_notes n ON n.id = ph.note_id
     LEFT JOIN users nu ON nu.id = n.user_id
     WHERE ph.project_id = ? AND ph.photo_type = 'progress'
-    ORDER BY ph.taken_at DESC, ph.created_at DESC
+    ORDER BY datetime(COALESCE(ph.captured_at, ph.taken_at, ph.uploaded_at, ph.created_at)) DESC, ph.created_at DESC
   `).all(req.params.projectId);
   res.json(photos);
 });
 
 // POST /api/projects/:projectId/photos - upload project media
-router.post('/', upload.array('photos', 20), (req, res) => {
+router.post('/', uploadProjectPhotos, (req, res) => {
   try {
     if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No files uploaded' });
     const db = getDb();
@@ -200,58 +315,125 @@ router.post('/', upload.array('photos', 20), (req, res) => {
       capture_source,
       capture_source_values,
       upload_session_id,
+      batch_id,
+      batch_note,
+      individual_note,
+      individual_note_values,
+      label,
+      label_values,
+      timezone,
+      captured_at,
+      captured_at_values,
+      gps_latitude,
+      gps_longitude,
+      gps_accuracy,
+      gps_latitude_values,
+      gps_longitude_values,
+      gps_accuracy_values,
+      batch_sequence,
     } = req.body;
     const photoType = construction_plan_item_id ? 'construction_plan'
       : material_id ? 'material'
       : normalizePhotoType(req.query.type || photo_type || (note_id ? 'note' : 'general'));
     const fallbackTakenAt = normalizeTakenAt(taken_at) || new Date().toISOString();
     const perFileTakenAt = parseTakenAtValues(taken_at_values);
+    const perFileCapturedAt = parseTakenAtValues(captured_at_values);
     const perFileCaptureSource = parseStringValues(capture_source_values);
+    const perFileNotes = parseStringValues(individual_note_values);
+    const perFileLabels = parseStringValues(label_values);
+    const perFileGpsLatitudes = parseNumberValues(gps_latitude_values);
+    const perFileGpsLongitudes = parseNumberValues(gps_longitude_values);
+    const perFileGpsAccuracies = parseNumberValues(gps_accuracy_values);
     const uploadIpAddress = getClientIp(req);
     const uploadUserAgent = String(req.headers['user-agent'] || '').slice(0, 500);
-    const latitude = normalizeNumber(capture_latitude);
-    const longitude = normalizeNumber(capture_longitude);
-    const accuracy = normalizeNumber(capture_accuracy);
+    const latitude = normalizeNumber(gps_latitude ?? capture_latitude);
+    const longitude = normalizeNumber(gps_longitude ?? capture_longitude);
+    const accuracy = normalizeNumber(gps_accuracy ?? capture_accuracy);
     const recordedAt = normalizeTakenAt(capture_recorded_at) || new Date().toISOString();
-    const sessionId = String(upload_session_id || uuidv4()).slice(0, 120);
+    const batch = getBatchContext(req);
+    const batchId = batch.batchId;
+    const sessionId = String(upload_session_id || batchId).slice(0, 120);
+    const uploadTimezone = normalizeTimezone(timezone);
+    const uploadedAt = new Date().toISOString();
+    const sharedBatchNote = String(batch_note || '').trim().slice(0, 2000) || null;
+    const sharedLabel = normalizeLabel(label);
+    const projectRoot = path.resolve(uploadRoot(), req.params.projectId);
     const inserted = [];
 
     if (note_id) {
       const note = db.prepare('SELECT id FROM project_notes WHERE id = ? AND project_id = ?').get(note_id, req.params.projectId);
-      if (!note) return res.status(400).json({ error: 'Note not found for this project' });
+      if (!note) {
+        cleanupUploadedFiles(req.files);
+        return res.status(400).json({ error: 'Note not found for this project' });
+      }
     }
     if (construction_plan_item_id) {
       const item = db.prepare('SELECT id FROM construction_plan_items WHERE id = ? AND project_id = ?').get(construction_plan_item_id, req.params.projectId);
-      if (!item) return res.status(400).json({ error: 'Construction plan item not found for this project' });
+      if (!item) {
+        cleanupUploadedFiles(req.files);
+        return res.status(400).json({ error: 'Construction plan item not found for this project' });
+      }
     }
     if (material_id) {
       const material = db.prepare('SELECT id FROM construction_materials WHERE id = ? AND project_id = ?').get(material_id, req.params.projectId);
-      if (!material) return res.status(400).json({ error: 'Material not found for this project' });
+      if (!material) {
+        cleanupUploadedFiles(req.files);
+        return res.status(400).json({ error: 'Material not found for this project' });
+      }
     }
-
-    // Determine the file path prefix based on type
-    const subFolder = photoType === 'progress' ? 'progress' : '';
 
     for (const [index, file] of req.files.entries()) {
       const id = uuidv4();
-      // Store relative path including subfolder so we can serve it correctly
-      const storedFilename = subFolder ? `progress/${file.filename}` : file.filename;
-      const takenAt = perFileTakenAt[index] || fallbackTakenAt;
+      const storedFilename = path.relative(projectRoot, file.path).replace(/\\/g, '/');
+      const capturedAt = perFileCapturedAt[index] || normalizeTakenAt(captured_at) || perFileTakenAt[index] || fallbackTakenAt;
+      const takenAt = perFileTakenAt[index] || capturedAt || fallbackTakenAt;
       const source = normalizeCaptureSource(perFileCaptureSource[index] || capture_source);
+      const photoLabel = normalizeLabel(perFileLabels[index]) || sharedLabel;
+      const note = (perFileNotes[index] || individual_note || '').trim().slice(0, 2000) || null;
+      const gpsLatitude = perFileGpsLatitudes[index] ?? latitude;
+      const gpsLongitude = perFileGpsLongitudes[index] ?? longitude;
+      const gpsAccuracy = perFileGpsAccuracies[index] ?? accuracy;
+      const sequence = Number.isFinite(Number(batch_sequence)) && req.files.length === 1
+        ? Number(batch_sequence)
+        : index + 1;
       db.prepare(`
         INSERT INTO photos (
           id, project_id, category_id, punch_list_item_id, note_id, construction_plan_item_id, material_id,
           filename, original_name, mime_type, size, caption, uploaded_by, photo_type, taken_at,
           upload_ip_address, upload_user_agent, capture_latitude, capture_longitude, capture_accuracy,
-          capture_recorded_at, capture_source, upload_session_id
+          capture_recorded_at, capture_source, upload_session_id, batch_id, batch_sequence,
+          stored_file_name, storage_path, thumbnail_path, captured_at, uploaded_at, timezone,
+          label, batch_note, individual_note, gps_latitude, gps_longitude, gps_accuracy,
+          upload_status, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id, req.params.projectId, category_id || null, punch_list_item_id || null, note_id || null, construction_plan_item_id || null, material_id || null,
-        storedFilename, file.originalname, file.mimetype, file.size, caption || null, req.user.id, photoType, takenAt,
-        uploadIpAddress, uploadUserAgent, latitude, longitude, accuracy, recordedAt, source, sessionId
+        storedFilename, file.originalname, file.mimetype, file.size, note || sharedBatchNote || caption || null, req.user.id, photoType, takenAt,
+        uploadIpAddress, uploadUserAgent, gpsLatitude, gpsLongitude, gpsAccuracy, recordedAt, source, sessionId, batchId, sequence,
+        file.filename, storedFilename, null, capturedAt, uploadedAt, uploadTimezone,
+        photoLabel, sharedBatchNote, note, gpsLatitude, gpsLongitude, gpsAccuracy,
+        'uploaded', uploadedAt
       );
-      inserted.push({ id, filename: storedFilename, original_name: file.originalname, taken_at: takenAt, note_id: note_id || null, capture_source: source });
+      inserted.push({
+        id,
+        filename: storedFilename,
+        original_name: file.originalname,
+        stored_file_name: file.filename,
+        storage_path: storedFilename,
+        thumbnail_path: null,
+        taken_at: takenAt,
+        captured_at: capturedAt,
+        uploaded_at: uploadedAt,
+        timezone: uploadTimezone,
+        note_id: note_id || null,
+        label: photoLabel,
+        batch_id: batchId,
+        batch_note: sharedBatchNote,
+        individual_note: note,
+        upload_status: 'uploaded',
+        capture_source: source,
+      });
     }
 
     logActivity({
@@ -266,10 +448,13 @@ router.post('/', upload.array('photos', 20), (req, res) => {
         upload_ip_address: uploadIpAddress,
         has_capture_location: latitude !== null && longitude !== null,
         upload_session_id: sessionId,
+        batch_id: batchId,
+        label: sharedLabel,
       },
     });
-    res.status(201).json({ uploaded: inserted.length, photos: inserted });
+    res.status(201).json({ uploaded: inserted.length, batch_id: batchId, photos: inserted });
   } catch (err) {
+    cleanupUploadedFiles(req.files);
     console.error(err);
     res.status(500).json({ error: 'Upload failed' });
   }

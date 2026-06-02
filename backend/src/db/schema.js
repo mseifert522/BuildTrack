@@ -298,6 +298,22 @@ function initializeSchema() {
       capture_recorded_at TEXT,
       capture_source TEXT,
       upload_session_id TEXT,
+      batch_id TEXT,
+      batch_sequence INTEGER,
+      stored_file_name TEXT,
+      storage_path TEXT,
+      thumbnail_path TEXT,
+      captured_at TEXT,
+      uploaded_at TEXT,
+      timezone TEXT,
+      label TEXT,
+      batch_note TEXT,
+      individual_note TEXT,
+      gps_latitude REAL,
+      gps_longitude REAL,
+      gps_accuracy REAL,
+      upload_status TEXT NOT NULL DEFAULT 'uploaded',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       uploaded_by TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
@@ -864,8 +880,27 @@ function initializeSchema() {
   try { db.exec(`ALTER TABLE photos ADD COLUMN capture_recorded_at TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE photos ADD COLUMN capture_source TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE photos ADD COLUMN upload_session_id TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN batch_id TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN batch_sequence INTEGER`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN stored_file_name TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN storage_path TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN thumbnail_path TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN captured_at TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN uploaded_at TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN timezone TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN label TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN batch_note TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN individual_note TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN gps_latitude REAL`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN gps_longitude REAL`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN gps_accuracy REAL`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN upload_status TEXT NOT NULL DEFAULT 'uploaded'`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN updated_at TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`UPDATE photos SET updated_at = COALESCE(updated_at, created_at, datetime('now')) WHERE updated_at IS NULL`); } catch (_) { /* best-effort */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_photos_project_type_taken ON photos(project_id, photo_type, taken_at, created_at)`); } catch (_) { /* best-effort */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_photos_note_taken ON photos(note_id, taken_at, created_at)`); } catch (_) { /* best-effort */ }
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_photos_project_batch ON photos(project_id, batch_id, batch_sequence)`); } catch (_) { /* best-effort */ }
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_photos_project_label_uploaded ON photos(project_id, label, uploaded_at)`); } catch (_) { /* best-effort */ }
   try { db.exec(`ALTER TABLE users ADD COLUMN pin TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE users ADD COLUMN contractor_category TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE users ADD COLUMN contractor_secondary_category TEXT`); } catch (_) { /* already exists */ }
