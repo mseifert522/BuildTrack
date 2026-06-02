@@ -13,10 +13,89 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function getClientIp(req) {
+  const forwardedFor = String(req.headers['x-forwarded-for'] || '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean);
+  return forwardedFor[0]
+    || String(req.headers['cf-connecting-ip'] || '').trim()
+    || String(req.headers['x-real-ip'] || '').trim()
+    || req.ip
+    || req.socket?.remoteAddress
+    || '';
+}
+
 function requestMeta(req) {
   return {
-    ip_address: req.ip || '',
+    ip_address: getClientIp(req),
     user_agent: req.headers['user-agent'] || '',
+  };
+}
+
+function parseJsonObject(value) {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function sessionStatus(lastSeenAt) {
+  if (!lastSeenAt) return 'signed_in';
+  const parsed = new Date(String(lastSeenAt).includes('T') ? lastSeenAt : `${String(lastSeenAt).replace(' ', 'T')}Z`);
+  if (!Number.isFinite(parsed.getTime())) return 'signed_in';
+  const ageMs = Date.now() - parsed.getTime();
+  if (ageMs <= 2 * 60 * 1000) return 'online';
+  if (ageMs <= 15 * 60 * 1000) return 'recently_active';
+  return 'signed_in';
+}
+
+function parseUserAgent(userAgent = '', sessionType = '') {
+  const ua = String(userAgent || '');
+  const lower = ua.toLowerCase();
+  const isTablet = /ipad|tablet|kindle|silk/.test(lower);
+  const isMobile = isTablet || /android|iphone|ipod|mobile|webos|blackberry|windows phone/.test(lower);
+  const deviceType = isTablet ? 'tablet' : isMobile ? 'mobile' : 'desktop';
+  const clientType = sessionType === 'mobile_app' || isMobile ? 'mobile_app' : 'desktop';
+
+  let osLabel = 'Unknown OS';
+  if (/iphone|ipad|ipod/i.test(ua)) osLabel = 'iOS';
+  else if (/android/i.test(ua)) osLabel = 'Android';
+  else if (/windows/i.test(ua)) osLabel = 'Windows';
+  else if (/mac os x|macintosh/i.test(ua)) osLabel = 'macOS';
+  else if (/linux/i.test(ua)) osLabel = 'Linux';
+
+  let browserLabel = 'Unknown browser';
+  if (/edg\//i.test(ua)) browserLabel = 'Microsoft Edge';
+  else if (/crios/i.test(ua)) browserLabel = 'Chrome iOS';
+  else if (/chrome|chromium/i.test(ua) && !/edg\//i.test(ua)) browserLabel = 'Chrome';
+  else if (/firefox|fxios/i.test(ua)) browserLabel = 'Firefox';
+  else if (/safari/i.test(ua) && !/chrome|chromium|crios|fxios|edg\//i.test(ua)) browserLabel = 'Safari';
+
+  const clientLabel = clientType === 'mobile_app' ? (isTablet ? 'Tablet / mobile app' : 'Mobile app') : 'Desktop browser';
+  const deviceLabel = [osLabel, browserLabel].filter(value => !value.startsWith('Unknown')).join(' / ') || 'Unknown device';
+  return { client_type: clientType, client_label: clientLabel, device_type: deviceType, os_label: osLabel, browser_label: browserLabel, device_label: deviceLabel };
+}
+
+function formatSession(row, currentSessionId = null) {
+  const parsed = parseUserAgent(row.user_agent, row.session_type);
+  return {
+    id: row.id,
+    user_id: row.user_id,
+    session_type: row.session_type || 'desktop',
+    ip_address: row.ip_address || '',
+    user_agent: row.user_agent || '',
+    issued_at: row.issued_at || null,
+    last_seen_at: row.last_seen_at || null,
+    created_at: row.created_at || null,
+    updated_at: row.updated_at || null,
+    details: parseJsonObject(row.details),
+    security_status: sessionStatus(row.last_seen_at),
+    is_current_session: currentSessionId && row.id === currentSessionId,
+    ...parsed,
   };
 }
 
@@ -145,13 +224,48 @@ router.get('/sessions', (req, res) => {
         lower(u.name)
     `).all();
 
-    const counts = users.reduce((acc, row) => {
+    const sessions = db.prepare(`
+      SELECT
+        s.id,
+        s.user_id,
+        s.session_type,
+        s.user_agent,
+        s.ip_address,
+        s.issued_at,
+        s.last_seen_at,
+        s.details,
+        s.created_at,
+        s.updated_at
+      FROM auth_sessions s
+      JOIN users u ON u.id = s.user_id
+      WHERE s.revoked_at IS NULL
+        AND u.is_active = 1
+      ORDER BY
+        datetime(COALESCE(s.last_seen_at, s.issued_at, s.created_at)) DESC,
+        s.created_at DESC
+    `).all().map(row => formatSession(row, req.auth?.session_id || null));
+
+    const sessionsByUser = sessions.reduce((acc, session) => {
+      if (!acc.has(session.user_id)) acc.set(session.user_id, []);
+      acc.get(session.user_id).push(session);
+      return acc;
+    }, new Map());
+
+    const usersWithSessions = users.map(row => ({
+      ...row,
+      sessions: sessionsByUser.get(row.id) || [],
+    }));
+
+    const counts = usersWithSessions.reduce((acc, row) => {
       acc.total += 1;
       acc[row.security_status] = (acc[row.security_status] || 0) + 1;
       return acc;
     }, { total: 0, online: 0, recently_active: 0, signed_in: 0, offline: 0 });
+    counts.session_records = sessions.length;
+    counts.online_sessions = sessions.filter(row => row.security_status === 'online').length;
+    counts.recent_sessions = sessions.filter(row => ['online', 'recently_active'].includes(row.security_status)).length;
 
-    res.json({ users, counts });
+    res.json({ users: usersWithSessions, sessions, counts });
   } catch (err) {
     console.error('Security sessions error:', err);
     res.status(500).json({ error: 'Failed to load security sessions' });
@@ -205,6 +319,68 @@ router.post('/logout-all', (req, res) => {
   } catch (err) {
     console.error('Security logout all error:', err);
     res.status(500).json({ error: 'Failed to log out all users' });
+  }
+});
+
+router.post('/sessions/:sessionId/logout', (req, res) => {
+  try {
+    const db = getDb();
+    const target = db.prepare(`
+      SELECT
+        s.id,
+        s.user_id,
+        s.session_type,
+        s.ip_address,
+        s.user_agent,
+        s.last_seen_at,
+        u.name,
+        u.email
+      FROM auth_sessions s
+      JOIN users u ON u.id = s.user_id
+      WHERE s.id = ?
+        AND s.revoked_at IS NULL
+        AND u.is_active = 1
+      LIMIT 1
+    `).get(req.params.sessionId);
+    if (!target) return res.status(404).json({ error: 'Active session not found' });
+
+    const revokedAt = nowIso();
+    const reason = String(req.body?.reason || `Security logout session: ${target.name}`).trim().slice(0, 240);
+
+    const revokeOneSession = db.transaction(() => {
+      db.prepare(`
+        UPDATE auth_sessions
+        SET revoked_at = ?,
+            revoke_reason = ?,
+            revoked_by = ?,
+            updated_at = datetime('now')
+        WHERE id = ?
+      `).run(revokedAt, reason, req.user.id, target.id);
+
+      writeSecurityEvent(db, req, {
+        action: 'security_logout_session',
+        targetUserId: target.user_id,
+        reason,
+        details: {
+          target_name: target.name,
+          target_email: target.email,
+          session_id: target.id,
+          session_type: target.session_type,
+          ip_address: target.ip_address,
+          user_agent: target.user_agent,
+        },
+      });
+    });
+
+    revokeOneSession();
+    res.json({
+      message: `${target.name}'s selected session has been logged out.`,
+      target_user_id: target.user_id,
+      session_id: target.id,
+    });
+  } catch (err) {
+    console.error('Security session logout error:', err);
+    res.status(500).json({ error: 'Failed to log out session' });
   }
 });
 

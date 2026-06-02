@@ -36,6 +36,29 @@ function shouldTrustDevice(value) {
   return value === true || value === 'true' || value === 1 || value === '1';
 }
 
+function getClientIp(req) {
+  const forwardedFor = String(req?.headers?.['x-forwarded-for'] || '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean);
+  return forwardedFor[0]
+    || String(req?.headers?.['cf-connecting-ip'] || '').trim()
+    || String(req?.headers?.['x-real-ip'] || '').trim()
+    || req?.ip
+    || req?.socket?.remoteAddress
+    || '';
+}
+
+function isMobileUserAgent(userAgent = '') {
+  return /android|iphone|ipad|ipod|mobile|tablet|silk|kindle|webos|blackberry|windows phone/i.test(userAgent);
+}
+
+function inferSessionType(user, req, sessionType = null) {
+  if (sessionType) return sessionType;
+  if (user.role === 'contractor') return 'mobile_app';
+  return isMobileUserAgent(req?.headers?.['user-agent'] || '') ? 'mobile_app' : 'desktop';
+}
+
 function markUserOnline(db, userId, includeLogin = false, sessionId = null) {
   db.prepare(`
     UPDATE users
@@ -78,7 +101,7 @@ function createSessionToken(user, sessionId = null) {
 
 function createAuthSession(db, user, req, details = null, sessionType = null) {
   const sessionId = uuidv4();
-  const resolvedSessionType = sessionType || (user.role === 'contractor' ? 'mobile_app' : 'desktop');
+  const resolvedSessionType = inferSessionType(user, req, sessionType);
   db.prepare(`
     INSERT INTO auth_sessions (
       id, user_id, session_type, user_agent, ip_address, issued_at, last_seen_at, details
@@ -88,7 +111,7 @@ function createAuthSession(db, user, req, details = null, sessionType = null) {
     user.id,
     resolvedSessionType,
     req?.headers?.['user-agent'] || '',
-    req?.ip || '',
+    getClientIp(req),
     details ? JSON.stringify({ issued_via: details }) : null,
   );
 

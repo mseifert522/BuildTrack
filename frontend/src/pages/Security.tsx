@@ -6,6 +6,7 @@ import {
   Clock,
   type LucideIcon,
   LogOut,
+  Monitor,
   RefreshCw,
   ShieldAlert,
   ShieldCheck,
@@ -16,6 +17,29 @@ import api from '../lib/api';
 import { Loading, PageHeader } from '../components/ui';
 import { useAuthStore, roleLabels } from '../store/authStore';
 import { formatEasternDateTime, parseBuildTrackTimestamp } from '../lib/time';
+
+type SecurityStatus = 'online' | 'recently_active' | 'signed_in' | 'offline';
+
+interface SecuritySession {
+  id: string;
+  user_id: string;
+  session_type: string;
+  ip_address?: string | null;
+  user_agent?: string | null;
+  issued_at?: string | null;
+  last_seen_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  security_status: SecurityStatus;
+  client_type: 'desktop' | 'mobile_app' | string;
+  client_label: string;
+  device_type: 'desktop' | 'mobile' | 'tablet' | string;
+  device_label: string;
+  os_label: string;
+  browser_label: string;
+  is_current_session?: boolean;
+  details?: Record<string, any> | null;
+}
 
 interface SecurityUser {
   id: string;
@@ -34,7 +58,8 @@ interface SecurityUser {
   session_types?: string;
   trusted_device_count: number;
   quick_access_count: number;
-  security_status: 'online' | 'recently_active' | 'signed_in' | 'offline';
+  security_status: SecurityStatus;
+  sessions?: SecuritySession[];
 }
 
 interface SecurityEvent {
@@ -69,6 +94,7 @@ const statusCopy: Record<SecurityUser['security_status'], { label: string; class
 const actionLabels: Record<string, string> = {
   security_logout_all_users: 'Logged out all users',
   security_logout_user: 'Logged out user',
+  security_logout_session: 'Logged out session',
 };
 
 function clearLocalLoginState() {
@@ -109,34 +135,76 @@ function timeDistance(value?: string | null) {
   return formatDateTime(value);
 }
 
+function sessionAccessMethod(session: SecuritySession) {
+  const issuedVia = session.details?.issued_via || {};
+  if (issuedVia.mobile_quick_access) return 'One-touch login';
+  if (issuedVia.trusted_device_quick_login || issuedVia.trusted_device) return 'Trusted device';
+  if (issuedVia.pin_login) return 'PIN login';
+  if (issuedVia.contractor_email_2fa) return 'Contractor email 2FA';
+  if (issuedVia.two_factor === true) return 'Password + 2FA';
+  if (issuedVia.two_factor === 'skipped_no_smtp') return 'Password login';
+  return 'Authenticated session';
+}
+
+function sessionIcon(session: SecuritySession) {
+  return session.client_type === 'mobile_app' || session.device_type === 'mobile' || session.device_type === 'tablet'
+    ? Smartphone
+    : Monitor;
+}
+
+function truncateMiddle(value?: string | null, max = 92) {
+  const text = String(value || '').trim();
+  if (text.length <= max) return text;
+  const keep = Math.floor((max - 3) / 2);
+  return `${text.slice(0, keep)}...${text.slice(-keep)}`;
+}
+
 function eventDescription(event: SecurityEvent) {
   if (event.action === 'security_logout_all_users') return 'Every active account was forced to sign in again.';
   if (event.action === 'security_logout_user') {
     return `${event.target_name || event.target_email || 'A user'} was forced to sign in again.`;
+  }
+  if (event.action === 'security_logout_session') {
+    return `${event.target_name || event.target_email || 'A user'} had one selected device session terminated.`;
   }
   return event.reason || 'Security event recorded.';
 }
 
 export default function Security() {
   const [users, setUsers] = useState<SecurityUser[]>([]);
+  const [sessions, setSessions] = useState<SecuritySession[]>([]);
   const [events, setEvents] = useState<SecurityEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [globalLogoutLoading, setGlobalLogoutLoading] = useState(false);
   const [userLogoutId, setUserLogoutId] = useState<string | null>(null);
+  const [sessionLogoutId, setSessionLogoutId] = useState<string | null>(null);
   const { user: currentUser, logout } = useAuthStore();
   const navigate = useNavigate();
 
+  const sessionRows = useMemo(() => users.flatMap(row =>
+    (row.sessions || []).map((session, index) => ({
+      user: row,
+      session,
+      index,
+      total: row.sessions?.length || 0,
+    }))
+  ), [users]);
+
+  const savedAccessRows = useMemo(() => users.filter(row =>
+    (!row.sessions || row.sessions.length === 0) && (row.trusted_device_count > 0 || row.quick_access_count > 0 || row.last_login_at)
+  ), [users]);
+
   const counts = useMemo(() => ({
-    online: users.filter(row => row.security_status === 'online').length,
-    active: users.filter(row => ['online', 'recently_active'].includes(row.security_status)).length,
-    signedIn: users.filter(row => row.active_session_count > 0).length,
+    online: sessions.filter(row => row.security_status === 'online').length,
+    active: sessions.filter(row => ['online', 'recently_active'].includes(row.security_status)).length,
+    signedIn: sessions.length,
     quickAccess: users.reduce((sum, row) => sum + Number(row.quick_access_count || 0), 0),
-  }), [users]);
+  }), [sessions, users]);
 
   const summaryCards: SummaryCard[] = [
-    { label: 'Online now', value: counts.online, icon: ShieldCheck, color: '#059669', bg: '#ECFDF5' },
-    { label: 'Active last 15 min', value: counts.active, icon: Clock, color: '#D97706', bg: '#FFFBEB' },
+    { label: 'Online sessions', value: counts.online, icon: ShieldCheck, color: '#059669', bg: '#ECFDF5' },
+    { label: 'Sessions active last 15 min', value: counts.active, icon: Clock, color: '#D97706', bg: '#FFFBEB' },
     { label: 'Signed-in sessions', value: counts.signedIn, icon: LogOut, color: '#2563EB', bg: '#EFF6FF' },
     { label: 'One-touch app access', value: counts.quickAccess, icon: Smartphone, color: '#7C3AED', bg: '#F5F3FF' },
   ];
@@ -150,6 +218,7 @@ export default function Security() {
         api.get('/security/events', { params: { limit: 40 } }),
       ]);
       setUsers(Array.isArray(sessionsRes.data?.users) ? sessionsRes.data.users : []);
+      setSessions(Array.isArray(sessionsRes.data?.sessions) ? sessionsRes.data.sessions : []);
       setEvents(Array.isArray(eventsRes.data?.events) ? eventsRes.data.events : []);
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to load security dashboard');
@@ -204,6 +273,28 @@ export default function Security() {
     }
   };
 
+  const handleLogoutSession = async (target: SecurityUser, session: SecuritySession) => {
+    const ipLabel = session.ip_address || 'unknown IP';
+    if (!confirm(`Log out this ${session.client_label} session for ${target.name} at ${ipLabel}?`)) return;
+    const reason = window.prompt('Reason for security history', `Security logout session: ${target.name} ${ipLabel}`) || `Security logout session: ${target.name}`;
+    setSessionLogoutId(session.id);
+    try {
+      const res = await api.post(`/security/sessions/${session.id}/logout`, { reason });
+      toast.success(res.data?.message || 'Session logged out');
+      if (session.is_current_session) {
+        clearLocalLoginState();
+        logout();
+        navigate('/login', { replace: true });
+        return;
+      }
+      await loadSecurity(true);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to log out session');
+    } finally {
+      setSessionLogoutId(null);
+    }
+  };
+
   if (loading) return <Loading message="Loading security controls..." />;
 
   return (
@@ -254,10 +345,12 @@ export default function Security() {
       <section className="rounded-lg border border-gray-200 bg-white shadow-sm">
         <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-3">
           <div>
-            <h2 className="text-base font-bold text-gray-950">Logged-In Users</h2>
-            <p className="text-sm text-gray-500">Status is based on active server sessions, heartbeat, and mobile app access.</p>
+            <h2 className="text-base font-bold text-gray-950">Logged-In Users & Sessions</h2>
+            <p className="text-sm text-gray-500">Each active desktop, mobile, and tablet session is shown separately with IP address and device details.</p>
           </div>
-          <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-bold text-gray-600">{users.length} records</span>
+          <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-bold text-gray-600">
+            {sessionRows.length} session record{sessionRows.length === 1 ? '' : 's'}
+          </span>
         </div>
 
         <div className="overflow-x-auto">
@@ -265,18 +358,19 @@ export default function Security() {
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-gray-500">User</th>
-                <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-gray-500">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-gray-500">Session Details</th>
+                <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-gray-500">Session Status</th>
+                <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-gray-500">Device & IP Address</th>
                 <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-gray-500">Last Activity</th>
                 <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-wide text-gray-500">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 bg-white">
-              {users.map(row => {
-                const status = statusCopy[row.security_status] || statusCopy.offline;
-                const lastSeen = row.session_last_seen_at || row.last_seen_at || row.last_login_at;
+              {sessionRows.map(({ user: row, session, index, total }) => {
+                const status = statusCopy[session.security_status] || statusCopy.offline;
+                const SessionIcon = sessionIcon(session);
+                const lastSeen = session.last_seen_at || session.issued_at;
                 return (
-                  <tr key={row.id} className="hover:bg-gray-50">
+                  <tr key={session.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-lg bg-gray-100 text-sm font-black text-gray-700">
@@ -286,50 +380,114 @@ export default function Security() {
                           <p className="font-bold text-gray-950">{row.name}</p>
                           <p className="text-xs text-gray-500">{row.email}</p>
                           <p className="text-xs font-semibold text-gray-400">{roleLabels[row.role] || row.role}</p>
+                          <p className="mt-1 text-[11px] font-bold text-blue-600">Session {index + 1} of {total}</p>
                         </div>
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-bold ${status.className}`}>
-                        <span className="h-2 w-2 rounded-full" style={{ background: status.dot }} />
-                        {status.label}
-                      </span>
+                      <div className="space-y-2">
+                        <span className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-bold ${status.className}`}>
+                          <span className="h-2 w-2 rounded-full" style={{ background: status.dot }} />
+                          {status.label}
+                        </span>
+                        {session.is_current_session && (
+                          <span className="block w-fit rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-blue-700">
+                            Current admin session
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-gray-700">
-                      <div className="space-y-1">
-                        <p><strong>{row.active_session_count}</strong> active session{row.active_session_count === 1 ? '' : 's'}</p>
-                        <p className="text-xs text-gray-500">Types: {row.session_types || 'not recorded'}</p>
-                        <p className="text-xs text-gray-500">Trusted devices: {row.trusted_device_count} · One-touch: {row.quick_access_count}</p>
+                      <div className="flex items-start gap-3">
+                        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-blue-100 bg-blue-50 text-blue-700">
+                          <SessionIcon className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0 space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="rounded-full bg-gray-900 px-2 py-0.5 text-[11px] font-black text-white">
+                              {session.client_label}
+                            </span>
+                            <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] font-bold text-gray-600">
+                              {sessionAccessMethod(session)}
+                            </span>
+                          </div>
+                          <p className="font-bold text-gray-950">IP: {session.ip_address || 'Not recorded'}</p>
+                          <p className="text-xs font-semibold text-gray-600">{session.device_label}</p>
+                          <p className="max-w-xl truncate text-xs text-gray-400" title={session.user_agent || ''}>
+                            {truncateMiddle(session.user_agent || 'User agent not recorded')}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            Trusted devices: {row.trusted_device_count} - One-touch: {row.quick_access_count}
+                          </p>
+                        </div>
                       </div>
                     </td>
                     <td className="px-4 py-3">
                       <p className="font-semibold text-gray-800">{timeDistance(lastSeen)}</p>
                       <p className="text-xs text-gray-500">{formatDateTime(lastSeen)}</p>
+                      <p className="mt-1 text-xs text-gray-400">Issued {formatDateTime(session.issued_at)}</p>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <button
-                        type="button"
-                        onClick={() => handleLogoutUser(row)}
-                        disabled={userLogoutId === row.id}
-                        className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100 disabled:opacity-60"
-                      >
-                        <UserX className="h-4 w-4" />
-                        {userLogoutId === row.id ? 'Logging out...' : 'Log That Person Out'}
-                      </button>
+                      <div className="flex flex-col items-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleLogoutSession(row, session)}
+                          disabled={sessionLogoutId === session.id}
+                          className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100 disabled:opacity-60"
+                        >
+                          <LogOut className="h-4 w-4" />
+                          {sessionLogoutId === session.id ? 'Logging out...' : 'Log Session Out'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleLogoutUser(row)}
+                          disabled={userLogoutId === row.id}
+                          className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                        >
+                          <UserX className="h-4 w-4" />
+                          {userLogoutId === row.id ? 'Logging out...' : 'Log User Out'}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
               })}
-              {users.length === 0 && (
+              {sessionRows.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-4 py-10 text-center text-sm text-gray-500">
-                    No active or recently signed-in users found.
+                    No active session records found.
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
+
+        {savedAccessRows.length > 0 && (
+          <div className="border-t border-gray-200 bg-gray-50 px-4 py-3">
+            <p className="mb-3 text-xs font-black uppercase tracking-wide text-gray-500">Saved access without an active session</p>
+            <div className="grid gap-2 md:grid-cols-2">
+              {savedAccessRows.map(row => (
+                <div key={row.id} className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold text-gray-950">{row.name}</p>
+                    <p className="truncate text-xs text-gray-500">{row.email}</p>
+                    <p className="mt-1 text-xs text-gray-500">Trusted devices: {row.trusted_device_count} - One-touch: {row.quick_access_count}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleLogoutUser(row)}
+                    disabled={userLogoutId === row.id}
+                    className="inline-flex flex-shrink-0 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100 disabled:opacity-60"
+                  >
+                    <UserX className="h-4 w-4" />
+                    Clear Access
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       <section className="rounded-lg border border-gray-200 bg-white shadow-sm">
