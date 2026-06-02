@@ -22,6 +22,29 @@ const DEFAULT_CONTRACTOR_CATEGORIES = [
   'Framing',
 ];
 
+const DEFAULT_SUPPLIER_CATEGORIES = [
+  'Landscaping Materials',
+  'Drywall',
+  'General Building Materials',
+  'Portable Toilets',
+  'Tool Rentals',
+  'Appliances',
+  'Fixtures',
+  'Building Materials',
+  'Lumber',
+  'Roofing Materials',
+  'Electrical Supplies',
+  'Plumbing Supplies',
+  'HVAC Supplies',
+  'Flooring Materials',
+  'Paint',
+  'Concrete and Masonry',
+  'Windows and Doors',
+  'Cabinets and Countertops',
+  'Dumpster and Hauling',
+  'Cleaning Supplies',
+];
+
 const QUOTE_CATEGORY_DEFINITIONS = [
   ['General', 'Demolition'],
   ['General', 'Site work'],
@@ -1033,7 +1056,7 @@ function initializeSchema() {
 	      INSERT OR IGNORE INTO contractor_categories (id, name, created_by, created_at)
       VALUES (?, ?, NULL, datetime('now'))
     `);
-    for (const category of DEFAULT_CONTRACTOR_CATEGORIES) {
+    for (const category of [...DEFAULT_CONTRACTOR_CATEGORIES, ...DEFAULT_SUPPLIER_CATEGORIES]) {
       const id = category.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
       insertCategory.run(id, category);
     }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Building2, Mail, Phone, Search, Truck } from 'lucide-react';
+import { Building2, Mail, MapPin, Phone, Search, Truck, UserRound } from 'lucide-react';
 import api from '../lib/api';
 import { Loading } from '../components/ui';
 
@@ -18,7 +18,25 @@ interface Supplier {
 
 function categoriesFor(supplier: Supplier) {
   return (supplier.categories && supplier.categories.length > 0 ? supplier.categories : [supplier.category])
+    .map(category => String(category || '').trim())
     .filter(Boolean);
+}
+
+function supplierContactLines(supplier: Supplier) {
+  return [
+    supplier.billing_address
+      ? { key: 'address', Icon: MapPin, value: supplier.billing_address, href: null }
+      : null,
+    supplier.contact
+      ? { key: 'contact', Icon: UserRound, value: `Contact: ${supplier.contact}`, href: null }
+      : null,
+    supplier.email
+      ? { key: 'email', Icon: Mail, value: supplier.email, href: `mailto:${supplier.email}` }
+      : null,
+    supplier.phone
+      ? { key: 'phone', Icon: Phone, value: supplier.phone, href: `tel:${supplier.phone}` }
+      : null,
+  ].filter(Boolean) as { key: string; Icon: typeof MapPin; value: string; href: string | null }[];
 }
 
 export default function Suppliers() {
@@ -89,18 +107,16 @@ export default function Suppliers() {
           </div>
         ) : (
           <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-            <div className="hidden border-b border-gray-200 bg-gray-50 px-4 py-3 text-xs font-black uppercase text-gray-500 lg:grid lg:grid-cols-[minmax(220px,1.35fr)_minmax(180px,1fr)_minmax(170px,1fr)_minmax(220px,1.2fr)_minmax(140px,.8fr)] lg:gap-4">
-              <span>Supplier</span>
+            <div className="hidden border-b border-gray-200 bg-gray-50 px-4 py-3 text-xs font-black uppercase text-gray-500 lg:grid lg:grid-cols-[minmax(220px,1fr)_minmax(260px,1fr)_minmax(360px,1.5fr)] lg:gap-5">
+              <span>Name</span>
               <span>Category</span>
               <span>Contact</span>
-              <span>Email</span>
-              <span>Phone</span>
             </div>
             <div className="divide-y divide-gray-100">
             {filteredSuppliers.map((supplier) => (
               <div
                 key={supplier.id}
-                className="grid gap-3 px-4 py-4 transition hover:bg-gray-50 lg:grid-cols-[minmax(220px,1.35fr)_minmax(180px,1fr)_minmax(170px,1fr)_minmax(220px,1.2fr)_minmax(140px,.8fr)] lg:items-center lg:gap-4"
+                className="grid gap-4 px-4 py-4 transition hover:bg-gray-50 lg:grid-cols-[minmax(220px,1fr)_minmax(260px,1fr)_minmax(360px,1.5fr)] lg:items-start lg:gap-5"
               >
                 <div className="flex min-w-0 items-start gap-3">
                   <div
@@ -118,44 +134,40 @@ export default function Suppliers() {
                 </div>
 
                 <div className="flex min-w-0 flex-wrap gap-1.5">
-                  {categoriesFor(supplier).map(category => (
+                  {categoriesFor(supplier).length > 0 ? categoriesFor(supplier).map(category => (
                     <span key={category} className="inline-flex min-h-7 items-center gap-1 rounded-md border border-blue-100 bg-blue-50 px-2 py-1 text-xs font-black text-blue-700">
                       <Building2 className="h-3 w-3 flex-shrink-0" />
                       {category}
                     </span>
-                  ))}
+                  )) : (
+                    <span className="inline-flex min-h-7 items-center rounded-md border border-amber-100 bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">
+                      Assign supply category
+                    </span>
+                  )}
                 </div>
 
-                <div className="min-w-0">
+                <div className="min-w-0 space-y-2">
                   <span className="lg:hidden text-xs font-black uppercase text-gray-400">Contact</span>
-                  <p className="truncate text-sm font-semibold text-gray-700">{supplier.contact || 'No contact listed'}</p>
-                </div>
-
-                <div className="min-w-0">
-                  {supplier.email && (
-                    <a href={`mailto:${supplier.email}`} className="flex min-h-11 items-center gap-2 text-sm font-semibold text-gray-600 hover:text-gray-900">
-                      <Mail className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                      <span className="truncate">{supplier.email}</span>
-                    </a>
+                  {supplierContactLines(supplier).length > 0 ? supplierContactLines(supplier).map(({ key, Icon, value, href }) => {
+                    const content = (
+                      <>
+                        <Icon className="mt-0.5 h-4 w-4 flex-shrink-0 text-gray-400" />
+                        <span className="min-w-0 whitespace-pre-wrap break-words">{value}</span>
+                      </>
+                    );
+                    return href ? (
+                      <a key={key} href={href} className="flex min-w-0 items-start gap-2 text-sm font-semibold text-gray-600 hover:text-gray-900">
+                        {content}
+                      </a>
+                    ) : (
+                      <p key={key} className="flex min-w-0 items-start gap-2 text-sm font-semibold text-gray-600">
+                        {content}
+                      </p>
+                    );
+                  }) : (
+                    <p className="text-sm font-semibold text-gray-400">No contact details listed</p>
                   )}
-                  {!supplier.email ? <span className="text-sm font-semibold text-gray-400">No email</span> : null}
                 </div>
-
-                <div className="min-w-0">
-                  {supplier.phone && (
-                    <a href={`tel:${supplier.phone}`} className="flex min-h-11 items-center gap-2 text-sm font-semibold text-gray-600 hover:text-gray-900">
-                      <Phone className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                      <span className="truncate">{supplier.phone}</span>
-                    </a>
-                  )}
-                  {!supplier.phone ? <span className="text-sm font-semibold text-gray-400">No phone</span> : null}
-                </div>
-
-                {supplier.billing_address ? (
-                  <p className="min-w-0 whitespace-pre-wrap text-xs leading-5 text-gray-500 lg:col-span-5 lg:pl-[3.25rem]">
-                    {supplier.billing_address}
-                  </p>
-                ) : null}
               </div>
             ))}
             </div>
