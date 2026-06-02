@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link, useLocation, useNavigate } from 'react-router-dom';
+import { useDropzone, type FileRejection } from 'react-dropzone';
 import { useAuthStore, canChangeProjectStatus, canManageProjects, isAdminRole } from '../store/authStore';
 import api from '../lib/api';
 import { Loading, StatusBadge, Modal } from '../components/ui';
@@ -10,7 +11,13 @@ import { format } from 'date-fns';
 import GooglePlacesInput from '../components/GooglePlacesInput';
 import CurrencyInput from '../components/CurrencyInput';
 import { formatEasternDate, formatEasternDateTime } from '../lib/time';
-import { appendProgressUploadAudit, PROGRESS_MEDIA_ACCEPT, type ProgressCaptureSource } from '../lib/progressUpload';
+import {
+  appendProgressUploadAudit,
+  isSupportedProgressMediaFile,
+  MAX_PROGRESS_UPLOAD_BATCH_FILES,
+  PROGRESS_MEDIA_ACCEPT,
+  type ProgressCaptureSource,
+} from '../lib/progressUpload';
 import { getProgressMediaKind, isVideoMedia } from '../lib/progressMedia';
 
 type Tab = 'overview' | 'progress-history' | 'construction-plan' | 'quotes' | 'punch-list' | 'photos' | 'invoices' | 'activity' | 'notes' | 'team' | 'texts';
@@ -2716,7 +2723,7 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
   const [newCatName, setNewCatName] = useState('');
   const groupedPhotos = groupMediaByDay(photos);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       const [photosRes, catsRes] = await Promise.all([
         api.get(`/projects/${projectId}/photos?type=progress${selectedCategory ? `&category_id=${selectedCategory}` : ''}`),
@@ -2725,29 +2732,68 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
       setPhotos(photosRes.data);
       setCategories(catsRes.data);
     } catch (err) { } finally { setLoading(false); }
-  };
+  }, [projectId, selectedCategory]);
 
-  useEffect(() => { load(); }, [selectedCategory]);
+  useEffect(() => { load(); }, [load]);
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || e.target.files.length === 0) return;
+  const uploadFiles = useCallback(async (incomingFiles: File[]) => {
+    if (incomingFiles.length === 0) return;
+    if (incomingFiles.length > MAX_PROGRESS_UPLOAD_BATCH_FILES) {
+      toast.error(`Upload up to ${MAX_PROGRESS_UPLOAD_BATCH_FILES} files at once. Remove ${incomingFiles.length - MAX_PROGRESS_UPLOAD_BATCH_FILES} and try again.`);
+      return;
+    }
+
+    const unsupportedFiles = incomingFiles.filter(file => !isSupportedProgressMediaFile(file));
+    if (unsupportedFiles.length > 0) {
+      toast.error(`${unsupportedFiles.length} unsupported file${unsupportedFiles.length === 1 ? '' : 's'} skipped. Use photo or video media files.`);
+    }
+
+    const files = incomingFiles.filter(isSupportedProgressMediaFile);
+    if (files.length === 0) return;
+
     setUploading(true);
     const formData = new FormData();
-    Array.from(e.target.files).forEach(f => formData.append('photos', f));
+    files.forEach(f => formData.append('photos', f));
     if (selectedCategory) formData.append('category_id', selectedCategory);
     formData.append('photo_type', 'progress');
-    await appendProgressUploadAudit(formData, Array.from(e.target.files), Array.from(e.target.files).map(() => 'desktop'));
+    await appendProgressUploadAudit(formData, files, files.map(() => 'desktop'));
     try {
       await api.post(`/projects/${projectId}/photos?type=progress`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
-      toast.success(`${e.target.files.length} photo(s) uploaded`);
+      toast.success(`${files.length} progress media item${files.length === 1 ? '' : 's'} uploaded`);
       load();
-    } catch (err) {
-      toast.error('Upload failed');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Upload failed');
     } finally {
       setUploading(false);
-      e.target.value = '';
     }
-  };
+  }, [load, projectId, selectedCategory]);
+
+  const handleRejectedFiles = useCallback((fileRejections: FileRejection[]) => {
+    if (!fileRejections.length) return;
+    const tooMany = fileRejections.some(rejection =>
+      rejection.errors.some(error => error.code === 'too-many-files')
+    );
+    if (tooMany) {
+      toast.error(`Upload up to ${MAX_PROGRESS_UPLOAD_BATCH_FILES} files at once.`);
+      return;
+    }
+    toast.error('Some files were not accepted. Use photos or videos only.');
+  }, []);
+
+  const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
+    multiple: true,
+    noClick: true,
+    noKeyboard: true,
+    disabled: uploading,
+    maxFiles: MAX_PROGRESS_UPLOAD_BATCH_FILES,
+    validator: file => isSupportedProgressMediaFile(file)
+      ? null
+      : { code: 'unsupported-media-type', message: 'Only photo or video media files are allowed' },
+    onDropAccepted: acceptedFiles => {
+      void uploadFiles(acceptedFiles);
+    },
+    onDropRejected: handleRejectedFiles,
+  });
 
   const addCategory = async () => {
     if (!newCatName.trim()) return;
@@ -2761,12 +2807,46 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
 
   return (
     <div className="space-y-4">
-      {/* Upload button */}
-      <label className={`flex items-center justify-center gap-2 py-3 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${uploading ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50'}`}>
-        <input type="file" multiple accept={PROGRESS_MEDIA_ACCEPT} onChange={handleUpload} className="hidden" disabled={uploading} />
-        <Camera className="w-5 h-5 text-blue-500" />
-        <span className="text-sm font-medium text-blue-600">{uploading ? 'Uploading...' : 'Upload Progress Pictures'}</span>
-      </label>
+      <div
+        {...getRootProps({
+          className: `rounded-2xl border-2 border-dashed p-4 transition-colors ${
+            uploading
+              ? 'border-blue-300 bg-blue-50'
+              : isDragActive
+                ? 'border-blue-500 bg-blue-50 shadow-sm'
+                : 'border-slate-300 bg-white hover:border-blue-400 hover:bg-slate-50'
+          }`,
+        })}
+      >
+        <input {...getInputProps({ accept: PROGRESS_MEDIA_ACCEPT })} />
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-start gap-3">
+            <div className={`flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl ${isDragActive ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-600'}`}>
+              <ImagePlus className="h-6 w-6" />
+            </div>
+            <div>
+              <p className="text-sm font-black text-slate-900">
+                {uploading ? 'Uploading progress media...' : isDragActive ? 'Drop photos or videos here' : 'Drag and drop progress pictures here'}
+              </p>
+              <p className="mt-1 text-xs font-semibold text-slate-500">
+                Upload up to {MAX_PROGRESS_UPLOAD_BATCH_FILES} items at once. HEIC, JPG, PNG, WebP, MP4, and MOV files are supported.
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                Files are saved to this project with timestamp and uploader metadata.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={open}
+            disabled={uploading}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-500 px-4 py-2.5 text-sm font-black text-white shadow-sm transition-colors hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Camera className="h-4 w-4" />
+            {uploading ? 'Uploading...' : 'Choose Files'}
+          </button>
+        </div>
+      </div>
 
       {/* Categories */}
       <div className="flex gap-2 overflow-x-auto pb-1">

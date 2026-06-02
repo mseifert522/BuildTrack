@@ -65,6 +65,7 @@ const VIDEO_EXTENSIONS = new Set([
 ]);
 const configuredMediaMaxMb = Number.parseInt(process.env.PROJECT_MEDIA_MAX_MB || '500', 10);
 const MEDIA_FILE_SIZE_LIMIT = (Number.isFinite(configuredMediaMaxMb) ? configuredMediaMaxMb : 500) * 1024 * 1024;
+const MAX_PROGRESS_UPLOAD_FILES = 100;
 
 function sanitizePathSegment(value, fallback) {
   const cleaned = String(value || '')
@@ -209,16 +210,25 @@ const fileFilter = (req, file, cb) => {
   else cb(new Error('Only image or video files are allowed'));
 };
 
-const upload = multer({ storage, fileFilter, limits: { fileSize: MEDIA_FILE_SIZE_LIMIT } });
+const upload = multer({
+  storage,
+  fileFilter,
+  limits: {
+    fileSize: MEDIA_FILE_SIZE_LIMIT,
+    files: MAX_PROGRESS_UPLOAD_FILES,
+  },
+});
 
 function uploadProjectPhotos(req, res, next) {
-  upload.array('photos')(req, res, err => {
+  upload.array('photos', MAX_PROGRESS_UPLOAD_FILES)(req, res, err => {
     if (!err) return next();
     cleanupUploadedFiles(req.files);
     const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
-    const message = err.code === 'LIMIT_FILE_SIZE'
-      ? `Each file must be ${configuredMediaMaxMb}MB or less`
-      : err.message || 'Upload rejected';
+    let message = err.message || 'Upload rejected';
+    if (err.code === 'LIMIT_FILE_SIZE') message = `Each file must be ${configuredMediaMaxMb}MB or less`;
+    if (err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE') {
+      message = `Upload up to ${MAX_PROGRESS_UPLOAD_FILES} files at once`;
+    }
     return res.status(status).json({ error: message });
   });
 }

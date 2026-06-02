@@ -1,8 +1,8 @@
 import exifr from 'exifr';
 
-export const PROGRESS_MEDIA_ACCEPT = [
-  'image/*',
-  'video/*',
+export const MAX_PROGRESS_UPLOAD_BATCH_FILES = 100;
+
+export const PROGRESS_IMAGE_EXTENSIONS = [
   '.avif',
   '.bmp',
   '.dib',
@@ -20,6 +20,9 @@ export const PROGRESS_MEDIA_ACCEPT = [
   '.tiff',
   '.webp',
   '.dng',
+];
+
+export const PROGRESS_VIDEO_EXTENSIONS = [
   '.mp4',
   '.mov',
   '.qt',
@@ -34,6 +37,17 @@ export const PROGRESS_MEDIA_ACCEPT = [
   '.hevc',
   '.mts',
   '.m2ts',
+];
+
+export const PROGRESS_MEDIA_EXTENSIONS = [
+  ...PROGRESS_IMAGE_EXTENSIONS,
+  ...PROGRESS_VIDEO_EXTENSIONS,
+];
+
+export const PROGRESS_MEDIA_ACCEPT = [
+  'image/*',
+  'video/*',
+  ...PROGRESS_MEDIA_EXTENSIONS,
 ].join(',');
 export const MAX_PROGRESS_IMAGE_DIMENSION = 2200;
 export const PROGRESS_IMAGE_QUALITY = 0.86;
@@ -42,6 +56,17 @@ export type ProgressCaptureSource = 'batch_camera' | 'device_camera' | 'library'
 
 const GEOLOCATION_TIMEOUT_MS = 3500;
 const IMAGE_TYPES_TO_RESIZE = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp']);
+const PROGRESS_MEDIA_EXTENSION_SET = new Set(PROGRESS_MEDIA_EXTENSIONS);
+
+export function isSupportedProgressMediaFile(file: File) {
+  const mime = String(file.type || '').toLowerCase();
+  const name = String(file.name || '').toLowerCase();
+  const extension = name.includes('.') ? name.slice(name.lastIndexOf('.')) : '';
+  if (mime.startsWith('image/') || mime.startsWith('video/')) return true;
+  if (PROGRESS_MEDIA_EXTENSION_SET.has(extension)) return true;
+  return ['application/mp4', 'application/quicktime', 'application/octet-stream'].includes(mime)
+    && PROGRESS_MEDIA_EXTENSION_SET.has(extension);
+}
 
 export interface ProgressUploadAuditOptions {
   batchId?: string;
