@@ -958,22 +958,6 @@ function initializeSchema() {
     CREATE INDEX IF NOT EXISTS idx_activity_log_project_created
       ON activity_log(project_id, created_at);
 
-    CREATE TABLE IF NOT EXISTS chat_messages (
-      id TEXT PRIMARY KEY,
-      sender_id TEXT NOT NULL,
-      recipient_id TEXT,
-      message TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_chat_messages_created
-      ON chat_messages(created_at);
-
-    CREATE INDEX IF NOT EXISTS idx_chat_messages_recipient
-      ON chat_messages(recipient_id, created_at);
-
     CREATE TABLE IF NOT EXISTS project_documents (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,

@@ -8,7 +8,6 @@ import {
 } from 'lucide-react';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
-import ManagementChatWidget from './ManagementChatWidget';
 import { formatEasternDateTime, parseBuildTrackTimestamp } from '../lib/time';
 
 interface LayoutProps { children: React.ReactNode; }
@@ -538,7 +537,7 @@ export default function Layout({ children }: LayoutProps) {
                     <div className="absolute right-0 top-full mt-2 w-80 rounded-2xl bg-white border border-gray-200 shadow-xl z-20 overflow-hidden">
                       <div className="px-4 py-3 border-b border-gray-100">
                         <p className="text-sm font-black text-gray-900">Team availability</p>
-                        <p className="text-xs text-gray-500 mt-0.5">Presence only. Use the bottom message bar for IM chat.</p>
+                        <p className="text-xs text-gray-500 mt-0.5">Current desktop activity status.</p>
                       </div>
                       <div className="max-h-80 overflow-y-auto divide-y divide-gray-50">
                         {presenceUsers.length === 0 ? (
@@ -751,7 +750,6 @@ export default function Layout({ children }: LayoutProps) {
         <main className="bt-horizontal-lock flex-1 overflow-y-auto overflow-x-hidden pb-24" style={{ touchAction: 'pan-y', overscrollBehaviorX: 'none' }}>
           {children}
         </main>
-        <ManagementChatWidget />
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore, isAdminRole, roleLabels } from '../store/authStore';
 import api from '../lib/api';
@@ -58,16 +58,6 @@ interface RecentNote {
   project_address: string;
   project_job_name: string;
   project_status: string;
-}
-
-interface PresenceUser {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-  avatar_url?: string | null;
-  last_seen_at?: string | null;
-  is_online?: number;
 }
 
 interface ReviewChange {
@@ -143,8 +133,6 @@ export default function Dashboard() {
   const [showReviewSummary, setShowReviewSummary] = useState(false);
   const [reviewDismissKey, setReviewDismissKey] = useState('');
   const [reviewLoginKey, setReviewLoginKey] = useState('');
-  const [presenceUsers, setPresenceUsers] = useState<PresenceUser[]>([]);
-
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -199,40 +187,11 @@ export default function Dashboard() {
     load();
   }, [user?.id, user?.role]);
 
-  useEffect(() => {
-    if (!user || !isAdminRole(user.role)) return;
-
-    const loadPresence = () => {
-      api.get('/users/presence')
-        .then(res => setPresenceUsers(Array.isArray(res.data) ? res.data : []))
-        .catch(() => setPresenceUsers([]));
-    };
-
-    loadPresence();
-    const timer = window.setInterval(loadPresence, 30000);
-    return () => window.clearInterval(timer);
-  }, [user?.id, user?.role]);
-
-  const presenceByUserId = useMemo(
-    () => new Map(presenceUsers.map(member => [member.id, member])),
-    [presenceUsers]
-  );
-  const currentPresence = user?.id ? presenceByUserId.get(user.id) : null;
-  const currentUserOnline = !!user && (!currentPresence || Number(currentPresence.is_online) === 1);
-
   if (loading) return <Loading />;
 
   const firstName = user?.name?.split(' ')[0] || 'there';
   const now = new Date();
   const reviewSummaryTotal = reviewSummaries.reduce((sum, project) => sum + project.change_count, 0);
-
-  const openDirectMessage = (event: React.MouseEvent, targetUserId: string) => {
-    event.preventDefault();
-    event.stopPropagation();
-    window.dispatchEvent(new CustomEvent('buildtrack-open-chat', {
-      detail: { recipientId: targetUserId === user?.id ? '' : targetUserId },
-    }));
-  };
 
   const closeReviewSummary = () => {
     if (reviewDismissKey) sessionStorage.setItem(reviewDismissKey, '1');
@@ -417,20 +376,6 @@ export default function Dashboard() {
                   <p className="text-xs font-semibold text-slate-400">{recentNotes.length} notes across all projects</p>
                 </div>
               </div>
-              {user && (
-                <div
-                  className="hidden items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black sm:inline-flex"
-                  style={{
-                    background: currentUserOnline ? 'rgba(16,185,129,0.14)' : 'rgba(148,163,184,0.12)',
-                    color: currentUserOnline ? '#A7F3D0' : '#CBD5E1',
-                    border: `1px solid ${currentUserOnline ? 'rgba(16,185,129,0.42)' : 'rgba(148,163,184,0.28)'}`,
-                  }}
-                  title="Your BuildTrack IM availability"
-                >
-                  <span className={`h-2.5 w-2.5 rounded-full ${currentUserOnline ? 'bg-green-400 animate-pulse' : 'bg-slate-400'}`} />
-                  {currentUserOnline ? 'You are online - IM ready' : 'IM status offline'}
-                </div>
-              )}
             </div>
 
             {recentNotes.length === 0 ? (
@@ -447,8 +392,6 @@ export default function Dashboard() {
             ) : (
               <div className="max-h-[660px] min-h-[560px] space-y-3 overflow-y-auto p-4">
                 {recentNotes.map((note) => {
-                  const notePresence = presenceByUserId.get(note.user_id);
-                  const noteUserOnline = Number(notePresence?.is_online) === 1 || note.user_id === user?.id;
                   const noteStyle = getNoteTypeStyle(note.note_type);
                   const statusStyle = getProjectStatusStyle(note.project_status);
                   return (
@@ -487,20 +430,6 @@ export default function Dashboard() {
                             {getInitials(note.user_name)}
                           </div>
                         )}
-                        <span
-                          className={`absolute -bottom-1 -right-1 h-3.5 w-3.5 rounded-full border-2 border-slate-900 ${noteUserOnline ? 'bg-green-400' : 'bg-slate-500'}`}
-                          title={noteUserOnline ? `${note.user_name} is online` : `${note.user_name} is offline`}
-                        />
-                        <button
-                          type="button"
-                          onClick={event => openDirectMessage(event, note.user_id)}
-                          className="absolute -right-2.5 -top-2.5 flex h-6 w-6 items-center justify-center rounded-full border bg-slate-950 text-white shadow-md transition-colors hover:bg-amber-600"
-                          style={{ borderColor: 'rgba(255,255,255,0.18)' }}
-                          title={note.user_id === user?.id ? 'Open IM chat' : `IM ${note.user_name}`}
-                          aria-label={note.user_id === user?.id ? 'Open IM chat' : `IM ${note.user_name}`}
-                        >
-                          <MessageSquare className="h-3 w-3" />
-                        </button>
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
@@ -518,12 +447,6 @@ export default function Dashboard() {
                           >
                             {statusStyle.label}
                           </span>
-                          {note.user_id === user?.id && currentUserOnline && (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-green-400/40 bg-green-400/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-green-200">
-                              <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
-                              Live
-                            </span>
-                          )}
                         </div>
                         <p className="mt-2 line-clamp-2 whitespace-pre-wrap text-sm leading-6 text-slate-100">
                           {note.note}
