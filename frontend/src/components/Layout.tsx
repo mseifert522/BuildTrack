@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { useAuthStore, roleLabels, canManageUsers, canAccessSettings, isAdminRole } from '../store/authStore';
+import { useAuthStore, roleLabels, canManageUsers, canAccessSettings, canAccessSecurity, isAdminRole } from '../store/authStore';
 import {
   LayoutDashboard, FolderOpen, ClipboardList, FileText,
   Users, Settings, LogOut, Menu, X, Bell, ChevronRight,
-  Camera, Search, Trash2, Truck
+  Camera, Search, Trash2, Truck, ShieldCheck
 } from 'lucide-react';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
@@ -147,6 +147,7 @@ export default function Layout({ children }: LayoutProps) {
     { to: '/invoices', icon: FileText, label: 'Invoices' },
     { to: '/contractors', icon: Users, label: 'Contractors' },
     { to: '/suppliers', icon: Truck, label: 'Suppliers' },
+    ...(user && canAccessSecurity(user.role) ? [{ to: '/security', icon: ShieldCheck, label: 'Security' }] : []),
   ];
 
   const isActive = (path: string) => location.pathname.startsWith(path);
@@ -157,6 +158,7 @@ export default function Layout({ children }: LayoutProps) {
     '/invoices': 'Invoices',
     '/contractors': 'Contractors',
     '/suppliers': 'Suppliers',
+    '/security': 'Security',
     '/users': 'Users',
     '/settings': 'Settings',
   };

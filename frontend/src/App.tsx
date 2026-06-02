@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
-import { useAuthStore, canManageUsers, canAccessSettings } from './store/authStore';
+import { useAuthStore, canManageUsers, canAccessSettings, canAccessSecurity } from './store/authStore';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -15,6 +15,7 @@ import Contractors from './pages/Contractors';
 import Suppliers from './pages/Suppliers';
 import Users from './pages/Users';
 import Settings from './pages/Settings';
+import Security from './pages/Security';
 import ChangePassword from './pages/ChangePassword';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
@@ -99,6 +100,15 @@ function SettingsRoute({ children }: { children: React.ReactNode }) {
   if (!token || !user) return <Navigate to="/login" replace />;
   if (user.force_password_reset) return <Navigate to="/change-password" replace />;
   if (!canAccessSettings(user.role)) return <Navigate to="/dashboard" replace />;
+  return <>{children}</>;
+}
+
+/** Only super_admin and operations_manager can access Security page */
+function SecurityRoute({ children }: { children: React.ReactNode }) {
+  const { user, token } = useAuthStore();
+  if (!token || !user) return <Navigate to="/login" replace />;
+  if (user.force_password_reset) return <Navigate to="/change-password" replace />;
+  if (!canAccessSecurity(user.role)) return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
 }
 
@@ -348,6 +358,11 @@ export default function App() {
           <SettingsRoute>
             <Layout><Settings /></Layout>
           </SettingsRoute>
+        } />
+        <Route path="/security" element={
+          <SecurityRoute>
+            <Layout><Security /></Layout>
+          </SecurityRoute>
         } />
 
         {/* Legacy contractor app entry points */}

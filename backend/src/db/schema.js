@@ -206,6 +206,7 @@ function initializeSchema() {
       avatar_url TEXT,
       last_login_at TEXT,
       last_seen_at TEXT,
+      session_revoked_at TEXT,
       is_active INTEGER NOT NULL DEFAULT 1,
       force_password_reset INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -527,6 +528,48 @@ function initializeSchema() {
       FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL,
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
+
+    -- Auth sessions and security control history
+    CREATE TABLE IF NOT EXISTS auth_sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      session_type TEXT NOT NULL DEFAULT 'desktop',
+      user_agent TEXT,
+      ip_address TEXT,
+      issued_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_seen_at TEXT,
+      revoked_at TEXT,
+      revoke_reason TEXT,
+      revoked_by TEXT,
+      details TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (revoked_by) REFERENCES users(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_active
+      ON auth_sessions(user_id, revoked_at, last_seen_at);
+
+    CREATE INDEX IF NOT EXISTS idx_auth_sessions_last_seen
+      ON auth_sessions(last_seen_at);
+
+    CREATE TABLE IF NOT EXISTS security_events (
+      id TEXT PRIMARY KEY,
+      actor_user_id TEXT NOT NULL,
+      target_user_id TEXT,
+      action TEXT NOT NULL,
+      reason TEXT,
+      ip_address TEXT,
+      user_agent TEXT,
+      details TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (actor_user_id) REFERENCES users(id),
+      FOREIGN KEY (target_user_id) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_security_events_created
+      ON security_events(created_at);
 
     -- Notifications
     CREATE TABLE IF NOT EXISTS notifications (
@@ -999,6 +1042,48 @@ function initializeSchema() {
   try { db.exec(`ALTER TABLE users ADD COLUMN avatar_url TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE users ADD COLUMN last_login_at TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE users ADD COLUMN last_seen_at TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE users ADD COLUMN session_revoked_at TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE auth_sessions ADD COLUMN details TEXT`); } catch (_) { /* already exists */ }
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS auth_sessions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        session_type TEXT NOT NULL DEFAULT 'desktop',
+        user_agent TEXT,
+        ip_address TEXT,
+        issued_at TEXT NOT NULL DEFAULT (datetime('now')),
+        last_seen_at TEXT,
+        revoked_at TEXT,
+        revoke_reason TEXT,
+        revoked_by TEXT,
+        details TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (revoked_by) REFERENCES users(id) ON DELETE SET NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_active
+        ON auth_sessions(user_id, revoked_at, last_seen_at);
+      CREATE INDEX IF NOT EXISTS idx_auth_sessions_last_seen
+        ON auth_sessions(last_seen_at);
+      CREATE TABLE IF NOT EXISTS security_events (
+        id TEXT PRIMARY KEY,
+        actor_user_id TEXT NOT NULL,
+        target_user_id TEXT,
+        action TEXT NOT NULL,
+        reason TEXT,
+        ip_address TEXT,
+        user_agent TEXT,
+        details TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (actor_user_id) REFERENCES users(id),
+        FOREIGN KEY (target_user_id) REFERENCES users(id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_security_events_created
+        ON security_events(created_at);
+    `);
+  } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE projects ADD COLUMN arv REAL`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE projects ADD COLUMN closing_costs REAL`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE projects ADD COLUMN main_photo_url TEXT`); } catch (_) { /* already exists */ }

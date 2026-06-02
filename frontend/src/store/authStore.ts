@@ -84,3 +84,7 @@ export const isAdminRole = (role: string) =>
 /** Can access Settings page */
 export const canAccessSettings = (role: string) =>
   ['super_admin', 'operations_manager'].includes(role);
+
+/** Can access Security controls */
+export const canAccessSecurity = (role: string) =>
+  ['super_admin', 'operations_manager'].includes(role);

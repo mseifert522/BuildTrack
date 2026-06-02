@@ -36,13 +36,21 @@ function shouldTrustDevice(value) {
   return value === true || value === 'true' || value === 1 || value === '1';
 }
 
-function markUserOnline(db, userId, includeLogin = false) {
+function markUserOnline(db, userId, includeLogin = false, sessionId = null) {
   db.prepare(`
     UPDATE users
     SET last_seen_at = datetime('now')${includeLogin ? ", last_login_at = datetime('now')" : ''},
         updated_at = datetime('now')
     WHERE id = ?
   `).run(userId);
+
+  if (sessionId) {
+    db.prepare(`
+      UPDATE auth_sessions
+      SET last_seen_at = datetime('now'), updated_at = datetime('now')
+      WHERE id = ? AND user_id = ? AND revoked_at IS NULL
+    `).run(sessionId, userId);
+  }
 }
 
 function publicUser(user) {
@@ -60,17 +68,37 @@ function publicUser(user) {
   };
 }
 
-function createSessionToken(user) {
+function createSessionToken(user, sessionId = null) {
   return jwt.sign(
-    { userId: user.id, role: user.role },
+    { userId: user.id, role: user.role, sid: sessionId || undefined },
     process.env.JWT_SECRET,
     { expiresIn: SESSION_EXPIRES_IN }
   );
 }
 
-function issueSession(db, user, details) {
-  const token = createSessionToken(user);
-  markUserOnline(db, user.id, true);
+function createAuthSession(db, user, req, details = null, sessionType = null) {
+  const sessionId = uuidv4();
+  const resolvedSessionType = sessionType || (user.role === 'contractor' ? 'mobile_app' : 'desktop');
+  db.prepare(`
+    INSERT INTO auth_sessions (
+      id, user_id, session_type, user_agent, ip_address, issued_at, last_seen_at, details
+    ) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'), ?)
+  `).run(
+    sessionId,
+    user.id,
+    resolvedSessionType,
+    req?.headers?.['user-agent'] || '',
+    req?.ip || '',
+    details ? JSON.stringify({ issued_via: details }) : null,
+  );
+
+  return sessionId;
+}
+
+function issueSession(db, user, details, req = null, sessionType = null) {
+  const sessionId = createAuthSession(db, user, req, details, sessionType);
+  const token = createSessionToken(user, sessionId);
+  markUserOnline(db, user.id, true, sessionId);
   logActivity({
     userId: user.id,
     action: 'user_login',
@@ -78,7 +106,7 @@ function issueSession(db, user, details) {
     entityId: user.id,
     details,
   });
-  return { token, user: publicUser(user) };
+  return { token, user: publicUser(user), session_id: sessionId };
 }
 
 function issueTrustedDevice(db, user, req, previousDeviceToken) {
@@ -186,13 +214,13 @@ router.post('/login', async (req, res) => {
     if (!valid) return res.status(401).json({ error: 'Invalid email or password' });
 
     if (!MANAGEMENT_ROLES.includes(user.role)) {
-      const payload = issueSession(db, user, { two_factor: 'not_required', trusted_device: trustDevice });
+      const payload = issueSession(db, user, { two_factor: 'not_required', trusted_device: trustDevice }, req);
       if (trustDevice) Object.assign(payload, issueTrustedDevice(db, user, req, device_token));
       return res.json(addMobileQuickAccess(payload, db, user, req));
     }
 
     if (isDeviceTrusted(db, user.id, device_token)) {
-      const payload = issueSession(db, user, { trusted_device: true });
+      const payload = issueSession(db, user, { trusted_device: true }, req);
       return res.json(addMobileQuickAccess(payload, db, user, req));
     }
 
@@ -208,7 +236,7 @@ router.post('/login', async (req, res) => {
       }
 
       db.prepare('UPDATE two_factor_codes SET used = 1 WHERE id = ?').run(codeRow.id);
-      const payload = issueSession(db, user, { two_factor: true, trusted_device: trustDevice });
+      const payload = issueSession(db, user, { two_factor: true, trusted_device: trustDevice }, req);
 
       if (trustDevice) {
         Object.assign(payload, issueTrustedDevice(db, user, req, device_token));
@@ -218,7 +246,7 @@ router.post('/login', async (req, res) => {
     }
 
     if (!process.env.SMTP_PASS || process.env.SMTP_PASS === 'REPLACE_WITH_RESEND_API_KEY') {
-      const payload = issueSession(db, user, { two_factor: 'skipped_no_smtp' });
+      const payload = issueSession(db, user, { two_factor: 'skipped_no_smtp' }, req);
       return res.json(addMobileQuickAccess(payload, db, user, req));
     }
 
@@ -280,7 +308,7 @@ router.post('/mobile-quick-access', async (req, res) => {
       WHERE token_hash = ?
     `).run(hashMobileQuickAccessToken(quickAccessToken));
 
-    const payload = issueSession(db, user, { mobile_quick_access: true });
+    const payload = issueSession(db, user, { mobile_quick_access: true }, req);
     payload.quick_access = {
       expires_at: user.quick_access_expires_at,
       expires_in_days: MOBILE_QUICK_ACCESS_DAYS,
@@ -316,7 +344,7 @@ router.post('/trusted-device-login', async (req, res) => {
       return res.status(401).json({ error: 'This trusted device approval has expired. Please sign in again.' });
     }
 
-    const payload = issueSession(db, user, { trusted_device_quick_login: true });
+    const payload = issueSession(db, user, { trusted_device_quick_login: true }, req);
     payload.device_token = device_token;
     payload.trusted_device_expires_at = user.trusted_device_expires_at;
     if (user.role === 'contractor') payload.projects = getLoginProjects(db, user);
@@ -346,12 +374,9 @@ router.post('/pin-login', async (req, res) => {
 
     const projects = getLoginProjects(db, user);
 
-    const token = createSessionToken(user);
-
     logActivity({ userId: user.id, action: 'pin_login', entityType: 'user', entityId: user.id });
-    markUserOnline(db, user.id, true);
-
-    const payload = { token, user: publicUser(user), projects };
+    const payload = issueSession(db, user, { pin_login: true, trusted_device: trustDevice }, req, 'mobile_app');
+    payload.projects = projects;
     if (trustDevice) Object.assign(payload, issueTrustedDevice(db, user, req, device_token));
 
     res.json(addMobileQuickAccess(payload, db, user, req));
@@ -446,7 +471,7 @@ router.post('/contractor/email-login/verify', async (req, res) => {
     if (!codeRow) return res.status(401).json({ error: 'Invalid or expired verification code' });
 
     db.prepare('UPDATE two_factor_codes SET used = 1 WHERE id = ?').run(codeRow.id);
-    const payload = issueSession(db, user, { contractor_email_2fa: true, trusted_device: trustDevice });
+    const payload = issueSession(db, user, { contractor_email_2fa: true, trusted_device: trustDevice }, req, 'mobile_app');
     payload.projects = getLoginProjects(db, user);
     if (trustDevice) Object.assign(payload, issueTrustedDevice(db, user, req, deviceToken));
 
@@ -538,8 +563,9 @@ router.get('/me', authenticate, (req, res) => {
 router.post('/refresh', authenticate, (req, res) => {
   try {
     const db = getDb();
-    markUserOnline(db, req.user.id, false);
-    res.json({ token: createSessionToken(req.user), user: publicUser(req.user) });
+    const sessionId = req.auth?.session_id || createAuthSession(db, req.user, req, { refresh_from_legacy_token: true });
+    markUserOnline(db, req.user.id, false, sessionId);
+    res.json({ token: createSessionToken(req.user, sessionId), user: publicUser(req.user) });
   } catch (err) {
     console.error('Token refresh error:', err);
     res.status(500).json({ error: 'Failed to refresh session' });
@@ -550,7 +576,7 @@ router.post('/refresh', authenticate, (req, res) => {
 router.post('/heartbeat', authenticate, (req, res) => {
   try {
     const db = getDb();
-    markUserOnline(db, req.user.id, false);
+    markUserOnline(db, req.user.id, false, req.auth?.session_id || null);
     res.json({ ok: true, last_seen_at: new Date().toISOString() });
   } catch (err) {
     console.error('Heartbeat error:', err);

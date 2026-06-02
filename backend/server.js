@@ -23,6 +23,7 @@ const { startGmailInvoicePoller } = require('./src/services/gmailInvoicePoller')
 const documentRoutes = require('./src/routes/documents');
 const contractorOnboardingRoutes = require('./src/routes/contractorOnboarding');
 const quoteAnalyticsRoutes = require('./src/routes/quoteAnalytics');
+const securityRoutes = require('./src/routes/security');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -85,6 +86,7 @@ app.use('/api/invoices/email-intake', invoiceEmailIntakeRoutes.authenticatedRout
 app.use('/api/documents', documentRoutes);
 app.use('/api/contractor-onboarding', contractorOnboardingRoutes);
 app.use('/api/quote-analytics', quoteAnalyticsRoutes.analyticsRouter);
+app.use('/api/security', securityRoutes);
 app.use('/api/projects/:projectId/quotes', quoteAnalyticsRoutes.projectQuotesRouter);
 app.use('/api/invoice-agent', (_req, res) => {
   res.status(404).json({ error: 'Endpoint removed' });

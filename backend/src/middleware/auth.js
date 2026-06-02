@@ -45,6 +45,37 @@ function extractApiKey(req, bearerToken) {
   return String(headerKey || bearerToken || '').trim();
 }
 
+function parseSqliteDateTime(value) {
+  if (!value) return 0;
+  const normalized = String(value).includes('T') ? String(value) : `${String(value).replace(' ', 'T')}Z`;
+  const timestamp = new Date(normalized).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function isTokenRevokedForUser(decoded, user) {
+  const revokedAt = parseSqliteDateTime(user.session_revoked_at);
+  if (!revokedAt || !decoded?.iat) return false;
+  return decoded.iat * 1000 <= revokedAt;
+}
+
+function touchSession(db, sessionId, userId) {
+  if (!sessionId) return null;
+  const session = db.prepare(`
+    SELECT id, revoked_at
+    FROM auth_sessions
+    WHERE id = ? AND user_id = ?
+    LIMIT 1
+  `).get(sessionId, userId);
+  if (!session || session.revoked_at) return session || { revoked_at: true };
+
+  db.prepare(`
+    UPDATE auth_sessions
+    SET last_seen_at = datetime('now'), updated_at = datetime('now')
+    WHERE id = ?
+  `).run(sessionId);
+  return session;
+}
+
 function authenticateApiKey(req, key) {
   const expectedHash = process.env.MAX_AI_API_KEY_HASH || '';
   if (!expectedHash || !key) return false;
@@ -97,9 +128,20 @@ function authenticate(req, res, next) {
       tokenBlacklist.add(token);
       return res.status(401).json({ error: 'Account has been deactivated. Contact your administrator.' });
     }
+    if (isTokenRevokedForUser(decoded, user)) {
+      tokenBlacklist.add(token);
+      return res.status(401).json({ error: 'Session terminated by security. Please log in again.' });
+    }
+    if (decoded.sid) {
+      const session = touchSession(db, decoded.sid, user.id);
+      if (!session || session.revoked_at) {
+        tokenBlacklist.add(token);
+        return res.status(401).json({ error: 'Session terminated by security. Please log in again.' });
+      }
+    }
     req.user = user;
     req.token = token;
-    req.auth = { type: 'jwt' };
+    req.auth = { type: 'jwt', session_id: decoded.sid || null, issued_at: decoded.iat || null };
     next();
   } catch (err) {
     return res.status(401).json({ error: 'Invalid or expired token' });
