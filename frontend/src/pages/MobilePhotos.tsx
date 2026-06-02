@@ -91,6 +91,7 @@ const PHOTO_LABELS = [
 const DEFAULT_PHOTO_LABEL = 'Progress';
 const SUPPORTED_MEDIA_TYPES = /^(image|video)\//;
 const SUPPORTED_FILE_EXTENSIONS = /\.(avif|bmp|dib|gif|heic|heif|jpe?g|jfif|pjpeg|pjp|png|tiff?|webp|dng|mp4|mov|qt|m4v|webm|avi|mkv|mpe?g|3gp|3g2|hevc|mts|m2ts)$/i;
+const MOBILE_PROGRESS_UPLOAD_CONCURRENCY = 4;
 
 function makeBatchId() {
   const random = typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -149,9 +150,11 @@ export default function MobilePhotos() {
   const [searchParams] = useSearchParams();
   const { user } = useAuthStore();
   const requestedProjectId = searchParams.get('projectId') || '';
+  const cameraFirstRequested = searchParams.get('camera') === '1' || searchParams.get('take') === '1';
   const storageKey = `buildtrack-mobile-photo-project:${user?.id || 'session'}`;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const cameraFirstHandledRef = useRef('');
   const previewUrlsRef = useRef<string[]>([]);
   const batchCameraVideoRef = useRef<HTMLVideoElement>(null);
   const batchCameraStreamRef = useRef<MediaStream | null>(null);
@@ -457,9 +460,9 @@ export default function MobilePhotos() {
     const failedIndexes = new Set<number>();
 
     try {
-      for (const index of indexes) {
+      const uploadOne = async (index: number) => {
         const file = previewFiles[index];
-        if (!file) continue;
+        if (!file) return;
         setUploadStatuses(statuses => statuses.map((status, itemIndex) => itemIndex === index ? 'uploading' : status));
         setUploadErrors(errors => errors.map((error, itemIndex) => itemIndex === index ? '' : error));
         setUploadProgress(progress => progress.map((value, itemIndex) => itemIndex === index ? Math.max(value, 5) : value));
@@ -507,7 +510,17 @@ export default function MobilePhotos() {
           setUploadProgress(progress => progress.map((value, itemIndex) => itemIndex === index ? 0 : value));
           setUploadErrors(errors => errors.map((error, itemIndex) => itemIndex === index ? message : error));
         }
-      }
+      };
+
+      let nextUploadIndex = 0;
+      const workerCount = Math.min(MOBILE_PROGRESS_UPLOAD_CONCURRENCY, indexes.length);
+      await Promise.all(Array.from({ length: workerCount }, async () => {
+        while (nextUploadIndex < indexes.length) {
+          const index = indexes[nextUploadIndex];
+          nextUploadIndex += 1;
+          await uploadOne(index);
+        }
+      }));
 
       if (successCount) {
         await loadPhotos(selectedProjectId);
@@ -590,10 +603,31 @@ export default function MobilePhotos() {
     setShowBatchCamera(true);
   };
 
+  const openCameraFirst = () => {
+    if (!selectedProjectId) {
+      setShowProjectSelector(true);
+      return;
+    }
+    setShowUploadOptions(false);
+    if (typeof navigator.mediaDevices?.getUserMedia === 'function') {
+      openBatchCamera();
+      return;
+    }
+    openCamera();
+  };
+
   const closeBatchCamera = () => {
     setShowBatchCamera(false);
     stopBatchCamera();
   };
+
+  useEffect(() => {
+    const requestKey = `${requestedProjectId || selectedProjectId}:camera`;
+    if (!cameraFirstRequested || cameraFirstHandledRef.current === requestKey || loading || !selectedProjectId) return;
+    cameraFirstHandledRef.current = requestKey;
+    setShowUploadOptions(false);
+    setShowBatchCamera(true);
+  }, [cameraFirstRequested, loading, requestedProjectId, selectedProjectId]);
 
   const projectSelector = (
     <div style={{ position: 'fixed', inset: 0, zIndex: 220, background: 'rgba(13,17,23,0.88)', display: 'flex', alignItems: 'flex-end' }}>
@@ -693,11 +727,18 @@ export default function MobilePhotos() {
             </span>
           </button>
           <button
-            onClick={openUploadOptions}
-            style={{ minHeight: 48, width: '100%', border: 'none', borderRadius: 13, padding: '10px 14px', background: 'linear-gradient(135deg, #D99D26, #C4891F)', color: 'white', fontSize: 13, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, whiteSpace: 'normal', textAlign: 'center', lineHeight: 1.15 }}
+            onClick={openCameraFirst}
+            style={{ minHeight: 50, width: '100%', border: 'none', borderRadius: 13, padding: '11px 14px', background: 'linear-gradient(135deg, #D99D26, #C4891F)', color: 'white', fontSize: 14, fontWeight: 950, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, whiteSpace: 'normal', textAlign: 'center', lineHeight: 1.15, boxShadow: '0 10px 20px rgba(217,157,38,0.24)' }}
           >
-            <Camera size={17} color="white" />
-            Add Photos
+            <Camera size={18} color="white" />
+            Take Progress Pictures
+          </button>
+          <button
+            onClick={openUploadOptions}
+            style={{ minHeight: 44, width: '100%', border: '1px solid rgba(255,255,255,0.16)', borderRadius: 13, padding: '9px 14px', background: 'rgba(255,255,255,0.09)', color: 'white', fontSize: 12, fontWeight: 850, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, whiteSpace: 'normal', textAlign: 'center', lineHeight: 1.15 }}
+          >
+            <ImagePlus size={16} color="#D99D26" />
+            Upload From Device
           </button>
         </div>
       </div>
@@ -715,6 +756,7 @@ export default function MobilePhotos() {
         type="file"
         accept="image/*"
         capture="environment"
+        multiple
         onChange={handleFileSelect}
         style={{ display: 'none' }}
       />
@@ -891,16 +933,16 @@ export default function MobilePhotos() {
                 style={{ minHeight: 44, border: '1px solid #F3D08A', borderRadius: 12, background: '#FFFBEB', color: '#92400E', fontSize: 12, fontWeight: 850, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
               >
                 <ImagePlus size={15} color="#D99D26" />
-                Add More
+                Upload From Device
               </button>
               <button
-                onClick={openBatchCamera}
+                onClick={openCameraFirst}
                 type="button"
                 disabled={uploading}
                 style={{ minHeight: 44, border: '1px solid #D1D5DB', borderRadius: 12, background: '#F9FAFB', color: '#374151', fontSize: 12, fontWeight: 850, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
               >
                 <Camera size={15} color="#374151" />
-                Batch Camera
+                Take More Pictures
               </button>
             </div>
             <button
@@ -950,6 +992,14 @@ export default function MobilePhotos() {
             <ImagePlus size={42} color="#D1D5DB" />
             <p style={{ margin: '12px 0 4px', color: '#374151', fontSize: 15, fontWeight: 850 }}>No progress photos yet</p>
             <p style={{ margin: 0, color: '#9CA3AF', fontSize: 12 }}>Choose multiple pictures at once, or open the camera and add shots before uploading.</p>
+            <button
+              type="button"
+              onClick={openCameraFirst}
+              style={{ marginTop: 16, width: '100%', minHeight: 46, border: 'none', borderRadius: 13, background: 'linear-gradient(135deg, #D99D26, #C4891F)', color: 'white', fontSize: 13, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}
+            >
+              <Camera size={17} color="white" />
+              Take Progress Pictures
+            </button>
           </div>
         ) : visiblePhotos.length === 0 ? (
           <div style={{ textAlign: 'center', background: 'white', borderRadius: 18, padding: '34px 18px', boxShadow: '0 1px 8px rgba(0,0,0,0.06)' }}>
@@ -1032,19 +1082,19 @@ export default function MobilePhotos() {
             style={{ width: '100%', background: 'white', borderRadius: '22px 22px 0 0', padding: '18px 14px 24px', boxShadow: '0 -14px 30px rgba(0,0,0,0.18)' }}
           >
             <div style={{ width: 42, height: 4, background: '#E5E7EB', borderRadius: 2, margin: '0 auto 14px' }} />
-            <p style={{ margin: 0, color: '#111827', fontSize: 18, fontWeight: 900 }}>Add Photos</p>
+            <p style={{ margin: 0, color: '#111827', fontSize: 18, fontWeight: 900 }}>Add Progress Media</p>
             <p style={{ margin: '4px 0 16px', color: '#6B7280', fontSize: 12, lineHeight: 1.45 }}>
               Capture photos or select a whole batch before sending it to the project.
             </p>
             <div style={{ display: 'grid', gap: 10 }}>
               <button
                 type="button"
-                onClick={openBatchCamera}
+                onClick={openCameraFirst}
                 style={{ minHeight: 64, border: 'none', borderRadius: 16, background: 'linear-gradient(135deg, #D99D26, #C4891F)', color: 'white', padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left' }}
               >
                 <Camera size={22} color="white" />
                 <span style={{ display: 'block' }}>
-                  <span style={{ display: 'block', fontSize: 14, fontWeight: 900 }}>Start Batch Camera</span>
+                  <span style={{ display: 'block', fontSize: 14, fontWeight: 900 }}>Take Progress Pictures</span>
                   <span style={{ display: 'block', marginTop: 2, fontSize: 11, fontWeight: 700, opacity: 0.82 }}>Take several photos without leaving this screen</span>
                 </span>
               </button>
@@ -1058,7 +1108,7 @@ export default function MobilePhotos() {
               >
                 <ImagePlus size={21} color="#D99D26" />
                 <span style={{ display: 'block' }}>
-                  <span style={{ display: 'block', fontSize: 14, fontWeight: 900 }}>Choose Multiple From Library</span>
+                  <span style={{ display: 'block', fontSize: 14, fontWeight: 900 }}>Upload From Device</span>
                   <span style={{ display: 'block', marginTop: 2, fontSize: 11, fontWeight: 700, color: '#6B7280' }}>Select many photos or videos at one time</span>
                 </span>
               </button>
@@ -1086,7 +1136,7 @@ export default function MobilePhotos() {
               <X size={20} color="white" />
             </button>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <p style={{ margin: 0, fontSize: 14, fontWeight: 900 }}>Batch Camera</p>
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 900 }}>Take Progress Pictures</p>
               <p style={{ margin: '2px 0 0', fontSize: 11, opacity: 0.72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {selectedProject?.address || 'Selected project'}
               </p>
@@ -1111,7 +1161,11 @@ export default function MobilePhotos() {
                 <div style={{ display: 'grid', gap: 8 }}>
                   <button
                     type="button"
-                    onClick={openCamera}
+                    onClick={() => {
+                      stopBatchCamera();
+                      setShowBatchCamera(false);
+                      cameraInputRef.current?.click();
+                    }}
                     style={{ minHeight: 44, border: 'none', borderRadius: 12, background: '#D99D26', color: 'white', fontSize: 13, fontWeight: 900 }}
                   >
                     Use Device Camera

@@ -118,7 +118,7 @@ export default function MobileProjectHub() {
         </p>
 
         <button
-          onClick={() => navigate(`/mobile/photos?projectId=${id}`)}
+          onClick={() => navigate(`/mobile/photos?projectId=${id}&camera=1`)}
           style={{
             width: '100%',
             textAlign: 'left',
@@ -134,18 +134,37 @@ export default function MobileProjectHub() {
             justifyContent: 'space-between',
             minHeight: 88,
           }}
-          aria-label="Upload progress pictures"
+          aria-label="Take progress pictures"
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <div style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
               <Camera size={28} color="white" />
             </div>
             <div>
-              <p style={{ fontWeight: 900, color: 'white', fontSize: 17, margin: 0 }}>Add Photos</p>
-              <p style={{ color: 'rgba(255,255,255,0.82)', fontSize: 13, margin: '4px 0 0' }}>Capture or upload a full progress batch</p>
+              <p style={{ fontWeight: 900, color: 'white', fontSize: 17, margin: 0 }}>Take Progress Pictures</p>
+              <p style={{ color: 'rgba(255,255,255,0.82)', fontSize: 13, margin: '4px 0 0' }}>Open the camera and upload a progress batch</p>
             </div>
           </div>
           <svg width="20" height="20" fill="none" stroke="white" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+
+        <button
+          onClick={() => navigate(`/mobile/photos?projectId=${id}`)}
+          style={{ width: '100%', textAlign: 'left', backgroundColor: 'white', borderRadius: 16, boxShadow: '0 1px 4px rgba(0,0,0,0.08)', padding: 18, border: '1px solid #F3F4F6', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+          aria-label="Upload progress photos from device"
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div style={{ width: 50, height: 50, borderRadius: 15, backgroundColor: '#FFFBEB', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Camera size={24} color="#D99D26" />
+            </div>
+            <div>
+              <p style={{ fontWeight: 800, color: '#111827', fontSize: 15, margin: 0 }}>Upload Progress Photos</p>
+              <p style={{ color: '#9CA3AF', fontSize: 12, margin: '4px 0 0' }}>Choose existing photos or videos from the device</p>
+            </div>
+          </div>
+          <svg width="20" height="20" fill="none" stroke="#D1D5DB" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
           </svg>
         </button>

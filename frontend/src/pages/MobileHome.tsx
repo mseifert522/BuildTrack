@@ -292,7 +292,7 @@ export default function MobileHome() {
 
                 <div style={{ padding: '0 12px 12px' }}>
                   <button
-                    onClick={() => navigate(`/mobile/photos?projectId=${project.id}`)}
+                    onClick={() => navigate(`/mobile/photos?projectId=${project.id}&camera=1`)}
                     style={{
                       minHeight: 48,
                       width: '100%',
@@ -308,10 +308,10 @@ export default function MobileHome() {
                       gap: 8,
                       boxShadow: '0 6px 14px rgba(217,157,38,0.22)',
                     }}
-                    aria-label={`Upload progress pictures to ${project.address}`}
+                    aria-label={`Take progress pictures for ${project.address}`}
                   >
                     <Camera size={18} color="white" />
-                    Add Photos
+                    Take Progress Pictures
                   </button>
                 </div>
 
@@ -333,7 +333,7 @@ export default function MobileHome() {
         {tab === 'photos' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <button
-              onClick={() => navigate(rememberedProject ? `/mobile/photos?projectId=${rememberedProject.id}` : '/mobile/photos')}
+              onClick={() => navigate(rememberedProject ? `/mobile/photos?projectId=${rememberedProject.id}&camera=1` : '/mobile/photos')}
               style={{ width: '100%', border: 'none', borderRadius: 18, padding: 16, textAlign: 'left', background: 'linear-gradient(135deg, #D99D26, #C4891F)', color: 'white', boxShadow: '0 8px 18px rgba(217,157,38,0.22)' }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -341,7 +341,7 @@ export default function MobileHome() {
                   <Camera size={22} color="white" />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ margin: 0, fontSize: 15, fontWeight: 900 }}>Add Photos</p>
+                  <p style={{ margin: 0, fontSize: 15, fontWeight: 900 }}>Take Progress Pictures</p>
                   <p style={{ margin: '3px 0 0', fontSize: 12, opacity: 0.82, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {rememberedProject ? `Continue with ${rememberedProject.address}` : 'Choose a project before uploading photos or videos'}
                   </p>
@@ -356,13 +356,13 @@ export default function MobileHome() {
             {filteredProjects.map(project => (
               <button
                 key={project.id}
-                onClick={() => navigate(`/mobile/photos?projectId=${project.id}`)}
+                onClick={() => navigate(`/mobile/photos?projectId=${project.id}&camera=1`)}
                 style={{ width: '100%', border: 'none', background: 'white', borderRadius: 15, padding: 13, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10, boxShadow: '0 1px 8px rgba(0,0,0,0.06)' }}
               >
                 <Camera size={18} color="#D99D26" />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <p style={{ color: '#111827', margin: 0, fontSize: 13, fontWeight: 850, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{project.address}</p>
-                  <p style={{ color: '#6B7280', margin: '2px 0 0', fontSize: 11 }}>Capture or upload timestamped batches</p>
+                  <p style={{ color: '#6B7280', margin: '2px 0 0', fontSize: 11 }}>Open camera and upload timestamped batches</p>
                 </div>
                 <ChevronRight size={16} color="#9CA3AF" />
               </button>
