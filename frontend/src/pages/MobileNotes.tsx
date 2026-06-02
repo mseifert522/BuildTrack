@@ -9,7 +9,7 @@ import {
   Camera, ImagePlus, PlayCircle,
 } from 'lucide-react';
 import { formatEasternDate, formatEasternDateTime, formatEasternRelative } from '../lib/time';
-import { appendProgressUploadAudit } from '../lib/progressUpload';
+import { appendProgressUploadAudit, PROGRESS_MEDIA_ACCEPT } from '../lib/progressUpload';
 
 interface NotePhoto {
   id: string;
@@ -695,7 +695,7 @@ export default function MobileNotes() {
         <input
           ref={noteFileInputRef}
           type="file"
-          accept="image/*,video/*"
+          accept={PROGRESS_MEDIA_ACCEPT}
           multiple
           className="hidden"
           onChange={event => queueNoteFiles(event.target.files)}
@@ -703,7 +703,7 @@ export default function MobileNotes() {
         <input
           ref={attachExistingInputRef}
           type="file"
-          accept="image/*,video/*"
+          accept={PROGRESS_MEDIA_ACCEPT}
           multiple
           className="hidden"
           onChange={event => attachFilesToExistingNote(event.target.files)}

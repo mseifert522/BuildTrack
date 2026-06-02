@@ -1,6 +1,40 @@
 import exifr from 'exifr';
 
-export const MAX_PROGRESS_UPLOAD_FILES = 20;
+export const PROGRESS_MEDIA_ACCEPT = [
+  'image/*',
+  'video/*',
+  '.avif',
+  '.bmp',
+  '.dib',
+  '.gif',
+  '.heic',
+  '.heif',
+  '.jpeg',
+  '.jpg',
+  '.jpe',
+  '.jfif',
+  '.pjpeg',
+  '.pjp',
+  '.png',
+  '.tif',
+  '.tiff',
+  '.webp',
+  '.dng',
+  '.mp4',
+  '.mov',
+  '.qt',
+  '.m4v',
+  '.webm',
+  '.avi',
+  '.mkv',
+  '.mpeg',
+  '.mpg',
+  '.3gp',
+  '.3g2',
+  '.hevc',
+  '.mts',
+  '.m2ts',
+].join(',');
 export const MAX_PROGRESS_IMAGE_DIMENSION = 2200;
 export const PROGRESS_IMAGE_QUALITY = 0.86;
 

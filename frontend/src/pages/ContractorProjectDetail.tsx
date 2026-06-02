@@ -4,6 +4,7 @@ import { ArrowLeft, MessageSquare, Camera, ClipboardList, Plus, Send, Trash2, Up
 import api from '../lib/api';
 import toast from 'react-hot-toast';
 import { formatEasternRelative } from '../lib/time';
+import { PROGRESS_MEDIA_ACCEPT } from '../lib/progressUpload';
 
 type Tab = 'plan' | 'notes' | 'photos' | 'punch';
 
@@ -286,7 +287,7 @@ export default function ContractorProjectDetail() {
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*,video/*"
+              accept={PROGRESS_MEDIA_ACCEPT}
               multiple
               style={{ display: 'none' }}
               onChange={e => { if (e.target.files && e.target.files.length > 0) uploadPhotos(e.target.files); e.currentTarget.value = ''; }}

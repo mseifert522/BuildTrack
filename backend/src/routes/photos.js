@@ -27,11 +27,43 @@ const PHOTO_LABELS = new Set([
   'Safety Concern',
   'Other',
 ]);
-const IMAGE_EXTENSIONS = new Set(['.jpeg', '.jpg', '.png', '.gif', '.webp', '.heic', '.heif']);
-const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.m4v', '.webm', '.avi', '.mkv', '.mpeg', '.mpg', '.3gp']);
+const IMAGE_EXTENSIONS = new Set([
+  '.avif',
+  '.bmp',
+  '.dib',
+  '.gif',
+  '.heic',
+  '.heif',
+  '.jpeg',
+  '.jpg',
+  '.jpe',
+  '.jfif',
+  '.pjpeg',
+  '.pjp',
+  '.png',
+  '.tif',
+  '.tiff',
+  '.webp',
+  '.dng',
+]);
+const VIDEO_EXTENSIONS = new Set([
+  '.mp4',
+  '.mov',
+  '.qt',
+  '.m4v',
+  '.webm',
+  '.avi',
+  '.mkv',
+  '.mpeg',
+  '.mpg',
+  '.3gp',
+  '.3g2',
+  '.hevc',
+  '.mts',
+  '.m2ts',
+]);
 const configuredMediaMaxMb = Number.parseInt(process.env.PROJECT_MEDIA_MAX_MB || '500', 10);
 const MEDIA_FILE_SIZE_LIMIT = (Number.isFinite(configuredMediaMaxMb) ? configuredMediaMaxMb : 500) * 1024 * 1024;
-const MAX_BATCH_FILES = 20;
 
 function sanitizePathSegment(value, fallback) {
   const cleaned = String(value || '')
@@ -164,24 +196,28 @@ const storage = multer.diskStorage({
 const fileFilter = (req, file, cb) => {
   const ext = path.extname(file.originalname).toLowerCase();
   const mime = String(file.mimetype || '').toLowerCase();
+  const hasAllowedMediaExtension = IMAGE_EXTENSIONS.has(ext) || VIDEO_EXTENSIONS.has(ext);
   const isImage = IMAGE_EXTENSIONS.has(ext) || mime.startsWith('image/') || mime === 'image/heic' || mime === 'image/heif';
-  const isVideo = VIDEO_EXTENSIONS.has(ext) || mime.startsWith('video/') || mime === 'application/mp4' || mime === 'application/quicktime';
+  const isVideo = VIDEO_EXTENSIONS.has(ext)
+    || mime.startsWith('video/')
+    || mime === 'application/mp4'
+    || mime === 'application/quicktime'
+    || mime === 'application/x-mpegurl'
+    || (mime === 'application/octet-stream' && hasAllowedMediaExtension);
   if (isImage || isVideo) cb(null, true);
   else cb(new Error('Only image or video files are allowed'));
 };
 
-const upload = multer({ storage, fileFilter, limits: { fileSize: MEDIA_FILE_SIZE_LIMIT, files: MAX_BATCH_FILES } });
+const upload = multer({ storage, fileFilter, limits: { fileSize: MEDIA_FILE_SIZE_LIMIT } });
 
 function uploadProjectPhotos(req, res, next) {
-  upload.array('photos', MAX_BATCH_FILES)(req, res, err => {
+  upload.array('photos')(req, res, err => {
     if (!err) return next();
     cleanupUploadedFiles(req.files);
-    const status = err.code === 'LIMIT_FILE_SIZE' || err.code === 'LIMIT_FILE_COUNT' ? 413 : 400;
+    const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
     const message = err.code === 'LIMIT_FILE_SIZE'
       ? `Each file must be ${configuredMediaMaxMb}MB or less`
-      : err.code === 'LIMIT_FILE_COUNT'
-        ? `Upload batches are limited to ${MAX_BATCH_FILES} files`
-        : err.message || 'Upload rejected';
+      : err.message || 'Upload rejected';
     return res.status(status).json({ error: message });
   });
 }

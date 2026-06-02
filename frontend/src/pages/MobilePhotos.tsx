@@ -25,7 +25,7 @@ import api from '../lib/api';
 import { useAuthStore } from '../store/authStore';
 import {
   appendProgressUploadAudit,
-  MAX_PROGRESS_UPLOAD_FILES,
+  PROGRESS_MEDIA_ACCEPT,
   prepareProgressUploadFile,
   type ProgressCaptureSource,
 } from '../lib/progressUpload';
@@ -90,7 +90,7 @@ const PHOTO_LABELS = [
 
 const DEFAULT_PHOTO_LABEL = 'Progress';
 const SUPPORTED_MEDIA_TYPES = /^(image|video)\//;
-const SUPPORTED_FILE_EXTENSIONS = /\.(jpe?g|png|webp|heic|heif|mp4|mov|m4v|webm|avi|mkv|mpeg|mpg|3gp)$/i;
+const SUPPORTED_FILE_EXTENSIONS = /\.(avif|bmp|dib|gif|heic|heif|jpe?g|jfif|pjpeg|pjp|png|tiff?|webp|dng|mp4|mov|qt|m4v|webm|avi|mkv|mpe?g|3gp|3g2|hevc|mts|m2ts)$/i;
 
 function makeBatchId() {
   const random = typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -304,18 +304,12 @@ export default function MobilePhotos() {
     if (!files.length) return;
     const validFiles = files.filter(isSupportedFile);
     if (validFiles.length < files.length) {
-      window.setTimeout(() => toast.error('Unsupported files were skipped. Use JPG, PNG, HEIC, WebP, or common video formats.'), 0);
+      window.setTimeout(() => toast.error('Unsupported files were skipped. Use image or video media files.'), 0);
     }
     if (!validFiles.length) return;
     setPreviewFiles(current => {
       const existing = new Set(current.map(fileKey));
-      const nextFiles = validFiles.filter(file => !existing.has(fileKey(file)));
-      if (!nextFiles.length) return current;
-      const availableSlots = Math.max(0, MAX_PROGRESS_UPLOAD_FILES - current.length);
-      const acceptedFiles = nextFiles.slice(0, availableSlots);
-      if (acceptedFiles.length < nextFiles.length) {
-        window.setTimeout(() => toast.error(`Upload batches are limited to ${MAX_PROGRESS_UPLOAD_FILES} items`), 0);
-      }
+      const acceptedFiles = validFiles.filter(file => !existing.has(fileKey(file)));
       if (!acceptedFiles.length) return current;
       setActiveBatchId(value => value || makeBatchId());
       setPreviewUrls(urls => [...urls, ...acceptedFiles.map(file => URL.createObjectURL(file))]);
@@ -454,11 +448,6 @@ export default function MobilePhotos() {
       return { successCount: 0, failedCount: indexes.length };
     }
     if (!previewFiles.length) return;
-    if (previewFiles.length > MAX_PROGRESS_UPLOAD_FILES) {
-      toast.error(`Upload batches are limited to ${MAX_PROGRESS_UPLOAD_FILES} items`);
-      return { successCount: 0, failedCount: indexes.length };
-    }
-
     setUploading(true);
     const batchId = activeBatchId || makeBatchId();
     setActiveBatchId(batchId);
@@ -716,7 +705,7 @@ export default function MobilePhotos() {
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*,video/*"
+        accept={PROGRESS_MEDIA_ACCEPT}
         multiple
         onChange={handleFileSelect}
         style={{ display: 'none' }}
@@ -898,7 +887,7 @@ export default function MobilePhotos() {
               <button
                 onClick={openFilePicker}
                 type="button"
-                disabled={uploading || previewFiles.length >= MAX_PROGRESS_UPLOAD_FILES}
+                disabled={uploading}
                 style={{ minHeight: 44, border: '1px solid #F3D08A', borderRadius: 12, background: '#FFFBEB', color: '#92400E', fontSize: 12, fontWeight: 850, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
               >
                 <ImagePlus size={15} color="#D99D26" />
@@ -907,7 +896,7 @@ export default function MobilePhotos() {
               <button
                 onClick={openBatchCamera}
                 type="button"
-                disabled={uploading || previewFiles.length >= MAX_PROGRESS_UPLOAD_FILES}
+                disabled={uploading}
                 style={{ minHeight: 44, border: '1px solid #D1D5DB', borderRadius: 12, background: '#F9FAFB', color: '#374151', fontSize: 12, fontWeight: 850, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
               >
                 <Camera size={15} color="#374151" />
@@ -1103,7 +1092,7 @@ export default function MobilePhotos() {
               </p>
             </div>
             <div style={{ borderRadius: 999, background: 'rgba(217,157,38,0.18)', color: '#FBD38D', padding: '8px 11px', fontSize: 12, fontWeight: 900 }}>
-              {previewFiles.length}/{MAX_PROGRESS_UPLOAD_FILES} queued
+              {previewFiles.length} queued
             </div>
           </div>
 
@@ -1172,16 +1161,15 @@ export default function MobilePhotos() {
               <button
                 type="button"
                 onClick={openFilePicker}
-                disabled={previewFiles.length >= MAX_PROGRESS_UPLOAD_FILES}
-                style={{ minHeight: 46, border: '1px solid rgba(255,255,255,0.14)', borderRadius: 14, background: 'rgba(255,255,255,0.08)', color: 'white', fontSize: 12, fontWeight: 850, opacity: previewFiles.length >= MAX_PROGRESS_UPLOAD_FILES ? 0.48 : 1 }}
+                style={{ minHeight: 46, border: '1px solid rgba(255,255,255,0.14)', borderRadius: 14, background: 'rgba(255,255,255,0.08)', color: 'white', fontSize: 12, fontWeight: 850 }}
               >
                 Add Library
               </button>
               <button
                 type="button"
                 onClick={captureBatchPhoto}
-                disabled={!cameraReady || Boolean(cameraError) || previewFiles.length >= MAX_PROGRESS_UPLOAD_FILES}
-                style={{ width: 76, height: 76, borderRadius: 38, border: '5px solid rgba(255,255,255,0.65)', background: cameraReady && !cameraError && previewFiles.length < MAX_PROGRESS_UPLOAD_FILES ? '#D99D26' : '#6B7280', boxShadow: '0 0 0 5px rgba(255,255,255,0.14)', opacity: cameraReady && !cameraError && previewFiles.length < MAX_PROGRESS_UPLOAD_FILES ? 1 : 0.6 }}
+                disabled={!cameraReady || Boolean(cameraError)}
+                style={{ width: 76, height: 76, borderRadius: 38, border: '5px solid rgba(255,255,255,0.65)', background: cameraReady && !cameraError ? '#D99D26' : '#6B7280', boxShadow: '0 0 0 5px rgba(255,255,255,0.14)', opacity: cameraReady && !cameraError ? 1 : 0.6 }}
                 aria-label="Capture progress photo"
               />
               <button

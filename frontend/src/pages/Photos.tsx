@@ -5,7 +5,7 @@ import { Loading } from '../components/ui';
 import { Camera, Grid, List, PlayCircle, X } from 'lucide-react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
-import { appendProgressUploadAudit } from '../lib/progressUpload';
+import { appendProgressUploadAudit, PROGRESS_MEDIA_ACCEPT } from '../lib/progressUpload';
 
 interface Photo {
   id: string;
@@ -163,7 +163,7 @@ export default function Photos() {
             ref={fileInputRef}
             type="file"
             multiple
-            accept="image/*,video/*"
+            accept={PROGRESS_MEDIA_ACCEPT}
             disabled={!selectedProject || uploading}
             onChange={e => uploadMedia(e.target.files)}
             className="hidden"

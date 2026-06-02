@@ -10,7 +10,7 @@ import { format } from 'date-fns';
 import GooglePlacesInput from '../components/GooglePlacesInput';
 import CurrencyInput from '../components/CurrencyInput';
 import { formatEasternDate, formatEasternDateTime } from '../lib/time';
-import { appendProgressUploadAudit, type ProgressCaptureSource } from '../lib/progressUpload';
+import { appendProgressUploadAudit, PROGRESS_MEDIA_ACCEPT, type ProgressCaptureSource } from '../lib/progressUpload';
 
 type Tab = 'overview' | 'progress-history' | 'construction-plan' | 'quotes' | 'punch-list' | 'photos' | 'invoices' | 'activity' | 'notes' | 'team';
 
@@ -333,7 +333,7 @@ export default function ProjectDetail() {
         ref={attachExistingNoteInputRef}
         type="file"
         multiple
-        accept="image/*,video/*"
+        accept={PROGRESS_MEDIA_ACCEPT}
         className="hidden"
         onChange={event => attachProgressPicturesToExistingNote(event.target.files)}
       />
@@ -377,7 +377,7 @@ export default function ProjectDetail() {
         <label className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer">
           <input
             type="file"
-            accept="image/*,video/*"
+            accept={PROGRESS_MEDIA_ACCEPT}
             multiple
             className="hidden"
             onChange={e => setNotePhotoFiles(Array.from(e.target.files || []))}
@@ -2337,7 +2337,7 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
     <div className="space-y-4">
       {/* Upload button */}
       <label className={`flex items-center justify-center gap-2 py-3 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${uploading ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50'}`}>
-        <input type="file" multiple accept="image/*,video/*" onChange={handleUpload} className="hidden" disabled={uploading} />
+        <input type="file" multiple accept={PROGRESS_MEDIA_ACCEPT} onChange={handleUpload} className="hidden" disabled={uploading} />
         <Camera className="w-5 h-5 text-blue-500" />
         <span className="text-sm font-medium text-blue-600">{uploading ? 'Uploading...' : 'Upload Progress Pictures'}</span>
       </label>
