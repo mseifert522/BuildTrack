@@ -56,9 +56,9 @@ export default function MobileProjects() {
   };
 
   return (
-    <div className="mobile-shell" style={{ backgroundColor: '#F4F5F7' }}>
+    <div className="mobile-shell mobile-projects-shell" style={{ backgroundColor: '#F4F5F7' }}>
       {/* Header */}
-      <div className="sticky top-0 z-10 shadow-md" style={{ backgroundColor: '#181D25' }}>
+      <div className="mobile-header sticky top-0 z-10 shadow-md" style={{ backgroundColor: '#181D25', touchAction: 'pan-y', overscrollBehaviorX: 'none' }}>
         <div className="flex items-center justify-between px-4 pt-4 pb-3">
           <div className="flex items-center gap-3">
             <img src="/buildtrack-logo.png" alt="NUD" className="w-9 h-9 rounded-full object-cover border-2" style={{ borderColor: '#D99D26' }} />
@@ -111,7 +111,7 @@ export default function MobileProjects() {
       </div>
 
       {/* Project Count + Add button row */}
-      <div className="px-4 py-3 flex items-center justify-between">
+      <div className="px-4 py-3 flex items-center justify-between overflow-x-hidden" style={{ touchAction: 'pan-y', overscrollBehaviorX: 'none' }}>
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
           {loading ? 'Loading...' : `${filtered.length} Project${filtered.length !== 1 ? 's' : ''}`}
         </p>
@@ -142,10 +142,10 @@ export default function MobileProjects() {
       </div>
 
       {/* Project List */}
-      <div className="mobile-content" style={{ padding: '0 16px 80px' }}>
+      <div className="mobile-content mobile-projects-content" style={{ padding: '0 16px 80px', touchAction: 'pan-y', overscrollBehaviorX: 'none' }}>
         {loading ? (
           Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="bg-white rounded-2xl p-4 animate-pulse">
+            <div key={i} className="mobile-project-card bg-white rounded-2xl p-4 animate-pulse">
               <div className="h-4 bg-gray-200 rounded w-3/4 mb-2" />
               <div className="h-3 bg-gray-100 rounded w-1/2" />
             </div>
@@ -179,7 +179,8 @@ export default function MobileProjects() {
               }}
               role="button"
               tabIndex={0}
-              className="w-full text-left bg-white rounded-2xl shadow-sm p-4 active:scale-98 transition-all hover:shadow-md border border-gray-100"
+              className="mobile-project-card w-full text-left bg-white rounded-2xl shadow-sm p-4 hover:shadow-md border border-gray-100"
+              style={{ touchAction: 'pan-y', overscrollBehaviorX: 'none' }}
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">

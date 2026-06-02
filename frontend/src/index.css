@@ -66,10 +66,12 @@ body {
   bottom: 0;
   width: 100%;
   max-width: 100dvw;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   overflow-x: hidden;
+  overscroll-behavior: none;
   overscroll-behavior-x: none;
   touch-action: pan-y;
   background: #F0F2F5;
@@ -86,6 +88,7 @@ body {
   max-width: 100%;
   overflow-y: auto;
   overflow-x: hidden;
+  overscroll-behavior: contain;
   overscroll-behavior-y: contain;
   overscroll-behavior-x: none;
   touch-action: pan-y;
@@ -139,10 +142,36 @@ body {
 .mobile-shell *,
 .contractor-setup-shell * {
   max-width: 100%;
+  min-width: 0;
+}
+
+.mobile-projects-shell,
+.mobile-projects-shell > *,
+.mobile-projects-content {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+  touch-action: pan-y;
+}
+
+.mobile-projects-content {
+  contain: layout paint;
+}
+
+.mobile-project-card {
+  transform: none;
+  touch-action: pan-y;
+  transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
+}
+
+.mobile-project-card:active {
+  transform: none;
 }
 
 .mobile-shell button,
 .mobile-shell a,
+.mobile-shell [role="button"],
 .mobile-shell input,
 .mobile-shell textarea,
 .mobile-shell select,
