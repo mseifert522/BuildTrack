@@ -1091,7 +1091,9 @@ export default function Contractors() {
                                 >
                                   {note.note}
                                 </p>
-                                <p className="text-[11px] text-gray-400 mt-1 truncate">{note.user_name}</p>
+                                <p className="text-[11px] text-gray-400 mt-1 truncate">
+                                  {note.user_name} · Inserted {formatEasternDateTime(note.created_at, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })} ET
+                                </p>
                               </div>
                             ))}
                           </div>

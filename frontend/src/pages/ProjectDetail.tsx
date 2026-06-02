@@ -2556,10 +2556,10 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
                 <div className="min-w-0">
                   <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
                     <p className="text-sm font-black text-slate-950">
-                      {formatEasternDateTime(record.timestamp, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                      {record.kind === 'note' ? 'Entered by' : 'Uploaded by'} {record.userName}
                     </p>
                     <p className="text-xs font-semibold text-slate-500">
-                      {record.kind === 'note' ? 'Entered by' : 'Uploaded by'} {record.userName}
+                      Inserted {formatEasternDateTime(record.timestamp, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time
                     </p>
                     {record.kind === 'note' && record.photos.length > 0 && (
                       <p className="text-xs font-bold text-blue-700">{record.photos.length} attached</p>

@@ -9,7 +9,7 @@ import {
   ArrowUpRight, Plus, ChevronRight, MapPin, MessageSquare, Camera,
   X, Bell
 } from 'lucide-react';
-import { EASTERN_TIME_ZONE, formatEasternDate, formatEasternRelative, formatEasternTime, parseBuildTrackTimestamp } from '../lib/time';
+import { EASTERN_TIME_ZONE, formatEasternDate, formatEasternDateTime, formatEasternRelative, formatEasternTime, parseBuildTrackTimestamp } from '../lib/time';
 
 interface Stats {
   total_projects: number;
@@ -434,7 +434,10 @@ export default function Dashboard() {
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-sm font-black text-white">{note.user_name}</span>
-                          <span className="text-xs font-semibold text-slate-400">added a note</span>
+                          <span className="text-xs font-semibold text-slate-400">
+                            Inserted {formatEasternDateTime(note.created_at, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time
+                          </span>
+                          <span className="text-xs font-semibold text-slate-500">added a note</span>
                           <span
                             className="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-black uppercase tracking-wide"
                             style={{ background: noteStyle.bg, color: noteStyle.color, borderColor: noteStyle.border }}
