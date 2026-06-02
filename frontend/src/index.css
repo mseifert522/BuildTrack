@@ -329,3 +329,43 @@ aside ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
     touch-action: pan-y;
   }
 }
+
+/* Horizontal pan guard for desktop admin pages viewed on phones/tablets. */
+html,
+body,
+#root {
+  max-width: 100dvw;
+  overscroll-behavior-x: none;
+}
+
+html,
+body,
+#root,
+.bt-horizontal-lock {
+  overflow-x: hidden;
+}
+
+.bt-horizontal-lock {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overscroll-behavior-x: none;
+  touch-action: pan-y;
+}
+
+.bt-horizontal-lock > *,
+.bt-horizontal-lock button,
+.bt-horizontal-lock input,
+.bt-horizontal-lock select,
+.bt-horizontal-lock textarea {
+  min-width: 0;
+}
+
+@supports (overflow: clip) {
+  html,
+  body,
+  #root,
+  .bt-horizontal-lock {
+    overflow-x: clip;
+  }
+}

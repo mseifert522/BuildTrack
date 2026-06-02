@@ -184,8 +184,11 @@ export default function Projects() {
   };
 
   return (
-    <div className="min-h-full px-6 py-6 md:px-8" style={{ background: '#F0F2F5' }}>
-      <div className="max-w-7xl mx-auto">
+    <div
+      className="bt-horizontal-lock min-h-full w-full max-w-full overflow-x-hidden px-4 py-4 md:px-8 md:py-6"
+      style={{ background: '#F0F2F5', touchAction: 'pan-y', overscrollBehaviorX: 'none' }}
+    >
+      <div className="bt-horizontal-lock mx-auto w-full max-w-7xl min-w-0">
       <PageHeader
         title="Projects"
         subtitle={`${projects.length} project${projects.length !== 1 ? 's' : ''}`}
@@ -197,8 +200,8 @@ export default function Projects() {
       />
 
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3 mb-5 rounded-2xl border border-gray-200 p-3" style={{ background: 'white', boxShadow: '0 8px 24px rgba(17,24,39,0.06)' }}>
-        <form onSubmit={handleSearch} className="flex-1 flex gap-2">
+      <div className="bt-horizontal-lock mb-5 flex w-full min-w-0 flex-col gap-3 rounded-2xl border border-gray-200 p-3 sm:flex-row" style={{ background: 'white', boxShadow: '0 8px 24px rgba(17,24,39,0.06)' }}>
+        <form onSubmit={handleSearch} className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
@@ -208,12 +211,12 @@ export default function Projects() {
               className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
-          <button type="submit" className="px-4 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-medium hover:bg-gray-800 transition-colors">Search</button>
+          <button type="submit" className="w-full rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-800 sm:w-auto">Search</button>
         </form>
         <select
           value={statusFilter}
           onChange={e => setStatusFilter(e.target.value)}
-          className="px-3 py-2.5 rounded-xl border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+          className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-auto"
         >
           <option value="">All Statuses</option>
           {PROJECT_STATUS_OPTIONS.map(option => (
@@ -223,7 +226,7 @@ export default function Projects() {
       </div>
 
       {loading ? <Loading /> : (
-        <div className="grid gap-3">
+        <div className="grid min-w-0 gap-3">
           {projects.length === 0 ? (
             <div className="text-center py-16 bg-white rounded-xl border border-gray-200">
               <MapPin className="w-10 h-10 text-gray-300 mx-auto mb-3" />
@@ -240,7 +243,7 @@ export default function Projects() {
               <div
                 key={p.id}
                 onClick={() => navigate(`/projects/${p.id}`)}
-                className="group relative bg-white rounded-2xl border border-gray-200 p-4 hover:shadow-lg transition-all hover:border-blue-300 hover:bg-blue-50/20 flex items-center gap-4 cursor-pointer"
+                className="bt-horizontal-lock group relative flex w-full min-w-0 cursor-pointer flex-col items-stretch gap-3 overflow-hidden rounded-2xl border border-gray-200 bg-white p-4 transition-all hover:border-blue-300 hover:bg-blue-50/20 hover:shadow-lg sm:flex-row sm:items-center sm:gap-4"
                 style={{ boxShadow: '0 8px 24px rgba(17,24,39,0.06)' }}
               >
                 <button
@@ -287,13 +290,13 @@ export default function Projects() {
                     </>
                   )}
                 </label>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-2">
+                <div className="w-full flex-1 min-w-0 max-w-full">
+                  <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
                       <p className="font-semibold text-gray-900 truncate">{p.address}</p>
                       <p className="text-sm text-gray-500 truncate">{p.job_name}</p>
                     </div>
-                    <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2 flex-shrink-0">
+                    <div className="flex flex-shrink-0 flex-wrap items-start gap-2 sm:items-center sm:justify-end">
                       {review && (
                         <span
                           className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-wide whitespace-nowrap"
@@ -312,7 +315,7 @@ export default function Projects() {
                       {review.change_count} new update{review.change_count !== 1 ? 's' : ''}: {review.changes[0].summary}
                     </p>
                   )}
-                  <div className="flex items-center gap-4 mt-2">
+                  <div className="mt-2 flex flex-wrap items-center gap-3 sm:gap-4">
                     {p.open_punch_items > 0 && (
                       <span className="flex items-center gap-1 text-xs text-orange-600">
                         <ClipboardList className="w-3.5 h-3.5" />
@@ -329,20 +332,20 @@ export default function Projects() {
                       <span className="text-xs text-gray-500">${Number(p.budget).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                     )}
                   </div>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <div className="mt-3 grid w-full min-w-0 grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">
                     <button
                       type="button"
                       onClick={e => {
                         e.stopPropagation();
                         navigate(`/photos?projectId=${p.id}`);
                       }}
-                      className="relative z-20 inline-flex min-h-10 items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-black text-white shadow-sm transition-colors cursor-pointer hover:bg-amber-600"
+                      className="relative z-20 inline-flex min-h-10 w-full max-w-full items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-center text-xs font-black leading-tight text-white shadow-sm transition-colors cursor-pointer hover:bg-amber-600 sm:w-auto"
                       style={{ background: '#D99D26', border: '1px solid #B7791F' }}
                       title="Upload timestamped progress photos or videos to this project"
                       aria-label={`Upload progress pictures to ${p.address}`}
                     >
-                      <Camera className="w-3.5 h-3.5" />
-                      Upload Progress Pictures
+                      <Camera className="h-3.5 w-3.5 flex-shrink-0" />
+                      <span className="min-w-0 whitespace-normal">Upload Progress Pictures</span>
                     </button>
                     <button
                       type="button"
@@ -350,13 +353,13 @@ export default function Projects() {
                         e.stopPropagation();
                         navigate(`/projects/${p.id}#progress-history`);
                       }}
-                      className="relative z-20 inline-flex min-h-10 items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-black text-white shadow-sm transition-colors cursor-pointer hover:bg-slate-800"
+                      className="relative z-20 inline-flex min-h-10 w-full max-w-full items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-center text-xs font-black leading-tight text-white shadow-sm transition-colors cursor-pointer hover:bg-slate-800 sm:w-auto"
                       style={{ background: '#0F172A', border: '1px solid #020617' }}
                       title="View progress pictures, notes, timestamps, and historical project activity"
                       aria-label={`View progress pictures and notes for ${p.address}`}
                     >
-                      <Activity className="w-3.5 h-3.5" />
-                      View Progress, Pictures, and Notes
+                      <Activity className="h-3.5 w-3.5 flex-shrink-0" />
+                      <span className="min-w-0 whitespace-normal">View Progress, Pictures, and Notes</span>
                     </button>
                     {[
                       { label: 'Scope of Work', icon: FileText, hash: 'construction-plan', color: '#1D4ED8', bg: '#EFF6FF' },
@@ -371,11 +374,11 @@ export default function Projects() {
                           e.stopPropagation();
                           navigate(`/projects/${p.id}#${action.hash}`);
                         }}
-                        className="relative z-20 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-black transition-colors cursor-pointer hover:brightness-95"
+                        className="relative z-20 inline-flex w-full max-w-full items-center justify-center gap-1.5 rounded-xl px-2.5 py-1.5 text-center text-xs font-black leading-tight transition-colors cursor-pointer hover:brightness-95 sm:w-auto"
                         style={{ background: action.bg, color: action.color, border: `1px solid ${action.color}22` }}
                       >
-                        <action.icon className="w-3.5 h-3.5" />
-                        {action.label}
+                        <action.icon className="h-3.5 w-3.5 flex-shrink-0" />
+                        <span className="min-w-0 whitespace-normal">{action.label}</span>
                       </button>
                     ))}
                     <button
@@ -384,11 +387,11 @@ export default function Projects() {
                         e.stopPropagation();
                         setLockboxProject(p);
                       }}
-                      className="relative z-20 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-black transition-colors cursor-pointer hover:brightness-95"
+                      className="relative z-20 inline-flex w-full max-w-full items-center justify-center gap-1.5 rounded-xl px-2.5 py-1.5 text-center text-xs font-black leading-tight transition-colors cursor-pointer hover:brightness-95 sm:w-auto"
                       style={{ background: '#F5F3FF', color: '#6D28D9', border: '1px solid #6D28D922' }}
                     >
-                      <KeyRound className="w-3.5 h-3.5" />
-                      Lockbox Code
+                      <KeyRound className="h-3.5 w-3.5 flex-shrink-0" />
+                      <span className="min-w-0 whitespace-normal">Lockbox Code</span>
                     </button>
                     {canManageProjectActions && (
                       <button
@@ -397,19 +400,19 @@ export default function Projects() {
                           e.stopPropagation();
                           setDocumentUploadProject(p);
                         }}
-                        className="relative z-20 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-black transition-colors cursor-pointer hover:brightness-95"
+                        className="relative z-20 inline-flex w-full max-w-full items-center justify-center gap-1.5 rounded-xl px-2.5 py-1.5 text-center text-xs font-black leading-tight transition-colors cursor-pointer hover:brightness-95 sm:w-auto"
                         style={{ background: '#ECFDF5', color: '#047857', border: '1px solid #04785722' }}
                       >
-                        <Upload className="w-3.5 h-3.5" />
-                        Upload Documents
+                        <Upload className="h-3.5 w-3.5 flex-shrink-0" />
+                        <span className="min-w-0 whitespace-normal">Upload Documents</span>
                       </button>
                     )}
                   </div>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <div className="mt-3 grid w-full min-w-0 grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">
                     {canManageProjectActions && (
                       <>
                         <label
-                          className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black cursor-pointer transition-colors ${p.main_photo_url ? 'relative z-0' : 'relative z-20'}`}
+                          className={`inline-flex w-full max-w-full items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-center text-xs font-black leading-tight cursor-pointer transition-colors sm:w-auto ${p.main_photo_url ? 'relative z-0' : 'relative z-20'}`}
                           style={{ background: '#F9FAFB', color: '#374151', border: '1px solid #E5E7EB' }}
                           title="Upload one main house photo"
                           onClick={e => {
@@ -430,13 +433,13 @@ export default function Projects() {
                               e.currentTarget.value = '';
                             }}
                           />
-                          <Camera className="w-3.5 h-3.5" />
-                          {p.main_photo_url ? 'House Photo Added' : uploadingPhoto === p.id ? 'Uploading...' : 'Add House Photo'}
+                          <Camera className="h-3.5 w-3.5 flex-shrink-0" />
+                          <span className="min-w-0 whitespace-normal">{p.main_photo_url ? 'House Photo Added' : uploadingPhoto === p.id ? 'Uploading...' : 'Add House Photo'}</span>
                         </label>
                         {canChangeStatus && (
                           <>
                             <div
-                              className="relative z-20 inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-300 bg-white px-2 py-1 shadow-sm"
+                              className="relative z-20 inline-flex min-h-10 w-full max-w-full items-center justify-between gap-2 rounded-xl border border-slate-300 bg-white px-2 py-1 shadow-sm sm:w-auto"
                               onClick={e => e.stopPropagation()}
                               onMouseDown={e => e.stopPropagation()}
                               title="Change project status"
@@ -446,7 +449,7 @@ export default function Projects() {
                                 value={p.status}
                                 disabled={updatingStatus === p.id}
                                 onChange={e => updateProjectStatus(p, e.target.value)}
-                                className="min-h-8 rounded-lg border-0 bg-transparent px-1 text-xs font-black text-slate-800 outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-60 cursor-pointer"
+                                className="min-h-8 min-w-0 flex-1 rounded-lg border-0 bg-transparent px-1 text-xs font-black text-slate-800 outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-60 cursor-pointer sm:flex-none"
                                 aria-label={`Change status for ${p.address}`}
                               >
                                 {PROJECT_STATUS_OPTIONS.map(option => (
@@ -461,7 +464,7 @@ export default function Projects() {
                                 e.stopPropagation();
                                 updateProjectStatus(p, 'rehab_completed');
                               }}
-                              className="relative z-20 inline-flex min-h-10 items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black transition-colors disabled:opacity-50 cursor-pointer"
+                              className="relative z-20 inline-flex min-h-10 w-full max-w-full items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-center text-xs font-black leading-tight transition-colors disabled:opacity-50 cursor-pointer sm:w-auto"
                               style={{
                                 background: p.status === 'rehab_completed' ? '#DCFCE7' : '#ECFDF5',
                                 color: '#047857',
@@ -469,8 +472,8 @@ export default function Projects() {
                               }}
                               title="Mark project completed"
                             >
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              {p.status === 'rehab_completed' ? 'Completed' : 'Mark Completed'}
+                              <CheckCircle2 className="h-3.5 w-3.5 flex-shrink-0" />
+                              <span className="min-w-0 whitespace-normal">{p.status === 'rehab_completed' ? 'Completed' : 'Mark Completed'}</span>
                             </button>
                           </>
                         )}
@@ -482,17 +485,17 @@ export default function Projects() {
                         e.stopPropagation();
                         navigate(`/projects/${p.id}#notes`);
                       }}
-                      className="relative z-20 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black transition-colors cursor-pointer hover:brightness-95"
+                      className="relative z-20 inline-flex w-full max-w-full items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-center text-xs font-black leading-tight transition-colors cursor-pointer hover:brightness-95 sm:w-auto"
                       style={{ background: '#EFF6FF', color: '#1D4ED8', border: '1px solid #BFDBFE' }}
                       title="Enter a project note"
                       aria-label={`Enter notes for ${p.address}`}
                     >
-                      <MessageSquare className="w-3.5 h-3.5" />
-                      Enter Notes
+                      <MessageSquare className="h-3.5 w-3.5 flex-shrink-0" />
+                      <span className="min-w-0 whitespace-normal">Enter Notes</span>
                     </button>
                   </div>
                 </div>
-                <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                <ChevronRight className="hidden w-4 h-4 text-gray-400 flex-shrink-0 sm:block" />
               </div>
             );
           })}

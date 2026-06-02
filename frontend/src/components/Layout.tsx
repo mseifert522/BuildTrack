@@ -360,7 +360,7 @@ export default function Layout({ children }: LayoutProps) {
   );
 
   return (
-    <div className="flex h-screen overflow-hidden" style={{ background: '#F0F2F5' }}>
+    <div className="bt-horizontal-lock flex h-screen max-w-full overflow-hidden" style={{ background: '#F0F2F5' }}>
       {/* Desktop Sidebar */}
       <aside
         className="hidden lg:flex flex-col flex-shrink-0 transition-all duration-300"
@@ -409,10 +409,10 @@ export default function Layout({ children }: LayoutProps) {
       )}
 
       {/* Main content area */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <div className="bt-horizontal-lock flex-1 flex flex-col min-w-0 max-w-full overflow-hidden">
         {/* Top Header Bar */}
         <header
-          className="flex items-center justify-between gap-4 px-6 flex-shrink-0"
+          className="bt-horizontal-lock flex items-center justify-between gap-3 px-4 sm:gap-4 sm:px-6 flex-shrink-0"
           style={{
             height: 64,
             background: 'white',
@@ -421,7 +421,7 @@ export default function Layout({ children }: LayoutProps) {
           }}
         >
           {/* Left: hamburger + breadcrumb */}
-          <div className="flex items-center gap-4 min-w-0">
+          <div className="flex flex-1 items-center gap-3 min-w-0 sm:gap-4">
             <button
               onClick={() => setSidebarOpen(true)}
               className="p-2 rounded-xl transition-colors lg:hidden"
@@ -429,10 +429,10 @@ export default function Layout({ children }: LayoutProps) {
             >
               <Menu className="w-5 h-5" />
             </button>
-            <div className="flex items-center gap-2 text-sm">
-              <span className="font-medium" style={{ color: '#9CA3AF' }}>BuildTrack</span>
+            <div className="flex min-w-0 items-center gap-2 text-sm">
+              <span className="flex-shrink-0 font-medium" style={{ color: '#9CA3AF' }}>BuildTrack</span>
               <ChevronRight className="w-3.5 h-3.5" style={{ color: '#D1D5DB' }} />
-              <span className="font-bold text-gray-900">{currentTitle}</span>
+              <span className="min-w-0 truncate font-bold text-gray-900">{currentTitle}</span>
             </div>
           </div>
 
@@ -508,7 +508,7 @@ export default function Layout({ children }: LayoutProps) {
           </div>
 
           {/* Right: team availability, users icon, settings icon, notification bell, user avatar dropdown */}
-          <div className="flex items-center gap-2">
+          <div className="flex flex-shrink-0 items-center gap-1 sm:gap-2">
             {user && isAdminRole(user.role) && (
               <div className="relative hidden xl:block">
                 <button
@@ -586,7 +586,7 @@ export default function Layout({ children }: LayoutProps) {
               <Link
                 to="/users"
                 title="User Management"
-                className="p-2.5 rounded-xl transition-all"
+                className="p-2 rounded-xl transition-all sm:p-2.5"
                 style={{
                   background: location.pathname.startsWith('/users') ? '#F3F4F6' : '#F9FAFB',
                   border: `1px solid ${location.pathname.startsWith('/users') ? '#D99D26' : '#E5E7EB'}`,
@@ -602,7 +602,7 @@ export default function Layout({ children }: LayoutProps) {
               <Link
                 to="/settings"
                 title="Settings"
-                className="p-2.5 rounded-xl transition-all"
+                className="p-2 rounded-xl transition-all sm:p-2.5"
                 style={{
                   background: location.pathname.startsWith('/settings') ? '#F3F4F6' : '#F9FAFB',
                   border: `1px solid ${location.pathname.startsWith('/settings') ? '#D99D26' : '#E5E7EB'}`,
@@ -615,7 +615,7 @@ export default function Layout({ children }: LayoutProps) {
 
             {/* Notification bell */}
             <button
-              className="relative p-2.5 rounded-xl transition-all"
+              className="relative p-2 rounded-xl transition-all sm:p-2.5"
               style={{ background: '#F9FAFB', border: '1px solid #E5E7EB', color: '#6B7280' }}
             >
               <Bell className="w-[18px] h-[18px]" />
@@ -626,7 +626,7 @@ export default function Layout({ children }: LayoutProps) {
             <div className="relative">
               <button
                 onClick={() => setProfileOpen(!profileOpen)}
-                className="flex items-center gap-3 px-3 py-2 rounded-xl cursor-pointer transition-all"
+                className="flex items-center gap-2 px-2 py-2 rounded-xl cursor-pointer transition-all sm:gap-3 sm:px-3"
                 style={{ background: '#F9FAFB', border: '1px solid #E5E7EB' }}
               >
                 <AvatarDisplay size={32} />
@@ -746,7 +746,7 @@ export default function Layout({ children }: LayoutProps) {
         </header>
 
         {/* Page content */}
-        <main className="flex-1 overflow-y-auto pb-24">
+        <main className="bt-horizontal-lock flex-1 overflow-y-auto overflow-x-hidden pb-24" style={{ touchAction: 'pan-y', overscrollBehaviorX: 'none' }}>
           {children}
         </main>
         <ManagementChatWidget />

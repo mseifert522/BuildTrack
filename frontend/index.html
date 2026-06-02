@@ -19,18 +19,23 @@
         margin: 0;
         padding: 0;
         width: 100%;
+        max-width: 100dvw;
         height: 100%;
         overflow: hidden;
+        overflow-x: hidden;
         overscroll-behavior: none;
+        overscroll-behavior-x: none;
         -webkit-overflow-scrolling: auto;
-        touch-action: pan-x pan-y;
+        touch-action: pan-y;
         -webkit-tap-highlight-color: transparent;
         -webkit-text-size-adjust: 100%;
       }
       #root {
         width: 100%;
+        max-width: 100dvw;
         height: 100%;
         overflow: hidden;
+        overflow-x: hidden;
         position: fixed;
         top: 0;
         left: 0;
@@ -48,6 +53,11 @@
       * {
         box-sizing: border-box;
         max-width: 100vw;
+      }
+      @supports (overflow: clip) {
+        html, body, #root {
+          overflow-x: clip;
+        }
       }
     </style>
   </head>
