@@ -415,9 +415,9 @@ export default function ProjectDetail() {
           <button type="button" onClick={() => setNotePhotoFiles([])} className="text-xs font-bold text-blue-700 hover:underline">Remove</button>
         </div>
       )}
-      <div className={`space-y-3 ${compact ? 'max-h-80 overflow-y-auto pr-1' : ''}`}>
+      <div className={`space-y-4 ${compact ? 'max-h-[620px] overflow-y-auto pr-2' : ''}`}>
         {notes.map(note => (
-          <div key={note.id} className="rounded-xl border border-gray-100 p-3 flex items-start gap-3">
+          <div key={note.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ring-1 ring-slate-100 flex items-start gap-3">
             {note.user_avatar_url ? (
               <img src={note.user_avatar_url} alt={note.user_name} className="w-9 h-9 rounded-xl object-cover flex-shrink-0" style={{ objectPosition: 'center top' }} />
             ) : (
@@ -426,11 +426,17 @@ export default function ProjectDetail() {
               </div>
             )}
             <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between gap-2 mb-1">
-                <span className="text-sm font-medium text-gray-900 truncate">{note.user_name}</span>
+              <div className="flex items-start justify-between gap-3 mb-2">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="text-sm font-bold text-gray-950 truncate">{note.user_name}</span>
+                    <span className="text-xs font-semibold text-gray-500">
+                      Inserted {formatEasternDateTime(note.created_at, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time
+                    </span>
+                  </div>
+                </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${note.note_type === 'field' ? 'bg-green-100 text-green-700' : note.note_type === 'office' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>{note.note_type}</span>
-                  <span className="hidden sm:inline text-xs text-gray-400">{formatEasternDateTime(note.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
                 </div>
               </div>
               {editingNoteId === note.id ? (
@@ -462,7 +468,7 @@ export default function ProjectDetail() {
                 </div>
               ) : (
                 <>
-                  <p className="text-sm text-gray-700 whitespace-pre-wrap">{note.note}</p>
+                  <p className="border-t border-slate-100 pt-3 text-sm leading-6 text-slate-700 whitespace-pre-wrap">{note.note}</p>
                   <span className={`inline-flex mt-2 px-2 py-0.5 rounded-full text-xs font-bold ${note.visibility === 'public' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
                     {note.visibility === 'public' ? 'Public to contractors' : 'Private management note'}
                   </span>
