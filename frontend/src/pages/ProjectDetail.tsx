@@ -456,13 +456,13 @@ export default function ProjectDetail() {
         className="mb-2 w-full resize-none rounded-lg border border-slate-400 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-950 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         placeholder="Add a note..."
       />
-      <div className="flex gap-2 mb-4">
-        <select value={noteType} onChange={e => setNoteType(e.target.value)} className="rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      <div className="mb-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+        <select value={noteType} onChange={e => setNoteType(e.target.value)} className="col-span-2 min-h-[46px] w-full rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm font-bold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:col-span-1 sm:w-auto">
           <option value="general">General</option>
           <option value="office">Office</option>
           <option value="field">Field</option>
         </select>
-        <label className="inline-flex items-center gap-2 rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm">
+        <label className="col-span-2 inline-flex min-h-[46px] items-center gap-2 rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm sm:col-span-1">
           <input
             type="checkbox"
             checked={noteVisibility === 'public'}
@@ -471,7 +471,7 @@ export default function ProjectDetail() {
           />
           Public to contractors
         </label>
-        <label className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50">
+        <label className="inline-flex min-h-[46px] cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 sm:min-w-[150px]">
           <input
             type="file"
             accept={PROGRESS_MEDIA_ACCEPT}
@@ -485,12 +485,19 @@ export default function ProjectDetail() {
         <button
           type="button"
           onClick={listeningNote ? stopNoteDictation : startNoteDictation}
-          className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
+          className="inline-flex min-h-[46px] items-center justify-center gap-1.5 rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
         >
           {listeningNote ? <Square className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
           {listeningNote ? 'Stop' : 'Mic'}
         </button>
-        <button onClick={addNote} className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">Add Note</button>
+        <button
+          type="button"
+          onClick={addNote}
+          className="col-span-2 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-black text-white shadow-sm transition-colors hover:bg-blue-700 sm:col-span-1 sm:flex-1 sm:py-2"
+        >
+          <Send className="h-4 w-4" />
+          Submit Note
+        </button>
       </div>
       {listeningNote && (
         <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-amber-50 text-amber-800 text-xs font-bold">
