@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Building2,
+  ChevronDown,
   CheckCircle2,
   Clock3,
   Copy,
@@ -10,9 +11,7 @@ import {
   EyeOff,
   ExternalLink,
   FileText,
-  Hash,
   Link as LinkIcon,
-  Mail,
   MapPin,
   MessageSquare,
   Phone,
@@ -172,6 +171,11 @@ const formatDate = (value?: string | null) => {
   return formatEasternDate(value, { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
+const contractorAddressLine = (value?: string | null) => {
+  const address = (value || '').replace(/\s+/g, ' ').trim();
+  return address || 'No address on file';
+};
+
 const isSetupComplete = (contractor: ContractorRow) =>
   contractor.onboarding_status === 'submitted' || Boolean(contractor.onboarding_submitted_at);
 
@@ -316,14 +320,6 @@ export default function Contractors() {
   const openNotes = async (contractorId: string) => {
     setExpandedContractorId(contractorId);
     if (!contractorNotes[contractorId]) await loadContractorNotes(contractorId);
-  };
-
-  const toggleNotes = async (contractorId: string) => {
-    if (expandedContractorId === contractorId) {
-      setExpandedContractorId(null);
-      return;
-    }
-    await openNotes(contractorId);
   };
 
   const openContractorDetails = (contractorId: string) => {
@@ -830,7 +826,7 @@ export default function Contractors() {
             <p className="text-sm font-bold text-gray-500">No contractors match these filters</p>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-2">
             {filteredContractors.map((contractor) => {
               const lastPaid = contractor.last_paid_invoice;
               const connectedProjects = contractor.connected_projects || [];
@@ -841,27 +837,52 @@ export default function Contractors() {
               const SetupIcon = setupComplete ? CheckCircle2 : setupPending ? Clock3 : ShieldCheck;
               const statusMeta = contractorStatusMeta(contractor.contractor_status);
               const contractorCategories = contractorCategoryList(contractor);
+              const isExpanded = expandedContractorId === contractor.id;
+              const addressLine = contractorAddressLine(contractor.billing_address);
               return (
                 <div
                   key={contractor.id}
                   onClick={(event) => {
                     const target = event.target as HTMLElement;
                     if (target.closest('button,a,input,textarea,select,label')) return;
-                    openContractorDetails(contractor.id);
+                    setExpandedContractorId(current => current === contractor.id ? null : contractor.id);
                   }}
-                  className="rounded-2xl overflow-hidden cursor-pointer transition-transform hover:-translate-y-0.5"
-                  style={{ background: 'white', boxShadow: '0 2px 16px rgba(0,0,0,0.07)' }}
-                  title="Click to view contractor details"
+                  className={`overflow-hidden rounded-xl border bg-white transition-colors cursor-pointer ${isExpanded ? 'border-amber-200 shadow-md' : 'border-gray-200 shadow-sm hover:border-amber-200 hover:bg-amber-50/20'}`}
+                  title={isExpanded ? 'Click to collapse contractor details' : 'Click to expand contractor details'}
                 >
-                  <div className="p-5">
-                    <div className="flex flex-col lg:flex-row lg:items-start gap-4">
-                      <div className="flex items-start gap-3 flex-1 min-w-0">
-                        <div className="w-12 h-12 rounded-xl flex items-center justify-center text-white text-sm font-black flex-shrink-0" style={{ background: 'linear-gradient(135deg, #1F2937, #D99D26)' }}>
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setExpandedContractorId(current => current === contractor.id ? null : contractor.id)}
+                      aria-expanded={isExpanded}
+                      className="grid w-full grid-cols-1 items-center gap-3 px-4 py-3 text-left md:grid-cols-[minmax(220px,1.1fr)_minmax(150px,0.65fr)_minmax(280px,1.4fr)_auto] md:px-5"
+                    >
+                      <div className="flex min-w-0 items-center gap-3">
+                        <div className="h-9 w-9 flex-shrink-0 rounded-xl flex items-center justify-center text-white text-xs font-black" style={{ background: 'linear-gradient(135deg, #1F2937, #D99D26)' }}>
                           {initials(contractor.name)}
                         </div>
-                        <div className="min-w-0 flex-1">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-black text-gray-950">{contractor.name}</p>
+                        </div>
+                      </div>
+                      <div className="flex min-w-0 items-center gap-2 text-sm font-bold text-gray-700">
+                        <Phone className="h-4 w-4 flex-shrink-0 text-gray-400" />
+                        <span className="truncate">{contractor.phone || 'No phone on file'}</span>
+                      </div>
+                      <div className="flex min-w-0 items-center gap-2 text-sm font-semibold text-gray-600">
+                        <MapPin className="h-4 w-4 flex-shrink-0 text-gray-400" />
+                        <span className="truncate">{addressLine}</span>
+                      </div>
+                      <div className="flex items-center justify-end gap-2 text-xs font-black text-amber-700">
+                        <span>{isExpanded ? 'Hide details' : 'Expand'}</span>
+                        <ChevronDown className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                      </div>
+                    </button>
+
+                    {isExpanded && (
+                      <div className="border-t border-gray-100 px-4 py-4 md:px-5" style={{ background: '#FAFAFA' }}>
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                           <div className="flex flex-wrap items-center gap-2">
-                            <h2 className="text-base font-black text-gray-900 truncate">{contractor.name}</h2>
                             <span
                               className="inline-flex px-2.5 py-1 rounded-full text-xs font-black"
                               style={{ background: statusMeta.background, color: statusMeta.color, border: `1px solid ${statusMeta.border}` }}
@@ -902,89 +923,61 @@ export default function Contractors() {
                               </button>
                             )}
                           </div>
-                          {contractor.contact_name && <p className="text-sm text-gray-500 mt-0.5">Contact: {contractor.contact_name}</p>}
-                          <div className="flex flex-wrap gap-2 mt-3">
-                            {contractor.phone && (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-gray-50 text-gray-700 border border-gray-100">
-                                <Phone className="w-3.5 h-3.5" /> {contractor.phone}
-                              </span>
-                            )}
-                            {contractor.email && (
-                              <a href={`mailto:${contractor.email}`} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-100">
-                                <Mail className="w-3.5 h-3.5" /> {contractor.email}
-                              </a>
-                            )}
-                            {contractor.account_number && (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-gray-50 text-gray-700 border border-gray-100">
-                                <Hash className="w-3.5 h-3.5" /> {contractor.account_number}
-                              </span>
-                            )}
-                            {contractor.tax_id_last4 && (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-100">
-                                <FileText className="w-3.5 h-3.5" /> Tax ****{contractor.tax_id_last4}
-                              </span>
-                            )}
-                            {contractor.bank_account_last4 && (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-100">
-                                <ShieldCheck className="w-3.5 h-3.5" /> ACH ****{contractor.bank_account_last4}
-                              </span>
-                            )}
+                          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                            <button
+                              type="button"
+                              onClick={() => openContractorDetails(contractor.id)}
+                              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black bg-white text-gray-700 border border-gray-200 hover:bg-gray-50 transition-colors"
+                            >
+                              View full profile
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => requestContractorSetup(contractor)}
+                              disabled={setupSending}
+                              className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-black shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:translate-y-0 disabled:opacity-50 disabled:shadow-none"
+                              style={{
+                                background: setupComplete ? '#ECFDF5' : setupPending ? '#EFF6FF' : '#FFFBEB',
+                                color: setupComplete ? '#047857' : setupPending ? '#1D4ED8' : '#92400E',
+                                border: setupComplete ? '1px solid #A7F3D0' : setupPending ? '1px solid #BFDBFE' : '1px solid #FDE68A',
+                              }}
+                              title="Click to email the secure contractor information intake link"
+                              aria-label={`Request contractor information from ${contractor.name}`}
+                            >
+                              <SetupIcon className="w-3.5 h-3.5" />
+                              {setupButtonLabel(contractor, setupSending)}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openEdit(contractor)}
+                              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black bg-gray-900 text-white hover:bg-gray-800 transition-colors"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openNotes(contractor.id)}
+                              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black transition-colors"
+                              style={{ background: '#FEF3C7', color: '#92400E', border: '1px solid #FDE68A' }}
+                            >
+                              <MessageSquare className="w-3.5 h-3.5" />
+                              {contractor.note_count || 0} notes
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deleteContractor(contractor)}
+                              disabled={deletingContractorId === contractor.id}
+                              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black transition-colors disabled:opacity-50"
+                              style={{ background: '#FEF2F2', color: '#B91C1C', border: '1px solid #FECACA' }}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              {deletingContractorId === contractor.id ? 'Deleting...' : 'Delete'}
+                            </button>
                           </div>
                         </div>
-                      </div>
-
-                      <div className="flex flex-col items-start lg:items-end gap-2">
-                        <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-                          <button
-                            type="button"
-                            onClick={() => requestContractorSetup(contractor)}
-                            disabled={setupSending}
-                            className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-black shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:translate-y-0 disabled:opacity-50 disabled:shadow-none"
-                            style={{
-                              background: setupComplete ? '#ECFDF5' : setupPending ? '#EFF6FF' : '#FFFBEB',
-                              color: setupComplete ? '#047857' : setupPending ? '#1D4ED8' : '#92400E',
-                              border: setupComplete ? '1px solid #A7F3D0' : setupPending ? '1px solid #BFDBFE' : '1px solid #FDE68A',
-                            }}
-                            title="Click to email the secure contractor information intake link"
-                            aria-label={`Request contractor information from ${contractor.name}`}
-                          >
-                            <SetupIcon className="w-3.5 h-3.5" />
-                            {setupButtonLabel(contractor, setupSending)}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => openEdit(contractor)}
-                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black bg-gray-900 text-white hover:bg-gray-800 transition-colors"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => toggleNotes(contractor.id)}
-                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black transition-colors"
-                            style={{
-                              background: expandedContractorId === contractor.id ? '#FEF3C7' : '#F9FAFB',
-                              color: expandedContractorId === contractor.id ? '#92400E' : '#374151',
-                              border: '1px solid #E5E7EB',
-                            }}
-                          >
-                            <MessageSquare className="w-3.5 h-3.5" />
-                            {contractor.note_count || 0} notes
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => deleteContractor(contractor)}
-                            disabled={deletingContractorId === contractor.id}
-                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black transition-colors disabled:opacity-50"
-                            style={{ background: '#FEF2F2', color: '#B91C1C', border: '1px solid #FECACA' }}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                            {deletingContractorId === contractor.id ? 'Deleting...' : 'Delete'}
-                          </button>
-                        </div>
                         {setupLinks[contractor.id]?.url && (
-                          <div className="w-full lg:w-[26rem] rounded-xl border border-blue-100 bg-blue-50 px-3 py-2">
+                          <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2">
                             <div className="flex items-center justify-between gap-2">
                               <div className="min-w-0">
                                 <p className="text-[11px] font-black uppercase tracking-wide text-blue-700">Contractor information link</p>
@@ -1027,8 +1020,6 @@ export default function Contractors() {
                             </div>
                           </div>
                         )}
-                      </div>
-                    </div>
 
                     <div className="grid lg:grid-cols-12 gap-4 mt-5">
                       <div className="lg:col-span-3 rounded-xl border border-gray-100 p-4 bg-gray-50">
@@ -1161,7 +1152,8 @@ export default function Contractors() {
                         </div>
                       </div>
                     </div>
-                  </div>
+                      </div>
+                    )}
 
                   {expandedContractorId === contractor.id && (
                     <div className="border-t border-gray-100 p-5" style={{ background: '#FAFAFA' }}>
@@ -1228,6 +1220,7 @@ export default function Contractors() {
                       </div>
                     </div>
                   )}
+                  </div>
                 </div>
               );
             })}
