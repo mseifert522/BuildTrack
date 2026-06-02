@@ -740,7 +740,7 @@ export default function Contractors() {
   if (loading) return <Loading />;
 
   return (
-    <div className="min-h-full px-6 py-6 md:px-8" style={{ background: '#E3E8EF' }}>
+    <div className="min-h-full px-6 py-6 md:px-8" style={{ background: '#D8E0EA' }}>
       <div className="max-w-7xl mx-auto space-y-5">
         <div className="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-4">
           <div>
@@ -774,10 +774,10 @@ export default function Contractors() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-300 p-4" style={{ background: '#F8FAFC', boxShadow: '0 10px 28px rgba(15,23,42,0.08)' }}>
+        <div className="rounded-2xl border border-slate-700 p-4" style={{ background: '#1F2937', boxShadow: '0 14px 34px rgba(15,23,42,0.16)' }}>
           <div className="flex items-center gap-2 mb-3">
-            <SlidersHorizontal className="w-4 h-4 text-gray-400" />
-            <p className="text-sm font-black text-gray-900">Filters</p>
+            <SlidersHorizontal className="w-4 h-4 text-amber-300" />
+            <p className="text-sm font-black text-white">Filters</p>
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-3">
             <select value={category} onChange={(e) => setCategory(e.target.value)} className="px-3 py-2.5 rounded-xl border border-gray-300 text-sm bg-white">
@@ -802,8 +802,8 @@ export default function Contractors() {
               <option value="total_paid">Sort: Total paid</option>
             </select>
           </div>
-          <div className="mt-4 border-t border-slate-200 pt-4">
-            <label className="block text-xs font-black uppercase tracking-wide text-gray-500 mb-2">Find contractor by name</label>
+          <div className="mt-4 border-t border-slate-600 pt-4">
+            <label className="block text-xs font-black uppercase tracking-wide text-slate-200 mb-2">Find contractor by name</label>
             <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-gray-300 bg-white">
               <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
               <input
@@ -826,7 +826,7 @@ export default function Contractors() {
             <p className="text-sm font-bold text-gray-500">No contractors match these filters</p>
           </div>
         ) : (
-          <div className="space-y-3 rounded-2xl border border-slate-300 bg-slate-300/70 p-2 shadow-inner">
+          <div className="space-y-3 rounded-2xl border border-slate-700 p-2 shadow-inner" style={{ background: '#253244' }}>
             {filteredContractors.map((contractor) => {
               const lastPaid = contractor.last_paid_invoice;
               const connectedProjects = contractor.connected_projects || [];
@@ -848,7 +848,7 @@ export default function Contractors() {
                     if (target.closest('button,a,input,textarea,select,label')) return;
                     setExpandedContractorId(current => current === contractor.id ? null : contractor.id);
                   }}
-                  className={`overflow-hidden rounded-xl border transition-colors cursor-pointer ${isExpanded ? 'border-amber-400 bg-amber-50 shadow-lg ring-1 ring-amber-200' : 'border-slate-300 bg-slate-50 shadow-sm hover:border-slate-500 hover:bg-white'}`}
+                  className={`overflow-hidden rounded-xl border-l-4 transition-colors cursor-pointer ${isExpanded ? 'border-y-amber-400 border-r-amber-400 border-l-amber-500 bg-amber-50 shadow-lg ring-1 ring-amber-200' : 'border-y-slate-400 border-r-slate-400 border-l-slate-700 bg-[#DDE6F0] shadow-sm hover:border-y-slate-600 hover:border-r-slate-600 hover:bg-[#EEF3F8]'}`}
                   title={isExpanded ? 'Click to collapse contractor details' : 'Click to expand contractor details'}
                 >
                   <div>
@@ -885,7 +885,7 @@ export default function Contractors() {
                     </button>
 
                     {isExpanded && (
-                      <div className="border-t border-slate-300 px-4 py-4 md:px-5" style={{ background: '#F8FAFC' }}>
+                      <div className="border-t border-slate-300 px-4 py-4 md:px-5" style={{ background: '#E9EEF5' }}>
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                           <div className="flex flex-wrap items-center gap-2">
                             <span
@@ -1161,7 +1161,7 @@ export default function Contractors() {
                     )}
 
                   {expandedContractorId === contractor.id && (
-                    <div className="border-t border-slate-300 p-5" style={{ background: '#F1F5F9' }}>
+                    <div className="border-t border-slate-300 p-5" style={{ background: '#E4EAF2' }}>
                       <div className="rounded-2xl border border-slate-300 bg-white p-4">
                         <div className="flex items-center justify-between gap-3 mb-3">
                           <div>
