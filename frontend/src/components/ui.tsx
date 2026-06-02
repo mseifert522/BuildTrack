@@ -5,6 +5,8 @@ export const statusColors: Record<string, string> = {
   // Project status
   active_rehab: 'bg-green-100 text-green-800',
   rehab_completed: 'bg-blue-100 text-blue-800',
+  long_term_holding: 'bg-amber-100 text-amber-800',
+  commercial: 'bg-cyan-100 text-cyan-800',
   on_market: 'bg-amber-100 text-amber-800',
   closed_sold: 'bg-gray-100 text-gray-700',
   // Legacy
@@ -35,6 +37,8 @@ export const priorityColors: Record<string, string> = {
 export const statusLabels: Record<string, string> = {
   active_rehab: 'Active Rehab',
   rehab_completed: 'Rehab Completed',
+  long_term_holding: 'Long-Term Holding',
+  commercial: 'Commercial',
   on_market: 'On Market',
   closed_sold: 'Closed and Sold',
   // Legacy

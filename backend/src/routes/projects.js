@@ -13,7 +13,7 @@ router.use(authenticate);
 
 const MANAGEMENT_ROLES = ['super_admin', 'operations_manager', 'project_manager'];
 const PROJECT_STATUS_ADMIN_ROLES = ['super_admin', 'operations_manager'];
-const PROJECT_STATUSES = ['not_started', 'active_rehab', 'rehab_completed'];
+const PROJECT_STATUSES = ['not_started', 'active_rehab', 'rehab_completed', 'long_term_holding', 'commercial'];
 
 function attachPhotosToNotes(db, notes) {
   if (!notes.length) return notes;
@@ -95,6 +95,10 @@ function lifecycleFromStatus(status, fallback = 'under_construction') {
       return 'under_construction';
     case 'rehab_completed':
       return 'completed';
+    case 'long_term_holding':
+      return 'long_term_holding';
+    case 'commercial':
+      return 'commercial';
     default:
       return fallback && fallback !== 'acquired' ? fallback : 'under_construction';
   }
@@ -257,11 +261,11 @@ function getUnreviewedProjectSummaries(db, userId, options = {}) {
     WHERE al.project_id IS NOT NULL
       AND al.user_id != ?
       AND al.action IN (${placeholders})
-      AND (? = 1 OR datetime(al.created_at) > datetime(COALESCE(prs.last_reviewed_at, '1970-01-01 00:00:00')))
+      AND datetime(al.created_at) > datetime(COALESCE(prs.last_reviewed_at, '1970-01-01 00:00:00'))
       AND (? = 0 OR datetime(al.created_at) > datetime('now', '-30 days'))
     ORDER BY datetime(al.created_at) DESC, al.created_at DESC
     LIMIT 500
-  `).all(userId, userId, ...REVIEW_ACTIONS, recentScope, recentScope);
+  `).all(userId, userId, ...REVIEW_ACTIONS, recentScope);
 
   const grouped = new Map();
   for (const row of rows) {
@@ -346,6 +350,8 @@ router.get('/stats', authorize('super_admin', 'operations_manager', 'project_man
   const underConstruction = db.prepare("SELECT COUNT(*) as cnt FROM projects WHERE status = 'active_rehab'").get();
   const preConstruction  = db.prepare("SELECT COUNT(*) as cnt FROM projects WHERE status = 'not_started' OR lifecycle_status = 'pre_construction'").get();
   const completed        = db.prepare("SELECT COUNT(*) as cnt FROM projects WHERE status = 'rehab_completed'").get();
+  const longTermHoldings = db.prepare("SELECT COUNT(*) as cnt FROM projects WHERE status = 'long_term_holding'").get();
+  const commercial       = db.prepare("SELECT COUNT(*) as cnt FROM projects WHERE status = 'commercial'").get();
   const sold             = { cnt: 0 };
   const occupied         = db.prepare('SELECT COUNT(*) as cnt FROM projects WHERE is_occupied = 1').get();
 
@@ -371,6 +377,8 @@ router.get('/stats', authorize('super_admin', 'operations_manager', 'project_man
     under_construction: underConstruction.cnt,
     pre_construction: preConstruction.cnt,
     completed_projects: completed.cnt,
+    long_term_holdings: longTermHoldings.cnt,
+    commercial_projects: commercial.cnt,
     sold_projects: sold.cnt,
     occupied_properties: occupied.cnt,
     // Operational

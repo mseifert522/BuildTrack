@@ -195,9 +195,10 @@ function slugify(value) {
     .replace(/^-|-$/g, '');
 }
 
-function ensureProjectStatusConstraintSupportsNotStarted(db) {
+function ensureProjectStatusConstraintSupportsCurrentStatuses(db) {
   const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'projects'").get();
-  if (!row?.sql || row.sql.includes("'not_started'")) return;
+  const requiredStatuses = ["'not_started'", "'active_rehab'", "'rehab_completed'", "'long_term_holding'", "'commercial'", "'archived'"];
+  if (!row?.sql || requiredStatuses.every(status => row.sql.includes(status))) return;
 
   const columns = `
     id, address, job_name, status, start_date, target_completion, scope_of_work, budget,
@@ -216,7 +217,7 @@ function ensureProjectStatusConstraintSupportsNotStarted(db) {
           id TEXT PRIMARY KEY,
           address TEXT NOT NULL,
           job_name TEXT NOT NULL,
-          status TEXT NOT NULL DEFAULT 'not_started' CHECK(status IN ('not_started','active_rehab','rehab_completed','archived')),
+          status TEXT NOT NULL DEFAULT 'not_started' CHECK(status IN ('not_started','active_rehab','rehab_completed','long_term_holding','commercial','archived')),
           start_date TEXT,
           target_completion TEXT,
           scope_of_work TEXT,
@@ -247,7 +248,7 @@ function ensureProjectStatusConstraintSupportsNotStarted(db) {
         SELECT
           id, address, job_name,
           CASE
-            WHEN status IN ('not_started','active_rehab','rehab_completed','archived') THEN status
+            WHEN status IN ('not_started','active_rehab','rehab_completed','long_term_holding','commercial','archived') THEN status
             WHEN status IN ('completed','closed_sold') THEN 'rehab_completed'
             ELSE 'active_rehab'
           END,
@@ -260,7 +261,7 @@ function ensureProjectStatusConstraintSupportsNotStarted(db) {
       db.exec('DROP TABLE projects');
       db.exec('ALTER TABLE projects_status_migration RENAME TO projects');
     })();
-    console.log('[MIGRATION] Updated projects status constraint to include not_started');
+    console.log('[MIGRATION] Updated projects status constraint to include current status buckets');
   } finally {
     db.pragma(`foreign_keys = ${foreignKeysEnabled ? 'ON' : 'OFF'}`);
   }
@@ -308,7 +309,7 @@ function initializeSchema() {
       id TEXT PRIMARY KEY,
       address TEXT NOT NULL,
       job_name TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'not_started' CHECK(status IN ('not_started','active_rehab','rehab_completed','archived')),
+      status TEXT NOT NULL DEFAULT 'not_started' CHECK(status IN ('not_started','active_rehab','rehab_completed','long_term_holding','commercial','archived')),
       start_date TEXT,
       target_completion TEXT,
       scope_of_work TEXT,
@@ -1162,7 +1163,7 @@ function initializeSchema() {
   try { db.exec(`ALTER TABLE projects ADD COLUMN closing_costs REAL`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE projects ADD COLUMN main_photo_url TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE projects ADD COLUMN lockbox_code TEXT`); } catch (_) { /* already exists */ }
-  try { ensureProjectStatusConstraintSupportsNotStarted(db); } catch (err) { console.error('[MIGRATION] Failed to update project status constraint:', err.message); }
+  try { ensureProjectStatusConstraintSupportsCurrentStatuses(db); } catch (err) { console.error('[MIGRATION] Failed to update project status constraint:', err.message); }
   try { db.exec(`ALTER TABLE project_notes ADD COLUMN edited_at TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE project_notes ADD COLUMN edited_by TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE project_notes ADD COLUMN edit_count INTEGER NOT NULL DEFAULT 0`); } catch (_) { /* already exists */ }

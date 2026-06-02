@@ -61,8 +61,10 @@ type ContractorTextMessage = {
 
 const PROJECT_STATUS_OPTIONS = [
   { value: 'not_started', label: 'Not Started' },
-  { value: 'active_rehab', label: 'Active Rehab' },
-  { value: 'rehab_completed', label: 'Completed' },
+  { value: 'active_rehab', label: 'Active Rehabs' },
+  { value: 'rehab_completed', label: 'Completed Projects' },
+  { value: 'long_term_holding', label: 'Long-Term Holdings' },
+  { value: 'commercial', label: 'Commercial' },
 ];
 
 const getInitials = (name?: string) =>

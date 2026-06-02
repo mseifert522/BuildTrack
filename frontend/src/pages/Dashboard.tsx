@@ -15,6 +15,8 @@ interface Stats {
   total_projects: number;
   under_construction: number;
   completed_projects: number;
+  long_term_holdings?: number;
+  commercial_projects?: number;
   sold_projects: number;
   active_projects: number;
   in_progress_projects: number;
@@ -112,6 +114,8 @@ const projectStatusStyles: Record<string, { label: string; bg: string; color: st
   active_rehab: { label: 'Active Rehab', bg: 'rgba(16,185,129,0.12)', color: '#A7F3D0', border: 'rgba(16,185,129,0.35)' },
   not_started: { label: 'Not Started', bg: 'rgba(148,163,184,0.14)', color: '#CBD5E1', border: 'rgba(148,163,184,0.30)' },
   rehab_completed: { label: 'Completed', bg: 'rgba(59,130,246,0.14)', color: '#BFDBFE', border: 'rgba(59,130,246,0.35)' },
+  long_term_holding: { label: 'Long-Term Holding', bg: 'rgba(217,119,6,0.14)', color: '#FCD34D', border: 'rgba(217,119,6,0.35)' },
+  commercial: { label: 'Commercial', bg: 'rgba(14,116,144,0.14)', color: '#67E8F9', border: 'rgba(14,116,144,0.35)' },
   completed: { label: 'Completed', bg: 'rgba(59,130,246,0.14)', color: '#BFDBFE', border: 'rgba(59,130,246,0.35)' },
 };
 
@@ -193,7 +197,15 @@ export default function Dashboard() {
   const now = new Date();
   const reviewSummaryTotal = reviewSummaries.reduce((sum, project) => sum + project.change_count, 0);
 
+  const markReviewSummariesReviewed = () => {
+    const projectIds = Array.from(new Set(reviewSummaries.map(project => project.project_id).filter(Boolean)));
+    if (!projectIds.length) return;
+    Promise.allSettled(projectIds.map(projectId => api.post(`/projects/${projectId}/reviewed`)))
+      .catch(err => console.error('Failed to mark review summary read', err));
+  };
+
   const closeReviewSummary = () => {
+    markReviewSummariesReviewed();
     if (reviewDismissKey) sessionStorage.setItem(reviewDismissKey, '1');
     if (reviewLoginKey) sessionStorage.removeItem(reviewLoginKey);
     setShowReviewSummary(false);
@@ -206,8 +218,21 @@ export default function Dashboard() {
   const completedProjects = stats?.completed_projects ?? allProjects.filter(p =>
     p.status === 'rehab_completed' || p.status === 'completed' || p.lifecycle_status === 'completed'
   ).length;
+  const longTermHoldings = stats?.long_term_holdings ?? allProjects.filter(p => p.status === 'long_term_holding').length;
+  const commercialProjects = stats?.commercial_projects ?? allProjects.filter(p => p.status === 'commercial').length;
 
   const kpiCards = [
+    {
+      label: 'Total Projects',
+      value: totalProjects,
+      sub: 'All tracked projects',
+      icon: FolderOpen,
+      gradient: 'linear-gradient(135deg, #1E3A5F 0%, #2563EB 100%)',
+      iconBg: 'rgba(255,255,255,0.15)',
+      trend: 'Project total',
+      trendUp: true,
+      filter: 'all_projects',
+    },
     {
       label: 'Active Rehabs',
       value: activeRehabs,
@@ -242,15 +267,26 @@ export default function Dashboard() {
       filter: 'rehab_completed',
     },
     {
-      label: 'Total Projects',
-      value: totalProjects,
-      sub: 'All tracked projects',
+      label: 'Long-Term Holdings',
+      value: longTermHoldings,
+      sub: 'Held portfolio properties',
       icon: FolderOpen,
-      gradient: 'linear-gradient(135deg, #1E3A5F 0%, #2563EB 100%)',
+      gradient: 'linear-gradient(135deg, #78350F 0%, #D97706 100%)',
       iconBg: 'rgba(255,255,255,0.15)',
-      trend: 'Project total',
-      trendUp: true,
-      filter: 'all_projects',
+      trend: longTermHoldings > 0 ? 'Holding' : 'None held',
+      trendUp: longTermHoldings > 0,
+      filter: 'long_term_holding',
+    },
+    {
+      label: 'Commercial',
+      value: commercialProjects,
+      sub: 'Commercial project pipeline',
+      icon: FolderOpen,
+      gradient: 'linear-gradient(135deg, #155E75 0%, #0891B2 100%)',
+      iconBg: 'rgba(255,255,255,0.15)',
+      trend: commercialProjects > 0 ? 'Commercial' : 'None listed',
+      trendUp: commercialProjects > 0,
+      filter: 'commercial',
     },
   ];
 
@@ -297,7 +333,7 @@ export default function Dashboard() {
 
       <div className="px-6 py-6 md:px-8 max-w-7xl mx-auto space-y-6">
         {/* KPI Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-3">
           {kpiCards.map(card => (
             <div
               key={card.label}

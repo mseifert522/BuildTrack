@@ -11,6 +11,8 @@ const STATUSES = [
   { value: 'not_started', label: 'Not Started', color: '#6b7280' },
   { value: 'active_rehab', label: 'Active Rehab', color: '#22c55e' },
   { value: 'rehab_completed', label: 'Completed', color: '#2563eb' },
+  { value: 'long_term_holding', label: 'Long-Term Holding', color: '#d97706' },
+  { value: 'commercial', label: 'Commercial', color: '#0891b2' },
 ];
 
 export default function MobileAddProject() {

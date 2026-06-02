@@ -46,10 +46,21 @@ interface ProjectReviewSummary {
   changes: { id: string; summary: string; user_name: string; created_at: string }[];
 }
 
+const PROJECT_FILTER_OPTIONS = [
+  { value: '', label: 'Total Projects' },
+  { value: 'active_rehab', label: 'Active Rehabs' },
+  { value: 'not_started', label: 'Not Started' },
+  { value: 'rehab_completed', label: 'Completed Projects' },
+  { value: 'long_term_holding', label: 'Long-Term Holdings' },
+  { value: 'commercial', label: 'Commercial' },
+];
+
 const PROJECT_STATUS_OPTIONS = [
   { value: 'not_started', label: 'Not Started' },
-  { value: 'active_rehab', label: 'Active Rehab' },
-  { value: 'rehab_completed', label: 'Completed' },
+  { value: 'active_rehab', label: 'Active Rehabs' },
+  { value: 'rehab_completed', label: 'Completed Projects' },
+  { value: 'long_term_holding', label: 'Long-Term Holdings' },
+  { value: 'commercial', label: 'Commercial' },
 ];
 
 const DOCUMENT_CATEGORIES = [
@@ -224,8 +235,7 @@ export default function Projects() {
           onChange={e => setStatusFilter(e.target.value)}
           className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-auto"
         >
-          <option value="">All Statuses</option>
-          {PROJECT_STATUS_OPTIONS.map(option => (
+          {PROJECT_FILTER_OPTIONS.map(option => (
             <option key={option.value} value={option.value}>{option.label}</option>
           ))}
         </select>
