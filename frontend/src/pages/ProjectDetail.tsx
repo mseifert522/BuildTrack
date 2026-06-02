@@ -121,6 +121,7 @@ export default function ProjectDetail() {
       '#quotes': 'quotes',
       '#punch-list': 'punch-list',
       '#assigned-contractors': 'team',
+      '#notes': 'notes',
     };
     if (hashTabMap[location.hash]) setTab(hashTabMap[location.hash]);
   }, [location.hash]);

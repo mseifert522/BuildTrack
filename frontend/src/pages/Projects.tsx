@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthStore, canCreateProjects, isAdminRole } from '../store/authStore';
 import api from '../lib/api';
 import { Loading, StatusBadge, Modal, PageHeader } from '../components/ui';
-import { Activity, Camera, CheckCircle2, FileText, Plus, Search, MapPin, Users, ClipboardList, ChevronRight, Bell, KeyRound, Upload } from 'lucide-react';
+import { Activity, Camera, CheckCircle2, FileText, Plus, Search, MapPin, Users, ClipboardList, ChevronRight, Bell, KeyRound, MessageSquare, Upload } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useForm } from 'react-hook-form';
 import GooglePlacesInput from '../components/GooglePlacesInput';
@@ -402,66 +402,82 @@ export default function Projects() {
                       </button>
                     )}
                   </div>
-                  {canUpdateStatus && (
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <label
-                        className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black cursor-pointer transition-colors ${p.main_photo_url ? 'relative z-0' : 'relative z-20'}`}
-                        style={{ background: '#F9FAFB', color: '#374151', border: '1px solid #E5E7EB' }}
-                        title="Upload one main house photo"
-                        onClick={e => {
-                          if (!p.main_photo_url) e.stopPropagation();
-                        }}
-                        onMouseDown={e => {
-                          if (!p.main_photo_url) e.stopPropagation();
-                        }}
-                      >
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          disabled={uploadingPhoto === p.id || !!p.main_photo_url}
-                          onChange={e => {
-                            const file = e.target.files?.[0];
-                            uploadProjectPhoto(p, file);
-                            e.currentTarget.value = '';
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {canUpdateStatus && (
+                      <>
+                        <label
+                          className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black cursor-pointer transition-colors ${p.main_photo_url ? 'relative z-0' : 'relative z-20'}`}
+                          style={{ background: '#F9FAFB', color: '#374151', border: '1px solid #E5E7EB' }}
+                          title="Upload one main house photo"
+                          onClick={e => {
+                            if (!p.main_photo_url) e.stopPropagation();
                           }}
-                        />
-                        <Camera className="w-3.5 h-3.5" />
-                        {p.main_photo_url ? 'House Photo Added' : uploadingPhoto === p.id ? 'Uploading...' : 'Add House Photo'}
-                      </label>
-                      <select
-                        value={p.status}
-                        disabled={updatingStatus === p.id}
-                        onClick={e => e.stopPropagation()}
-                        onMouseDown={e => e.stopPropagation()}
-                        onChange={e => updateProjectStatus(p, e.target.value)}
-                        className="relative z-20 px-3 py-2 rounded-xl border border-gray-300 bg-white text-xs font-semibold text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-60 cursor-pointer"
-                        title="Change project status"
-                      >
-                        {PROJECT_STATUS_OPTIONS.map(option => (
-                          <option key={option.value} value={option.value}>{option.label}</option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        disabled={updatingStatus === p.id || p.status === 'rehab_completed'}
-                        onClick={e => {
-                          e.stopPropagation();
-                          updateProjectStatus(p, 'rehab_completed');
-                        }}
-                        className="relative z-20 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black transition-colors disabled:opacity-50 cursor-pointer"
-                        style={{
-                          background: p.status === 'rehab_completed' ? '#DCFCE7' : '#ECFDF5',
-                          color: '#047857',
-                          border: '1px solid #A7F3D0',
-                        }}
-                        title="Mark project completed"
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        {p.status === 'rehab_completed' ? 'Completed' : 'Mark Completed'}
-                      </button>
-                    </div>
-                  )}
+                          onMouseDown={e => {
+                            if (!p.main_photo_url) e.stopPropagation();
+                          }}
+                        >
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            disabled={uploadingPhoto === p.id || !!p.main_photo_url}
+                            onChange={e => {
+                              const file = e.target.files?.[0];
+                              uploadProjectPhoto(p, file);
+                              e.currentTarget.value = '';
+                            }}
+                          />
+                          <Camera className="w-3.5 h-3.5" />
+                          {p.main_photo_url ? 'House Photo Added' : uploadingPhoto === p.id ? 'Uploading...' : 'Add House Photo'}
+                        </label>
+                        <select
+                          value={p.status}
+                          disabled={updatingStatus === p.id}
+                          onClick={e => e.stopPropagation()}
+                          onMouseDown={e => e.stopPropagation()}
+                          onChange={e => updateProjectStatus(p, e.target.value)}
+                          className="relative z-20 px-3 py-2 rounded-xl border border-gray-300 bg-white text-xs font-semibold text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-60 cursor-pointer"
+                          title="Change project status"
+                        >
+                          {PROJECT_STATUS_OPTIONS.map(option => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          disabled={updatingStatus === p.id || p.status === 'rehab_completed'}
+                          onClick={e => {
+                            e.stopPropagation();
+                            updateProjectStatus(p, 'rehab_completed');
+                          }}
+                          className="relative z-20 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black transition-colors disabled:opacity-50 cursor-pointer"
+                          style={{
+                            background: p.status === 'rehab_completed' ? '#DCFCE7' : '#ECFDF5',
+                            color: '#047857',
+                            border: '1px solid #A7F3D0',
+                          }}
+                          title="Mark project completed"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          {p.status === 'rehab_completed' ? 'Completed' : 'Mark Completed'}
+                        </button>
+                      </>
+                    )}
+                    <button
+                      type="button"
+                      onClick={e => {
+                        e.stopPropagation();
+                        navigate(`/projects/${p.id}#notes`);
+                      }}
+                      className="relative z-20 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black transition-colors cursor-pointer hover:brightness-95"
+                      style={{ background: '#EFF6FF', color: '#1D4ED8', border: '1px solid #BFDBFE' }}
+                      title="Enter a project note"
+                      aria-label={`Enter notes for ${p.address}`}
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      Enter Notes
+                    </button>
+                  </div>
                 </div>
                 <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
               </div>
