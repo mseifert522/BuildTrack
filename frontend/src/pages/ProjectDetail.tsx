@@ -425,7 +425,7 @@ export default function ProjectDetail() {
   const canAssign = user && isAdminRole(user.role);
 
   const notesPanel = (compact = false) => (
-    <div className="h-full rounded-xl border border-slate-400 bg-[#D8E0EA] p-4 shadow-[0_10px_24px_rgba(15,23,42,0.12)]">
+    <div className="h-full rounded-xl border border-slate-400 bg-[#D8E0EA] p-3 shadow-[0_10px_24px_rgba(15,23,42,0.12)] sm:p-4">
       <input
         ref={attachExistingNoteInputRef}
         type="file"
@@ -435,11 +435,21 @@ export default function ProjectDetail() {
         onChange={event => attachProgressPicturesToExistingNote(event.target.files)}
       />
       <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-slate-400 bg-slate-50 px-3 py-2.5 shadow-sm">
-        <div>
+        <div className="min-w-0">
           <h3 className="text-sm font-black text-slate-950">Project Notes</h3>
           <p className="mt-0.5 text-xs font-semibold text-slate-600">Office, field, and general updates for this project</p>
         </div>
-        {compact && (
+        <div className="flex flex-shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={addNote}
+            disabled={!newNote.trim()}
+            className="inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 text-xs font-black text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500 sm:hidden"
+          >
+            <Send className="h-3.5 w-3.5" />
+            Save
+          </button>
+          {compact && (
           <button
             type="button"
             onClick={() => setTab('notes')}
@@ -447,37 +457,41 @@ export default function ProjectDetail() {
           >
             View all
           </button>
-        )}
+          )}
+        </div>
       </div>
-      <textarea
-        value={newNote}
-        onChange={e => setNewNote(e.target.value)}
-        rows={compact ? 2 : 3}
-        className="mb-2 min-h-[156px] w-full resize-none rounded-lg border border-slate-400 bg-slate-50 px-3.5 py-3 text-base leading-6 text-slate-950 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:min-h-[88px] sm:py-2.5 sm:text-sm"
-        placeholder="Add a note..."
-      />
-      <button
-        type="button"
-        onClick={addNote}
-        className="mb-3 inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-black text-white shadow-sm transition-colors hover:bg-blue-700 sm:hidden"
-      >
-        <Send className="h-4 w-4" />
-        Done - Submit Note
-      </button>
-      <div className="mb-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-        <select value={noteType} onChange={e => setNoteType(e.target.value)} className="col-span-2 min-h-[46px] w-full rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm font-bold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:col-span-1 sm:w-auto">
+      <div className="mb-4 rounded-2xl border border-slate-400 bg-[#EDF3F8] p-3 shadow-sm">
+        <textarea
+          value={newNote}
+          onChange={e => setNewNote(e.target.value)}
+          rows={compact ? 2 : 3}
+          className="mb-3 min-h-[178px] w-full resize-none rounded-xl border border-slate-400 bg-white px-4 py-3 text-base leading-6 text-slate-950 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:min-h-[92px] sm:py-2.5 sm:text-sm"
+          placeholder="Add a note..."
+        />
+        <button
+          type="button"
+          onClick={addNote}
+          disabled={!newNote.trim()}
+          className="mb-3 inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500 sm:hidden"
+        >
+          <Send className="h-4 w-4" />
+          Done - Submit Note
+        </button>
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+        <select value={noteType} onChange={e => setNoteType(e.target.value)} className="min-h-[46px] w-full rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm font-bold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-auto">
           <option value="general">General</option>
           <option value="office">Office</option>
           <option value="field">Field</option>
         </select>
-        <label className="col-span-2 inline-flex min-h-[46px] items-center gap-2 rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm sm:col-span-1">
+        <label className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm">
           <input
             type="checkbox"
             checked={noteVisibility === 'public'}
             onChange={e => setNoteVisibility(e.target.checked ? 'public' : 'private')}
             style={{ accentColor: '#2563EB' }}
           />
-          Public to contractors
+          <span className="text-center leading-tight sm:hidden">Public</span>
+          <span className="hidden sm:inline">Public to contractors</span>
         </label>
         <label className="inline-flex min-h-[46px] cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 sm:min-w-[150px]">
           <input
@@ -488,7 +502,12 @@ export default function ProjectDetail() {
             onChange={e => setNotePhotoFiles(Array.from(e.target.files || []))}
           />
           <Camera className="w-4 h-4" />
-          {notePhotoFiles.length ? `${notePhotoFiles.length} ready` : 'Progress pictures'}
+          {notePhotoFiles.length ? `${notePhotoFiles.length} ready` : (
+            <>
+              <span className="sm:hidden">Pictures</span>
+              <span className="hidden sm:inline">Progress pictures</span>
+            </>
+          )}
         </label>
         <button
           type="button"
@@ -506,9 +525,9 @@ export default function ProjectDetail() {
           <Send className="h-4 w-4" />
           Submit Note
         </button>
-      </div>
+        </div>
       {listeningNote && (
-        <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-amber-50 text-amber-800 text-xs font-bold">
+        <div className="mt-3 flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
           <span>Listening</span>
           <span className="flex items-end gap-0.5 h-4">
             {[0, 1, 2, 3].map(i => (
@@ -522,11 +541,12 @@ export default function ProjectDetail() {
         </div>
       )}
       {notePhotoFiles.length > 0 && (
-        <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 shadow-sm">
+        <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 shadow-sm">
           <span className="text-xs font-semibold text-blue-700 truncate">{notePhotoFiles.length} progress picture{notePhotoFiles.length === 1 ? '' : 's'} will attach to this note</span>
           <button type="button" onClick={() => setNotePhotoFiles([])} className="text-xs font-bold text-blue-700 hover:underline">Remove</button>
         </div>
       )}
+      </div>
       <div className={`space-y-4 rounded-xl border border-slate-400 bg-[#C7D2DE] p-3 shadow-inner ${compact ? 'max-h-[620px] overflow-y-auto pr-2' : ''}`}>
         {notes.map(note => (
           <div key={note.id} className="flex items-start gap-3 rounded-2xl border border-slate-400 bg-[#F1F5F9] p-4 shadow-[0_4px_14px_rgba(15,23,42,0.10)] ring-1 ring-slate-300/70">
