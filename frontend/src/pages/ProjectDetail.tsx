@@ -453,9 +453,17 @@ export default function ProjectDetail() {
         value={newNote}
         onChange={e => setNewNote(e.target.value)}
         rows={compact ? 2 : 3}
-        className="mb-2 w-full resize-none rounded-lg border border-slate-400 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-950 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        className="mb-2 min-h-[156px] w-full resize-none rounded-lg border border-slate-400 bg-slate-50 px-3.5 py-3 text-base leading-6 text-slate-950 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:min-h-[88px] sm:py-2.5 sm:text-sm"
         placeholder="Add a note..."
       />
+      <button
+        type="button"
+        onClick={addNote}
+        className="mb-3 inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-black text-white shadow-sm transition-colors hover:bg-blue-700 sm:hidden"
+      >
+        <Send className="h-4 w-4" />
+        Done - Submit Note
+      </button>
       <div className="mb-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
         <select value={noteType} onChange={e => setNoteType(e.target.value)} className="col-span-2 min-h-[46px] w-full rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm font-bold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:col-span-1 sm:w-auto">
           <option value="general">General</option>
@@ -493,7 +501,7 @@ export default function ProjectDetail() {
         <button
           type="button"
           onClick={addNote}
-          className="col-span-2 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-black text-white shadow-sm transition-colors hover:bg-blue-700 sm:col-span-1 sm:flex-1 sm:py-2"
+          className="hidden min-h-[50px] w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-black text-white shadow-sm transition-colors hover:bg-blue-700 sm:col-span-1 sm:inline-flex sm:flex-1 sm:py-2"
         >
           <Send className="h-4 w-4" />
           Submit Note
