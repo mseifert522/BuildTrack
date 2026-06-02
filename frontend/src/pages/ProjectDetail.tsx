@@ -639,6 +639,9 @@ export default function ProjectDetail() {
             </div>
 
             <div className="grid lg:grid-cols-5 gap-4">
+              <div className="lg:col-span-3">
+                {notesPanel(true)}
+              </div>
               <div className="lg:col-span-2 space-y-4">
             {/* Project details */}
             <div className="bg-white rounded-xl border border-gray-200 p-4">
@@ -669,9 +672,6 @@ export default function ProjectDetail() {
                 <h3 className="font-semibold text-gray-900 mb-2 text-sm">Upload Quotes</h3>
                 <p className="text-sm text-gray-600">Store contractor quotes directly against this property.</p>
               </button>
-              </div>
-              <div className="lg:col-span-3">
-                {notesPanel(true)}
               </div>
             </div>
 
