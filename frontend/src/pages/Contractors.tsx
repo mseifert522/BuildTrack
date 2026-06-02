@@ -740,7 +740,7 @@ export default function Contractors() {
   if (loading) return <Loading />;
 
   return (
-    <div className="min-h-full px-6 py-6 md:px-8" style={{ background: '#F0F2F5' }}>
+    <div className="min-h-full px-6 py-6 md:px-8" style={{ background: '#E3E8EF' }}>
       <div className="max-w-7xl mx-auto space-y-5">
         <div className="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-4">
           <div>
@@ -774,7 +774,7 @@ export default function Contractors() {
           </div>
         </div>
 
-        <div className="rounded-2xl p-4" style={{ background: 'white', boxShadow: '0 2px 16px rgba(0,0,0,0.07)' }}>
+        <div className="rounded-2xl border border-slate-300 p-4" style={{ background: '#F8FAFC', boxShadow: '0 10px 28px rgba(15,23,42,0.08)' }}>
           <div className="flex items-center gap-2 mb-3">
             <SlidersHorizontal className="w-4 h-4 text-gray-400" />
             <p className="text-sm font-black text-gray-900">Filters</p>
@@ -802,7 +802,7 @@ export default function Contractors() {
               <option value="total_paid">Sort: Total paid</option>
             </select>
           </div>
-          <div className="mt-4 pt-4 border-t border-gray-100">
+          <div className="mt-4 border-t border-slate-200 pt-4">
             <label className="block text-xs font-black uppercase tracking-wide text-gray-500 mb-2">Find contractor by name</label>
             <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-gray-300 bg-white">
               <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
@@ -826,7 +826,7 @@ export default function Contractors() {
             <p className="text-sm font-bold text-gray-500">No contractors match these filters</p>
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-3 rounded-2xl border border-slate-300 bg-slate-300/70 p-2 shadow-inner">
             {filteredContractors.map((contractor) => {
               const lastPaid = contractor.last_paid_invoice;
               const connectedProjects = contractor.connected_projects || [];
@@ -848,7 +848,7 @@ export default function Contractors() {
                     if (target.closest('button,a,input,textarea,select,label')) return;
                     setExpandedContractorId(current => current === contractor.id ? null : contractor.id);
                   }}
-                  className={`overflow-hidden rounded-xl border bg-white transition-colors cursor-pointer ${isExpanded ? 'border-amber-200 shadow-md' : 'border-gray-200 shadow-sm hover:border-amber-200 hover:bg-amber-50/20'}`}
+                  className={`overflow-hidden rounded-xl border transition-colors cursor-pointer ${isExpanded ? 'border-amber-400 bg-amber-50 shadow-lg ring-1 ring-amber-200' : 'border-slate-300 bg-slate-50 shadow-sm hover:border-slate-500 hover:bg-white'}`}
                   title={isExpanded ? 'Click to collapse contractor details' : 'Click to expand contractor details'}
                 >
                   <div>
@@ -885,7 +885,7 @@ export default function Contractors() {
                     </button>
 
                     {isExpanded && (
-                      <div className="border-t border-gray-100 px-4 py-4 md:px-5" style={{ background: '#FAFAFA' }}>
+                      <div className="border-t border-slate-300 px-4 py-4 md:px-5" style={{ background: '#F8FAFC' }}>
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                           <div className="flex flex-wrap items-center gap-2">
                             <span
@@ -1027,7 +1027,7 @@ export default function Contractors() {
                         )}
 
                     <div className="grid lg:grid-cols-12 gap-4 mt-5">
-                      <div className="lg:col-span-3 rounded-xl border border-gray-100 p-4 bg-gray-50">
+                      <div className="lg:col-span-3 rounded-xl border border-slate-200 p-4 bg-slate-100">
                         <div className="flex items-center gap-2 mb-2">
                           <Building2 className="w-4 h-4 text-gray-400" />
                           <p className="text-xs font-black uppercase tracking-wide text-gray-500">Billing Address</p>
@@ -1035,7 +1035,7 @@ export default function Contractors() {
                         <p className="text-sm text-gray-800 whitespace-pre-wrap">{contractor.billing_address || 'No billing address on file'}</p>
                       </div>
 
-                      <div className="lg:col-span-3 rounded-xl border border-gray-100 p-4">
+                      <div className="lg:col-span-3 rounded-xl border border-slate-200 bg-white p-4">
                         <div className="flex items-center justify-between gap-2 mb-3">
                           <div className="flex items-center gap-2">
                             <LinkIcon className="w-4 h-4 text-gray-400" />
@@ -1070,7 +1070,7 @@ export default function Contractors() {
                         )}
                       </div>
 
-                      <div className="lg:col-span-3 rounded-xl border border-gray-100 p-4 bg-white hover:border-amber-200 hover:bg-amber-50/20 transition-colors">
+                      <div className="lg:col-span-3 rounded-xl border border-slate-200 bg-white p-4 transition-colors hover:border-amber-300 hover:bg-amber-50/30">
                         <div className="flex items-center justify-between gap-2 mb-3">
                           <div className="flex items-center gap-2">
                             <MessageSquare className="w-4 h-4 text-gray-400" />
@@ -1120,7 +1120,7 @@ export default function Contractors() {
                         </div>
                       </div>
 
-                      <div className="lg:col-span-3 rounded-xl border border-gray-100 p-4">
+                      <div className="lg:col-span-3 rounded-xl border border-slate-200 bg-white p-4">
                         <div className="flex items-center gap-2 mb-3">
                           <FileText className="w-4 h-4 text-gray-400" />
                           <p className="text-xs font-black uppercase tracking-wide text-gray-500">Payment History</p>
@@ -1161,8 +1161,8 @@ export default function Contractors() {
                     )}
 
                   {expandedContractorId === contractor.id && (
-                    <div className="border-t border-gray-100 p-5" style={{ background: '#FAFAFA' }}>
-                      <div className="rounded-2xl border border-gray-200 p-4 bg-white">
+                    <div className="border-t border-slate-300 p-5" style={{ background: '#F1F5F9' }}>
+                      <div className="rounded-2xl border border-slate-300 bg-white p-4">
                         <div className="flex items-center justify-between gap-3 mb-3">
                           <div>
                             <p className="text-sm font-black text-gray-900">Contractor Notes</p>

@@ -232,7 +232,7 @@ export default function Suppliers() {
   if (loading) return <Loading />;
 
   return (
-    <div className="min-h-full px-6 py-6 md:px-8" style={{ background: '#F0F2F5' }}>
+    <div className="min-h-full px-6 py-6 md:px-8" style={{ background: '#E3E8EF' }}>
       <div className="mx-auto max-w-7xl space-y-5">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
@@ -272,8 +272,8 @@ export default function Suppliers() {
             <p className="font-bold text-gray-700">No suppliers found</p>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="hidden border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-black uppercase tracking-wide text-slate-500 xl:grid xl:grid-cols-[minmax(210px,1.1fr)_minmax(220px,1fr)_minmax(260px,1.25fr)_minmax(190px,0.9fr)_minmax(160px,0.75fr)_80px] xl:gap-4">
+          <div className="overflow-hidden rounded-2xl border border-slate-300 bg-slate-300/70 p-2 shadow-inner">
+            <div className="hidden rounded-xl border border-slate-300 bg-slate-800 px-4 py-3 text-xs font-black uppercase tracking-wide text-slate-100 xl:grid xl:grid-cols-[minmax(210px,1.1fr)_minmax(220px,1fr)_minmax(260px,1.25fr)_minmax(190px,0.9fr)_minmax(160px,0.75fr)_80px] xl:gap-4">
               <span>Name</span>
               <span>Category</span>
               <span>Address</span>
@@ -281,14 +281,14 @@ export default function Suppliers() {
               <span>Phone Number</span>
               <span className="text-right">Open</span>
             </div>
-            <div className="divide-y divide-slate-100">
+            <div className="mt-2 space-y-2">
               {filteredSuppliers.map(supplier => {
                 const isExpanded = expandedSupplierId === supplier.id;
                 const categories = categoriesFor(supplier);
                 return (
                   <div
                     key={supplier.id}
-                    className={`transition-colors ${isExpanded ? 'bg-blue-50/40' : 'bg-white hover:bg-slate-50'}`}
+                    className={`overflow-hidden rounded-xl border transition-colors ${isExpanded ? 'border-blue-400 bg-blue-50 shadow-lg ring-1 ring-blue-200' : 'border-slate-300 bg-slate-50 shadow-sm hover:border-slate-500 hover:bg-white'}`}
                     onClick={event => {
                       const target = event.target as HTMLElement;
                       if (target.closest('button,a,input,textarea,select,label')) return;
@@ -351,9 +351,9 @@ export default function Suppliers() {
                     </button>
 
                     {isExpanded && (
-                      <div className="border-t border-blue-100 bg-white px-4 py-4">
+                      <div className="border-t border-slate-300 bg-slate-50 px-4 py-4">
                         <div className="grid gap-3 lg:grid-cols-[1.1fr_1fr_auto] lg:items-start">
-                          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                          <div className="rounded-xl border border-slate-300 bg-white p-4">
                             <p className="mb-2 text-xs font-black uppercase tracking-wide text-slate-500">Supplier Details</p>
                             <div className="grid gap-3 sm:grid-cols-2">
                               <DetailLine label="Name" value={supplier.name} />
@@ -362,7 +362,7 @@ export default function Suppliers() {
                               <DetailLine label="Contact Person" value={supplierContact(supplier)} />
                             </div>
                           </div>
-                          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                          <div className="rounded-xl border border-slate-300 bg-white p-4">
                             <p className="mb-2 text-xs font-black uppercase tracking-wide text-slate-500">Contact</p>
                             <div className="space-y-2 text-sm">
                               <p className="flex min-w-0 items-center gap-2 font-semibold text-slate-700"><Phone className="h-4 w-4 text-slate-400" />{supplierPhone(supplier)}</p>
