@@ -425,7 +425,7 @@ export default function ProjectDetail() {
   const canAssign = user && isAdminRole(user.role);
 
   const notesPanel = (compact = false) => (
-    <div className="bg-white rounded-xl border border-gray-200 p-4 h-full">
+    <div className="h-full rounded-xl border border-slate-400 bg-[#D8E0EA] p-4 shadow-[0_10px_24px_rgba(15,23,42,0.12)]">
       <input
         ref={attachExistingNoteInputRef}
         type="file"
@@ -434,10 +434,10 @@ export default function ProjectDetail() {
         className="hidden"
         onChange={event => attachProgressPicturesToExistingNote(event.target.files)}
       />
-      <div className="flex items-center justify-between gap-3 mb-3">
+      <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-slate-400 bg-slate-50 px-3 py-2.5 shadow-sm">
         <div>
-          <h3 className="font-semibold text-gray-900 text-sm">Project Notes</h3>
-          <p className="text-xs text-gray-500 mt-0.5">Office, field, and general updates for this project</p>
+          <h3 className="text-sm font-black text-slate-950">Project Notes</h3>
+          <p className="mt-0.5 text-xs font-semibold text-slate-600">Office, field, and general updates for this project</p>
         </div>
         {compact && (
           <button
@@ -453,16 +453,16 @@ export default function ProjectDetail() {
         value={newNote}
         onChange={e => setNewNote(e.target.value)}
         rows={compact ? 2 : 3}
-        className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none mb-2"
+        className="mb-2 w-full resize-none rounded-lg border border-slate-400 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-950 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         placeholder="Add a note..."
       />
       <div className="flex gap-2 mb-4">
-        <select value={noteType} onChange={e => setNoteType(e.target.value)} className="px-3 py-2 rounded-lg border border-gray-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <select value={noteType} onChange={e => setNoteType(e.target.value)} className="rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
           <option value="general">General</option>
           <option value="office">Office</option>
           <option value="field">Field</option>
         </select>
-        <label className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 bg-white">
+        <label className="inline-flex items-center gap-2 rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm">
           <input
             type="checkbox"
             checked={noteVisibility === 'public'}
@@ -471,7 +471,7 @@ export default function ProjectDetail() {
           />
           Public to contractors
         </label>
-        <label className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer">
+        <label className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50">
           <input
             type="file"
             accept={PROGRESS_MEDIA_ACCEPT}
@@ -485,7 +485,7 @@ export default function ProjectDetail() {
         <button
           type="button"
           onClick={listeningNote ? stopNoteDictation : startNoteDictation}
-          className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+          className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
         >
           {listeningNote ? <Square className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
           {listeningNote ? 'Stop' : 'Mic'}
@@ -507,14 +507,14 @@ export default function ProjectDetail() {
         </div>
       )}
       {notePhotoFiles.length > 0 && (
-        <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 shadow-sm">
           <span className="text-xs font-semibold text-blue-700 truncate">{notePhotoFiles.length} progress picture{notePhotoFiles.length === 1 ? '' : 's'} will attach to this note</span>
           <button type="button" onClick={() => setNotePhotoFiles([])} className="text-xs font-bold text-blue-700 hover:underline">Remove</button>
         </div>
       )}
-      <div className={`space-y-4 ${compact ? 'max-h-[620px] overflow-y-auto pr-2' : ''}`}>
+      <div className={`space-y-4 rounded-xl border border-slate-400 bg-[#C7D2DE] p-3 shadow-inner ${compact ? 'max-h-[620px] overflow-y-auto pr-2' : ''}`}>
         {notes.map(note => (
-          <div key={note.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ring-1 ring-slate-100 flex items-start gap-3">
+          <div key={note.id} className="flex items-start gap-3 rounded-2xl border border-slate-400 bg-[#F1F5F9] p-4 shadow-[0_4px_14px_rgba(15,23,42,0.10)] ring-1 ring-slate-300/70">
             {note.user_avatar_url ? (
               <img src={note.user_avatar_url} alt={note.user_name} className="w-9 h-9 rounded-xl object-cover flex-shrink-0" style={{ objectPosition: 'center top' }} />
             ) : (
@@ -523,11 +523,11 @@ export default function ProjectDetail() {
               </div>
             )}
             <div className="flex-1 min-w-0">
-              <div className="flex items-start justify-between gap-3 mb-2">
+              <div className="mb-2 flex items-start justify-between gap-3 border-b border-slate-300 pb-2">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="text-sm font-bold text-gray-950 truncate">{note.user_name}</span>
-                    <span className="text-xs font-semibold text-gray-500">
+                    <span className="text-sm font-black text-slate-950 truncate">{note.user_name}</span>
+                    <span className="text-xs font-semibold text-slate-600">
                       Inserted {formatEasternDateTime(note.created_at, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time
                     </span>
                   </div>
@@ -565,12 +565,12 @@ export default function ProjectDetail() {
                 </div>
               ) : (
                 <>
-                  <p className="border-t border-slate-100 pt-3 text-sm leading-6 text-slate-700 whitespace-pre-wrap">{note.note}</p>
-                  <span className={`inline-flex mt-2 px-2 py-0.5 rounded-full text-xs font-bold ${note.visibility === 'public' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                  <p className="pt-2 text-sm leading-6 text-slate-800 whitespace-pre-wrap">{note.note}</p>
+                  <span className={`inline-flex mt-2 rounded-full border px-2 py-0.5 text-xs font-bold ${note.visibility === 'public' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-300 bg-white text-slate-700'}`}>
                     {note.visibility === 'public' ? 'Public to contractors' : 'Private management note'}
                   </span>
                   {getNotePhotos(note).length > 0 && (
-                    <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-2">
+                    <div className="mt-3 rounded-xl border border-slate-400 bg-[#E2E8F0] p-2 shadow-inner">
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                         {getNotePhotos(note).map((photo: any) => {
                           const src = `/uploads/${note.project_id}/${photo.filename}`;
@@ -579,7 +579,7 @@ export default function ProjectDetail() {
                           return (
                             <div
                               key={photo.id}
-                              className={`relative aspect-square overflow-hidden rounded-lg bg-white ${mediaKind === 'file' ? 'cursor-pointer' : ''}`}
+                              className={`relative aspect-square overflow-hidden rounded-lg border border-slate-300 bg-white shadow-sm ${mediaKind === 'file' ? 'cursor-pointer' : ''}`}
                               onClick={() => {
                                 if (mediaKind === 'file') window.open(src, '_blank', 'noopener,noreferrer');
                               }}
@@ -601,7 +601,7 @@ export default function ProjectDetail() {
                           );
                         })}
                       </div>
-                      <p className="px-1 pt-2 text-xs font-semibold text-gray-500">Progress pictures attached to this note</p>
+                      <p className="px-1 pt-2 text-xs font-bold text-slate-600">Progress pictures attached to this note</p>
                     </div>
                   )}
                   {note.edited_at && (
