@@ -19,6 +19,8 @@ import toast from 'react-hot-toast';
 
 const DEVICE_TOKEN_KEY = 'bt_device_token';
 const DEVICE_TRUSTED_UNTIL_KEY = 'bt_device_trusted_until';
+const REMEMBERED_EMAIL_KEY = 'bt_remembered_email';
+const REMEMBERED_CONTRACTOR_EMAIL_KEY = 'bt_remembered_contractor_email';
 const CONTRACTOR_TOKEN_KEY = 'contractor_token';
 const CONTRACTOR_USER_KEY = 'contractor_user';
 const CONTRACTOR_PROJECTS_KEY = 'contractor_projects';
@@ -90,6 +92,16 @@ const saveTrustedDevice = (data: { device_token?: string; trusted_device_expires
   }
 };
 
+const saveRememberedIdentity = (data: LoginPayload) => {
+  const rememberedEmail = data.user?.email;
+  if (!rememberedEmail) return;
+  if (data.user?.role === 'contractor') {
+    localStorage.setItem(REMEMBERED_CONTRACTOR_EMAIL_KEY, rememberedEmail);
+  } else {
+    localStorage.setItem(REMEMBERED_EMAIL_KEY, rememberedEmail);
+  }
+};
+
 const parseTrustedUntil = (value?: string | null) => {
   if (!value) return 0;
   const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`;
@@ -107,8 +119,10 @@ const getTrustedDeviceState = () => {
   };
 };
 
+const getStoredDeviceToken = () => localStorage.getItem(DEVICE_TOKEN_KEY) || undefined;
+
 export default function Login({ initialMode = 'password' }: LoginProps) {
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(() => localStorage.getItem(REMEMBERED_EMAIL_KEY) || '');
   const [password, setPassword] = useState('');
   const [stayLoggedIn, setStayLoggedIn] = useState(
     localStorage.getItem('stayLoggedIn') === 'true'
@@ -124,7 +138,7 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
   const [loginMode, setLoginMode] = useState<LoginMode>(initialMode);
   const [contractorAccessMode, setContractorAccessMode] = useState<ContractorAccessMode>('pin');
   const [pinDigits, setPinDigits] = useState('');
-  const [contractorEmail, setContractorEmail] = useState('');
+  const [contractorEmail, setContractorEmail] = useState(() => localStorage.getItem(REMEMBERED_CONTRACTOR_EMAIL_KEY) || '');
   const [contractorEmailCode, setContractorEmailCode] = useState('');
   const [contractorEmailCodeSent, setContractorEmailCodeSent] = useState(false);
   const [contractorActionLoading, setContractorActionLoading] = useState(false);
@@ -132,6 +146,49 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
   const [focusedField, setFocusedField] = useState<string | null>(null);
   const { setAuth } = useAuthStore();
   const navigate = useNavigate();
+
+  const wantsTrustedDevice = () => trustDevice || stayLoggedIn;
+
+  const setTrustDevicePreference = (trusted: boolean) => {
+    setTrustDevice(trusted);
+    setStayLoggedIn(trusted);
+  };
+
+  const renderTrustDevicePreference = (
+    title = 'Trust this device after verification',
+    description = 'Remember email, then skip password and 2FA next time on this browser.'
+  ) => {
+    const enabled = wantsTrustedDevice();
+    return (
+      <div
+        className="flex items-center justify-between gap-4 p-4 rounded-lg"
+        style={{ background: 'white', border: '1px solid #E5E7EB' }}
+      >
+        <div>
+          <p className="text-sm font-semibold text-gray-800">{title}</p>
+          <p className="text-xs text-gray-400 mt-0.5">{description}</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setTrustDevicePreference(!enabled)}
+          className="relative flex-shrink-0 transition-all duration-300"
+          style={{
+            width: 52,
+            height: 28,
+            borderRadius: 999,
+            backgroundColor: enabled ? '#D99D26' : '#D1D5DB',
+          }}
+          aria-label={title}
+          aria-pressed={enabled}
+        >
+          <span
+            className="absolute top-1 w-5 h-5 bg-white rounded-full shadow-md transition-all duration-300"
+            style={{ left: enabled ? 28 : 4 }}
+          />
+        </button>
+      </div>
+    );
+  };
 
   useEffect(() => {
     setTrustedDeviceReady(getTrustedDeviceState().available);
@@ -154,6 +211,7 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
     if (data.user?.role === 'contractor') saveContractorSession(data);
     else clearContractorSession();
     saveTrustedDevice(data);
+    saveRememberedIdentity(data);
     setAuth(data.user as any, data.token);
     clearReviewSummaryDismissals(data.user);
     queueLoginReviewSummary(data.user);
@@ -188,15 +246,21 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
     e.preventDefault();
     setLoading(true);
     try {
-      const deviceToken = localStorage.getItem(DEVICE_TOKEN_KEY) || undefined;
-      const res = await api.post('/auth/login', { email, password, device_token: deviceToken });
+      const rememberThisDevice = wantsTrustedDevice();
+      const res = await api.post('/auth/login', {
+        email,
+        password,
+        device_token: getStoredDeviceToken(),
+        trust_device: rememberThisDevice,
+      });
 
       if (res.data.requires_2fa) {
-        setTrustDevice(stayLoggedIn);
+        localStorage.setItem(REMEMBERED_EMAIL_KEY, email.toLowerCase().trim());
+        setTrustDevicePreference(rememberThisDevice);
         setNeeds2FA(true);
         toast.success('Verification code sent to your email');
       } else {
-        localStorage.setItem('stayLoggedIn', stayLoggedIn ? 'true' : 'false');
+        localStorage.setItem('stayLoggedIn', rememberThisDevice ? 'true' : 'false');
         completeLogin(res.data);
       }
     } catch (err: any) {
@@ -210,13 +274,12 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
     e.preventDefault();
     setTwofaLoading(true);
     try {
-      const rememberThisDevice = trustDevice || stayLoggedIn;
-      const deviceToken = localStorage.getItem(DEVICE_TOKEN_KEY) || undefined;
+      const rememberThisDevice = wantsTrustedDevice();
       const res = await api.post('/auth/login', {
         email,
         password,
         twofa_code: twofaCode,
-        device_token: deviceToken,
+        device_token: getStoredDeviceToken(),
         trust_device: rememberThisDevice,
       });
       if (res.data.requires_2fa) {
@@ -237,7 +300,13 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
     if (pinDigits.length !== 5) return;
     setLoading(true);
     try {
-      const res = await api.post('/auth/pin-login', { pin: pinDigits });
+      const rememberThisDevice = wantsTrustedDevice();
+      const res = await api.post('/auth/pin-login', {
+        pin: pinDigits,
+        device_token: getStoredDeviceToken(),
+        trust_device: rememberThisDevice,
+      });
+      localStorage.setItem('stayLoggedIn', rememberThisDevice ? 'true' : 'false');
       completeLogin(res.data);
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Invalid contractor PIN');
@@ -266,10 +335,14 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
     if (contractorEmailCode.length !== 6) return;
     setContractorActionLoading(true);
     try {
+      const rememberThisDevice = wantsTrustedDevice();
       const res = await api.post('/auth/contractor/email-login/verify', {
         email: contractorEmail,
         code: contractorEmailCode,
+        device_token: getStoredDeviceToken(),
+        trust_device: rememberThisDevice,
       });
+      localStorage.setItem('stayLoggedIn', rememberThisDevice ? 'true' : 'false');
       completeLogin(res.data);
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Invalid or expired login code');
@@ -454,10 +527,10 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                   className="mt-0.5 h-4 w-4 rounded border-gray-300"
                   style={{ accentColor: '#D99D26' }}
                 />
-                <span>
-                  <span className="block text-sm font-bold text-gray-900">Trust this device for 60 days</span>
-                  <span className="block text-xs text-gray-500 mt-0.5">Skip email verification on this approved browser.</span>
-                </span>
+        <span>
+          <span className="block text-sm font-bold text-gray-900">Trust this device and remember email</span>
+          <span className="block text-xs text-gray-500 mt-0.5">Skip password and email verification on this approved browser.</span>
+        </span>
               </label>
               <button
                 type="submit"
@@ -548,13 +621,15 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                     >
                       <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5" style={{ color: focusedField === 'email' ? '#D99D26' : '#9CA3AF' }} />
                       <input
+                        id="buildtrack-email"
+                        name="email"
                         type="email"
                         value={email}
                         onChange={e => setEmail(e.target.value)}
                         onFocus={() => setFocusedField('email')}
                         onBlur={() => setFocusedField(null)}
                         required
-                        autoComplete="email"
+                        autoComplete="username email"
                         className="w-full pl-12 pr-4 py-4 bg-transparent text-gray-900 text-sm font-medium placeholder-gray-400 focus:outline-none rounded-lg"
                         placeholder="you@company.com"
                       />
@@ -575,6 +650,8 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                     >
                       <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5" style={{ color: focusedField === 'password' ? '#D99D26' : '#9CA3AF' }} />
                       <input
+                        id="buildtrack-password"
+                        name="password"
                         type={showPassword ? 'text' : 'password'}
                         value={password}
                         onChange={e => setPassword(e.target.value)}
@@ -603,36 +680,7 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                     </Link>
                   </div>
 
-                  <div
-                    className="flex items-center justify-between gap-4 p-4 rounded-lg"
-                    style={{ background: 'white', border: '1px solid #E5E7EB' }}
-                  >
-                    <div>
-                      <p className="text-sm font-semibold text-gray-800">Trust this device after verification</p>
-                      <p className="text-xs text-gray-400 mt-0.5">Use 2FA once, then continue faster next time.</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const nextStayLoggedIn = !stayLoggedIn;
-                        setStayLoggedIn(nextStayLoggedIn);
-                        setTrustDevice(nextStayLoggedIn);
-                      }}
-                      className="relative flex-shrink-0 transition-all duration-300"
-                      style={{
-                        width: 52,
-                        height: 28,
-                        borderRadius: 999,
-                        backgroundColor: stayLoggedIn ? '#D99D26' : '#D1D5DB',
-                      }}
-                      aria-pressed={stayLoggedIn}
-                    >
-                      <span
-                        className="absolute top-1 w-5 h-5 bg-white rounded-full shadow-md transition-all duration-300"
-                        style={{ left: stayLoggedIn ? 28 : 4 }}
-                      />
-                    </button>
-                  </div>
+                  {renderTrustDevicePreference()}
 
                   <button
                     type="submit"
@@ -698,6 +746,7 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                         <h3 className="font-black text-gray-900 text-lg">Contractor PIN Access</h3>
                         <p className="text-sm text-gray-500 mt-1 mb-5">Enter the contractor PIN to open assigned projects.</p>
                         <input
+                          name="one-time-code"
                           type="text"
                           inputMode="numeric"
                           maxLength={5}
@@ -709,6 +758,11 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                           placeholder="00000"
                         />
                       </div>
+
+                      {renderTrustDevicePreference(
+                        'Trust this device after PIN verification',
+                        'Use this PIN once, then continue faster next time on this browser.'
+                      )}
 
                       <button
                         type="submit"
@@ -741,10 +795,12 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                         <p className="text-center text-sm text-gray-500 mt-1 mb-5">Use your contractor email to receive a 6-digit login code.</p>
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Contractor Email</label>
                         <input
+                          name="contractor-email"
                           type="email"
                           value={contractorEmail}
                           onChange={e => setContractorEmail(e.target.value)}
                           required
+                          autoComplete="email"
                           className="w-full rounded-lg px-4 py-3 text-sm font-semibold text-gray-900 focus:outline-none"
                           style={{ border: '2px solid #E5E7EB' }}
                           placeholder="contractor@email.com"
@@ -753,6 +809,7 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                           <div className="mt-4">
                             <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Login Code</label>
                             <input
+                              name="contractor-email-code"
                               type="text"
                               inputMode="numeric"
                               maxLength={6}
@@ -765,6 +822,10 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                           </div>
                         )}
                       </div>
+                      {renderTrustDevicePreference(
+                        'Trust this device after email verification',
+                        'Remember contractor email, then continue faster next time on this browser.'
+                      )}
                       <button
                         type="submit"
                         disabled={contractorActionLoading || (contractorEmailCodeSent && contractorEmailCode.length !== 6)}

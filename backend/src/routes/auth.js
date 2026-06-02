@@ -31,6 +31,10 @@ function generate2FACode() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
+function shouldTrustDevice(value) {
+  return value === true || value === 'true' || value === 1 || value === '1';
+}
+
 function markUserOnline(db, userId, includeLogin = false) {
   db.prepare(`
     UPDATE users
@@ -76,6 +80,26 @@ function issueSession(db, user, details) {
   return { token, user: publicUser(user) };
 }
 
+function issueTrustedDevice(db, user, req, previousDeviceToken) {
+  const deviceToken = crypto.randomBytes(32).toString('hex');
+  const expiresAt = daysFromNow(TRUSTED_DEVICE_DAYS);
+
+  db.prepare("DELETE FROM trusted_devices WHERE datetime(expires_at) <= datetime('now')").run();
+  if (previousDeviceToken) {
+    db.prepare('DELETE FROM trusted_devices WHERE user_id = ? AND device_token = ?').run(user.id, previousDeviceToken);
+  }
+
+  db.prepare(`
+    INSERT INTO trusted_devices (id, user_id, device_token, user_agent, ip_address, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(uuidv4(), user.id, deviceToken, req.headers['user-agent'] || '', req.ip || '', expiresAt);
+
+  return {
+    device_token: deviceToken,
+    trusted_device_expires_at: expiresAt,
+  };
+}
+
 function isDeviceTrusted(db, userId, deviceToken) {
   if (!deviceToken) return false;
   const device = db.prepare(
@@ -107,6 +131,7 @@ function getLoginProjects(db, user) {
 router.post('/login', async (req, res) => {
   try {
     const { email, password, twofa_code, device_token, trust_device } = req.body;
+    const trustDevice = shouldTrustDevice(trust_device);
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
     }
@@ -119,7 +144,9 @@ router.post('/login', async (req, res) => {
     if (!valid) return res.status(401).json({ error: 'Invalid email or password' });
 
     if (!MANAGEMENT_ROLES.includes(user.role)) {
-      return res.json(issueSession(db, user, { two_factor: 'not_required' }));
+      const payload = issueSession(db, user, { two_factor: 'not_required', trusted_device: trustDevice });
+      if (trustDevice) Object.assign(payload, issueTrustedDevice(db, user, req, device_token));
+      return res.json(payload);
     }
 
     if (isDeviceTrusted(db, user.id, device_token)) {
@@ -138,17 +165,10 @@ router.post('/login', async (req, res) => {
       }
 
       db.prepare('UPDATE two_factor_codes SET used = 1 WHERE id = ?').run(codeRow.id);
-      const payload = issueSession(db, user, { two_factor: true, trusted_device: !!trust_device });
+      const payload = issueSession(db, user, { two_factor: true, trusted_device: trustDevice });
 
-      if (trust_device) {
-        const newDeviceToken = crypto.randomBytes(32).toString('hex');
-        const expiresAt = daysFromNow(TRUSTED_DEVICE_DAYS);
-        db.prepare(`
-          INSERT INTO trusted_devices (id, user_id, device_token, user_agent, ip_address, expires_at)
-          VALUES (?, ?, ?, ?, ?, ?)
-        `).run(uuidv4(), user.id, newDeviceToken, req.headers['user-agent'] || '', req.ip || '', expiresAt);
-        payload.device_token = newDeviceToken;
-        payload.trusted_device_expires_at = expiresAt;
+      if (trustDevice) {
+        Object.assign(payload, issueTrustedDevice(db, user, req, device_token));
       }
 
       return res.json(payload);
@@ -220,7 +240,8 @@ router.post('/trusted-device-login', async (req, res) => {
 // POST /api/auth/pin-login - contractor quick login via 5-digit PIN
 router.post('/pin-login', async (req, res) => {
   try {
-    const { pin } = req.body;
+    const { pin, device_token, trust_device } = req.body;
+    const trustDevice = shouldTrustDevice(trust_device);
     if (!pin || !/^\d{5}$/.test(pin)) {
       return res.status(400).json({ error: 'Please enter a valid 5-digit PIN' });
     }
@@ -239,7 +260,10 @@ router.post('/pin-login', async (req, res) => {
     logActivity({ userId: user.id, action: 'pin_login', entityType: 'user', entityId: user.id });
     markUserOnline(db, user.id, true);
 
-    res.json({ token, user: publicUser(user), projects });
+    const payload = { token, user: publicUser(user), projects };
+    if (trustDevice) Object.assign(payload, issueTrustedDevice(db, user, req, device_token));
+
+    res.json(payload);
   } catch (err) {
     console.error('PIN login error:', err);
     res.status(500).json({ error: 'Login failed' });
@@ -311,6 +335,8 @@ router.post('/contractor/email-login/verify', async (req, res) => {
   try {
     const email = normalizeEmail(req.body?.email);
     const code = String(req.body?.code || '').replace(/\D/g, '').slice(0, 6);
+    const deviceToken = req.body?.device_token;
+    const trustDevice = shouldTrustDevice(req.body?.trust_device);
     if (!email || code.length !== 6) {
       return res.status(400).json({ error: 'Valid contractor email and 6-digit code are required' });
     }
@@ -329,8 +355,9 @@ router.post('/contractor/email-login/verify', async (req, res) => {
     if (!codeRow) return res.status(401).json({ error: 'Invalid or expired verification code' });
 
     db.prepare('UPDATE two_factor_codes SET used = 1 WHERE id = ?').run(codeRow.id);
-    const payload = issueSession(db, user, { contractor_email_2fa: true });
+    const payload = issueSession(db, user, { contractor_email_2fa: true, trusted_device: trustDevice });
     payload.projects = getLoginProjects(db, user);
+    if (trustDevice) Object.assign(payload, issueTrustedDevice(db, user, req, deviceToken));
 
     res.json(payload);
   } catch (err) {
