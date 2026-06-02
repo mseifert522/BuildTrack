@@ -15,6 +15,7 @@ interface Supplier {
   contact?: string | null;
   billing_address?: string | null;
   account_number?: string | null;
+  category_inferred?: boolean;
   supplier_marked_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
@@ -41,6 +42,7 @@ const SUPPLY_CATEGORY_OPTIONS = [
   'Building Materials',
   'Lumber',
   'Roofing Materials',
+  'Siding Materials',
   'Electrical Supplies',
   'Plumbing Supplies',
   'HVAC Supplies',
@@ -49,6 +51,15 @@ const SUPPLY_CATEGORY_OPTIONS = [
   'Concrete and Masonry',
   'Windows and Doors',
   'Cabinets and Countertops',
+  'Countertops and Stone',
+  'Tile and Stone',
+  'Tools and Hardware',
+  'Welding Supplies',
+  'Industrial Supplies',
+  'Equipment Rentals',
+  'Truck and Trailer Rentals',
+  'Steel and Metal',
+  'Fixtures and Furnishings',
   'Dumpster and Hauling',
   'Cleaning Supplies',
 ];

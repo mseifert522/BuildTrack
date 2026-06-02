@@ -33,6 +33,7 @@ const DEFAULT_SUPPLIER_CATEGORIES = [
   'Building Materials',
   'Lumber',
   'Roofing Materials',
+  'Siding Materials',
   'Electrical Supplies',
   'Plumbing Supplies',
   'HVAC Supplies',
@@ -41,9 +42,98 @@ const DEFAULT_SUPPLIER_CATEGORIES = [
   'Concrete and Masonry',
   'Windows and Doors',
   'Cabinets and Countertops',
+  'Countertops and Stone',
+  'Tile and Stone',
+  'Tools and Hardware',
+  'Welding Supplies',
+  'Industrial Supplies',
+  'Equipment Rentals',
+  'Truck and Trailer Rentals',
+  'Steel and Metal',
+  'Fixtures and Furnishings',
   'Dumpster and Hauling',
   'Cleaning Supplies',
 ];
+
+const SUPPLIER_CATEGORY_RULES = [
+  { includes: ['landscape', 'landscaping', 'sod'], categories: ['Landscaping Materials'] },
+  { includes: ['wimsatt', 'abc supply', 'gulfeagle'], categories: ['Roofing Materials', 'Siding Materials'] },
+  { includes: ['siding'], categories: ['Siding Materials'] },
+  { includes: ['lumber', 'churchs'], categories: ['Lumber', 'General Building Materials'] },
+  { includes: ['home depot', 'lowes', 'menard'], categories: ['General Building Materials'] },
+  { includes: ['ace hardware', 'hardware', 'harbor freight', 'tractor supply', 'colony hardware'], categories: ['Tools and Hardware'] },
+  { includes: ['sunbelt', 'rent all', 'rental'], categories: ['Equipment Rentals', 'Tool Rentals'] },
+  { includes: ['u-haul', 'trailer'], categories: ['Truck and Trailer Rentals'] },
+  { includes: ['appliance'], categories: ['Appliances'] },
+  { includes: ['wayfair', 'nikos'], categories: ['Fixtures and Furnishings'] },
+  { includes: ['floor'], categories: ['Flooring Materials'] },
+  { includes: ['tile'], categories: ['Tile and Stone'] },
+  { includes: ['granite', 'stone'], categories: ['Countertops and Stone'] },
+  { includes: ['window'], categories: ['Windows and Doors'] },
+  { includes: ['gas', 'welding'], categories: ['Welding Supplies'] },
+  { includes: ['grainger'], categories: ['Industrial Supplies', 'Tools and Hardware'] },
+  { includes: ['steel'], categories: ['Steel and Metal'] },
+  { includes: ['tee pee'], categories: ['Portable Toilets'] },
+  { includes: ['kaltz'], categories: ['Plumbing Supplies'] },
+];
+
+const SUPPLIER_CATEGORY_ALIASES = {
+  floor: 'Flooring Materials',
+  roof: 'Roofing Materials',
+  roofing: 'Roofing Materials',
+  electrical: 'Electrical Supplies',
+  plumbing: 'Plumbing Supplies',
+  painting: 'Paint',
+  concrete: 'Concrete and Masonry',
+  cleaning: 'Cleaning Supplies',
+  'window install': 'Windows and Doors',
+  landscaping: 'Landscaping Materials',
+  supplier: '',
+};
+
+function uniqueSupplierCategories(values) {
+  const valid = new Map(DEFAULT_SUPPLIER_CATEGORIES.map(category => [category.toLowerCase(), category]));
+  const seen = new Set();
+  const result = [];
+  for (const value of values || []) {
+    const raw = String(value || '').trim().replace(/\s+/g, ' ');
+    if (!raw) continue;
+    const aliased = SUPPLIER_CATEGORY_ALIASES[raw.toLowerCase()] ?? raw;
+    const category = valid.get(String(aliased).toLowerCase()) || aliased;
+    if (!category || !valid.has(category.toLowerCase())) continue;
+    const key = category.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(category);
+  }
+  return result;
+}
+
+function inferSupplierCategoriesFromName(name) {
+  const normalized = String(name || '').toLowerCase();
+  const matched = [];
+  for (const rule of SUPPLIER_CATEGORY_RULES) {
+    if (rule.includes.some(term => normalized.includes(term))) {
+      matched.push(...rule.categories);
+    }
+  }
+  return uniqueSupplierCategories(matched.length ? matched : ['General Building Materials']);
+}
+
+function parseSupplierCategoriesForBackfill(row) {
+  let stored = [];
+  try {
+    const parsed = JSON.parse(row.contractor_categories_json || '[]');
+    if (Array.isArray(parsed)) stored = parsed;
+  } catch (_) {
+    stored = [];
+  }
+  return uniqueSupplierCategories([
+    ...stored,
+    row.contractor_category,
+    row.contractor_secondary_category,
+  ]);
+}
 
 const QUOTE_CATEGORY_DEFINITIONS = [
   ['General', 'Demolition'],
@@ -1306,6 +1396,36 @@ function initializeSchema() {
       WHERE contractor_category IS NOT NULL AND trim(contractor_category) != ''
     `);
 	  } catch (_) { /* category bootstrap best-effort */ }
+
+  try {
+    const supplierRows = db.prepare(`
+      SELECT id, vendor_name, contractor_category, contractor_secondary_category, contractor_categories_json
+      FROM contractor_profiles
+      WHERE COALESCE(is_supplier, 0) = 1
+    `).all();
+    const updateSupplierCategories = db.prepare(`
+      UPDATE contractor_profiles
+      SET contractor_category = ?,
+          contractor_secondary_category = ?,
+          contractor_categories_json = ?,
+          updated_at = datetime('now')
+      WHERE id = ?
+    `);
+    for (const row of supplierRows) {
+      const existing = parseSupplierCategoriesForBackfill(row);
+      const categories = existing.length ? existing : inferSupplierCategoriesFromName(row.vendor_name);
+      if (categories.length === 0) continue;
+      const stored = JSON.stringify(categories);
+      if (
+        row.contractor_category === categories[0]
+        && (row.contractor_secondary_category || null) === (categories[1] || null)
+        && row.contractor_categories_json === stored
+      ) {
+        continue;
+      }
+      updateSupplierCategories.run(categories[0], categories[1] || null, stored, row.id);
+    }
+  } catch (_) { /* supplier category backfill best-effort */ }
 
   try {
     const insertQuoteCategory = db.prepare(`

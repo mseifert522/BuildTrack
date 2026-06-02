@@ -61,6 +61,7 @@ const DEFAULT_CONTRACTOR_CATEGORIES = [
   'Building Materials',
   'Lumber',
   'Roofing Materials',
+  'Siding Materials',
   'Electrical Supplies',
   'Plumbing Supplies',
   'HVAC Supplies',
@@ -69,9 +70,54 @@ const DEFAULT_CONTRACTOR_CATEGORIES = [
   'Concrete and Masonry',
   'Windows and Doors',
   'Cabinets and Countertops',
+  'Countertops and Stone',
+  'Tile and Stone',
+  'Tools and Hardware',
+  'Welding Supplies',
+  'Industrial Supplies',
+  'Equipment Rentals',
+  'Truck and Trailer Rentals',
+  'Steel and Metal',
+  'Fixtures and Furnishings',
   'Dumpster and Hauling',
   'Cleaning Supplies',
 ];
+
+const SUPPLIER_CATEGORY_RULES = [
+  { includes: ['landscape', 'landscaping', 'sod'], categories: ['Landscaping Materials'] },
+  { includes: ['wimsatt', 'abc supply', 'gulfeagle'], categories: ['Roofing Materials', 'Siding Materials'] },
+  { includes: ['siding'], categories: ['Siding Materials'] },
+  { includes: ['lumber', 'churchs'], categories: ['Lumber', 'General Building Materials'] },
+  { includes: ['home depot', 'lowes', 'menard'], categories: ['General Building Materials'] },
+  { includes: ['ace hardware', 'hardware', 'harbor freight', 'tractor supply', 'colony hardware'], categories: ['Tools and Hardware'] },
+  { includes: ['sunbelt', 'rent all', 'rental'], categories: ['Equipment Rentals', 'Tool Rentals'] },
+  { includes: ['u-haul', 'trailer'], categories: ['Truck and Trailer Rentals'] },
+  { includes: ['appliance'], categories: ['Appliances'] },
+  { includes: ['wayfair', 'nikos'], categories: ['Fixtures and Furnishings'] },
+  { includes: ['floor'], categories: ['Flooring Materials'] },
+  { includes: ['tile'], categories: ['Tile and Stone'] },
+  { includes: ['granite', 'stone'], categories: ['Countertops and Stone'] },
+  { includes: ['window'], categories: ['Windows and Doors'] },
+  { includes: ['gas', 'welding'], categories: ['Welding Supplies'] },
+  { includes: ['grainger'], categories: ['Industrial Supplies', 'Tools and Hardware'] },
+  { includes: ['steel'], categories: ['Steel and Metal'] },
+  { includes: ['tee pee'], categories: ['Portable Toilets'] },
+  { includes: ['kaltz'], categories: ['Plumbing Supplies'] },
+];
+
+const SUPPLIER_CATEGORY_ALIASES = {
+  floor: 'Flooring Materials',
+  roof: 'Roofing Materials',
+  roofing: 'Roofing Materials',
+  electrical: 'Electrical Supplies',
+  plumbing: 'Plumbing Supplies',
+  painting: 'Paint',
+  concrete: 'Concrete and Masonry',
+  cleaning: 'Cleaning Supplies',
+  'window install': 'Windows and Doors',
+  landscaping: 'Landscaping Materials',
+  supplier: '',
+};
 
 function normalizeCategory(value) {
   return String(value || '').trim().replace(/\s+/g, ' ');
@@ -172,6 +218,39 @@ function parseStoredContractorCategories(contractor) {
   ]);
 }
 
+function normalizeSupplierCategoryName(value) {
+  const raw = normalizeCategory(value);
+  if (!raw) return '';
+  const aliased = SUPPLIER_CATEGORY_ALIASES[raw.toLowerCase()] ?? raw;
+  if (!aliased) return '';
+  return DEFAULT_CONTRACTOR_CATEGORIES.find(category => category.toLowerCase() === String(aliased).toLowerCase()) || aliased;
+}
+
+function uniqueSupplierCategories(values) {
+  const seen = new Set();
+  const result = [];
+  for (const value of values || []) {
+    const category = normalizeSupplierCategoryName(value);
+    if (!category) continue;
+    const key = category.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(category);
+  }
+  return result;
+}
+
+function inferSupplierCategoriesFromName(name) {
+  const normalized = String(name || '').toLowerCase();
+  const matched = [];
+  for (const rule of SUPPLIER_CATEGORY_RULES) {
+    if (rule.includes.some(term => normalized.includes(term))) {
+      matched.push(...rule.categories);
+    }
+  }
+  return uniqueSupplierCategories(matched.length ? matched : ['General Building Materials']);
+}
+
 function validateContractorStatus(value) {
   const status = String(value || 'active').trim().toLowerCase();
   if (['active', 'terminated', 'will_use_again'].includes(status)) return status;
@@ -210,7 +289,8 @@ function categoryError(res, err) {
 }
 
 function formatSupplierProfile(supplier) {
-  const categories = parseStoredContractorCategories(supplier);
+  const storedCategories = uniqueSupplierCategories(parseStoredContractorCategories(supplier));
+  const categories = storedCategories.length ? storedCategories : inferSupplierCategoriesFromName(supplier.vendor_name);
   return {
     id: supplier.id,
     name: supplier.vendor_name,
@@ -221,6 +301,7 @@ function formatSupplierProfile(supplier) {
     account_number: supplier.account_number,
     categories,
     category: categories.join(' / ') || 'Supplier',
+    category_inferred: storedCategories.length === 0,
     supplier_marked_at: supplier.supplier_marked_at,
     created_at: supplier.created_at,
     updated_at: supplier.updated_at,
