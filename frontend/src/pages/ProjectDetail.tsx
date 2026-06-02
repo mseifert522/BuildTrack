@@ -3,7 +3,7 @@ import { useParams, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore, canChangeProjectStatus, canManageProjects, isAdminRole } from '../store/authStore';
 import api from '../lib/api';
 import { Loading, StatusBadge, Modal } from '../components/ui';
-import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, ClipboardList, Activity, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle } from 'lucide-react';
+import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, ClipboardList, Activity, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle, Send, Phone, Building2, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useForm } from 'react-hook-form';
 import { format } from 'date-fns';
@@ -13,7 +13,44 @@ import { formatEasternDate, formatEasternDateTime } from '../lib/time';
 import { appendProgressUploadAudit, PROGRESS_MEDIA_ACCEPT, type ProgressCaptureSource } from '../lib/progressUpload';
 import { getProgressMediaKind, isVideoMedia } from '../lib/progressMedia';
 
-type Tab = 'overview' | 'progress-history' | 'construction-plan' | 'quotes' | 'punch-list' | 'photos' | 'invoices' | 'activity' | 'notes' | 'team';
+type Tab = 'overview' | 'progress-history' | 'construction-plan' | 'quotes' | 'punch-list' | 'photos' | 'invoices' | 'activity' | 'notes' | 'team' | 'texts';
+
+type ContractorDirectoryProject = {
+  id?: string | null;
+  address?: string | null;
+  job_name?: string | null;
+  status?: string | null;
+};
+
+type ContractorDirectoryRow = {
+  id: string;
+  name?: string;
+  vendor_name?: string;
+  contact_name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  billing_address?: string | null;
+  contractor_category?: string | null;
+  contractor_secondary_category?: string | null;
+  contractor_categories?: string[] | null;
+  connected_projects?: ContractorDirectoryProject[];
+};
+
+type ContractorTextMessage = {
+  id: string;
+  project_id?: string | null;
+  contractor_id: string;
+  contractor_name: string;
+  contractor_contact_name?: string | null;
+  contractor_phone: string;
+  sent_by_name: string;
+  message_body: string;
+  status: string;
+  provider: string;
+  error_message?: string | null;
+  created_at: string;
+  sent_at?: string | null;
+};
 
 const PROJECT_STATUS_OPTIONS = [
   { value: 'not_started', label: 'Not Started' },
@@ -332,6 +369,7 @@ export default function ProjectDetail() {
     { id: 'punch-list', label: 'Punch List', icon: ClipboardList },
     { id: 'photos', label: 'Progress Photos', icon: Camera },
     { id: 'team', label: 'Assigned Contractors', icon: Users },
+    { id: 'texts', label: 'Text Contractors', icon: MessageSquare },
     { id: 'activity', label: 'Activity', icon: Activity },
   ];
 
@@ -741,6 +779,10 @@ export default function ProjectDetail() {
           </div>
         )}
 
+        {tab === 'texts' && (
+          <ProjectTextMessagesTab projectId={id!} project={project} />
+        )}
+
         {/* Activity Tab */}
         {tab === 'activity' && (
           <div className="space-y-2">
@@ -888,6 +930,245 @@ export default function ProjectDetail() {
 }
 
 // ---- Sub-components ----
+
+const contractorDisplayName = (contractor?: ContractorDirectoryRow | null) =>
+  contractor?.name || contractor?.vendor_name || 'Unnamed contractor';
+
+const contractorTypeLabel = (contractor?: ContractorDirectoryRow | null) => {
+  if (!contractor) return 'Uncategorized';
+  const categories = Array.isArray(contractor.contractor_categories)
+    ? contractor.contractor_categories.map(item => String(item || '').trim()).filter(Boolean)
+    : [];
+  if (categories.length) return categories.join(' / ');
+  return [contractor.contractor_category, contractor.contractor_secondary_category]
+    .map(item => String(item || '').trim())
+    .filter(Boolean)
+    .join(' / ') || 'Uncategorized';
+};
+
+const textStatusMeta = (status?: string) => {
+  switch (status) {
+    case 'sent':
+    case 'delivered':
+      return { label: status === 'delivered' ? 'Delivered' : 'Sent', className: 'bg-emerald-50 text-emerald-700 border-emerald-100' };
+    case 'failed':
+    case 'missing_phone':
+      return { label: status === 'missing_phone' ? 'Missing phone' : 'Failed', className: 'bg-red-50 text-red-700 border-red-100' };
+    case 'provider_not_configured':
+      return { label: 'Provider TBD', className: 'bg-amber-50 text-amber-800 border-amber-100' };
+    default:
+      return { label: 'Queued', className: 'bg-blue-50 text-blue-700 border-blue-100' };
+  }
+};
+
+function ProjectTextMessagesTab({ projectId, project }: { projectId: string; project: any }) {
+  const [contractors, setContractors] = useState<ContractorDirectoryRow[]>([]);
+  const [messages, setMessages] = useState<ContractorTextMessage[]>([]);
+  const [selectedContractorId, setSelectedContractorId] = useState('');
+  const [messageBody, setMessageBody] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+
+  const isConnectedToProject = (contractor: ContractorDirectoryRow) =>
+    Boolean(contractor.connected_projects?.some(item => item.id === projectId));
+
+  const orderedContractors = useMemo(() => {
+    return [...contractors].sort((left, right) => {
+      const leftConnected = isConnectedToProject(left) ? 0 : 1;
+      const rightConnected = isConnectedToProject(right) ? 0 : 1;
+      if (leftConnected !== rightConnected) return leftConnected - rightConnected;
+      return contractorDisplayName(left).localeCompare(contractorDisplayName(right));
+    });
+  }, [contractors, projectId]);
+
+  const connectedCount = useMemo(
+    () => contractors.filter(item => isConnectedToProject(item)).length,
+    [contractors, projectId]
+  );
+
+  const selectedContractor = useMemo(
+    () => orderedContractors.find(item => item.id === selectedContractorId) || null,
+    [orderedContractors, selectedContractorId]
+  );
+
+  const loadTextingData = async () => {
+    setLoading(true);
+    try {
+      const [directoryRes, messagesRes] = await Promise.all([
+        api.get('/users/contractors/directory'),
+        api.get(`/text-messages?project_id=${encodeURIComponent(projectId)}&limit=200`),
+      ]);
+      const nextContractors: ContractorDirectoryRow[] = directoryRes.data?.contractors || [];
+      setContractors(nextContractors);
+      setMessages(messagesRes.data?.messages || []);
+      if (!selectedContractorId && nextContractors.length) {
+        const connected = nextContractors.find(item => item.connected_projects?.some(projectItem => projectItem.id === projectId));
+        setSelectedContractorId((connected || nextContractors[0]).id);
+      }
+    } catch (err) {
+      toast.error('Failed to load contractor text records');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadTextingData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
+  const sendTextMessage = async () => {
+    if (!selectedContractor) return toast.error('Select a contractor');
+    if (!messageBody.trim()) return toast.error('Enter a message');
+    if (!selectedContractor.phone) return toast.error('Selected contractor has no phone number on file');
+    setSending(true);
+    try {
+      const res = await api.post('/text-messages', {
+        project_id: projectId,
+        contractor_id: selectedContractor.id,
+        body: messageBody.trim(),
+      });
+      const savedMessage = res.data?.message;
+      if (savedMessage) setMessages(current => [savedMessage, ...current]);
+      setMessageBody('');
+      if (savedMessage?.status === 'sent' || savedMessage?.status === 'delivered') {
+        toast.success('Text sent and recorded');
+      } else if (savedMessage?.status === 'provider_not_configured') {
+        toast.success('Message saved. Text provider is still TBD.');
+      } else {
+        toast.success('Message record saved');
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to record text message');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (loading) return <Loading message="Loading contractor text records..." />;
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+      <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-base font-black text-gray-950">Text Contractors</h3>
+            <p className="mt-1 text-xs font-semibold text-gray-500">{connectedCount} connected to this project / {contractors.length} total contractors</p>
+          </div>
+          <span className="inline-flex items-center gap-1 rounded-full border border-amber-100 bg-amber-50 px-2.5 py-1 text-xs font-black text-amber-800">
+            <MessageSquare className="h-3.5 w-3.5" />
+            SMS TBD
+          </span>
+        </div>
+
+        <label className="mb-1 block text-xs font-black uppercase tracking-wide text-gray-500">Contractor</label>
+        <select
+          value={selectedContractorId}
+          onChange={event => setSelectedContractorId(event.target.value)}
+          className="w-full rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          {orderedContractors.map(contractor => (
+            <option key={contractor.id} value={contractor.id}>
+              {isConnectedToProject(contractor) ? 'Project contractor - ' : 'All contractors - '}
+              {contractorDisplayName(contractor)} - {contractor.phone || 'No phone'}
+            </option>
+          ))}
+        </select>
+
+        {selectedContractor ? (
+          <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-black text-gray-950">{contractorDisplayName(selectedContractor)}</span>
+              <span className="rounded-full bg-white px-2 py-0.5 text-xs font-black text-amber-800 ring-1 ring-amber-100">{contractorTypeLabel(selectedContractor)}</span>
+              {isConnectedToProject(selectedContractor) && (
+                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-black text-emerald-700 ring-1 ring-emerald-100">Connected to project</span>
+              )}
+            </div>
+            <div className="mt-2 grid gap-2 text-sm text-gray-700 sm:grid-cols-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <Phone className="h-4 w-4 flex-shrink-0 text-gray-400" />
+                <span className="truncate font-bold">{selectedContractor.phone || 'No phone on file'}</span>
+              </div>
+              <div className="flex min-w-0 items-center gap-2">
+                <Building2 className="h-4 w-4 flex-shrink-0 text-gray-400" />
+                <span className="truncate">{selectedContractor.contact_name || selectedContractor.email || 'No contact person listed'}</span>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-3 rounded-xl border border-red-100 bg-red-50 p-3 text-sm font-bold text-red-700">No contractors are available to text.</div>
+        )}
+
+        <label className="mb-1 mt-4 block text-xs font-black uppercase tracking-wide text-gray-500">Office message</label>
+        <textarea
+          value={messageBody}
+          onChange={event => setMessageBody(event.target.value)}
+          rows={7}
+          maxLength={2000}
+          placeholder={`Message about ${project.address || 'this project'}...`}
+          className="w-full resize-none rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm leading-6 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        <div className="mt-2 flex items-center justify-between gap-3">
+          <p className="text-xs font-semibold text-gray-500">{messageBody.length}/2000 characters</p>
+          <button
+            type="button"
+            onClick={sendTextMessage}
+            disabled={sending || !selectedContractor || !selectedContractor.phone || !messageBody.trim()}
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-black text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Send className="h-4 w-4" />
+            {sending ? 'Saving...' : 'Send Text'}
+          </button>
+        </div>
+
+        <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
+          <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+          <span>Messages are saved as office records now. They will send automatically once the selected SMS provider is configured.</span>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base font-black text-gray-950">Text History</h3>
+            <p className="mt-1 text-xs font-semibold text-gray-500">Project record for office-to-contractor messages</p>
+          </div>
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-700">{messages.length} records</span>
+        </div>
+
+        <div className="max-h-[660px] space-y-3 overflow-y-auto pr-2">
+          {messages.map(message => {
+            const statusMeta = textStatusMeta(message.status);
+            return (
+              <div key={message.id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-black text-gray-950">{message.contractor_name}</p>
+                    <p className="mt-0.5 text-xs font-bold text-gray-500">{message.contractor_phone} / {message.sent_by_name}</p>
+                  </div>
+                  <div className="text-left sm:text-right">
+                    <p className="text-xs font-black text-gray-900">{formatEasternDateTime(message.created_at, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</p>
+                    <span className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-xs font-black ${statusMeta.className}`}>{statusMeta.label}</span>
+                  </div>
+                </div>
+                <p className="mt-3 whitespace-pre-wrap rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-800">{message.message_body}</p>
+                {message.error_message && (
+                  <p className="mt-2 text-xs font-semibold text-amber-800">{message.error_message}</p>
+                )}
+              </div>
+            );
+          })}
+          {messages.length === 0 && (
+            <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 py-12 text-center">
+              <MessageSquare className="mx-auto mb-2 h-8 w-8 text-gray-300" />
+              <p className="text-sm font-semibold text-gray-500">No contractor texts recorded for this project yet</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 type ProjectScopeForm = {
   section_name: string;

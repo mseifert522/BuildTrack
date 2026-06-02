@@ -745,6 +745,34 @@ function initializeSchema() {
     CREATE INDEX IF NOT EXISTS idx_contractor_project_links_project
       ON contractor_project_links(project_id);
 
+    CREATE TABLE IF NOT EXISTS contractor_text_messages (
+      id TEXT PRIMARY KEY,
+      project_id TEXT,
+      contractor_id TEXT NOT NULL,
+      contractor_name TEXT NOT NULL,
+      contractor_phone TEXT NOT NULL,
+      sent_by_user_id TEXT NOT NULL,
+      sent_by_name TEXT,
+      direction TEXT NOT NULL DEFAULT 'outbound',
+      message_body TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'provider_not_configured',
+      provider TEXT NOT NULL DEFAULT 'tbd',
+      provider_message_id TEXT,
+      error_message TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      sent_at TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL,
+      FOREIGN KEY (contractor_id) REFERENCES contractor_profiles(id) ON DELETE CASCADE,
+      FOREIGN KEY (sent_by_user_id) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_contractor_text_messages_project_created
+      ON contractor_text_messages(project_id, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_contractor_text_messages_contractor_created
+      ON contractor_text_messages(contractor_id, created_at);
+
     -- Contractor notes, kept separate from project notes
     CREATE TABLE IF NOT EXISTS contractor_notes (
       id TEXT PRIMARY KEY,
@@ -1098,6 +1126,34 @@ function initializeSchema() {
 
       CREATE INDEX IF NOT EXISTS idx_contractor_project_links_project
         ON contractor_project_links(project_id);
+
+      CREATE TABLE IF NOT EXISTS contractor_text_messages (
+        id TEXT PRIMARY KEY,
+        project_id TEXT,
+        contractor_id TEXT NOT NULL,
+        contractor_name TEXT NOT NULL,
+        contractor_phone TEXT NOT NULL,
+        sent_by_user_id TEXT NOT NULL,
+        sent_by_name TEXT,
+        direction TEXT NOT NULL DEFAULT 'outbound',
+        message_body TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'provider_not_configured',
+        provider TEXT NOT NULL DEFAULT 'tbd',
+        provider_message_id TEXT,
+        error_message TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        sent_at TEXT,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL,
+        FOREIGN KEY (contractor_id) REFERENCES contractor_profiles(id) ON DELETE CASCADE,
+        FOREIGN KEY (sent_by_user_id) REFERENCES users(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_contractor_text_messages_project_created
+        ON contractor_text_messages(project_id, created_at);
+
+      CREATE INDEX IF NOT EXISTS idx_contractor_text_messages_contractor_created
+        ON contractor_text_messages(contractor_id, created_at);
     `);
   } catch (_) { /* link table already exists */ }
 

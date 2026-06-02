@@ -157,6 +157,7 @@ const REVIEW_ACTIONS = [
   'invoice_status_updated',
   'user_assigned',
   'user_unassigned',
+  'contractor_text_message_recorded',
 ];
 
 function parseDetails(details) {
@@ -218,6 +219,8 @@ function summarizeActivity(row) {
       return 'Assigned a user to the project';
     case 'user_unassigned':
       return 'Removed a user from the project';
+    case 'contractor_text_message_recorded':
+      return `Recorded an office text message to ${details.contractor_name || 'a contractor'}`;
     default:
       return row.action.replace(/_/g, ' ');
   }
