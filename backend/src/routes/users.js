@@ -209,6 +209,66 @@ function categoryError(res, err) {
   return res.status(500).json({ error: 'Failed to save contractor category' });
 }
 
+function formatSupplierProfile(supplier) {
+  const categories = parseStoredContractorCategories(supplier);
+  return {
+    id: supplier.id,
+    name: supplier.vendor_name,
+    contact: supplier.contact_name,
+    email: supplier.email,
+    phone: supplier.phone,
+    billing_address: supplier.billing_address,
+    account_number: supplier.account_number,
+    categories,
+    category: categories.join(' / ') || 'Supplier',
+    supplier_marked_at: supplier.supplier_marked_at,
+    created_at: supplier.created_at,
+    updated_at: supplier.updated_at,
+  };
+}
+
+function supplierPayload(req) {
+  const db = getDb();
+  const nextName = String(req.body?.vendor_name || req.body?.name || '').trim();
+  if (!nextName) {
+    const err = new Error('Supplier name is required');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const nextEmail = req.body?.email ? String(req.body.email).trim().toLowerCase() : null;
+  if (nextEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
+    const err = new Error('Valid supplier email is required');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const categories = validateContractorCategories(
+    db,
+    req.body?.categories || req.body?.contractor_categories,
+    req.body?.category || req.body?.contractor_category,
+    req.body?.contractor_secondary_category
+  );
+  if (categories.length === 0) {
+    const err = new Error('Supplier category is required');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  return {
+    db,
+    name: nextName,
+    contact: req.body?.contact || req.body?.contact_name ? String(req.body.contact || req.body.contact_name).trim() : null,
+    email: nextEmail,
+    phone: req.body?.phone ? String(req.body.phone).trim() : null,
+    billingAddress: req.body?.billing_address ? String(req.body.billing_address).trim() : null,
+    accountNumber: req.body?.account_number ? String(req.body.account_number).trim() : null,
+    categories,
+    primaryCategory: categories[0] || null,
+    secondaryCategory: categories[1] || null,
+  };
+}
+
 // GET /api/users/me - get current user profile (any authenticated user)
 router.get('/me', (req, res) => {
   const db = getDb();
@@ -338,23 +398,105 @@ router.get('/suppliers', authorize('super_admin', 'operations_manager', 'project
     ORDER BY datetime(COALESCE(supplier_marked_at, created_at)) DESC, vendor_name
   `).all();
 
-  res.json(suppliers.map(supplier => {
-    const categories = parseStoredContractorCategories(supplier);
-    return {
-      id: supplier.id,
-      name: supplier.vendor_name,
-      contact: supplier.contact_name,
-      email: supplier.email,
-      phone: supplier.phone,
-      billing_address: supplier.billing_address,
-      account_number: supplier.account_number,
-      categories,
-      category: categories.join(' / ') || 'Supplier',
-      supplier_marked_at: supplier.supplier_marked_at,
-      created_at: supplier.created_at,
-      updated_at: supplier.updated_at,
-    };
-  }));
+  res.json(suppliers.map(formatSupplierProfile));
+});
+
+// POST /api/users/suppliers - add a supplier record with supply categories
+router.post('/suppliers', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
+  try {
+    const payload = supplierPayload(req);
+    const supplierId = uuidv4();
+    const markedAt = new Date().toISOString();
+
+    payload.db.prepare(`
+      INSERT INTO contractor_profiles (
+        id, vendor_name, contact_name, email, phone, billing_address, account_number,
+        contractor_status, contractor_category, contractor_secondary_category, contractor_categories_json,
+        is_supplier, supplier_marked_at, supplier_marked_by, source, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 1, ?, ?, 'manual_supplier', datetime('now'), datetime('now'))
+    `).run(
+      supplierId,
+      payload.name,
+      payload.contact,
+      payload.email,
+      payload.phone,
+      payload.billingAddress,
+      payload.accountNumber,
+      payload.primaryCategory,
+      payload.secondaryCategory,
+      JSON.stringify(payload.categories),
+      markedAt,
+      req.user.id
+    );
+
+    logActivity({
+      userId: req.user.id,
+      action: 'supplier_profile_created',
+      entityType: 'contractor_profile',
+      entityId: supplierId,
+      details: { supplier_name: payload.name, supplier_categories: payload.categories },
+    });
+
+    const supplier = payload.db.prepare('SELECT * FROM contractor_profiles WHERE id = ?').get(supplierId);
+    res.status(201).json({ supplier: formatSupplierProfile(supplier), message: 'Supplier added' });
+  } catch (err) {
+    if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    if (err?.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      return res.status(409).json({ error: 'A supplier with this name already exists' });
+    }
+    console.error(err);
+    res.status(500).json({ error: 'Failed to add supplier' });
+  }
+});
+
+// PUT /api/users/suppliers/:id - edit supplier details and categories
+router.put('/suppliers/:id', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
+  try {
+    const payload = supplierPayload(req);
+    const existing = payload.db.prepare('SELECT * FROM contractor_profiles WHERE id = ? AND COALESCE(is_supplier, 0) = 1').get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Supplier not found' });
+
+    payload.db.prepare(`
+      UPDATE contractor_profiles SET
+        vendor_name = ?,
+        contact_name = ?,
+        email = ?,
+        phone = ?,
+        billing_address = ?,
+        account_number = ?,
+        contractor_category = ?,
+        contractor_secondary_category = ?,
+        contractor_categories_json = ?,
+        updated_at = datetime('now')
+      WHERE id = ? AND COALESCE(is_supplier, 0) = 1
+    `).run(
+      payload.name,
+      payload.contact,
+      payload.email,
+      payload.phone,
+      payload.billingAddress,
+      payload.accountNumber,
+      payload.primaryCategory,
+      payload.secondaryCategory,
+      JSON.stringify(payload.categories),
+      req.params.id
+    );
+
+    logActivity({
+      userId: req.user.id,
+      action: 'supplier_profile_updated',
+      entityType: 'contractor_profile',
+      entityId: req.params.id,
+      details: { supplier_name: payload.name, supplier_categories: payload.categories },
+    });
+
+    const supplier = payload.db.prepare('SELECT * FROM contractor_profiles WHERE id = ?').get(req.params.id);
+    res.json({ supplier: formatSupplierProfile(supplier), message: 'Supplier updated' });
+  } catch (err) {
+    if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update supplier' });
+  }
 });
 
 // GET /api/users/contractors/directory - contractor table with project and payment context
