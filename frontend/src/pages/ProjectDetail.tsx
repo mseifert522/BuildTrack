@@ -2234,8 +2234,19 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
                 key={record.id}
                 className={`rounded-lg border bg-white p-3 shadow-sm ${record.kind === 'note' ? 'border-slate-200 border-l-4 border-l-blue-500' : 'border-amber-200 border-l-4 border-l-amber-500'}`}
               >
-                <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-                  <div className="min-w-0 flex-1">
+                <div className="min-w-0">
+                  <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <p className="text-sm font-black text-slate-950">
+                      {formatEasternDateTime(record.timestamp, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                    </p>
+                    <p className="text-xs font-semibold text-slate-500">
+                      {record.kind === 'note' ? 'Entered by' : 'Uploaded by'} {record.userName}
+                    </p>
+                    {record.kind === 'note' && record.photos.length > 0 && (
+                      <p className="text-xs font-bold text-blue-700">{record.photos.length} attached</p>
+                    )}
+                  </div>
+                  <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       {record.kind === 'note' ? (
                         <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2 py-1 text-xs font-black text-blue-700">
@@ -2268,15 +2279,6 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
                       maxItems={record.kind === 'note' ? 10 : 6}
                       onLightbox={setLightbox}
                     />
-                  </div>
-                  <div className="shrink-0 text-left xl:w-44 xl:text-right">
-                    <p className="text-sm font-black text-slate-950">
-                      {formatEasternDateTime(record.timestamp, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
-                    </p>
-                    <p className="mt-1 text-xs font-semibold text-slate-500">{record.userName}</p>
-                    {record.kind === 'note' && record.photos.length > 0 && (
-                      <p className="mt-2 text-xs font-bold text-blue-700">{record.photos.length} attached</p>
-                    )}
                   </div>
                 </div>
               </article>
