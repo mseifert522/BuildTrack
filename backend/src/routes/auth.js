@@ -12,6 +12,7 @@ const { ensureContractorMobileAccountByEmail, normalizeEmail } = require('../uti
 const router = express.Router();
 const MANAGEMENT_ROLES = ['super_admin', 'operations_manager', 'project_manager'];
 const TRUSTED_DEVICE_DAYS = 60;
+const MOBILE_QUICK_ACCESS_DAYS = 7;
 const SESSION_EXPIRES_IN = '45m';
 const CONTRACTOR_EMAIL_LOGIN_MESSAGE = 'If that contractor email is on file, BuildTrack will send login instructions.';
 
@@ -100,6 +101,47 @@ function issueTrustedDevice(db, user, req, previousDeviceToken) {
   };
 }
 
+function hashMobileQuickAccessToken(token) {
+  return crypto.createHash('sha256').update(String(token || '')).digest('hex');
+}
+
+function issueMobileQuickAccess(db, user, req) {
+  const quickAccessToken = crypto.randomBytes(32).toString('hex');
+  const expiresAt = daysFromNow(MOBILE_QUICK_ACCESS_DAYS);
+
+  db.prepare(`
+    DELETE FROM mobile_quick_access_tokens
+    WHERE datetime(expires_at) <= datetime('now')
+      OR revoked_at IS NOT NULL
+  `).run();
+
+  db.prepare(`
+    INSERT INTO mobile_quick_access_tokens (
+      id, user_id, token_hash, user_agent, ip_address, expires_at
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    uuidv4(),
+    user.id,
+    hashMobileQuickAccessToken(quickAccessToken),
+    req.headers['user-agent'] || '',
+    req.ip || '',
+    expiresAt
+  );
+
+  return {
+    quick_access: {
+      token: quickAccessToken,
+      expires_at: expiresAt,
+      expires_in_days: MOBILE_QUICK_ACCESS_DAYS,
+    },
+  };
+}
+
+function addMobileQuickAccess(payload, db, user, req) {
+  Object.assign(payload, issueMobileQuickAccess(db, user, req));
+  return payload;
+}
+
 function isDeviceTrusted(db, userId, deviceToken) {
   if (!deviceToken) return false;
   const device = db.prepare(
@@ -146,11 +188,12 @@ router.post('/login', async (req, res) => {
     if (!MANAGEMENT_ROLES.includes(user.role)) {
       const payload = issueSession(db, user, { two_factor: 'not_required', trusted_device: trustDevice });
       if (trustDevice) Object.assign(payload, issueTrustedDevice(db, user, req, device_token));
-      return res.json(payload);
+      return res.json(addMobileQuickAccess(payload, db, user, req));
     }
 
     if (isDeviceTrusted(db, user.id, device_token)) {
-      return res.json(issueSession(db, user, { trusted_device: true }));
+      const payload = issueSession(db, user, { trusted_device: true });
+      return res.json(addMobileQuickAccess(payload, db, user, req));
     }
 
     if (twofa_code) {
@@ -171,11 +214,12 @@ router.post('/login', async (req, res) => {
         Object.assign(payload, issueTrustedDevice(db, user, req, device_token));
       }
 
-      return res.json(payload);
+      return res.json(addMobileQuickAccess(payload, db, user, req));
     }
 
     if (!process.env.SMTP_PASS || process.env.SMTP_PASS === 'REPLACE_WITH_RESEND_API_KEY') {
-      return res.json(issueSession(db, user, { two_factor: 'skipped_no_smtp' }));
+      const payload = issueSession(db, user, { two_factor: 'skipped_no_smtp' });
+      return res.json(addMobileQuickAccess(payload, db, user, req));
     }
 
     db.prepare('UPDATE two_factor_codes SET used = 1 WHERE user_id = ? AND used = 0').run(user.id);
@@ -200,6 +244,53 @@ router.post('/login', async (req, res) => {
   } catch (err) {
     console.error('Login error:', err);
     res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// POST /api/auth/mobile-quick-access - one-touch app access for 7 days after full login.
+router.post('/mobile-quick-access', async (req, res) => {
+  try {
+    const quickAccessToken = req.body?.quick_access_token || req.body?.token;
+    if (!quickAccessToken || typeof quickAccessToken !== 'string') {
+      return res.status(400).json({ error: 'Quick access token is required', reset_quick_access: true });
+    }
+
+    const db = getDb();
+    const user = db.prepare(`
+      SELECT mqat.expires_at as quick_access_expires_at, u.*
+      FROM mobile_quick_access_tokens mqat
+      JOIN users u ON u.id = mqat.user_id
+      WHERE mqat.token_hash = ?
+        AND mqat.revoked_at IS NULL
+        AND datetime(mqat.expires_at) > datetime('now')
+        AND u.is_active = 1
+      LIMIT 1
+    `).get(hashMobileQuickAccessToken(quickAccessToken));
+
+    if (!user) {
+      return res.status(401).json({
+        error: 'Quick access has expired. Please sign in with your password or PIN again.',
+        reset_quick_access: true,
+      });
+    }
+
+    db.prepare(`
+      UPDATE mobile_quick_access_tokens
+      SET last_used_at = datetime('now')
+      WHERE token_hash = ?
+    `).run(hashMobileQuickAccessToken(quickAccessToken));
+
+    const payload = issueSession(db, user, { mobile_quick_access: true });
+    payload.quick_access = {
+      expires_at: user.quick_access_expires_at,
+      expires_in_days: MOBILE_QUICK_ACCESS_DAYS,
+    };
+    if (user.role === 'contractor') payload.projects = getLoginProjects(db, user);
+
+    return res.json(payload);
+  } catch (err) {
+    console.error('Mobile quick access login error:', err);
+    res.status(500).json({ error: 'Quick access login failed' });
   }
 });
 
@@ -263,7 +354,7 @@ router.post('/pin-login', async (req, res) => {
     const payload = { token, user: publicUser(user), projects };
     if (trustDevice) Object.assign(payload, issueTrustedDevice(db, user, req, device_token));
 
-    res.json(payload);
+    res.json(addMobileQuickAccess(payload, db, user, req));
   } catch (err) {
     console.error('PIN login error:', err);
     res.status(500).json({ error: 'Login failed' });
@@ -359,7 +450,7 @@ router.post('/contractor/email-login/verify', async (req, res) => {
     payload.projects = getLoginProjects(db, user);
     if (trustDevice) Object.assign(payload, issueTrustedDevice(db, user, req, deviceToken));
 
-    res.json(payload);
+    res.json(addMobileQuickAccess(payload, db, user, req));
   } catch (err) {
     console.error('Contractor email login verify error:', err);
     res.status(err.statusCode || 500).json({ error: err.message || 'Login failed' });

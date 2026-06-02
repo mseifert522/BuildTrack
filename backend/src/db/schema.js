@@ -577,6 +577,26 @@ function initializeSchema() {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    -- Mobile one-touch app access. Stores token hashes only and expires hard after 7 days.
+    CREATE TABLE IF NOT EXISTS mobile_quick_access_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      token_hash TEXT UNIQUE NOT NULL,
+      user_agent TEXT,
+      ip_address TEXT,
+      expires_at TEXT NOT NULL,
+      last_used_at TEXT,
+      revoked_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_mobile_quick_access_tokens_user_expires
+      ON mobile_quick_access_tokens(user_id, expires_at);
+
+    CREATE INDEX IF NOT EXISTS idx_mobile_quick_access_tokens_hash
+      ON mobile_quick_access_tokens(token_hash);
+
     -- Project notes
     CREATE TABLE IF NOT EXISTS project_notes (
       id TEXT PRIMARY KEY,

@@ -19,6 +19,9 @@ import toast from 'react-hot-toast';
 
 const DEVICE_TOKEN_KEY = 'bt_device_token';
 const DEVICE_TRUSTED_UNTIL_KEY = 'bt_device_trusted_until';
+const QUICK_ACCESS_TOKEN_KEY = 'bt_mobile_quick_access_token';
+const QUICK_ACCESS_EXPIRES_AT_KEY = 'bt_mobile_quick_access_expires_at';
+const QUICK_ACCESS_USER_LABEL_KEY = 'bt_mobile_quick_access_user_label';
 const REMEMBERED_EMAIL_KEY = 'bt_remembered_email';
 const REMEMBERED_CONTRACTOR_EMAIL_KEY = 'bt_remembered_contractor_email';
 const CONTRACTOR_TOKEN_KEY = 'contractor_token';
@@ -46,6 +49,11 @@ type LoginPayload = {
   projects?: any[];
   device_token?: string;
   trusted_device_expires_at?: string;
+  quick_access?: {
+    token?: string;
+    expires_at?: string;
+    expires_in_days?: number;
+  };
 };
 
 const landingPathFor = (user: { role?: string; force_password_reset?: boolean }) => {
@@ -92,6 +100,17 @@ const saveTrustedDevice = (data: { device_token?: string; trusted_device_expires
   }
 };
 
+const saveMobileQuickAccess = (data: LoginPayload) => {
+  const token = data.quick_access?.token;
+  const expiresAt = data.quick_access?.expires_at;
+  if (!token || !expiresAt) return;
+
+  const userLabel = data.user?.name || data.user?.email || 'this device';
+  localStorage.setItem(QUICK_ACCESS_TOKEN_KEY, token);
+  localStorage.setItem(QUICK_ACCESS_EXPIRES_AT_KEY, expiresAt);
+  localStorage.setItem(QUICK_ACCESS_USER_LABEL_KEY, userLabel);
+};
+
 const saveRememberedIdentity = (data: LoginPayload) => {
   const rememberedEmail = data.user?.email;
   if (!rememberedEmail) return;
@@ -109,6 +128,12 @@ const parseTrustedUntil = (value?: string | null) => {
   return Number.isFinite(timestamp) ? timestamp : 0;
 };
 
+const clearMobileQuickAccess = () => {
+  localStorage.removeItem(QUICK_ACCESS_TOKEN_KEY);
+  localStorage.removeItem(QUICK_ACCESS_EXPIRES_AT_KEY);
+  localStorage.removeItem(QUICK_ACCESS_USER_LABEL_KEY);
+};
+
 const getTrustedDeviceState = () => {
   const token = localStorage.getItem(DEVICE_TOKEN_KEY);
   const trustedUntil = localStorage.getItem(DEVICE_TRUSTED_UNTIL_KEY);
@@ -121,6 +146,25 @@ const getTrustedDeviceState = () => {
 
 const getStoredDeviceToken = () => localStorage.getItem(DEVICE_TOKEN_KEY) || undefined;
 
+const getMobileQuickAccessState = () => {
+  const token = localStorage.getItem(QUICK_ACCESS_TOKEN_KEY);
+  const expiresAt = localStorage.getItem(QUICK_ACCESS_EXPIRES_AT_KEY);
+  const userLabel = localStorage.getItem(QUICK_ACCESS_USER_LABEL_KEY) || 'BuildTrack';
+  const expiresMs = parseTrustedUntil(expiresAt);
+
+  if (token && expiresAt && expiresMs <= Date.now()) {
+    clearMobileQuickAccess();
+    return { token: null, expiresAt: null, userLabel, available: false };
+  }
+
+  return {
+    token,
+    expiresAt,
+    userLabel,
+    available: Boolean(token && expiresAt && expiresMs > Date.now()),
+  };
+};
+
 export default function Login({ initialMode = 'password' }: LoginProps) {
   const [email, setEmail] = useState(() => localStorage.getItem(REMEMBERED_EMAIL_KEY) || '');
   const [password, setPassword] = useState('');
@@ -131,6 +175,9 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
   const [loading, setLoading] = useState(false);
   const [trustedDeviceLoading, setTrustedDeviceLoading] = useState(false);
   const [trustedDeviceReady, setTrustedDeviceReady] = useState(() => getTrustedDeviceState().available);
+  const [quickAccessLoading, setQuickAccessLoading] = useState(false);
+  const [quickAccessReady, setQuickAccessReady] = useState(() => getMobileQuickAccessState().available);
+  const [quickAccessLabel, setQuickAccessLabel] = useState(() => getMobileQuickAccessState().userLabel);
   const [needs2FA, setNeeds2FA] = useState(false);
   const [twofaCode, setTwofaCode] = useState('');
   const [trustDevice, setTrustDevice] = useState(false);
@@ -192,6 +239,9 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
 
   useEffect(() => {
     setTrustedDeviceReady(getTrustedDeviceState().available);
+    const quickAccess = getMobileQuickAccessState();
+    setQuickAccessReady(quickAccess.available);
+    setQuickAccessLabel(quickAccess.userLabel);
 
     const contractorToken = localStorage.getItem(CONTRACTOR_TOKEN_KEY);
     if (!localStorage.getItem('token') && contractorToken) {
@@ -211,11 +261,40 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
     if (data.user?.role === 'contractor') saveContractorSession(data);
     else clearContractorSession();
     saveTrustedDevice(data);
+    saveMobileQuickAccess(data);
     saveRememberedIdentity(data);
+    const quickAccess = getMobileQuickAccessState();
+    setQuickAccessReady(quickAccess.available);
+    setQuickAccessLabel(quickAccess.userLabel);
     setAuth(data.user as any, data.token);
     clearReviewSummaryDismissals(data.user);
     queueLoginReviewSummary(data.user);
     navigate(landingPathFor(data.user));
+  };
+
+  const handleMobileQuickAccessLogin = async () => {
+    const quickAccess = getMobileQuickAccessState();
+    if (!quickAccess.available || !quickAccess.token) {
+      clearMobileQuickAccess();
+      setQuickAccessReady(false);
+      toast.error('Quick app access expired. Please sign in with your password or PIN.');
+      return;
+    }
+
+    setQuickAccessLoading(true);
+    try {
+      const res = await api.post('/auth/mobile-quick-access', { quick_access_token: quickAccess.token });
+      completeLogin(res.data);
+      toast.success('One-touch app access opened');
+    } catch (err: any) {
+      if (err.response?.data?.reset_quick_access) {
+        clearMobileQuickAccess();
+        setQuickAccessReady(false);
+      }
+      toast.error(err.response?.data?.error || 'Quick app access failed. Please sign in again.');
+    } finally {
+      setQuickAccessLoading(false);
+    }
   };
 
   const handleTrustedDeviceLogin = async () => {
@@ -551,6 +630,33 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
             </form>
           ) : (
             <div className="space-y-4">
+              {quickAccessReady && (
+                <button
+                  type="button"
+                  onClick={handleMobileQuickAccessLogin}
+                  disabled={quickAccessLoading}
+                  className="w-full flex items-center justify-between gap-3 p-4 rounded-lg text-left transition-all disabled:opacity-60"
+                  style={{ background: 'linear-gradient(135deg, #D99D26, #C4891F)', color: 'white', boxShadow: '0 12px 28px rgba(217,157,38,0.28)' }}
+                >
+                  <span className="flex items-center gap-3 min-w-0">
+                    <span className="w-11 h-11 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(255,255,255,0.18)' }}>
+                      <Smartphone className="w-5 h-5" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-black">One-Touch App Login</span>
+                      <span className="block text-xs mt-0.5" style={{ color: 'rgba(255,255,255,0.78)' }}>
+                        Continue as {quickAccessLabel}. Resets after 7 days.
+                      </span>
+                    </span>
+                  </span>
+                  {quickAccessLoading ? (
+                    <span className="w-5 h-5 rounded-full animate-spin flex-shrink-0" style={{ border: '2px solid rgba(255,255,255,0.35)', borderTopColor: 'white' }} />
+                  ) : (
+                    <ArrowRight className="w-5 h-5 flex-shrink-0" />
+                  )}
+                </button>
+              )}
+
               {trustedDeviceReady && (
                 <button
                   type="button"

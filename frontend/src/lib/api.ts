@@ -14,7 +14,15 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401) {
+    const requestUrl = String(err.config?.url || '');
+    const handlesOwnAuthError = [
+      '/auth/login',
+      '/auth/pin-login',
+      '/auth/trusted-device-login',
+      '/auth/mobile-quick-access',
+      '/auth/contractor/email-login/verify',
+    ].some(path => requestUrl.startsWith(path));
+    if (err.response?.status === 401 && !handlesOwnAuthError) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       localStorage.removeItem('auth_session_started_at');
