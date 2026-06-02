@@ -51,17 +51,20 @@ const groupMediaByDay = (photos: any[]) =>
     return groups;
   }, []);
 
-const groupEventsByDay = (events: any[]) =>
-  events.reduce<{ date: string; events: any[] }[]>((groups, event) => {
-    const date = formatEasternDate(event.timestamp, {
+const getProgressTimestamp = (item: any) =>
+  item?.captured_at || item?.taken_at || item?.uploaded_at || item?.created_at;
+
+const groupProgressRecordsByDay = (records: any[]) =>
+  records.reduce<{ date: string; records: any[] }[]>((groups, record) => {
+    const date = formatEasternDate(record.timestamp, {
       weekday: 'long',
       month: 'long',
       day: 'numeric',
       year: 'numeric',
     });
     const last = groups[groups.length - 1];
-    if (last && last.date === date) last.events.push(event);
-    else groups.push({ date, events: [event] });
+    if (last && last.date === date) last.records.push(record);
+    else groups.push({ date, records: [record] });
     return groups;
   }, []);
 
@@ -2069,21 +2072,18 @@ function PunchListTab({ projectId, user }: { projectId: string; user: any }) {
 function ProgressHistoryTab({ projectId, project }: { projectId: string; project: any }) {
   const [notes, setNotes] = useState<any[]>([]);
   const [photos, setPhotos] = useState<any[]>([]);
-  const [activity, setActivity] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<{ src: string; isVideo: boolean } | null>(null);
 
   const load = async () => {
     try {
-      const [notesRes, photosRes, activityRes] = await Promise.all([
+      const [notesRes, photosRes] = await Promise.all([
         api.get(`/projects/${projectId}/notes`).catch(() => ({ data: [] })),
         api.get(`/projects/${projectId}/photos?type=progress`).catch(() => ({ data: [] })),
-        api.get(`/projects/${projectId}/activity`).catch(() => ({ data: [] })),
       ]);
       setNotes(Array.isArray(notesRes.data) ? notesRes.data : []);
       setPhotos(Array.isArray(photosRes.data) ? photosRes.data : []);
-      setActivity(Array.isArray(activityRes.data) ? activityRes.data : []);
       setLastUpdated(new Date().toISOString());
     } catch {
       toast.error('Failed to load project progress history');
@@ -2098,182 +2098,172 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
     return () => window.clearInterval(interval);
   }, [projectId]);
 
-  const photoEvents = photos.map(photo => ({
-    id: `photo-${photo.id}`,
-    kind: 'photo',
-    timestamp: photo.taken_at || photo.created_at,
-    userName: photo.uploader_name || 'Unknown user',
-    title: isVideoMedia(photo) ? 'Project video added' : 'Progress picture added',
-    detail: photo.caption || photo.note_text || photo.original_name || 'Progress media',
-    noteText: photo.note_text,
-    photo,
-    photos: [photo],
-  }));
+  const attachedPhotoKeys = useMemo(() => {
+    const keys = new Set<string>();
+    notes.forEach(note => {
+      getNotePhotos(note).forEach((photo: any) => {
+        if (photo?.id) keys.add(`id:${photo.id}`);
+        if (photo?.filename) keys.add(`filename:${photo.filename}`);
+      });
+    });
+    return keys;
+  }, [notes]);
 
-  const noteEvents = notes.map(note => ({
-    id: `note-${note.id}`,
-    kind: 'note',
-    timestamp: note.created_at,
-    userName: note.user_name || 'Unknown user',
-    title: 'Project note added',
-    detail: note.note,
-    note,
-    photos: getNotePhotos(note),
-  }));
+  const formatNoteType = (value?: string | null) =>
+    String(value || 'general')
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, char => char.toUpperCase());
 
-  const activityEvents = activity.map(log => ({
-    id: `activity-${log.id}`,
-    kind: 'activity',
-    timestamp: log.created_at,
-    userName: log.user_name || 'Unknown user',
-    title: String(log.action || 'Project activity').replace(/_/g, ' '),
-    detail: log.details ? JSON.stringify(log.details) : '',
-    log,
-    photos: [],
-  }));
+  const standalonePhotos = useMemo(
+    () => photos.filter(photo => {
+      if (photo.note_id) return false;
+      if (photo.id && attachedPhotoKeys.has(`id:${photo.id}`)) return false;
+      if (photo.filename && attachedPhotoKeys.has(`filename:${photo.filename}`)) return false;
+      return true;
+    }),
+    [photos, attachedPhotoKeys]
+  );
 
-  const events = [...photoEvents, ...noteEvents, ...activityEvents]
-    .filter(event => event.timestamp)
-    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-  const groupedEvents = groupEventsByDay(events);
+  const records = useMemo(() => {
+    const noteRecords = notes
+      .filter(note => note.created_at && (String(note.note || '').trim() || getNotePhotos(note).length))
+      .map(note => ({
+        id: `note-${note.id}`,
+        kind: 'note',
+        timestamp: note.created_at,
+        userName: note.user_name || 'Unknown user',
+        noteText: note.note,
+        noteType: note.note_type || 'general',
+        visibility: note.visibility || 'private',
+        photos: getNotePhotos(note),
+      }));
 
-  const eventTone = (kind: string) => {
-    if (kind === 'photo') return { bg: 'bg-amber-50', text: 'text-amber-700', Icon: Camera, label: 'Picture' };
-    if (kind === 'note') return { bg: 'bg-blue-50', text: 'text-blue-700', Icon: MessageSquare, label: 'Note' };
-    return { bg: 'bg-slate-100', text: 'text-slate-700', Icon: Activity, label: 'Activity' };
-  };
+    const mediaRecords = standalonePhotos
+      .filter(photo => getProgressTimestamp(photo))
+      .map(photo => ({
+        id: `media-${photo.id || photo.filename}`,
+        kind: 'media',
+        timestamp: getProgressTimestamp(photo),
+        userName: photo.uploader_name || 'Unknown user',
+        mediaType: isVideoMedia(photo) ? 'video' : 'picture',
+        noteText: photo.individual_note || photo.batch_note || photo.caption || null,
+        photos: [photo],
+      }));
+
+    return [...noteRecords, ...mediaRecords]
+      .filter(record => record.timestamp)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }, [notes, standalonePhotos]);
+
+  const groupedRecords = groupProgressRecordsByDay(records);
+  const attachedMediaCount = notes.reduce((count, note) => count + getNotePhotos(note).length, 0);
+  const standaloneMediaCount = standalonePhotos.length;
 
   if (loading) return <Loading />;
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-gray-200 bg-white p-4">
+      <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className="text-xs font-black uppercase tracking-wide text-gray-500">Historical Record</p>
-            <h2 className="mt-1 text-lg font-black text-gray-900">Progress, Pictures, and Notes</h2>
-            <p className="mt-1 text-sm text-gray-500">
-              {project?.address} / photos, notes, users, dates, timestamps, and audit signals in one project record.
-            </p>
+            <p className="text-xs font-black uppercase tracking-wide text-slate-500">Project Record</p>
+            <h2 className="mt-1 text-lg font-black text-slate-950">Progress Notes</h2>
+            <p className="mt-1 text-sm font-medium text-slate-500">{project?.address || 'Project progress'} </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-black text-emerald-700">
-              Auto-refreshes every 30s
-            </span>
             <button
               type="button"
               onClick={load}
-              className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-black text-white hover:bg-slate-800"
+              className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-black text-white hover:bg-slate-800"
             >
               Refresh now
             </button>
           </div>
         </div>
-        <div className="mt-4 grid gap-2 sm:grid-cols-4">
-          <div className="rounded-xl bg-gray-50 p-3">
-            <p className="text-xl font-black text-gray-900">{events.length}</p>
-            <p className="text-xs font-semibold text-gray-500">Total records</p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-4">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+            <p className="text-lg font-black text-slate-950">{notes.length}</p>
+            <p className="text-xs font-semibold text-slate-500">Notes</p>
           </div>
-          <div className="rounded-xl bg-amber-50 p-3">
-            <p className="text-xl font-black text-amber-700">{photos.length}</p>
-            <p className="text-xs font-semibold text-amber-700">Progress media</p>
+          <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
+            <p className="text-lg font-black text-blue-700">{attachedMediaCount}</p>
+            <p className="text-xs font-semibold text-blue-700">Attached media</p>
           </div>
-          <div className="rounded-xl bg-blue-50 p-3">
-            <p className="text-xl font-black text-blue-700">{notes.length}</p>
-            <p className="text-xs font-semibold text-blue-700">Notes</p>
+          <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
+            <p className="text-lg font-black text-amber-700">{standaloneMediaCount}</p>
+            <p className="text-xs font-semibold text-amber-700">Standalone media</p>
           </div>
-          <div className="rounded-xl bg-slate-100 p-3">
+          <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
             <p className="text-sm font-black text-slate-800">{lastUpdated ? formatEasternDateTime(lastUpdated, { hour: 'numeric', minute: '2-digit' }) : '-'}</p>
-            <p className="text-xs font-semibold text-slate-500">Last refreshed</p>
+            <p className="text-xs font-semibold text-slate-500">Last refresh</p>
           </div>
         </div>
       </div>
 
-      {events.length === 0 ? (
-        <div className="rounded-2xl border border-gray-200 bg-white p-10 text-center">
-          <Activity className="mx-auto mb-3 h-10 w-10 text-gray-300" />
-          <p className="font-bold text-gray-600">No progress history yet</p>
-          <p className="mt-1 text-sm text-gray-400">Progress pictures, notes, and project activity will appear here.</p>
+      {records.length === 0 ? (
+        <div className="rounded-lg border border-slate-200 bg-white p-10 text-center shadow-sm">
+          <MessageSquare className="mx-auto mb-3 h-10 w-10 text-slate-300" />
+          <p className="font-bold text-slate-600">No progress notes yet</p>
         </div>
       ) : (
-        groupedEvents.map(group => (
-          <section key={group.date} className="rounded-2xl border border-gray-200 bg-white p-4">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-black text-gray-900">{group.date}</h3>
-                <p className="text-xs font-semibold text-gray-500">{group.events.length} dated record{group.events.length === 1 ? '' : 's'}</p>
-              </div>
-              <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-black text-gray-600">Newest first</span>
+        groupedRecords.map(group => (
+          <section key={group.date} className="space-y-2">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+              <h3 className="text-sm font-black text-slate-950">{group.date}</h3>
+              <span className="text-xs font-bold text-slate-500">{group.records.length} item{group.records.length === 1 ? '' : 's'}</span>
             </div>
-            <div className="space-y-3">
-              {group.events.map(event => {
-                const tone = eventTone(event.kind);
-                const Icon = tone.Icon;
-                return (
-                  <div key={event.id} className="grid gap-3 rounded-xl border border-gray-100 bg-gray-50 p-3 lg:grid-cols-[180px_1fr]">
-                    <div>
-                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-black ${tone.bg} ${tone.text}`}>
-                        <Icon className="h-3.5 w-3.5" />
-                        {tone.label}
-                      </span>
-                      <p className="mt-2 text-sm font-black text-gray-900">{formatEasternDateTime(event.timestamp, { hour: 'numeric', minute: '2-digit' })}</p>
-                      <p className="text-xs font-semibold text-gray-500">{event.userName}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-black capitalize text-gray-900">{event.title}</p>
-                      {event.detail && (
-                        <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-gray-600">{event.detail}</p>
+            {group.records.map(record => (
+              <article
+                key={record.id}
+                className={`rounded-lg border bg-white p-3 shadow-sm ${record.kind === 'note' ? 'border-slate-200 border-l-4 border-l-blue-500' : 'border-amber-200 border-l-4 border-l-amber-500'}`}
+              >
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {record.kind === 'note' ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2 py-1 text-xs font-black text-blue-700">
+                          <MessageSquare className="h-3.5 w-3.5" />
+                          Note
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">
+                          <Camera className="h-3.5 w-3.5" />
+                          {record.mediaType === 'video' ? 'Video' : 'Picture'}
+                        </span>
                       )}
-                      {event.noteText && (
-                        <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">Linked note: {event.noteText}</p>
-                      )}
-                      {event.photos.length > 0 && (
-                        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                          {event.photos.slice(0, 8).map((photo: any) => {
-                            const src = `/uploads/${projectId}/${photo.filename}`;
-                            const mediaKind = getProgressMediaKind(photo);
-                            const isVideo = mediaKind === 'video';
-                            return (
-                              <button
-                                key={photo.id || photo.filename}
-                                type="button"
-                                onClick={() => {
-                                  if (mediaKind === 'file') window.open(src, '_blank', 'noopener,noreferrer');
-                                  else setLightbox({ src, isVideo });
-                                }}
-                                className="relative aspect-square overflow-hidden rounded-xl bg-gray-200 text-left"
-                              >
-                                {isVideo ? (
-                                  <>
-                                    <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
-                                    <PlayCircle className="absolute inset-0 m-auto h-8 w-8 text-white drop-shadow" />
-                                  </>
-                                ) : mediaKind === 'image' ? (
-                                  <img src={src} alt={photo.original_name || 'Progress picture'} className="h-full w-full object-cover" loading="lazy" />
-                                ) : (
-                                  <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
-                                )}
-                                <div className="absolute bottom-1 left-1 rounded-full bg-black/70 px-1.5 py-0.5 text-[10px] font-black text-white">
-                                  {formatEasternDateTime(photo.taken_at || photo.created_at, { hour: 'numeric', minute: '2-digit' })}
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                      {event.kind === 'photo' && event.photo && (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <span className="rounded-full bg-white px-2 py-1 text-xs font-bold text-gray-500">Taken: {formatEasternDateTime(event.photo.taken_at || event.photo.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
-                          <span className="rounded-full bg-white px-2 py-1 text-xs font-bold text-gray-500">Uploaded: {formatEasternDateTime(event.photo.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
-                          <span className={`rounded-full px-2 py-1 text-xs font-black ${event.photo.capture_latitude ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>{event.photo.capture_latitude ? 'GPS recorded' : 'IP recorded'}</span>
-                          {event.photo.upload_ip_address && <span className="rounded-full bg-gray-100 px-2 py-1 text-xs font-bold text-gray-500">IP {event.photo.upload_ip_address}</span>}
-                        </div>
+                      {record.kind === 'note' && (
+                        <>
+                          <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">{formatNoteType(record.noteType)}</span>
+                          <span className={`rounded-full px-2 py-1 text-xs font-bold ${record.visibility === 'public' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                            {record.visibility === 'public' ? 'Public to contractors' : 'Private management note'}
+                          </span>
+                        </>
                       )}
                     </div>
+                    {record.noteText && (
+                      <div className="mt-2 max-h-28 overflow-y-auto whitespace-pre-wrap pr-2 text-sm leading-6 text-slate-700">
+                        {record.noteText}
+                      </div>
+                    )}
+                    <ProgressMediaGrid
+                      projectId={projectId}
+                      photos={record.photos}
+                      maxItems={record.kind === 'note' ? 10 : 6}
+                      onLightbox={setLightbox}
+                    />
                   </div>
-                );
-              })}
-            </div>
+                  <div className="shrink-0 text-left xl:w-44 xl:text-right">
+                    <p className="text-sm font-black text-slate-950">
+                      {formatEasternDateTime(record.timestamp, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                    </p>
+                    <p className="mt-1 text-xs font-semibold text-slate-500">{record.userName}</p>
+                    {record.kind === 'note' && record.photos.length > 0 && (
+                      <p className="mt-2 text-xs font-bold text-blue-700">{record.photos.length} attached</p>
+                    )}
+                  </div>
+                </div>
+              </article>
+            ))}
           </section>
         ))
       )}
@@ -2288,6 +2278,67 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
           <button className="absolute right-4 top-4 text-white/70 hover:text-white" onClick={() => setLightbox(null)}>
             <XIcon />
           </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProgressMediaGrid({
+  projectId,
+  photos,
+  maxItems,
+  onLightbox,
+}: {
+  projectId: string;
+  photos: any[];
+  maxItems: number;
+  onLightbox: (value: { src: string; isVideo: boolean }) => void;
+}) {
+  if (!photos.length) return null;
+  const visiblePhotos = photos.slice(0, maxItems);
+  const hiddenCount = photos.length - visiblePhotos.length;
+
+  return (
+    <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5 xl:grid-cols-6">
+      {visiblePhotos.map(photo => {
+        const src = `/uploads/${projectId}/${photo.filename}`;
+        const mediaKind = getProgressMediaKind(photo);
+        const isVideo = mediaKind === 'video';
+        const timestamp = getProgressTimestamp(photo);
+
+        return (
+          <button
+            key={photo.id || photo.filename}
+            type="button"
+            onClick={() => {
+              if (mediaKind === 'file') window.open(src, '_blank', 'noopener,noreferrer');
+              else onLightbox({ src, isVideo });
+            }}
+            className="relative aspect-square overflow-hidden rounded-lg border border-slate-200 bg-slate-100 text-left"
+            aria-label={photo.original_name || 'Open progress media'}
+          >
+            {isVideo ? (
+              <>
+                <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+                <PlayCircle className="absolute inset-0 m-auto h-8 w-8 text-white drop-shadow" />
+              </>
+            ) : mediaKind === 'image' ? (
+              <img src={src} alt={photo.original_name || 'Progress picture'} className="h-full w-full object-cover" loading="lazy" />
+            ) : (
+              <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
+            )}
+            {timestamp && (
+              <div className="absolute bottom-1 left-1 rounded bg-black/75 px-1.5 py-0.5 text-[10px] font-black text-white">
+                {formatEasternDateTime(timestamp, { hour: 'numeric', minute: '2-digit' })}
+              </div>
+            )}
+          </button>
+        );
+      })}
+      {hiddenCount > 0 && (
+        <div className="flex aspect-square items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 text-sm font-black text-slate-500">
+          +{hiddenCount}
         </div>
       )}
     </div>
