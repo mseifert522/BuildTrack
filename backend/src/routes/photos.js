@@ -6,6 +6,7 @@ const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/schema');
 const { authenticate, authorizeProjectAccess } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
+const { convertHeicUploadToJpeg } = require('../utils/mediaConversion');
 
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
@@ -232,6 +233,16 @@ function cleanupUploadedFiles(files = []) {
   }
 }
 
+async function normalizeUploadedMediaFiles(files = []) {
+  for (const file of files) {
+    try {
+      await convertHeicUploadToJpeg(file);
+    } catch (err) {
+      console.warn(`Failed to convert HEIC upload ${file?.originalname || file?.filename || ''}:`, err.message || err);
+    }
+  }
+}
+
 // GET /api/projects/:projectId/photos
 router.get('/', (req, res) => {
   const db = getDb();
@@ -330,7 +341,7 @@ router.get('/progress', (req, res) => {
 });
 
 // POST /api/projects/:projectId/photos - upload project media
-router.post('/', uploadProjectPhotos, (req, res) => {
+router.post('/', uploadProjectPhotos, async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No files uploaded' });
     const db = getDb();
@@ -417,6 +428,8 @@ router.post('/', uploadProjectPhotos, (req, res) => {
         return res.status(400).json({ error: 'Material not found for this project' });
       }
     }
+
+    await normalizeUploadedMediaFiles(req.files);
 
     for (const [index, file] of req.files.entries()) {
       const id = uuidv4();

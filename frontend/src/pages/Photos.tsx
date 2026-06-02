@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import api from '../lib/api';
 import { Loading } from '../components/ui';
-import { Camera, Grid, List, PlayCircle, X } from 'lucide-react';
+import { Camera, FileImage, Grid, List, PlayCircle, X } from 'lucide-react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import { appendProgressUploadAudit, PROGRESS_MEDIA_ACCEPT } from '../lib/progressUpload';
+import { getProgressMediaKind } from '../lib/progressMedia';
 
 interface Photo {
   id: string;
@@ -34,12 +35,18 @@ interface LightboxMedia {
   isVideo: boolean;
 }
 
-function isVideoMedia(item: Pick<Photo, 'filename' | 'mime_type'>) {
-  return Boolean(item.mime_type?.startsWith('video/')) || /\.(mp4|mov|m4v|webm|avi|mkv|mpeg|mpg|3gp)$/i.test(item.filename);
-}
-
 function mediaLabel(count: number) {
   return `${count} progress item${count === 1 ? '' : 's'}`;
+}
+
+function UnsupportedMediaTile({ name }: { name?: string }) {
+  return (
+    <div className="flex h-full w-full flex-col items-center justify-center bg-gray-50 p-3 text-center">
+      <FileImage className="mb-2 h-8 w-8 text-gray-400" />
+      <p className="max-w-full truncate text-xs font-black text-gray-700">{name || 'Media file'}</p>
+      <p className="mt-1 text-[10px] font-bold uppercase tracking-wide text-amber-700">Open file</p>
+    </div>
+  );
 }
 
 function groupPhotosByDay(photos: Photo[]) {
@@ -136,9 +143,15 @@ export default function Photos() {
   };
 
   const openMedia = (photo: Photo) => {
+    const kind = getProgressMediaKind(photo);
+    const src = `/uploads/${photo.project_id}/${photo.filename}`;
+    if (kind === 'file') {
+      window.open(src, '_blank', 'noopener,noreferrer');
+      return;
+    }
     setLightbox({
-      src: `/uploads/${photo.project_id}/${photo.filename}`,
-      isVideo: isVideoMedia(photo),
+      src,
+      isVideo: kind === 'video',
     });
   };
 
@@ -219,7 +232,8 @@ export default function Photos() {
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
                   {group.photos.map(photo => {
                     const src = `/uploads/${photo.project_id}/${photo.filename}`;
-                    const isVideo = isVideoMedia(photo);
+                    const mediaKind = getProgressMediaKind(photo);
+                    const isVideo = mediaKind === 'video';
                     return (
                       <div
                         key={photo.id}
@@ -228,8 +242,10 @@ export default function Photos() {
                       >
                         {isVideo ? (
                           <video src={src} className="w-full h-full object-cover transition-transform group-hover:scale-105" preload="metadata" muted playsInline />
-                        ) : (
+                        ) : mediaKind === 'image' ? (
                           <img src={src} alt={photo.original_name} className="w-full h-full object-cover transition-transform group-hover:scale-105" loading="lazy" />
+                        ) : (
+                          <UnsupportedMediaTile name={photo.original_name || photo.filename} />
                         )}
                         {isVideo && (
                           <div className="absolute inset-0 flex items-center justify-center bg-black/20">
@@ -258,7 +274,8 @@ export default function Photos() {
                 <div className="space-y-2">
                   {group.photos.map(photo => {
                     const src = `/uploads/${photo.project_id}/${photo.filename}`;
-                    const isVideo = isVideoMedia(photo);
+                    const mediaKind = getProgressMediaKind(photo);
+                    const isVideo = mediaKind === 'video';
                     return (
                       <div key={photo.id} className="bg-white rounded-xl border border-gray-200 p-3 flex items-center gap-3">
                         <div className="w-16 h-16 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0 cursor-pointer relative" onClick={() => openMedia(photo)}>
@@ -267,8 +284,10 @@ export default function Photos() {
                               <video src={src} className="w-full h-full object-cover" preload="metadata" muted playsInline />
                               <PlayCircle className="absolute inset-0 m-auto w-7 h-7 text-white drop-shadow" />
                             </>
-                          ) : (
+                          ) : mediaKind === 'image' ? (
                             <img src={src} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <UnsupportedMediaTile name={photo.original_name || photo.filename} />
                           )}
                         </div>
                         <div className="flex-1 min-w-0">

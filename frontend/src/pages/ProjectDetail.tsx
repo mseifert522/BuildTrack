@@ -3,7 +3,7 @@ import { useParams, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore, canManageProjects, isAdminRole } from '../store/authStore';
 import api from '../lib/api';
 import { Loading, StatusBadge, Modal } from '../components/ui';
-import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileText, ClipboardList, Activity, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle } from 'lucide-react';
+import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, ClipboardList, Activity, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useForm } from 'react-hook-form';
 import { format } from 'date-fns';
@@ -11,6 +11,7 @@ import GooglePlacesInput from '../components/GooglePlacesInput';
 import CurrencyInput from '../components/CurrencyInput';
 import { formatEasternDate, formatEasternDateTime } from '../lib/time';
 import { appendProgressUploadAudit, PROGRESS_MEDIA_ACCEPT, type ProgressCaptureSource } from '../lib/progressUpload';
+import { getProgressMediaKind, isVideoMedia } from '../lib/progressMedia';
 
 type Tab = 'overview' | 'progress-history' | 'construction-plan' | 'quotes' | 'punch-list' | 'photos' | 'invoices' | 'activity' | 'notes' | 'team';
 
@@ -35,9 +36,6 @@ const getNotePhotos = (note: any) => {
     created_at: note.created_at,
   }];
 };
-
-const isVideoMedia = (item: { filename?: string; mime_type?: string | null }) =>
-  Boolean(item.mime_type?.startsWith('video/')) || /\.(mp4|mov|m4v|webm|avi|mkv|mpeg|mpg|3gp)$/i.test(item.filename || '');
 
 const groupMediaByDay = (photos: any[]) =>
   photos.reduce<{ date: string; photos: any[] }[]>((groups, photo) => {
@@ -477,16 +475,25 @@ export default function ProjectDetail() {
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                         {getNotePhotos(note).map((photo: any) => {
                           const src = `/uploads/${note.project_id}/${photo.filename}`;
-                          const isVideo = isVideoMedia(photo);
+                          const mediaKind = getProgressMediaKind(photo);
+                          const isVideo = mediaKind === 'video';
                           return (
-                            <div key={photo.id} className="relative aspect-square overflow-hidden rounded-lg bg-white">
+                            <div
+                              key={photo.id}
+                              className={`relative aspect-square overflow-hidden rounded-lg bg-white ${mediaKind === 'file' ? 'cursor-pointer' : ''}`}
+                              onClick={() => {
+                                if (mediaKind === 'file') window.open(src, '_blank', 'noopener,noreferrer');
+                              }}
+                            >
                               {isVideo ? (
                                 <>
                                   <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
                                   <PlayCircle className="absolute inset-0 m-auto h-7 w-7 text-white drop-shadow" />
                                 </>
-                              ) : (
+                              ) : mediaKind === 'image' ? (
                                 <img src={src} alt={photo.original_name || 'Note attachment'} className="h-full w-full object-cover" loading="lazy" />
+                              ) : (
+                                <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
                               )}
                               <div className="absolute bottom-1 left-1 rounded-full bg-black/65 px-1.5 py-0.5 text-[10px] font-black text-white">
                                 {formatEasternDateTime(photo.taken_at || photo.created_at, { hour: 'numeric', minute: '2-digit' })}
@@ -2224,12 +2231,16 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
                         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                           {event.photos.slice(0, 8).map((photo: any) => {
                             const src = `/uploads/${projectId}/${photo.filename}`;
-                            const isVideo = isVideoMedia(photo);
+                            const mediaKind = getProgressMediaKind(photo);
+                            const isVideo = mediaKind === 'video';
                             return (
                               <button
                                 key={photo.id || photo.filename}
                                 type="button"
-                                onClick={() => setLightbox({ src, isVideo })}
+                                onClick={() => {
+                                  if (mediaKind === 'file') window.open(src, '_blank', 'noopener,noreferrer');
+                                  else setLightbox({ src, isVideo });
+                                }}
                                 className="relative aspect-square overflow-hidden rounded-xl bg-gray-200 text-left"
                               >
                                 {isVideo ? (
@@ -2237,8 +2248,10 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
                                     <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
                                     <PlayCircle className="absolute inset-0 m-auto h-8 w-8 text-white drop-shadow" />
                                   </>
-                                ) : (
+                                ) : mediaKind === 'image' ? (
                                   <img src={src} alt={photo.original_name || 'Progress picture'} className="h-full w-full object-cover" loading="lazy" />
+                                ) : (
+                                  <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
                                 )}
                                 <div className="absolute bottom-1 left-1 rounded-full bg-black/70 px-1.5 py-0.5 text-[10px] font-black text-white">
                                   {formatEasternDateTime(photo.taken_at || photo.created_at, { hour: 'numeric', minute: '2-digit' })}
@@ -2283,6 +2296,16 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
 
 function XIcon() {
   return <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>;
+}
+
+function UnsupportedProgressMediaTile({ name }: { name?: string }) {
+  return (
+    <div className="flex h-full w-full flex-col items-center justify-center bg-slate-50 p-3 text-center">
+      <FileImage className="mb-2 h-8 w-8 text-slate-400" />
+      <p className="max-w-full truncate text-xs font-black text-slate-700">{name || 'Media file'}</p>
+      <p className="mt-1 text-[10px] font-bold uppercase tracking-wide text-amber-700">Open file</p>
+    </div>
+  );
 }
 
 function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
@@ -2379,16 +2402,26 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
                 {group.photos.map(photo => {
                   const src = `/uploads/${projectId}/${photo.filename}`;
-                  const isVideo = isVideoMedia(photo);
+                  const mediaKind = getProgressMediaKind(photo);
+                  const isVideo = mediaKind === 'video';
                   return (
-                    <div key={photo.id} className="relative group aspect-square rounded-xl overflow-hidden bg-gray-100 cursor-pointer" onClick={() => setLightbox({ src, isVideo })}>
+                    <div
+                      key={photo.id}
+                      className="relative group aspect-square rounded-xl overflow-hidden bg-gray-100 cursor-pointer"
+                      onClick={() => {
+                        if (mediaKind === 'file') window.open(src, '_blank', 'noopener,noreferrer');
+                        else setLightbox({ src, isVideo });
+                      }}
+                    >
                       {isVideo ? (
                         <>
                           <video src={src} className="w-full h-full object-cover transition-transform group-hover:scale-105" muted playsInline preload="metadata" />
                           <PlayCircle className="absolute inset-0 m-auto h-10 w-10 text-white drop-shadow" />
                         </>
-                      ) : (
+                      ) : mediaKind === 'image' ? (
                         <img src={src} alt={photo.original_name} className="w-full h-full object-cover transition-transform group-hover:scale-105" loading="lazy" />
+                      ) : (
+                        <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
                       )}
                       {photo.note_id && (
                         <span className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-black text-white">Note</span>
