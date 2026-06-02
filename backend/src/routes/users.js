@@ -410,20 +410,6 @@ router.get('/', authorize('super_admin', 'operations_manager'), (req, res) => {
   res.json(users);
 });
 
-// GET /api/users/presence - show online/offline status in the header for management
-router.get('/presence', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
-  const db = getDb();
-  const users = db.prepare(`
-    SELECT
-      id, name, email, role, avatar_url, last_login_at, last_seen_at,
-      CASE WHEN last_seen_at IS NOT NULL AND datetime(last_seen_at) >= datetime('now', '-2 minutes') THEN 1 ELSE 0 END as is_online
-    FROM users
-    WHERE is_active = 1 AND role != 'contractor'
-    ORDER BY is_online DESC, datetime(COALESCE(last_seen_at, last_login_at, created_at)) DESC, name
-  `).all();
-  res.json(users);
-});
-
 // GET /api/users/contractors - list contractors for assignment dropdowns
 router.get('/contractors', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
   const db = getDb();

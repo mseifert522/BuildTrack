@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { useAuthStore, roleLabels, canManageUsers, canAccessSettings, canAccessSecurity, isAdminRole } from '../store/authStore';
+import { useAuthStore, roleLabels, canManageUsers, canAccessSettings, canAccessSecurity } from '../store/authStore';
 import {
   LayoutDashboard, FolderOpen, ClipboardList, FileText,
   Users, Settings, LogOut, Menu, X, Bell, ChevronRight,
@@ -8,7 +8,6 @@ import {
 } from 'lucide-react';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
-import { formatEasternDateTime, parseBuildTrackTimestamp } from '../lib/time';
 
 interface LayoutProps { children: React.ReactNode; }
 
@@ -20,28 +19,15 @@ interface SearchResult {
   meta?: string;
 }
 
-interface PresenceUser {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-  avatar_url?: string | null;
-  last_login_at?: string | null;
-  last_seen_at?: string | null;
-  is_online?: number;
-}
-
 export default function Layout({ children }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [teamOpen, setTeamOpen] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [presenceUsers, setPresenceUsers] = useState<PresenceUser[]>([]);
   const { user, logout, updateUser } = useAuthStore();
   const location = useLocation();
   const navigate = useNavigate();
@@ -63,20 +49,6 @@ export default function Layout({ children }: LayoutProps) {
     }, 45000);
     return () => window.clearInterval(timer);
   }, [user?.id]);
-
-  useEffect(() => {
-    if (!user || !isAdminRole(user.role)) return;
-
-    const loadPresence = () => {
-      api.get('/users/presence')
-        .then(res => setPresenceUsers(Array.isArray(res.data) ? res.data : []))
-        .catch(() => setPresenceUsers([]));
-    };
-
-    loadPresence();
-    const timer = window.setInterval(loadPresence, 30000);
-    return () => window.clearInterval(timer);
-  }, [user?.id, user?.role]);
 
   useEffect(() => {
     const q = searchTerm.trim();
@@ -167,26 +139,6 @@ export default function Layout({ children }: LayoutProps) {
   )?.[1] || 'BuildTrack';
 
   const W = sidebarCollapsed ? 72 : 240;
-  const onlineUsers = presenceUsers.filter(member => Number(member.is_online) === 1);
-
-  const getPresenceState = (member: PresenceUser) => {
-    if (Number(member.is_online) === 1) return { label: 'Online now', color: '#059669', bg: '#ECFDF5' };
-    if (member.last_seen_at) {
-      const seenAt = parseBuildTrackTimestamp(member.last_seen_at)?.getTime() || 0;
-      if (Number.isFinite(seenAt) && Date.now() - seenAt < 15 * 60 * 1000) {
-        return { label: 'Recently active', color: '#D97706', bg: '#FFFBEB' };
-      }
-    }
-    return { label: 'Offline', color: '#6B7280', bg: '#F3F4F6' };
-  };
-
-  const formatPresenceTime = (member: PresenceUser) => {
-    const value = member.last_seen_at || member.last_login_at;
-    if (!value) return 'No recent activity';
-    if (!parseBuildTrackTimestamp(value)) return 'No recent activity';
-    return `Last active ${formatEasternDateTime(value, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`;
-  };
-
   // Avatar display helper
   const AvatarDisplay = ({ size = 36, className = '' }: { size?: number; className?: string }) => {
     if (user?.avatar_url) {
@@ -508,80 +460,8 @@ export default function Layout({ children }: LayoutProps) {
             )}
           </div>
 
-          {/* Right: team availability, users icon, settings icon, notification bell, user avatar dropdown */}
+          {/* Right: users icon, settings icon, notification bell, user avatar dropdown */}
           <div className="flex flex-shrink-0 items-center gap-1 sm:gap-2">
-            {user && isAdminRole(user.role) && (
-              <div className="relative hidden xl:block">
-                <button
-                  type="button"
-                  onClick={() => setTeamOpen(!teamOpen)}
-                  className="flex items-center gap-2 px-3 py-2 rounded-xl transition-all"
-                  style={{ background: '#F9FAFB', border: '1px solid #E5E7EB', color: '#374151' }}
-                  title="Team availability"
-                >
-                  <div className="relative">
-                    <Users className="w-[18px] h-[18px]" />
-                    {onlineUsers.length > 0 && (
-                      <span className="absolute -right-1 -top-1 w-2.5 h-2.5 rounded-full border-2 border-white" style={{ background: '#059669' }} />
-                    )}
-                  </div>
-                  <div className="text-left leading-tight">
-                    <p className="text-xs font-black text-gray-900">Team availability</p>
-                    <p className="text-[11px] text-gray-500">{onlineUsers.length} online</p>
-                  </div>
-                </button>
-
-                {teamOpen && (
-                  <>
-                    <div className="fixed inset-0 z-10" onClick={() => setTeamOpen(false)} />
-                    <div className="absolute right-0 top-full mt-2 w-80 rounded-2xl bg-white border border-gray-200 shadow-xl z-20 overflow-hidden">
-                      <div className="px-4 py-3 border-b border-gray-100">
-                        <p className="text-sm font-black text-gray-900">Team availability</p>
-                        <p className="text-xs text-gray-500 mt-0.5">Current desktop activity status.</p>
-                      </div>
-                      <div className="max-h-80 overflow-y-auto divide-y divide-gray-50">
-                        {presenceUsers.length === 0 ? (
-                          <p className="px-4 py-5 text-sm text-gray-400">No team status available</p>
-                        ) : presenceUsers.map(member => {
-                          const state = getPresenceState(member);
-                          return (
-                            <button
-                              key={member.id}
-                              type="button"
-                              onClick={() => {
-                                setTeamOpen(false);
-                                if (canManageUsers(user.role)) navigate('/users');
-                              }}
-                              className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors"
-                            >
-                              {member.avatar_url ? (
-                                <img src={member.avatar_url} alt={member.name} className="w-9 h-9 rounded-xl object-cover flex-shrink-0" style={{ objectPosition: 'center top' }} />
-                              ) : (
-                                <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-xs font-black flex-shrink-0" style={{ background: 'linear-gradient(135deg, #D99D26, #C4891F)' }}>
-                                  {member.name?.[0]?.toUpperCase() || '?'}
-                                </div>
-                              )}
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center justify-between gap-2">
-                                  <p className="text-sm font-bold text-gray-900 truncate">{member.name}</p>
-                                  <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full whitespace-nowrap" style={{ color: state.color, background: state.bg }}>
-                                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: state.color }} />
-                                    {state.label}
-                                  </span>
-                                </div>
-                                <p className="text-xs text-gray-500 truncate">{roleLabels[member.role] || member.role}</p>
-                                <p className="text-[11px] text-gray-400">{formatPresenceTime(member)}</p>
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-
             {/* Users icon — only for super_admin and operations_manager */}
             {user && canManageUsers(user.role) && (
               <Link
