@@ -28,10 +28,9 @@ export default function ContractorProjects() {
   }, []);
 
   const statusColors: Record<string, { bg: string; text: string; label: string }> = {
+    not_started: { bg: '#F3F4F6', text: '#374151', label: 'Not Started' },
     active_rehab: { bg: '#DCFCE7', text: '#166534', label: 'Active Rehab' },
     rehab_completed: { bg: '#DBEAFE', text: '#1E40AF', label: 'Rehab Completed' },
-    on_market: { bg: '#FEF3C7', text: '#92400E', label: 'On Market' },
-    closed_sold: { bg: '#F3F4F6', text: '#374151', label: 'Closed' },
   };
 
   return (
@@ -59,7 +58,7 @@ export default function ContractorProjects() {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {projects.map(p => {
-              const status = statusColors[p.status] || statusColors.active_rehab;
+              const status = statusColors[p.status] || statusColors.not_started;
               return (
                 <div
                   key={p.id}

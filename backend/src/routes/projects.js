@@ -12,7 +12,8 @@ const router = express.Router();
 router.use(authenticate);
 
 const MANAGEMENT_ROLES = ['super_admin', 'operations_manager', 'project_manager'];
-const PROJECT_STATUSES = ['active_rehab', 'rehab_completed'];
+const PROJECT_STATUS_ADMIN_ROLES = ['super_admin', 'operations_manager'];
+const PROJECT_STATUSES = ['not_started', 'active_rehab', 'rehab_completed'];
 
 function attachPhotosToNotes(db, notes) {
   if (!notes.length) return notes;
@@ -88,6 +89,8 @@ function getProjectScopes(db, projectId) {
 
 function lifecycleFromStatus(status, fallback = 'under_construction') {
   switch (status) {
+    case 'not_started':
+      return 'pre_construction';
     case 'active_rehab':
       return 'under_construction';
     case 'rehab_completed':
@@ -825,10 +828,13 @@ router.post('/', authorize('super_admin', 'operations_manager', 'project_manager
       sold_date, occupant_vacate_date, sale_price, purchase_price, arv, closing_costs, lockbox_code
     } = req.body;
     if (!address || !job_name) return res.status(400).json({ error: 'Address and job name are required' });
+    if (status !== undefined && !PROJECT_STATUS_ADMIN_ROLES.includes(req.user.role)) {
+      return res.status(403).json({ error: 'Only an operations manager or super admin can set project status' });
+    }
 
     const db = getDb();
     const id = uuidv4();
-    const projectStatus = status || 'active_rehab';
+    const projectStatus = status || 'not_started';
     if (!PROJECT_STATUSES.includes(projectStatus)) {
       return res.status(400).json({ error: 'Invalid project status' });
     }
@@ -892,9 +898,13 @@ router.put('/:id', authorize('super_admin', 'operations_manager', 'project_manag
 
     // Log lifecycle status change
     const prevLifecycle = project.lifecycle_status;
+    const prevStatus = project.status;
     const nextStatus = status ?? project.status;
     if (!PROJECT_STATUSES.includes(nextStatus)) {
       return res.status(400).json({ error: 'Invalid project status' });
+    }
+    if (status !== undefined && nextStatus !== project.status && !PROJECT_STATUS_ADMIN_ROLES.includes(req.user.role)) {
+      return res.status(403).json({ error: 'Only an operations manager or super admin can change project status' });
     }
     const newLifecycle = lifecycle_status && lifecycle_status !== 'acquired'
       ? lifecycle_status
@@ -938,6 +948,7 @@ router.put('/:id', authorize('super_admin', 'operations_manager', 'project_manag
     }
 
     const details = { status: nextStatus, lifecycle_status: newLifecycle };
+    if (prevStatus !== nextStatus) details.previous_status = prevStatus;
     if (prevLifecycle !== newLifecycle) details.previous_lifecycle = prevLifecycle;
     logActivity({ userId: req.user.id, projectId: req.params.id, action: 'project_updated', entityType: 'project', entityId: req.params.id, details });
     res.json({ message: 'Project updated' });

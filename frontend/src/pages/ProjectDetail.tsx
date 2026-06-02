@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link, useLocation, useNavigate } from 'react-router-dom';
-import { useAuthStore, canManageProjects, isAdminRole } from '../store/authStore';
+import { useAuthStore, canChangeProjectStatus, canManageProjects, isAdminRole } from '../store/authStore';
 import api from '../lib/api';
 import { Loading, StatusBadge, Modal } from '../components/ui';
 import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, ClipboardList, Activity, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle } from 'lucide-react';
@@ -14,6 +14,12 @@ import { appendProgressUploadAudit, PROGRESS_MEDIA_ACCEPT, type ProgressCaptureS
 import { getProgressMediaKind, isVideoMedia } from '../lib/progressMedia';
 
 type Tab = 'overview' | 'progress-history' | 'construction-plan' | 'quotes' | 'punch-list' | 'photos' | 'invoices' | 'activity' | 'notes' | 'team';
+
+const PROJECT_STATUS_OPTIONS = [
+  { value: 'not_started', label: 'Not Started' },
+  { value: 'active_rehab', label: 'Active Rehab' },
+  { value: 'rehab_completed', label: 'Completed' },
+];
 
 const getInitials = (name?: string) =>
   (name || '?')
@@ -181,9 +187,13 @@ export default function ProjectDetail() {
     }
   };
 
+  const canChangeStatus = user && canChangeProjectStatus(user.role);
+
   const onEditProject = async (data: any) => {
     try {
-      await api.put(`/projects/${id}`, { ...data, address: editAddress || data.address, budget: editBudget ? parseFloat(editBudget) : null, purchase_price: editPurchasePrice ? parseFloat(editPurchasePrice) : null, arv: editArv ? parseFloat(editArv) : null, closing_costs: editClosingCosts ? parseFloat(editClosingCosts) : null });
+      const payload = { ...data, address: editAddress || data.address, budget: editBudget ? parseFloat(editBudget) : null, purchase_price: editPurchasePrice ? parseFloat(editPurchasePrice) : null, arv: editArv ? parseFloat(editArv) : null, closing_costs: editClosingCosts ? parseFloat(editClosingCosts) : null };
+      if (!canChangeStatus) delete payload.status;
+      await api.put(`/projects/${id}`, payload);
       toast.success('Project updated');
       setShowEdit(false);
       load();
@@ -796,10 +806,17 @@ export default function ProjectDetail() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-              <select {...register('status')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-                <option value="active_rehab">Active Rehab</option>
-                <option value="rehab_completed">Completed</option>
-              </select>
+              {canChangeStatus ? (
+                <select {...register('status')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                  {PROJECT_STATUS_OPTIONS.map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              ) : (
+                <div className="flex min-h-[42px] items-center rounded-lg border border-gray-200 bg-gray-50 px-3.5">
+                  <StatusBadge status={project.status} />
+                </div>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Lockbox Code</label>

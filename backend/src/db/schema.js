@@ -105,6 +105,77 @@ function slugify(value) {
     .replace(/^-|-$/g, '');
 }
 
+function ensureProjectStatusConstraintSupportsNotStarted(db) {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'projects'").get();
+  if (!row?.sql || row.sql.includes("'not_started'")) return;
+
+  const columns = `
+    id, address, job_name, status, start_date, target_completion, scope_of_work, budget,
+    project_stage, office_notes, field_notes, lifecycle_status, is_occupied, construction_start_date,
+    acquisition_date, sold_date, occupant_vacate_date, sale_price, purchase_price, arv, closing_costs,
+    main_photo_url, lockbox_code, created_by, created_at, updated_at
+  `;
+  const foreignKeysEnabled = db.pragma('foreign_keys', { simple: true });
+
+  try {
+    db.pragma('foreign_keys = OFF');
+    db.transaction(() => {
+      db.exec('DROP TABLE IF EXISTS projects_status_migration');
+      db.exec(`
+        CREATE TABLE projects_status_migration (
+          id TEXT PRIMARY KEY,
+          address TEXT NOT NULL,
+          job_name TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'not_started' CHECK(status IN ('not_started','active_rehab','rehab_completed','archived')),
+          start_date TEXT,
+          target_completion TEXT,
+          scope_of_work TEXT,
+          budget REAL,
+          project_stage TEXT,
+          office_notes TEXT,
+          field_notes TEXT,
+          lifecycle_status TEXT DEFAULT 'pre_construction',
+          is_occupied INTEGER DEFAULT 0,
+          construction_start_date TEXT,
+          acquisition_date TEXT,
+          sold_date TEXT,
+          occupant_vacate_date TEXT,
+          sale_price REAL,
+          purchase_price REAL,
+          arv REAL,
+          closing_costs REAL,
+          main_photo_url TEXT,
+          lockbox_code TEXT,
+          created_by TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (created_by) REFERENCES users(id)
+        )
+      `);
+      db.exec(`
+        INSERT INTO projects_status_migration (${columns})
+        SELECT
+          id, address, job_name,
+          CASE
+            WHEN status IN ('not_started','active_rehab','rehab_completed','archived') THEN status
+            WHEN status IN ('completed','closed_sold') THEN 'rehab_completed'
+            ELSE 'active_rehab'
+          END,
+          start_date, target_completion, scope_of_work, budget,
+          project_stage, office_notes, field_notes, lifecycle_status, is_occupied, construction_start_date,
+          acquisition_date, sold_date, occupant_vacate_date, sale_price, purchase_price, arv, closing_costs,
+          main_photo_url, lockbox_code, created_by, created_at, updated_at
+        FROM projects
+      `);
+      db.exec('DROP TABLE projects');
+      db.exec('ALTER TABLE projects_status_migration RENAME TO projects');
+    })();
+    console.log('[MIGRATION] Updated projects status constraint to include not_started');
+  } finally {
+    db.pragma(`foreign_keys = ${foreignKeysEnabled ? 'ON' : 'OFF'}`);
+  }
+}
+
 function getDb() {
   if (!db) {
     const dbPath = process.env.DB_PATH || './data/buildtrack.db';
@@ -146,7 +217,7 @@ function initializeSchema() {
       id TEXT PRIMARY KEY,
       address TEXT NOT NULL,
       job_name TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'active_rehab' CHECK(status IN ('active_rehab','rehab_completed','archived')),
+      status TEXT NOT NULL DEFAULT 'not_started' CHECK(status IN ('not_started','active_rehab','rehab_completed','archived')),
       start_date TEXT,
       target_completion TEXT,
       scope_of_work TEXT,
@@ -154,7 +225,7 @@ function initializeSchema() {
       project_stage TEXT,
       office_notes TEXT,
       field_notes TEXT,
-      lifecycle_status TEXT DEFAULT 'under_construction',
+      lifecycle_status TEXT DEFAULT 'pre_construction',
       is_occupied INTEGER DEFAULT 0,
       construction_start_date TEXT,
       acquisition_date TEXT,
@@ -884,6 +955,7 @@ function initializeSchema() {
   try { db.exec(`ALTER TABLE projects ADD COLUMN closing_costs REAL`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE projects ADD COLUMN main_photo_url TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE projects ADD COLUMN lockbox_code TEXT`); } catch (_) { /* already exists */ }
+  try { ensureProjectStatusConstraintSupportsNotStarted(db); } catch (err) { console.error('[MIGRATION] Failed to update project status constraint:', err.message); }
   try { db.exec(`ALTER TABLE project_notes ADD COLUMN edited_at TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE project_notes ADD COLUMN edited_by TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE project_notes ADD COLUMN edit_count INTEGER NOT NULL DEFAULT 0`); } catch (_) { /* already exists */ }
@@ -1108,6 +1180,7 @@ function initializeSchema() {
     db.exec(`
       UPDATE projects
       SET lifecycle_status = CASE status
+        WHEN 'not_started' THEN 'pre_construction'
         WHEN 'active_rehab' THEN 'under_construction'
         WHEN 'rehab_completed' THEN 'completed'
         ELSE 'under_construction'

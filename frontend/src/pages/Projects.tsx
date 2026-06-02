@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useAuthStore, canCreateProjects, isAdminRole } from '../store/authStore';
+import { useAuthStore, canChangeProjectStatus, canCreateProjects, isAdminRole } from '../store/authStore';
 import api from '../lib/api';
 import { Loading, StatusBadge, Modal, PageHeader } from '../components/ui';
 import { Activity, Camera, CheckCircle2, FileText, Plus, Search, MapPin, Users, ClipboardList, ChevronRight, Bell, KeyRound, MessageSquare, Upload } from 'lucide-react';
@@ -47,6 +47,7 @@ interface ProjectReviewSummary {
 }
 
 const PROJECT_STATUS_OPTIONS = [
+  { value: 'not_started', label: 'Not Started' },
   { value: 'active_rehab', label: 'Active Rehab' },
   { value: 'rehab_completed', label: 'Completed' },
 ];
@@ -121,10 +122,11 @@ export default function Projects() {
   };
 
   const canCreate = user && canCreateProjects(user.role);
-  const canUpdateStatus = user && isAdminRole(user.role);
+  const canManageProjectActions = user && isAdminRole(user.role);
+  const canChangeStatus = user && canChangeProjectStatus(user.role);
 
   const updateProjectStatus = async (project: Project, nextStatus: string) => {
-    if (!canUpdateStatus || project.status === nextStatus) return;
+    if (!canChangeStatus || project.status === nextStatus) return;
     setUpdatingStatus(project.id);
     try {
       await api.put(`/projects/${project.id}`, { status: nextStatus });
@@ -139,7 +141,7 @@ export default function Projects() {
   };
 
   const uploadProjectPhoto = async (project: Project, file?: File) => {
-    if (!file || !canUpdateStatus) return;
+    if (!file || !canManageProjectActions) return;
     setUploadingPhoto(project.id);
     try {
       const formData = new FormData();
@@ -214,8 +216,9 @@ export default function Projects() {
           className="px-3 py-2.5 rounded-xl border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
         >
           <option value="">All Statuses</option>
-          <option value="active_rehab">Active Rehab</option>
-          <option value="rehab_completed">Completed</option>
+          {PROJECT_STATUS_OPTIONS.map(option => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
         </select>
       </div>
 
@@ -250,13 +253,13 @@ export default function Projects() {
                   className="absolute inset-0 z-10 rounded-2xl cursor-pointer bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
                 />
                 <label
-                  className={`relative w-20 h-16 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden ${canUpdateStatus && !p.main_photo_url ? 'z-20 cursor-pointer' : 'z-0 cursor-pointer'}`}
+                  className={`relative w-20 h-16 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden ${canManageProjectActions && !p.main_photo_url ? 'z-20 cursor-pointer' : 'z-0 cursor-pointer'}`}
                   style={{ background: '#EFF6FF' }}
                   onClick={e => {
-                    if (canUpdateStatus && !p.main_photo_url) e.stopPropagation();
+                    if (canManageProjectActions && !p.main_photo_url) e.stopPropagation();
                   }}
                   onMouseDown={e => {
-                    if (canUpdateStatus && !p.main_photo_url) e.stopPropagation();
+                    if (canManageProjectActions && !p.main_photo_url) e.stopPropagation();
                   }}
                   title={p.main_photo_url ? 'Main house photo uploaded' : 'Add main house photo'}
                 >
@@ -264,7 +267,7 @@ export default function Projects() {
                     type="file"
                     accept="image/*"
                     className="hidden"
-                    disabled={!canUpdateStatus || uploadingPhoto === p.id || !!p.main_photo_url}
+                    disabled={!canManageProjectActions || uploadingPhoto === p.id || !!p.main_photo_url}
                     onChange={e => {
                       const file = e.target.files?.[0];
                       uploadProjectPhoto(p, file);
@@ -276,7 +279,7 @@ export default function Projects() {
                   ) : (
                     <>
                       <MapPin className="w-6 h-6 text-blue-600" />
-                      {canUpdateStatus && (
+                      {canManageProjectActions && (
                         <span className="absolute -right-1 -top-1 w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center shadow-md">
                           <Plus className="w-4 h-4" />
                         </span>
@@ -387,7 +390,7 @@ export default function Projects() {
                       <KeyRound className="w-3.5 h-3.5" />
                       Lockbox Code
                     </button>
-                    {canUpdateStatus && (
+                    {canManageProjectActions && (
                       <button
                         type="button"
                         onClick={e => {
@@ -403,7 +406,7 @@ export default function Projects() {
                     )}
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
-                    {canUpdateStatus && (
+                    {canManageProjectActions && (
                       <>
                         <label
                           className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black cursor-pointer transition-colors ${p.main_photo_url ? 'relative z-0' : 'relative z-20'}`}
@@ -430,37 +433,47 @@ export default function Projects() {
                           <Camera className="w-3.5 h-3.5" />
                           {p.main_photo_url ? 'House Photo Added' : uploadingPhoto === p.id ? 'Uploading...' : 'Add House Photo'}
                         </label>
-                        <select
-                          value={p.status}
-                          disabled={updatingStatus === p.id}
-                          onClick={e => e.stopPropagation()}
-                          onMouseDown={e => e.stopPropagation()}
-                          onChange={e => updateProjectStatus(p, e.target.value)}
-                          className="relative z-20 px-3 py-2 rounded-xl border border-gray-300 bg-white text-xs font-semibold text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-60 cursor-pointer"
-                          title="Change project status"
-                        >
-                          {PROJECT_STATUS_OPTIONS.map(option => (
-                            <option key={option.value} value={option.value}>{option.label}</option>
-                          ))}
-                        </select>
-                        <button
-                          type="button"
-                          disabled={updatingStatus === p.id || p.status === 'rehab_completed'}
-                          onClick={e => {
-                            e.stopPropagation();
-                            updateProjectStatus(p, 'rehab_completed');
-                          }}
-                          className="relative z-20 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black transition-colors disabled:opacity-50 cursor-pointer"
-                          style={{
-                            background: p.status === 'rehab_completed' ? '#DCFCE7' : '#ECFDF5',
-                            color: '#047857',
-                            border: '1px solid #A7F3D0',
-                          }}
-                          title="Mark project completed"
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          {p.status === 'rehab_completed' ? 'Completed' : 'Mark Completed'}
-                        </button>
+                        {canChangeStatus && (
+                          <>
+                            <div
+                              className="relative z-20 inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-300 bg-white px-2 py-1 shadow-sm"
+                              onClick={e => e.stopPropagation()}
+                              onMouseDown={e => e.stopPropagation()}
+                              title="Change project status"
+                            >
+                              <span className="text-[11px] font-black uppercase tracking-wide text-slate-500">Status</span>
+                              <select
+                                value={p.status}
+                                disabled={updatingStatus === p.id}
+                                onChange={e => updateProjectStatus(p, e.target.value)}
+                                className="min-h-8 rounded-lg border-0 bg-transparent px-1 text-xs font-black text-slate-800 outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-60 cursor-pointer"
+                                aria-label={`Change status for ${p.address}`}
+                              >
+                                {PROJECT_STATUS_OPTIONS.map(option => (
+                                  <option key={option.value} value={option.value}>{option.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={updatingStatus === p.id || p.status === 'rehab_completed'}
+                              onClick={e => {
+                                e.stopPropagation();
+                                updateProjectStatus(p, 'rehab_completed');
+                              }}
+                              className="relative z-20 inline-flex min-h-10 items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black transition-colors disabled:opacity-50 cursor-pointer"
+                              style={{
+                                background: p.status === 'rehab_completed' ? '#DCFCE7' : '#ECFDF5',
+                                color: '#047857',
+                                border: '1px solid #A7F3D0',
+                              }}
+                              title="Mark project completed"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              {p.status === 'rehab_completed' ? 'Completed' : 'Mark Completed'}
+                            </button>
+                          </>
+                        )}
                       </>
                     )}
                     <button
@@ -585,8 +598,9 @@ export default function Projects() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
               <select {...register('status')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-                <option value="active_rehab">Active Rehab</option>
-                <option value="rehab_completed">Completed</option>
+                {PROJECT_STATUS_OPTIONS.map(option => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
               </select>
             </div>
             <div>

@@ -8,10 +8,9 @@ import CurrencyInput from '../components/CurrencyInput';
 
 
 const STATUSES = [
+  { value: 'not_started', label: 'Not Started', color: '#6b7280' },
   { value: 'active_rehab', label: 'Active Rehab', color: '#22c55e' },
-  { value: 'on_market', label: 'On Market', color: '#D97706' },
-  { value: 'closed_sold', label: 'Closed and Sold', color: '#6b7280' },
-
+  { value: 'rehab_completed', label: 'Completed', color: '#2563eb' },
 ];
 
 export default function MobileAddProject() {
@@ -21,7 +20,7 @@ export default function MobileAddProject() {
   // Form fields
   const [address, setAddress] = useState('');
   const [jobName, setJobName] = useState('');
-  const [status, setStatus] = useState('active_rehab');
+  const [status, setStatus] = useState('not_started');
   const [acquisitionDate, setAcquisitionDate] = useState('');
   const [startDate, setStartDate] = useState('');
   const [targetCompletion, setTargetCompletion] = useState('');

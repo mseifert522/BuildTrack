@@ -69,6 +69,10 @@ export const canManageProjects = (role: string) =>
 export const canCreateProjects = (role: string) =>
   ['super_admin', 'operations_manager'].includes(role);
 
+/** Can change the operational status of a project */
+export const canChangeProjectStatus = (role: string) =>
+  ['super_admin', 'operations_manager'].includes(role);
+
 /** Can access Users management page */
 export const canManageUsers = (role: string) =>
   ['super_admin', 'operations_manager'].includes(role);
