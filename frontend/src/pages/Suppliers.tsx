@@ -232,7 +232,7 @@ export default function Suppliers() {
   if (loading) return <Loading />;
 
   return (
-    <div className="min-h-full px-6 py-6 md:px-8" style={{ background: '#E3E8EF' }}>
+    <div className="min-h-full px-6 py-6 md:px-8" style={{ background: '#D8E0EA' }}>
       <div className="mx-auto max-w-7xl space-y-5">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
@@ -240,7 +240,7 @@ export default function Suppliers() {
             <p className="mt-1 text-sm font-semibold text-gray-500">{filteredSuppliers.length} active supplier records</p>
           </div>
           <div className="flex w-full flex-col gap-2 sm:flex-row md:w-auto">
-            <div className="flex min-h-11 w-full items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 shadow-sm sm:w-80">
+            <div className="flex min-h-11 w-full items-center gap-2 rounded-xl border border-slate-400 bg-slate-50 px-3 shadow-sm sm:w-80">
               <Search className="h-4 w-4 flex-shrink-0 text-gray-400" />
               <input
                 value={query}
@@ -272,8 +272,8 @@ export default function Suppliers() {
             <p className="font-bold text-gray-700">No suppliers found</p>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-2xl border border-slate-300 bg-slate-300/70 p-2 shadow-inner">
-            <div className="hidden rounded-xl border border-slate-300 bg-slate-800 px-4 py-3 text-xs font-black uppercase tracking-wide text-slate-100 xl:grid xl:grid-cols-[minmax(210px,1.1fr)_minmax(220px,1fr)_minmax(260px,1.25fr)_minmax(190px,0.9fr)_minmax(160px,0.75fr)_80px] xl:gap-4">
+          <div className="overflow-hidden rounded-2xl border border-slate-800 p-2 shadow-inner" style={{ background: '#1E293B' }}>
+            <div className="hidden rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-xs font-black uppercase tracking-wide text-slate-100 xl:grid xl:grid-cols-[minmax(210px,1.1fr)_minmax(220px,1fr)_minmax(260px,1.25fr)_minmax(190px,0.9fr)_minmax(160px,0.75fr)_80px] xl:gap-4">
               <span>Name</span>
               <span>Category</span>
               <span>Address</span>
@@ -288,7 +288,7 @@ export default function Suppliers() {
                 return (
                   <div
                     key={supplier.id}
-                    className={`overflow-hidden rounded-xl border transition-colors ${isExpanded ? 'border-blue-400 bg-blue-50 shadow-lg ring-1 ring-blue-200' : 'border-slate-300 bg-slate-50 shadow-sm hover:border-slate-500 hover:bg-white'}`}
+                    className={`overflow-hidden rounded-xl border-l-4 transition-colors ${isExpanded ? 'border-y-blue-400 border-r-blue-400 border-l-blue-600 bg-blue-50 shadow-lg ring-1 ring-blue-200' : 'border-y-slate-500 border-r-slate-500 border-l-slate-800 bg-[#CBD6E2] shadow-[0_2px_10px_rgba(15,23,42,0.18)] hover:border-y-slate-700 hover:border-r-slate-700 hover:bg-[#DDE6F0]'}`}
                     onClick={event => {
                       const target = event.target as HTMLElement;
                       if (target.closest('button,a,input,textarea,select,label')) return;
@@ -351,9 +351,9 @@ export default function Suppliers() {
                     </button>
 
                     {isExpanded && (
-                      <div className="border-t border-slate-300 bg-slate-50 px-4 py-4">
+                      <div className="border-t border-slate-300 px-4 py-4" style={{ background: '#E9EEF5' }}>
                         <div className="grid gap-3 lg:grid-cols-[1.1fr_1fr_auto] lg:items-start">
-                          <div className="rounded-xl border border-slate-300 bg-white p-4">
+                          <div className="rounded-xl border border-slate-400 bg-slate-50 p-4 shadow-sm">
                             <p className="mb-2 text-xs font-black uppercase tracking-wide text-slate-500">Supplier Details</p>
                             <div className="grid gap-3 sm:grid-cols-2">
                               <DetailLine label="Name" value={supplier.name} />
@@ -362,7 +362,7 @@ export default function Suppliers() {
                               <DetailLine label="Contact Person" value={supplierContact(supplier)} />
                             </div>
                           </div>
-                          <div className="rounded-xl border border-slate-300 bg-white p-4">
+                          <div className="rounded-xl border border-slate-400 bg-slate-50 p-4 shadow-sm">
                             <p className="mb-2 text-xs font-black uppercase tracking-wide text-slate-500">Contact</p>
                             <div className="space-y-2 text-sm">
                               <p className="flex min-w-0 items-center gap-2 font-semibold text-slate-700"><Phone className="h-4 w-4 text-slate-400" />{supplierPhone(supplier)}</p>

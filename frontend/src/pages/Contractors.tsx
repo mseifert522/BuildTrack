@@ -731,7 +731,7 @@ export default function Contractors() {
   };
 
   const detailLine = (label: string, value?: string | number | null, className = '') => (
-    <div className={`rounded-xl border border-gray-100 bg-white px-4 py-3 ${className}`}>
+    <div className={`rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 shadow-sm ${className}`}>
       <p className="text-[11px] font-black uppercase tracking-wide text-gray-400">{label}</p>
       <p className="mt-1 break-words text-sm font-bold leading-5 text-gray-900 whitespace-pre-wrap">{detailValue(value)}</p>
     </div>
@@ -761,7 +761,7 @@ export default function Contractors() {
             </button>
             <div
               className="flex items-center gap-2 px-3 py-2.5 rounded-xl w-full sm:w-[460px]"
-              style={{ background: 'white', border: '1px solid #D1D5DB', boxShadow: '0 8px 24px rgba(17,24,39,0.06)' }}
+              style={{ background: '#F8FAFC', border: '1px solid #94A3B8', boxShadow: '0 8px 24px rgba(17,24,39,0.10)' }}
             >
               <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
               <input
@@ -774,7 +774,7 @@ export default function Contractors() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-700 p-4" style={{ background: '#1F2937', boxShadow: '0 14px 34px rgba(15,23,42,0.16)' }}>
+        <div className="rounded-2xl border border-slate-800 p-4" style={{ background: '#111827', boxShadow: '0 14px 34px rgba(15,23,42,0.22)' }}>
           <div className="flex items-center gap-2 mb-3">
             <SlidersHorizontal className="w-4 h-4 text-amber-300" />
             <p className="text-sm font-black text-white">Filters</p>
@@ -826,7 +826,7 @@ export default function Contractors() {
             <p className="text-sm font-bold text-gray-500">No contractors match these filters</p>
           </div>
         ) : (
-          <div className="space-y-3 rounded-2xl border border-slate-700 p-2 shadow-inner" style={{ background: '#253244' }}>
+          <div className="space-y-3 rounded-2xl border border-slate-800 p-2 shadow-inner" style={{ background: '#1E293B' }}>
             {filteredContractors.map((contractor) => {
               const lastPaid = contractor.last_paid_invoice;
               const connectedProjects = contractor.connected_projects || [];
@@ -848,7 +848,7 @@ export default function Contractors() {
                     if (target.closest('button,a,input,textarea,select,label')) return;
                     setExpandedContractorId(current => current === contractor.id ? null : contractor.id);
                   }}
-                  className={`overflow-hidden rounded-xl border-l-4 transition-colors cursor-pointer ${isExpanded ? 'border-y-amber-400 border-r-amber-400 border-l-amber-500 bg-amber-50 shadow-lg ring-1 ring-amber-200' : 'border-y-slate-400 border-r-slate-400 border-l-slate-700 bg-[#DDE6F0] shadow-sm hover:border-y-slate-600 hover:border-r-slate-600 hover:bg-[#EEF3F8]'}`}
+                  className={`overflow-hidden rounded-xl border-l-4 transition-colors cursor-pointer ${isExpanded ? 'border-y-amber-400 border-r-amber-400 border-l-amber-500 bg-amber-50 shadow-lg ring-1 ring-amber-200' : 'border-y-slate-500 border-r-slate-500 border-l-slate-800 bg-[#CBD6E2] shadow-[0_2px_10px_rgba(15,23,42,0.18)] hover:border-y-slate-700 hover:border-r-slate-700 hover:bg-[#DDE6F0]'}`}
                   title={isExpanded ? 'Click to collapse contractor details' : 'Click to expand contractor details'}
                 >
                   <div>
@@ -1027,7 +1027,7 @@ export default function Contractors() {
                         )}
 
                     <div className="grid lg:grid-cols-12 gap-4 mt-5">
-                      <div className="lg:col-span-3 rounded-xl border border-slate-200 p-4 bg-slate-100">
+                      <div className="lg:col-span-3 rounded-xl border border-slate-300 p-4 bg-slate-100 shadow-sm">
                         <div className="flex items-center gap-2 mb-2">
                           <Building2 className="w-4 h-4 text-gray-400" />
                           <p className="text-xs font-black uppercase tracking-wide text-gray-500">Billing Address</p>
@@ -1035,7 +1035,7 @@ export default function Contractors() {
                         <p className="text-sm text-gray-800 whitespace-pre-wrap">{contractor.billing_address || 'No billing address on file'}</p>
                       </div>
 
-                      <div className="lg:col-span-3 rounded-xl border border-slate-200 bg-white p-4">
+                      <div className="lg:col-span-3 rounded-xl border border-slate-300 bg-slate-50 p-4 shadow-sm">
                         <div className="flex items-center justify-between gap-2 mb-3">
                           <div className="flex items-center gap-2">
                             <LinkIcon className="w-4 h-4 text-gray-400" />
@@ -1070,7 +1070,7 @@ export default function Contractors() {
                         )}
                       </div>
 
-                      <div className="lg:col-span-3 rounded-xl border border-slate-200 bg-white p-4 transition-colors hover:border-amber-300 hover:bg-amber-50/30">
+                      <div className="lg:col-span-3 rounded-xl border border-slate-300 bg-slate-50 p-4 shadow-sm transition-colors hover:border-amber-300 hover:bg-amber-50/40">
                         <div className="flex items-center justify-between gap-2 mb-3">
                           <div className="flex items-center gap-2">
                             <MessageSquare className="w-4 h-4 text-gray-400" />
@@ -1084,7 +1084,7 @@ export default function Contractors() {
                         {(contractor.latest_notes || []).length > 0 ? (
                           <div className="space-y-2">
                             {(contractor.latest_notes || []).slice(0, 2).map((note, index) => (
-                              <div key={`${note.created_at}-${index}`} className="rounded-lg bg-gray-50 border border-gray-100 px-2.5 py-2 hover:bg-white">
+                              <div key={`${note.created_at}-${index}`} className="rounded-lg bg-white border border-slate-200 px-2.5 py-2 hover:border-amber-200">
                                 <p
                                   className="text-xs font-semibold text-gray-700"
                                   style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
@@ -1120,7 +1120,7 @@ export default function Contractors() {
                         </div>
                       </div>
 
-                      <div className="lg:col-span-3 rounded-xl border border-slate-200 bg-white p-4">
+                      <div className="lg:col-span-3 rounded-xl border border-slate-300 bg-slate-50 p-4 shadow-sm">
                         <div className="flex items-center gap-2 mb-3">
                           <FileText className="w-4 h-4 text-gray-400" />
                           <p className="text-xs font-black uppercase tracking-wide text-gray-500">Payment History</p>
@@ -1141,7 +1141,7 @@ export default function Contractors() {
                               <p className="text-xs font-black text-gray-900">{money(contractor.total_paid)}</p>
                             </div>
                           </div>
-                          <div className="rounded-lg bg-gray-50 border border-gray-100 p-2">
+                          <div className="rounded-lg bg-white border border-slate-200 p-2">
                             <p className="text-xs text-gray-400">Contractor setup</p>
                             <p className="text-xs font-black text-gray-900">
                               {setupComplete
