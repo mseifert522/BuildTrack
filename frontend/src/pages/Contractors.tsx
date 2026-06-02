@@ -837,6 +837,7 @@ export default function Contractors() {
               const SetupIcon = setupComplete ? CheckCircle2 : setupPending ? Clock3 : ShieldCheck;
               const statusMeta = contractorStatusMeta(contractor.contractor_status);
               const contractorCategories = contractorCategoryList(contractor);
+              const contractorTypeLabel = contractorCategories.length ? contractorCategories.join(' / ') : 'Uncategorized';
               const isExpanded = expandedContractorId === contractor.id;
               const addressLine = contractorAddressLine(contractor.billing_address);
               return (
@@ -855,7 +856,7 @@ export default function Contractors() {
                       type="button"
                       onClick={() => setExpandedContractorId(current => current === contractor.id ? null : contractor.id)}
                       aria-expanded={isExpanded}
-                      className="grid w-full grid-cols-1 items-center gap-3 px-4 py-3 text-left md:grid-cols-[minmax(220px,1.1fr)_minmax(150px,0.65fr)_minmax(280px,1.4fr)_auto] md:px-5"
+                      className="grid w-full grid-cols-1 items-center gap-3 px-4 py-3 text-left md:grid-cols-[minmax(190px,0.95fr)_minmax(150px,0.75fr)_minmax(150px,0.65fr)_minmax(260px,1.25fr)_auto] md:px-5"
                     >
                       <div className="flex min-w-0 items-center gap-3">
                         <div className="h-9 w-9 flex-shrink-0 rounded-xl flex items-center justify-center text-white text-xs font-black" style={{ background: 'linear-gradient(135deg, #1F2937, #D99D26)' }}>
@@ -864,6 +865,10 @@ export default function Contractors() {
                         <div className="min-w-0">
                           <p className="truncate text-sm font-black text-gray-950">{contractor.name}</p>
                         </div>
+                      </div>
+                      <div className="flex min-w-0 items-center gap-2 text-sm font-black text-amber-800">
+                        <Building2 className="h-4 w-4 flex-shrink-0 text-amber-500" />
+                        <span className="truncate" title={contractorTypeLabel}>{contractorTypeLabel}</span>
                       </div>
                       <div className="flex min-w-0 items-center gap-2 text-sm font-bold text-gray-700">
                         <Phone className="h-4 w-4 flex-shrink-0 text-gray-400" />
