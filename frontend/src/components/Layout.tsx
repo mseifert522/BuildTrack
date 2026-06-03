@@ -504,17 +504,21 @@ export default function Layout({ children }: LayoutProps) {
             <div className="relative">
               <button
                 onClick={() => setProfileOpen(!profileOpen)}
-                className="flex items-center gap-2 px-2 py-2 rounded-xl cursor-pointer transition-all sm:gap-3 sm:px-3"
+                className="flex h-11 min-w-0 max-w-[176px] cursor-pointer items-center gap-2 overflow-hidden rounded-xl px-2.5 py-0 transition-all"
                 style={{ background: '#F9FAFB', border: '1px solid #E5E7EB' }}
                 aria-label="Open profile menu"
               >
-                <Avatar src={user?.avatar_url} name={user?.name} size={32} />
-                <div className="hidden sm:block text-left">
-                  <p className="text-sm font-bold text-gray-900 leading-tight">{user?.name}</p>
-                  <p className="text-xs" style={{ color: '#D99D26' }}>{user ? roleLabels[user.role] : ''}</p>
-                  <p className="text-[10px] font-bold" style={{ color: '#059669' }}>Online now</p>
+                <Avatar src={user?.avatar_url} name={user?.name} size={30} />
+                <div className="hidden min-w-0 text-left sm:block">
+                  <p className="truncate text-[13px] font-bold leading-4 text-gray-900">{user?.name}</p>
+                  <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
+                    <p className="truncate text-[11px] font-semibold leading-3" style={{ color: '#D99D26' }}>
+                      {user ? roleLabels[user.role] : ''}
+                    </p>
+                    <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full" style={{ background: '#059669' }} aria-label="Online now" />
+                  </div>
                 </div>
-                <ChevronRight className={`w-3.5 h-3.5 hidden sm:block transition-transform ${profileOpen ? 'rotate-90' : 'rotate-0'}`} style={{ color: '#9CA3AF' }} />
+                <ChevronRight className={`hidden h-3 w-3 flex-shrink-0 transition-transform sm:block ${profileOpen ? 'rotate-90' : 'rotate-0'}`} style={{ color: '#9CA3AF' }} />
               </button>
 
               {/* Profile dropdown */}
