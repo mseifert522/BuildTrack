@@ -99,7 +99,7 @@ export default function MobileProjectHub() {
               </p>
             )}
           </div>
-          <img src="/buildtrack-logo.png" alt="NUD" style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover', border: '2px solid #D99D26', flexShrink: 0 }} />
+          <img src="/buildtrack-logo-mark.png" alt="BuildTrack" style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover', border: '2px solid #D99D26', flexShrink: 0 }} />
         </div>
         {/* Stage / Status strip */}
         <div style={{ display: 'flex', gap: 8, padding: '0 16px 12px', flexWrap: 'wrap' }}>

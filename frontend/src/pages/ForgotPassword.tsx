@@ -27,7 +27,7 @@ export default function ForgotPassword() {
       <div className="w-full max-w-[420px]">
         <div className="text-center mb-8">
           <div className="w-16 h-16 rounded-2xl overflow-hidden border-3 shadow-xl mx-auto mb-4" style={{ borderColor: '#D99D26' }}>
-            <img src="/buildtrack-logo.png" alt="BuildTrack" className="w-full h-full object-cover" />
+            <img src="/buildtrack-logo-mark.png" alt="BuildTrack" className="h-full w-full object-cover" />
           </div>
           <h2 className="text-2xl font-black text-gray-900">Forgot Password</h2>
           <p className="text-gray-500 mt-2 text-sm">Enter your email and we'll send you a reset link</p>

@@ -196,7 +196,7 @@ export default function Layout({ children }: LayoutProps) {
             className="w-9 h-9 rounded-xl overflow-hidden flex-shrink-0 border-2"
             style={{ borderColor: 'rgba(217,157,38,0.5)' }}
           >
-            <img src="/buildtrack-logo.png" alt="BuildTrack" className="w-full h-full object-cover" />
+            <img src="/buildtrack-logo-mark.png" alt="BuildTrack" className="h-full w-full object-cover" />
           </div>
           {!collapsed && (
             <div className="min-w-0">
@@ -363,7 +363,7 @@ export default function Layout({ children }: LayoutProps) {
             <div className="flex items-center justify-between px-4 py-4 border-b" style={{ borderColor: 'rgba(255,255,255,0.07)' }}>
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-xl overflow-hidden border-2" style={{ borderColor: 'rgba(217,157,38,0.5)' }}>
-                  <img src="/buildtrack-logo.png" alt="BuildTrack" className="w-full h-full object-contain" />
+                  <img src="/buildtrack-logo-mark.png" alt="BuildTrack" className="h-full w-full object-cover" />
                 </div>
                 <div>
                   <p className="text-white font-bold text-sm">New Urban Dev</p>

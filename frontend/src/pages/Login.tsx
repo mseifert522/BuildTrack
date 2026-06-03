@@ -488,7 +488,7 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
             className="w-12 h-12 rounded-lg flex items-center justify-center overflow-hidden border-2"
             style={{ borderColor: 'rgba(217,157,38,0.5)', background: 'rgba(217,157,38,0.1)' }}
           >
-            <img src="/buildtrack-logo.png" alt="BuildTrack" className="w-full h-full object-cover" />
+            <img src="/buildtrack-logo-mark.png" alt="BuildTrack" className="h-full w-full object-cover" />
           </div>
           <div>
             <p className="text-white font-bold text-lg leading-tight">BuildTrack</p>
@@ -558,7 +558,7 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
             className="w-12 h-12 rounded-lg overflow-hidden border-2 shadow-sm"
             style={{ borderColor: '#D99D26' }}
           >
-            <img src="/buildtrack-logo.png" alt="BuildTrack" className="w-full h-full object-cover" />
+            <img src="/buildtrack-logo-mark.png" alt="BuildTrack" className="h-full w-full object-cover" />
           </div>
           <div>
             <h1 className="text-xl font-black text-gray-900">BuildTrack</h1>

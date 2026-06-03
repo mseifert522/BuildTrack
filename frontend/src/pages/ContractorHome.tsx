@@ -47,7 +47,7 @@ export default function ContractorHome() {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <img src="/buildtrack-logo.png" alt="BuildTrack" style={{ width: 40, height: 40, borderRadius: 12, border: '2px solid #D99D26', objectFit: 'cover' }} />
+            <img src="/buildtrack-logo-mark.png" alt="BuildTrack" style={{ width: 40, height: 40, borderRadius: 12, border: '2px solid #D99D26', objectFit: 'cover' }} />
             <div>
               <p style={{ color: '#D99D26', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', margin: 0 }}>BuildTrack</p>
               <p style={{ color: 'white', fontSize: 16, fontWeight: 800, margin: 0 }}>{user.name}</p>

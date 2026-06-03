@@ -61,7 +61,7 @@ export default function MobileProjects() {
       <div className="mobile-header sticky top-0 z-10 shadow-md" style={{ backgroundColor: '#181D25', touchAction: 'pan-y', overscrollBehaviorX: 'none' }}>
         <div className="flex items-center justify-between px-4 pt-4 pb-3">
           <div className="flex items-center gap-3">
-            <img src="/buildtrack-logo.png" alt="NUD" className="w-9 h-9 rounded-full object-cover border-2" style={{ borderColor: '#D99D26' }} />
+            <img src="/buildtrack-logo-mark.png" alt="BuildTrack" className="h-9 w-9 rounded-full border-2 object-cover" style={{ borderColor: '#D99D26' }} />
             <div>
               <p className="text-white font-bold text-sm leading-tight">BuildTrack</p>
               <p className="text-xs" style={{ color: '#D99D26' }}>New Urban Development</p>
