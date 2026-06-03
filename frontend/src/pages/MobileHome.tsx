@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import {
   Camera,
   ChevronRight,
+  ClipboardList,
   FileText,
   FolderOpen,
   LogOut,
@@ -333,12 +334,15 @@ export default function MobileHome() {
                   </button>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: managementUser ? '1fr' : '1fr 1fr', borderTop: '1px solid #F3F4F6' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', borderTop: '1px solid #F3F4F6' }}>
                   <button onClick={() => navigate(`/mobile/project/${project.id}`)} style={{ border: 'none', background: '#FAFAFA', padding: '10px 4px', fontSize: 11, fontWeight: 850, color: '#2563EB', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
                     <FolderOpen size={15} color="#2563EB" /> Open
                   </button>
+                  <button onClick={() => navigate(`/mobile/project/${project.id}/punch-list`)} style={{ border: 'none', borderLeft: '1px solid #F3F4F6', background: '#FAFAFA', padding: '10px 4px', fontSize: 11, fontWeight: 850, color: '#D99D26', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                    <ClipboardList size={15} color="#D99D26" /> Punch List
+                  </button>
                   {!managementUser && (
-                    <button onClick={() => navigate(`/mobile/project/${project.id}/invoice`)} style={{ border: 'none', borderLeft: '1px solid #F3F4F6', background: '#FAFAFA', padding: '10px 4px', fontSize: 11, fontWeight: 850, color: '#7C3AED', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                    <button onClick={() => navigate(`/mobile/project/${project.id}/invoice`)} style={{ gridColumn: '1 / -1', border: 'none', borderTop: '1px solid #F3F4F6', background: '#FAFAFA', padding: '10px 4px', fontSize: 11, fontWeight: 850, color: '#7C3AED', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
                       <FileText size={15} color="#7C3AED" /> Invoice
                     </button>
                   )}

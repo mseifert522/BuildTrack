@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Activity, Calendar, Camera, ClipboardList, DollarSign, FileText, MessageSquare, Package, Users } from 'lucide-react';
+import { Activity, Calendar, Camera, ClipboardList, DollarSign, FileText, ImagePlus, MessageSquare, Package, Users } from 'lucide-react';
 import api from '../lib/api';
 import { useAuthStore } from '../store/authStore';
 
@@ -117,8 +117,8 @@ export default function MobileProjectHub() {
 
       {/* Action Cards */}
       <div className="mobile-content" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <p style={{ color: '#9CA3AF', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', margin: '4px 0 0' }}>
-          Select Action
+        <p style={{ color: '#475569', fontSize: 13, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em', margin: '4px 0 0' }}>
+          Field actions
         </p>
 
         <button
@@ -226,33 +226,46 @@ export default function MobileProjectHub() {
         {/* Punch List Card */}
         <button
           onClick={() => navigate(`/mobile/project/${id}/punch-list`)}
-          style={{ width: '100%', textAlign: 'left', backgroundColor: 'white', borderRadius: 16, boxShadow: '0 1px 4px rgba(0,0,0,0.08)', padding: 20, border: '1px solid #F3F4F6', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+          style={{
+            width: '100%',
+            minHeight: 112,
+            textAlign: 'left',
+            background: 'linear-gradient(135deg, #111827 0%, #1F2937 100%)',
+            borderRadius: 22,
+            boxShadow: '0 16px 30px rgba(17,24,39,0.22)',
+            padding: 20,
+            border: '1px solid rgba(255,255,255,0.08)',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 14,
+          }}
+          aria-label="Open field punch list and add multiple items with pictures"
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <div style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: '#FEF3C7', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <svg width="28" height="28" fill="none" stroke="#D99D26" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-              </svg>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
+            <div style={{ width: 64, height: 64, borderRadius: 19, backgroundColor: 'rgba(217,157,38,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <ClipboardList size={32} color="#F7C96D" />
             </div>
-            <div>
-              <p style={{ fontWeight: 700, color: '#111827', fontSize: 16, margin: 0 }}>Safety & Quality Punch List</p>
+            <div style={{ minWidth: 0 }}>
+              <p style={{ color: '#F7C96D', fontSize: 12, fontWeight: 900, letterSpacing: '0.08em', textTransform: 'uppercase', margin: '0 0 5px' }}>Walk-through capture</p>
+              <p style={{ fontWeight: 950, color: 'white', fontSize: 20, lineHeight: 1.12, margin: 0 }}>Create Field Punch List</p>
+              <p style={{ color: '#D4DEE9', fontSize: 14, lineHeight: 1.35, margin: '6px 0 0' }}>Add multiple issues quickly and attach pictures to each item.</p>
               {punchCount === 0 ? (
-                <p style={{ color: '#9CA3AF', fontSize: 13, margin: '4px 0 0' }}>No issues yet - tap to create</p>
+                <p style={{ color: '#F7C96D', fontSize: 13, fontWeight: 850, margin: '8px 0 0' }}>No items yet - tap to start</p>
               ) : (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                  <span style={{ color: '#6B7280', fontSize: 13 }}>{punchCount} items</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 9, flexWrap: 'wrap' }}>
+                  <span style={{ backgroundColor: 'rgba(255,255,255,0.12)', color: 'white', borderRadius: 20, padding: '4px 10px', fontSize: 12, fontWeight: 900 }}>{punchCount} items</span>
                   {openCount > 0 ? (
-                    <span style={{ backgroundColor: '#ef4444', color: 'white', borderRadius: 20, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>{openCount} open</span>
+                    <span style={{ backgroundColor: '#F97316', color: 'white', borderRadius: 20, padding: '4px 10px', fontSize: 12, fontWeight: 900 }}>{openCount} open</span>
                   ) : (
-                    <span style={{ backgroundColor: '#22c55e', color: 'white', borderRadius: 20, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>All done</span>
+                    <span style={{ backgroundColor: '#22c55e', color: 'white', borderRadius: 20, padding: '4px 10px', fontSize: 12, fontWeight: 900 }}>All done</span>
                   )}
                 </div>
               )}
             </div>
           </div>
-          <svg width="20" height="20" fill="none" stroke="#D1D5DB" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
+          <ImagePlus size={28} color="#F7C96D" style={{ flexShrink: 0 }} />
         </button>
 
         {/* Invoice Card */}
