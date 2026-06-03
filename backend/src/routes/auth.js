@@ -13,7 +13,8 @@ const router = express.Router();
 const MANAGEMENT_ROLES = ['super_admin', 'operations_manager', 'project_manager'];
 const TRUSTED_DEVICE_DAYS = 60;
 const MOBILE_QUICK_ACCESS_DAYS = 7;
-const SESSION_EXPIRES_IN = '45m';
+const DESKTOP_SESSION_EXPIRES_IN = '45m';
+const MOBILE_SESSION_EXPIRES_IN = '7d';
 const CONTRACTOR_EMAIL_LOGIN_MESSAGE = 'If that contractor email is on file, BuildTrack will send login instructions.';
 
 function sqliteDateTime(date) {
@@ -91,11 +92,16 @@ function publicUser(user) {
   };
 }
 
-function createSessionToken(user, sessionId = null) {
+function sessionExpiryFor(sessionType) {
+  return sessionType === 'mobile_app' ? MOBILE_SESSION_EXPIRES_IN : DESKTOP_SESSION_EXPIRES_IN;
+}
+
+function createSessionToken(user, sessionId = null, sessionType = null) {
+  const resolvedSessionType = sessionType || (user.role === 'contractor' ? 'mobile_app' : 'desktop');
   return jwt.sign(
-    { userId: user.id, role: user.role, sid: sessionId || undefined },
+    { userId: user.id, role: user.role, sid: sessionId || undefined, st: resolvedSessionType },
     process.env.JWT_SECRET,
-    { expiresIn: SESSION_EXPIRES_IN }
+    { expiresIn: sessionExpiryFor(resolvedSessionType) }
   );
 }
 
@@ -115,13 +121,13 @@ function createAuthSession(db, user, req, details = null, sessionType = null) {
     details ? JSON.stringify({ issued_via: details }) : null,
   );
 
-  return sessionId;
+  return { id: sessionId, sessionType: resolvedSessionType };
 }
 
 function issueSession(db, user, details, req = null, sessionType = null) {
-  const sessionId = createAuthSession(db, user, req, details, sessionType);
-  const token = createSessionToken(user, sessionId);
-  markUserOnline(db, user.id, true, sessionId);
+  const session = createAuthSession(db, user, req, details, sessionType);
+  const token = createSessionToken(user, session.id, session.sessionType);
+  markUserOnline(db, user.id, true, session.id);
   logActivity({
     userId: user.id,
     action: 'user_login',
@@ -129,7 +135,7 @@ function issueSession(db, user, details, req = null, sessionType = null) {
     entityId: user.id,
     details,
   });
-  return { token, user: publicUser(user), session_id: sessionId };
+  return { token, user: publicUser(user), session_id: session.id };
 }
 
 function issueTrustedDevice(db, user, req, previousDeviceToken) {
@@ -586,9 +592,23 @@ router.get('/me', authenticate, (req, res) => {
 router.post('/refresh', authenticate, (req, res) => {
   try {
     const db = getDb();
-    const sessionId = req.auth?.session_id || createAuthSession(db, req.user, req, { refresh_from_legacy_token: true });
+    let sessionId = req.auth?.session_id || null;
+    let sessionType = req.auth?.session_type || null;
+    if (!sessionId) {
+      const session = createAuthSession(db, req.user, req, { refresh_from_legacy_token: true });
+      sessionId = session.id;
+      sessionType = session.sessionType;
+    } else if (!sessionType) {
+      const row = db.prepare(`
+        SELECT session_type
+        FROM auth_sessions
+        WHERE id = ? AND user_id = ? AND revoked_at IS NULL
+        LIMIT 1
+      `).get(sessionId, req.user.id);
+      sessionType = row?.session_type || inferSessionType(req.user, req);
+    }
     markUserOnline(db, req.user.id, false, sessionId);
-    res.json({ token: createSessionToken(req.user, sessionId), user: publicUser(req.user) });
+    res.json({ token: createSessionToken(req.user, sessionId, sessionType), user: publicUser(req.user) });
   } catch (err) {
     console.error('Token refresh error:', err);
     res.status(500).json({ error: 'Failed to refresh session' });

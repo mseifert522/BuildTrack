@@ -33,13 +33,21 @@ const MobileNotes = lazy(() => import('./pages/MobileNotes'));
 const MobileProgress = lazy(() => import('./pages/MobileProgress'));
 const MobilePhotos = lazy(() => import('./pages/MobilePhotos'));
 
-const IDLE_TIMEOUT_MS = 45 * 60 * 1000;
+const DESKTOP_IDLE_TIMEOUT_MS = 45 * 60 * 1000;
 const ACTIVITY_WRITE_INTERVAL_MS = 15 * 1000;
 const TOKEN_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 const AUTH_LAST_ACTIVITY_KEY = 'auth_last_activity_at';
 const AUTH_LAST_REFRESH_KEY = 'auth_last_refresh_at';
 const CONTRACTOR_LAST_ACTIVITY_KEY = 'contractor_last_activity_at';
 const CONTRACTOR_LAST_REFRESH_KEY = 'contractor_last_refresh_at';
+const MOBILE_USER_AGENT_PATTERN = /android|iphone|ipad|ipod|mobile|tablet|silk|kindle|webos|blackberry|windows phone/i;
+
+function isMobileDeviceSession() {
+  if (typeof window === 'undefined') return false;
+  return window.location.pathname.startsWith('/mobile')
+    || window.location.pathname.startsWith('/app')
+    || MOBILE_USER_AGENT_PATTERN.test(window.navigator.userAgent || '');
+}
 
 function clearContractorSession() {
   localStorage.removeItem('contractor_token');
@@ -127,7 +135,7 @@ function AuthRoute({ children }: { children: ReactNode }) {
 
 function SessionTimeout() {
   const navigate = useNavigate();
-  const { token, logout } = useAuthStore();
+  const { token, user, logout } = useAuthStore();
   const refreshInFlight = useRef({ desktop: false, contractor: false });
 
   useEffect(() => {
@@ -194,7 +202,8 @@ function SessionTimeout() {
       activityKey: string,
       refreshKey: string,
       userKey: 'user' | 'contractor_user',
-      sessionType: 'desktop' | 'contractor'
+      sessionType: 'desktop' | 'contractor',
+      enforceIdleTimeout: boolean
     ) => {
       const now = Date.now();
       const activeToken = localStorage.getItem(tokenKey);
@@ -205,7 +214,7 @@ function SessionTimeout() {
         localStorage.setItem(activityKey, String(now));
       }
 
-      if (now - lastActivity >= IDLE_TIMEOUT_MS) {
+      if (enforceIdleTimeout && now - lastActivity >= DESKTOP_IDLE_TIMEOUT_MS) {
         if (sessionType === 'desktop') {
           clearDesktopSession();
           navigate('/login', { replace: true });
@@ -224,8 +233,20 @@ function SessionTimeout() {
     };
 
     const checkSession = () => {
-      if (!checkActiveSession('token', AUTH_LAST_ACTIVITY_KEY, AUTH_LAST_REFRESH_KEY, 'user', 'desktop')) return;
-      checkActiveSession('contractor_token', CONTRACTOR_LAST_ACTIVITY_KEY, CONTRACTOR_LAST_REFRESH_KEY, 'contractor_user', 'contractor');
+      const activeToken = localStorage.getItem('token');
+      const contractorToken = localStorage.getItem('contractor_token');
+      const normalTokenIsMirroredContractorToken = Boolean(
+        user?.role === 'contractor'
+        && contractorToken
+        && activeToken === contractorToken
+      );
+
+      if (!normalTokenIsMirroredContractorToken) {
+        const enforceDesktopIdleTimeout = !isMobileDeviceSession() && user?.role !== 'contractor';
+        if (!checkActiveSession('token', AUTH_LAST_ACTIVITY_KEY, AUTH_LAST_REFRESH_KEY, 'user', 'desktop', enforceDesktopIdleTimeout)) return;
+      }
+
+      checkActiveSession('contractor_token', CONTRACTOR_LAST_ACTIVITY_KEY, CONTRACTOR_LAST_REFRESH_KEY, 'contractor_user', 'contractor', false);
     };
 
     if (localStorage.getItem('token') && !localStorage.getItem(AUTH_LAST_ACTIVITY_KEY)) {
@@ -245,7 +266,7 @@ function SessionTimeout() {
       activityEvents.forEach(event => window.removeEventListener(event, markActivity));
       document.removeEventListener('visibilitychange', markActivity);
     };
-  }, [token, logout, navigate]);
+  }, [token, user?.role, logout, navigate]);
 
   return null;
 }

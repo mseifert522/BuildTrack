@@ -61,7 +61,7 @@ function isTokenRevokedForUser(decoded, user) {
 function touchSession(db, sessionId, userId) {
   if (!sessionId) return null;
   const session = db.prepare(`
-    SELECT id, revoked_at
+    SELECT id, session_type, revoked_at
     FROM auth_sessions
     WHERE id = ? AND user_id = ?
     LIMIT 1
@@ -132,8 +132,9 @@ function authenticate(req, res, next) {
       tokenBlacklist.add(token);
       return res.status(401).json({ error: 'Session terminated by security. Please log in again.' });
     }
+    let session = null;
     if (decoded.sid) {
-      const session = touchSession(db, decoded.sid, user.id);
+      session = touchSession(db, decoded.sid, user.id);
       if (!session || session.revoked_at) {
         tokenBlacklist.add(token);
         return res.status(401).json({ error: 'Session terminated by security. Please log in again.' });
@@ -141,7 +142,12 @@ function authenticate(req, res, next) {
     }
     req.user = user;
     req.token = token;
-    req.auth = { type: 'jwt', session_id: decoded.sid || null, issued_at: decoded.iat || null };
+    req.auth = {
+      type: 'jwt',
+      session_id: decoded.sid || null,
+      session_type: session?.session_type || decoded.st || null,
+      issued_at: decoded.iat || null,
+    };
     next();
   } catch (err) {
     return res.status(401).json({ error: 'Invalid or expired token' });
