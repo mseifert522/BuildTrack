@@ -176,6 +176,9 @@ const contractorAddressLine = (value?: string | null) => {
   return address || 'No address on file';
 };
 
+const contractorFilterFieldClass =
+  'h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-950 shadow-sm outline-none placeholder:text-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-200';
+
 const isSetupComplete = (contractor: ContractorRow) =>
   contractor.onboarding_status === 'submitted' || Boolean(contractor.onboarding_submitted_at);
 
@@ -780,20 +783,20 @@ export default function Contractors() {
             <p className="text-sm font-black text-white">Filters</p>
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-3">
-            <select value={category} onChange={(e) => setCategory(e.target.value)} className="px-3 py-2.5 rounded-xl border border-gray-300 text-sm bg-white">
+            <select value={category} onChange={(e) => setCategory(e.target.value)} className={contractorFilterFieldClass}>
               <option value="">All categories</option>
               {categories.map((item) => <option key={item} value={item}>{item}</option>)}
             </select>
-            <select value={paidFilter} onChange={(e) => setPaidFilter(e.target.value)} className="px-3 py-2.5 rounded-xl border border-gray-300 text-sm bg-white">
+            <select value={paidFilter} onChange={(e) => setPaidFilter(e.target.value)} className={contractorFilterFieldClass}>
               <option value="">All payment history</option>
               <option value="paid">Has paid job</option>
               <option value="unpaid">No paid job</option>
             </select>
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="px-3 py-2.5 rounded-xl border border-gray-300 text-sm" />
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="px-3 py-2.5 rounded-xl border border-gray-300 text-sm" />
-            <input type="number" min="0" value={minAmount} onChange={(e) => setMinAmount(e.target.value)} placeholder="Min paid" className="px-3 py-2.5 rounded-xl border border-gray-300 text-sm" />
-            <input type="number" min="0" value={maxAmount} onChange={(e) => setMaxAmount(e.target.value)} placeholder="Max paid" className="px-3 py-2.5 rounded-xl border border-gray-300 text-sm" />
-            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="px-3 py-2.5 rounded-xl border border-gray-300 text-sm bg-white">
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={contractorFilterFieldClass} style={{ colorScheme: 'light' }} aria-label="Start date" />
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={contractorFilterFieldClass} style={{ colorScheme: 'light' }} aria-label="End date" />
+            <input type="number" min="0" value={minAmount} onChange={(e) => setMinAmount(e.target.value)} placeholder="Min paid" className={contractorFilterFieldClass} />
+            <input type="number" min="0" value={maxAmount} onChange={(e) => setMaxAmount(e.target.value)} placeholder="Max paid" className={contractorFilterFieldClass} />
+            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className={contractorFilterFieldClass}>
               <option value="newest">Sort: Newest contractors</option>
               <option value="name">Sort: Name</option>
               <option value="category">Sort: Category</option>
@@ -848,7 +851,7 @@ export default function Contractors() {
                     if (target.closest('button,a,input,textarea,select,label')) return;
                     setExpandedContractorId(current => current === contractor.id ? null : contractor.id);
                   }}
-                  className={`overflow-hidden rounded-xl border-l-4 transition-colors cursor-pointer ${isExpanded ? 'border-y-amber-400 border-r-amber-400 border-l-amber-500 bg-amber-50 shadow-lg ring-1 ring-amber-200' : 'border-y-slate-500 border-r-slate-500 border-l-slate-800 bg-[#CBD6E2] shadow-[0_2px_10px_rgba(15,23,42,0.18)] hover:border-y-slate-700 hover:border-r-slate-700 hover:bg-[#DDE6F0]'}`}
+                  className={`overflow-hidden rounded-xl border-l-4 transition-colors cursor-pointer ${isExpanded ? 'border-y-amber-400 border-r-amber-400 border-l-amber-500 bg-amber-50 shadow-lg ring-1 ring-amber-200' : 'border-y-slate-600 border-r-slate-600 border-l-slate-900 bg-[#E7EDF5] shadow-[0_2px_12px_rgba(15,23,42,0.24)] hover:border-y-slate-800 hover:border-r-slate-800 hover:bg-[#F2F6FB]'}`}
                   title={isExpanded ? 'Click to collapse contractor details' : 'Click to expand contractor details'}
                 >
                   <div>
