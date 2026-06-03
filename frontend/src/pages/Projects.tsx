@@ -222,7 +222,7 @@ export default function Projects() {
 
   return (
     <div
-      className="bt-projects-page bt-horizontal-lock min-h-full w-full max-w-full overflow-x-hidden px-4 py-4 md:px-8 md:py-6"
+      className="bt-desktop-page bt-projects-page bt-horizontal-lock min-h-full w-full max-w-full overflow-x-hidden px-4 py-4 md:px-8 md:py-6"
       style={{ background: '#F0F2F5', touchAction: 'pan-y', overscrollBehaviorX: 'none' }}
     >
       <div className="mx-auto w-full max-w-7xl min-w-0">
@@ -522,8 +522,7 @@ export default function Projects() {
                         e.stopPropagation();
                         navigate(isMobileCaptureContext() ? `/mobile/photos?projectId=${p.id}&camera=1` : `/photos?projectId=${p.id}`);
                       }}
-                      className="relative z-20 inline-flex min-h-10 w-full max-w-full items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-center text-xs font-black leading-tight text-white shadow-sm transition-colors cursor-pointer hover:bg-amber-600 sm:w-auto"
-                      style={{ background: '#D99D26', border: '1px solid #B7791F' }}
+                      className="relative z-20 inline-flex min-h-10 w-full max-w-full items-center justify-center gap-1.5 rounded-lg border border-blue-700 bg-blue-600 px-3 py-2 text-center text-xs font-black leading-tight text-white shadow-sm transition-colors cursor-pointer hover:bg-blue-700 sm:w-auto"
                       title="Take timestamped progress pictures for this project"
                       aria-label={`Take progress pictures for ${p.address}`}
                     >

@@ -232,7 +232,7 @@ export default function Suppliers() {
   if (loading) return <Loading />;
 
   return (
-    <div className="min-h-full px-6 py-6 md:px-8" style={{ background: '#D8E0EA' }}>
+    <div className="bt-desktop-page min-h-full px-6 py-6 md:px-8">
       <div className="mx-auto max-w-7xl space-y-5">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
@@ -272,8 +272,8 @@ export default function Suppliers() {
             <p className="font-bold text-gray-700">No suppliers found</p>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-2xl border border-slate-800 p-2 shadow-inner" style={{ background: '#1E293B' }}>
-            <div className="hidden rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-xs font-black uppercase tracking-wide text-slate-100 xl:grid xl:grid-cols-[minmax(210px,1.1fr)_minmax(220px,1fr)_minmax(260px,1.25fr)_minmax(190px,0.9fr)_minmax(160px,0.75fr)_80px] xl:gap-4">
+          <div className="bt-table-wrap p-2">
+            <div className="hidden rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-black uppercase tracking-wide text-slate-500 xl:grid xl:grid-cols-[minmax(210px,1.1fr)_minmax(220px,1fr)_minmax(260px,1.25fr)_minmax(190px,0.9fr)_minmax(160px,0.75fr)_80px] xl:gap-4">
               <span>Name</span>
               <span>Category</span>
               <span>Address</span>
@@ -288,7 +288,7 @@ export default function Suppliers() {
                 return (
                   <div
                     key={supplier.id}
-                    className={`overflow-hidden rounded-xl border-l-4 transition-colors ${isExpanded ? 'border-y-blue-400 border-r-blue-400 border-l-blue-600 bg-blue-50 shadow-lg ring-1 ring-blue-200' : 'border-y-slate-500 border-r-slate-500 border-l-slate-800 bg-[#CBD6E2] shadow-[0_2px_10px_rgba(15,23,42,0.18)] hover:border-y-slate-700 hover:border-r-slate-700 hover:bg-[#DDE6F0]'}`}
+                    className={`overflow-hidden rounded-lg border border-l-4 transition-colors ${isExpanded ? 'border-blue-300 border-l-blue-600 bg-blue-50 ring-1 ring-blue-100' : 'border-slate-200 border-l-slate-400 bg-white hover:border-blue-200 hover:bg-slate-50'}`}
                     onClick={event => {
                       const target = event.target as HTMLElement;
                       if (target.closest('button,a,input,textarea,select,label')) return;
@@ -302,7 +302,7 @@ export default function Suppliers() {
                       aria-expanded={isExpanded}
                     >
                       <div className="flex min-w-0 items-center gap-3">
-                        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl text-xs font-black text-white" style={{ background: 'linear-gradient(135deg, #1E3A5F, #2563EB)' }}>
+                        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-blue-50 text-xs font-black text-blue-700 ring-1 ring-blue-100">
                           {supplierInitials(supplier.name)}
                         </div>
                         <div className="min-w-0">
@@ -351,7 +351,7 @@ export default function Suppliers() {
                     </button>
 
                     {isExpanded && (
-                      <div className="border-t border-slate-300 px-4 py-4" style={{ background: '#E9EEF5' }}>
+                      <div className="border-t border-slate-200 bg-slate-50 px-4 py-4">
                         <div className="grid gap-3 lg:grid-cols-[1.1fr_1fr_auto] lg:items-start">
                           <div className="rounded-xl border border-slate-400 bg-slate-50 p-4 shadow-sm">
                             <p className="mb-2 text-xs font-black uppercase tracking-wide text-slate-500">Supplier Details</p>

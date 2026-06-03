@@ -15,7 +15,7 @@ import {
   UserX,
 } from 'lucide-react';
 import api from '../lib/api';
-import { Loading, PageHeader } from '../components/ui';
+import { Loading, Modal, PageHeader } from '../components/ui';
 import Avatar from '../components/Avatar';
 import { useAuthStore, roleLabels } from '../store/authStore';
 import { formatEasternDateTime, parseBuildTrackTimestamp } from '../lib/time';
@@ -77,6 +77,11 @@ interface SecurityEvent {
   target_name?: string | null;
   target_email?: string | null;
 }
+
+type PendingSecurityAction =
+  | { type: 'all' }
+  | { type: 'user'; target: SecurityUser }
+  | { type: 'session'; target: SecurityUser; session: SecuritySession };
 
 interface SummaryCard {
   label: string;
@@ -184,6 +189,8 @@ export default function Security() {
   const [securitySearch, setSecuritySearch] = useState('');
   const [securityStatusFilter, setSecurityStatusFilter] = useState('');
   const [securityClientFilter, setSecurityClientFilter] = useState('');
+  const [pendingSecurityAction, setPendingSecurityAction] = useState<PendingSecurityAction | null>(null);
+  const [securityReason, setSecurityReason] = useState('');
   const { user: currentUser, logout } = useAuthStore();
   const navigate = useNavigate();
 
@@ -273,10 +280,28 @@ export default function Security() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const handleLogoutAll = async () => {
-    if (!confirm('Log out ALL users? Everyone will be forced to sign in again on desktop and mobile.')) return;
-    if (!confirm('Confirm security action: this will revoke active sessions, trusted devices, and one-touch app access for every user.')) return;
-    const reason = window.prompt('Reason for security history', 'Security logout all users') || 'Security logout all users';
+  const requestLogoutAll = () => {
+    setSecurityReason('Security logout all users');
+    setPendingSecurityAction({ type: 'all' });
+  };
+
+  const requestLogoutUser = (target: SecurityUser) => {
+    setSecurityReason(`Security logout: ${target.name}`);
+    setPendingSecurityAction({ type: 'user', target });
+  };
+
+  const requestLogoutSession = (target: SecurityUser, session: SecuritySession) => {
+    setSecurityReason(`Security logout session: ${target.name} ${session.ip_address || 'unknown IP'}`);
+    setPendingSecurityAction({ type: 'session', target, session });
+  };
+
+  const confirmSecurityAction = async () => {
+    if (!pendingSecurityAction) return;
+    const reason = securityReason.trim() || 'Security action';
+    const pending = pendingSecurityAction;
+    setPendingSecurityAction(null);
+
+    if (pending.type === 'all') {
     setGlobalLogoutLoading(true);
     try {
       const res = await api.post('/security/logout-all', { reason });
@@ -289,11 +314,11 @@ export default function Security() {
     } finally {
       setGlobalLogoutLoading(false);
     }
-  };
+      return;
+    }
 
-  const handleLogoutUser = async (target: SecurityUser) => {
-    if (!confirm(`Log ${target.name} out now? They will need to sign back in on desktop or mobile.`)) return;
-    const reason = window.prompt('Reason for security history', `Security logout: ${target.name}`) || `Security logout: ${target.name}`;
+    if (pending.type === 'user') {
+    const target = pending.target;
     setUserLogoutId(target.id);
     try {
       const res = await api.post(`/security/users/${target.id}/logout`, { reason });
@@ -310,12 +335,11 @@ export default function Security() {
     } finally {
       setUserLogoutId(null);
     }
-  };
+      return;
+    }
 
-  const handleLogoutSession = async (target: SecurityUser, session: SecuritySession) => {
-    const ipLabel = session.ip_address || 'unknown IP';
-    if (!confirm(`Log out this ${session.client_label} session for ${target.name} at ${ipLabel}?`)) return;
-    const reason = window.prompt('Reason for security history', `Security logout session: ${target.name} ${ipLabel}`) || `Security logout session: ${target.name}`;
+    if (pending.type === 'session') {
+    const { target, session } = pending;
     setSessionLogoutId(session.id);
     try {
       const res = await api.post(`/security/sessions/${session.id}/logout`, { reason });
@@ -332,12 +356,13 @@ export default function Security() {
     } finally {
       setSessionLogoutId(null);
     }
+    }
   };
 
   if (loading) return <Loading message="Loading security controls..." />;
 
   return (
-    <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-5">
+    <div className="bt-desktop-page p-4 md:p-6 max-w-7xl mx-auto space-y-5">
       <PageHeader
         title="Security"
         subtitle="Active sessions, mobile app access, and forced logout controls."
@@ -354,7 +379,7 @@ export default function Security() {
             </button>
             <button
               type="button"
-              onClick={handleLogoutAll}
+              onClick={requestLogoutAll}
               disabled={globalLogoutLoading}
               className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-600 px-3.5 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-red-700 disabled:opacity-60"
             >
@@ -512,7 +537,7 @@ export default function Security() {
                       <div className="flex flex-col items-end gap-2">
                         <button
                           type="button"
-                          onClick={() => handleLogoutSession(row, session)}
+                          onClick={() => requestLogoutSession(row, session)}
                           disabled={sessionLogoutId === session.id}
                           className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100 disabled:opacity-60"
                         >
@@ -521,7 +546,7 @@ export default function Security() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleLogoutUser(row)}
+                          onClick={() => requestLogoutUser(row)}
                           disabled={userLogoutId === row.id}
                           className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
                         >
@@ -557,7 +582,7 @@ export default function Security() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => handleLogoutUser(row)}
+                    onClick={() => requestLogoutUser(row)}
                     disabled={userLogoutId === row.id}
                     className="inline-flex flex-shrink-0 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100 disabled:opacity-60"
                   >
@@ -599,6 +624,55 @@ export default function Security() {
           )}
         </div>
       </section>
+
+      <Modal
+        isOpen={!!pendingSecurityAction}
+        onClose={() => setPendingSecurityAction(null)}
+        title="Confirm Security Action"
+        description="This action affects active access. Enter a reason so the security history remains auditable."
+      >
+        <div className="space-y-4">
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+            <p className="text-sm font-bold text-red-800">
+              {pendingSecurityAction?.type === 'all'
+                ? 'Log out all desktop and mobile users.'
+                : pendingSecurityAction?.type === 'user'
+                  ? `Log out ${pendingSecurityAction.target.name}.`
+                  : pendingSecurityAction?.type === 'session'
+                    ? `Terminate one ${pendingSecurityAction.session.client_label} session for ${pendingSecurityAction.target.name}.`
+                    : 'Confirm this security action.'}
+            </p>
+            <p className="mt-1 text-sm text-red-700">
+              Users affected by this action will need to authenticate again.
+            </p>
+          </div>
+
+          <label className="block">
+            <span className="mb-1 block text-sm font-bold text-gray-800">Reason for audit log *</span>
+            <textarea
+              value={securityReason}
+              onChange={event => setSecurityReason(event.target.value)}
+              rows={3}
+              className="w-full resize-none rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Example: Terminating stale sessions after admin review"
+            />
+          </label>
+
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => setPendingSecurityAction(null)} className="bt-btn bt-btn-secondary">
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={confirmSecurityAction}
+              disabled={!securityReason.trim() || globalLogoutLoading || Boolean(userLogoutId) || Boolean(sessionLogoutId)}
+              className="bt-btn bt-btn-danger disabled:opacity-50"
+            >
+              Confirm Action
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

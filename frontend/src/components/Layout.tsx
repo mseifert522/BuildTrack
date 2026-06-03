@@ -156,14 +156,14 @@ export default function Layout({ children }: LayoutProps) {
         <div className="flex items-center gap-3 min-w-0">
           <div
             className="w-9 h-9 rounded-xl overflow-hidden flex-shrink-0 border-2"
-            style={{ borderColor: 'rgba(217,157,38,0.5)' }}
+            style={{ borderColor: 'rgba(96,165,250,0.45)' }}
           >
             <img src="/buildtrack-logo-mark.png" alt="BuildTrack" className="h-full w-full object-cover" />
           </div>
           {!collapsed && (
             <div className="min-w-0">
               <p className="text-white font-bold text-sm leading-tight truncate">BuildTrack</p>
-              <p className="text-xs font-medium truncate" style={{ color: '#D99D26' }}>Construction Mgmt</p>
+              <p className="text-xs font-medium truncate" style={{ color: '#93C5FD' }}>Construction Ops</p>
             </div>
           )}
         </div>
@@ -204,20 +204,20 @@ export default function Layout({ children }: LayoutProps) {
                 padding: collapsed ? '10px 0' : '10px 12px',
                 justifyContent: collapsed ? 'center' : 'flex-start',
                 background: active
-                  ? 'linear-gradient(135deg, rgba(217,157,38,0.2) 0%, rgba(217,157,38,0.08) 100%)'
+                  ? 'rgba(37,99,235,0.16)'
                   : 'transparent',
-                color: active ? '#D99D26' : 'rgba(255,255,255,0.6)',
-                borderLeft: active ? '3px solid #D99D26' : '3px solid transparent',
+                color: active ? '#BFDBFE' : 'rgba(255,255,255,0.64)',
+                borderLeft: active ? '3px solid #60A5FA' : '3px solid transparent',
               }}
             >
               <Icon className="w-5 h-5 flex-shrink-0" style={{ opacity: active ? 1 : 0.7 }} />
               {!collapsed && (
-                <span className="flex-1 truncate" style={{ color: active ? '#FFFFFF' : 'rgba(255,255,255,0.65)' }}>
+                <span className="flex-1 truncate" style={{ color: active ? '#FFFFFF' : 'rgba(255,255,255,0.72)' }}>
                   {label}
                 </span>
               )}
               {active && !collapsed && (
-                <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: '#D99D26' }} />
+                <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: '#60A5FA' }} />
               )}
               {collapsed && (
                 <div
@@ -293,14 +293,14 @@ export default function Layout({ children }: LayoutProps) {
   );
 
   return (
-    <div className="bt-horizontal-lock flex h-screen max-w-full overflow-hidden" style={{ background: 'var(--bt-bg)' }}>
+    <div className="bt-desktop-shell bt-horizontal-lock flex h-screen max-w-full overflow-hidden" style={{ background: 'var(--bt-bg)' }}>
       {/* Desktop Sidebar */}
       <aside
         className="hidden lg:flex flex-col flex-shrink-0 transition-all duration-300"
         style={{
           width: W,
-          background: 'linear-gradient(180deg, #0D1117 0%, #181D25 50%, #0D1117 100%)',
-          boxShadow: '4px 0 24px rgba(0,0,0,0.25)',
+          background: '#111827',
+          boxShadow: '1px 0 0 rgba(15,23,42,0.45)',
         }}
       >
         <SidebarContent collapsed={sidebarCollapsed} />
@@ -345,12 +345,12 @@ export default function Layout({ children }: LayoutProps) {
       <div className="bt-horizontal-lock flex-1 flex flex-col min-w-0 max-w-full overflow-hidden">
         {/* Top Header Bar */}
         <header
-          className="bt-horizontal-lock flex items-center justify-between gap-3 px-4 sm:gap-4 sm:px-6 flex-shrink-0"
+          className="bt-desktop-topbar bt-horizontal-lock flex items-center justify-between gap-3 px-4 sm:gap-4 sm:px-6 flex-shrink-0"
           style={{
             height: 64,
-            background: 'var(--bt-surface)',
+            background: '#FFFFFF',
             borderBottom: '1px solid var(--bt-border)',
-            boxShadow: '0 1px 8px rgba(0,0,0,0.06)',
+            boxShadow: '0 1px 2px rgba(15,23,42,0.04)',
           }}
         >
           {/* Left: hamburger + breadcrumb */}
@@ -382,12 +382,11 @@ export default function Layout({ children }: LayoutProps) {
                 }}
                 onFocus={() => setSearchOpen(true)}
                 placeholder="Search anything in BuildTrack..."
-                className="w-full pl-11 pr-10 py-3 rounded-2xl text-sm font-medium placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                className="w-full rounded-lg py-2.5 pl-10 pr-10 text-sm font-medium placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 style={{
-                  background: 'var(--bt-surface)',
+                  background: '#F8FAFC',
                   color: 'var(--bt-text)',
                   border: '1px solid var(--bt-border)',
-                  boxShadow: '0 8px 24px rgba(17,24,39,0.08)',
                 }}
               />
               {searchTerm && (
@@ -453,8 +452,8 @@ export default function Layout({ children }: LayoutProps) {
                 className="p-2 rounded-xl transition-all sm:p-2.5"
                 style={{
                   background: location.pathname.startsWith('/users') ? '#F3F4F6' : '#F9FAFB',
-                  border: `1px solid ${location.pathname.startsWith('/users') ? '#D99D26' : '#E5E7EB'}`,
-                  color: location.pathname.startsWith('/users') ? '#D99D26' : '#6B7280',
+                  border: `1px solid ${location.pathname.startsWith('/users') ? '#2563EB' : '#E5E7EB'}`,
+                  color: location.pathname.startsWith('/users') ? '#2563EB' : '#64748B',
                 }}
               >
                 <Users className="w-[18px] h-[18px]" />
@@ -470,8 +469,8 @@ export default function Layout({ children }: LayoutProps) {
                 className="p-2 rounded-xl transition-all sm:p-2.5"
                 style={{
                   background: location.pathname.startsWith('/settings') ? '#F3F4F6' : '#F9FAFB',
-                  border: `1px solid ${location.pathname.startsWith('/settings') ? '#D99D26' : '#E5E7EB'}`,
-                  color: location.pathname.startsWith('/settings') ? '#D99D26' : '#6B7280',
+                  border: `1px solid ${location.pathname.startsWith('/settings') ? '#2563EB' : '#E5E7EB'}`,
+                  color: location.pathname.startsWith('/settings') ? '#2563EB' : '#64748B',
                 }}
               >
                 <Settings className="w-[18px] h-[18px]" />
@@ -481,18 +480,18 @@ export default function Layout({ children }: LayoutProps) {
             {/* Notification bell */}
             <button
               className="relative p-2 rounded-xl transition-all sm:p-2.5"
-              style={{ background: '#F9FAFB', border: '1px solid #E5E7EB', color: '#6B7280' }}
+              style={{ background: '#F9FAFB', border: '1px solid #E5E7EB', color: '#64748B' }}
               aria-label="Notifications"
             >
               <Bell className="w-[18px] h-[18px]" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style={{ background: '#D99D26' }} />
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style={{ background: '#D97706' }} />
             </button>
 
             {/* User avatar + profile dropdown */}
             <div className="relative">
               <button
                 onClick={() => setProfileOpen(!profileOpen)}
-                className="flex h-11 min-w-0 max-w-[176px] cursor-pointer items-center gap-2 overflow-hidden rounded-xl px-2.5 py-0 transition-all"
+                className="flex h-11 min-w-0 max-w-[176px] cursor-pointer items-center gap-2 overflow-hidden rounded-lg px-2.5 py-0 transition-all"
                 style={{ background: '#F9FAFB', border: '1px solid #E5E7EB' }}
                 aria-label="Open profile menu"
               >
@@ -500,7 +499,7 @@ export default function Layout({ children }: LayoutProps) {
                 <div className="hidden min-w-0 text-left sm:block">
                   <p className="truncate text-[13px] font-bold leading-4 text-gray-900">{user?.name}</p>
                   <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
-                    <p className="truncate text-[11px] font-semibold leading-3" style={{ color: '#D99D26' }}>
+                    <p className="truncate text-[11px] font-semibold leading-3 text-blue-700">
                       {user ? roleLabels[user.role] : ''}
                     </p>
                     <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full" style={{ background: '#059669' }} aria-label="Online now" />

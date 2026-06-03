@@ -744,7 +744,7 @@ export default function Contractors() {
   if (loading) return <Loading />;
 
   return (
-    <div className="min-h-full px-6 py-6 md:px-8" style={{ background: '#D8E0EA' }}>
+    <div className="bt-desktop-page min-h-full px-6 py-6 md:px-8">
       <div className="max-w-7xl mx-auto space-y-5">
         <div className="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-4">
           <div>
@@ -757,15 +757,13 @@ export default function Contractors() {
             <button
               type="button"
               onClick={openAdd}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-black text-white shadow-sm"
-              style={{ background: '#111827' }}
+              className="bt-btn bt-btn-primary"
             >
               <Plus className="w-4 h-4" />
               Add Contractor
             </button>
             <div
-              className="flex items-center gap-2 px-3 py-2.5 rounded-xl w-full sm:w-[460px]"
-              style={{ background: '#F8FAFC', border: '1px solid #94A3B8', boxShadow: '0 8px 24px rgba(17,24,39,0.10)' }}
+              className="flex items-center gap-2 px-3 py-2.5 rounded-lg w-full sm:w-[460px] bg-white border border-slate-300 shadow-sm"
             >
               <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
               <input
@@ -778,10 +776,10 @@ export default function Contractors() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-800 p-4" style={{ background: '#111827', boxShadow: '0 14px 34px rgba(15,23,42,0.22)' }}>
+        <div className="bt-toolbar">
           <div className="flex items-center gap-2 mb-3">
-            <SlidersHorizontal className="w-4 h-4 text-amber-300" />
-            <p className="text-sm font-black text-white">Filters</p>
+            <SlidersHorizontal className="w-4 h-4 text-slate-500" />
+            <p className="text-sm font-black text-slate-900">Filters</p>
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-3">
             <select value={category} onChange={(e) => setCategory(e.target.value)} className={contractorFilterFieldClass}>
@@ -806,8 +804,8 @@ export default function Contractors() {
               <option value="total_paid">Sort: Total paid</option>
             </select>
           </div>
-          <div className="mt-4 border-t border-slate-600 pt-4">
-            <label className="block text-xs font-black uppercase tracking-wide text-slate-200 mb-2">Find contractor by name</label>
+          <div className="mt-4 border-t border-slate-200 pt-4">
+            <label className="block text-xs font-black uppercase tracking-wide text-slate-500 mb-2">Find contractor by name</label>
             <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-gray-300 bg-white">
               <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
               <input
@@ -830,7 +828,7 @@ export default function Contractors() {
             <p className="text-sm font-bold text-gray-500">No contractors match these filters</p>
           </div>
         ) : (
-          <div className="space-y-3 rounded-2xl border border-slate-800 p-2 shadow-inner" style={{ background: '#1E293B' }}>
+          <div className="bt-table-wrap space-y-3 p-2">
             {filteredContractors.map((contractor) => {
               const lastPaid = contractor.last_paid_invoice;
               const connectedProjects = contractor.connected_projects || [];
@@ -852,7 +850,7 @@ export default function Contractors() {
                     if (target.closest('button,a,input,textarea,select,label')) return;
                     setExpandedContractorId(current => current === contractor.id ? null : contractor.id);
                   }}
-                  className={`overflow-hidden rounded-xl border-l-4 transition-colors cursor-pointer ${isExpanded ? 'border-y-amber-400 border-r-amber-400 border-l-amber-500 bg-amber-50 shadow-lg ring-1 ring-amber-200' : 'border-y-slate-600 border-r-slate-600 border-l-slate-900 bg-[#E7EDF5] shadow-[0_2px_12px_rgba(15,23,42,0.24)] hover:border-y-slate-800 hover:border-r-slate-800 hover:bg-[#F2F6FB]'}`}
+                  className={`overflow-hidden rounded-lg border border-l-4 transition-colors cursor-pointer ${isExpanded ? 'border-blue-300 border-l-blue-600 bg-blue-50 ring-1 ring-blue-100' : 'border-slate-200 border-l-slate-400 bg-white hover:border-blue-200 hover:bg-slate-50'}`}
                   title={isExpanded ? 'Click to collapse contractor details' : 'Click to expand contractor details'}
                 >
                   <div>
@@ -863,15 +861,15 @@ export default function Contractors() {
                       className="grid w-full grid-cols-1 items-center gap-3 px-4 py-3 text-left md:grid-cols-[minmax(190px,0.95fr)_minmax(150px,0.75fr)_minmax(150px,0.65fr)_minmax(260px,1.25fr)_auto] md:px-5"
                     >
                       <div className="flex min-w-0 items-center gap-3">
-                        <div className="h-9 w-9 flex-shrink-0 rounded-xl flex items-center justify-center text-white text-xs font-black" style={{ background: 'linear-gradient(135deg, #1F2937, #D99D26)' }}>
+                        <div className="h-9 w-9 flex-shrink-0 rounded-lg flex items-center justify-center bg-slate-100 text-slate-700 text-xs font-black ring-1 ring-slate-200">
                           {initials(contractor.name)}
                         </div>
                         <div className="min-w-0">
                           <p className="truncate text-sm font-black text-gray-950">{contractor.name}</p>
                         </div>
                       </div>
-                      <div className="flex min-w-0 items-center gap-2 text-sm font-black text-amber-800">
-                        <Building2 className="h-4 w-4 flex-shrink-0 text-amber-500" />
+                      <div className="flex min-w-0 items-center gap-2 text-sm font-black text-slate-800">
+                        <Building2 className="h-4 w-4 flex-shrink-0 text-slate-400" />
                         <span className="truncate" title={contractorTypeLabel}>{contractorTypeLabel}</span>
                       </div>
                       <div className="flex min-w-0 items-center gap-2 text-sm font-bold text-gray-700">
@@ -882,14 +880,14 @@ export default function Contractors() {
                         <MapPin className="h-4 w-4 flex-shrink-0 text-gray-400" />
                         <span className="truncate">{addressLine}</span>
                       </div>
-                      <div className="flex items-center justify-end gap-2 text-xs font-black text-amber-700">
+                      <div className="flex items-center justify-end gap-2 text-xs font-black text-blue-700">
                         <span>{isExpanded ? 'Hide details' : 'Expand'}</span>
                         <ChevronDown className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                       </div>
                     </button>
 
                     {isExpanded && (
-                      <div className="border-t border-slate-300 px-4 py-4 md:px-5" style={{ background: '#E9EEF5' }}>
+                      <div className="border-t border-slate-200 bg-slate-50 px-4 py-4 md:px-5">
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                           <div className="flex flex-wrap items-center gap-2">
                             <span
@@ -900,7 +898,7 @@ export default function Contractors() {
                             </span>
                             {contractorCategories.length > 0 ? (
                               contractorCategories.map(item => (
-                                <span key={item} className="inline-flex px-2.5 py-1 rounded-full text-xs font-black" style={{ background: '#FEF3C7', color: '#92400E' }}>
+                                <span key={item} className="inline-flex px-2.5 py-1 rounded-full text-xs font-black bg-slate-100 text-slate-700">
                                   {item}
                                 </span>
                               ))
@@ -1260,16 +1258,16 @@ export default function Contractors() {
             size="xl"
           >
             <div className="space-y-5">
-              <div className="rounded-2xl bg-gray-950 p-5 text-white">
+              <div className="rounded-lg border border-slate-200 bg-white p-5">
                 <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                   <div className="flex min-w-0 items-start gap-4">
-                    <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-2xl text-base font-black text-white" style={{ background: 'linear-gradient(135deg, #1F2937, #D99D26)' }}>
+                    <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-lg bg-slate-100 text-base font-black text-slate-700 ring-1 ring-slate-200">
                       {initials(contractor.name)}
                     </div>
                     <div className="min-w-0">
-                      <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-300">Contractor profile</p>
-                      <h2 className="mt-1 break-words text-2xl font-black leading-tight">{contractor.name}</h2>
-                      {contractor.contact_name ? <p className="mt-1 text-sm font-semibold text-gray-300">Contact: {contractor.contact_name}</p> : null}
+                      <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Contractor profile</p>
+                      <h2 className="mt-1 break-words text-2xl font-black leading-tight text-slate-950">{contractor.name}</h2>
+                      {contractor.contact_name ? <p className="mt-1 text-sm font-semibold text-slate-500">Contact: {contractor.contact_name}</p> : null}
                       <div className="mt-3 flex flex-wrap gap-2">
                         <span
                           className="inline-flex rounded-full px-2.5 py-1 text-xs font-black"
@@ -1278,11 +1276,11 @@ export default function Contractors() {
                           {statusMeta.label}
                         </span>
                         {contractorCategories.length > 0 ? contractorCategories.map(item => (
-                          <span key={item} className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-black text-amber-800">
+                          <span key={item} className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-700">
                             {item}
                           </span>
                         )) : (
-                          <span className="inline-flex rounded-full bg-gray-800 px-2.5 py-1 text-xs font-black text-gray-300">Uncategorized</span>
+                          <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-600">Uncategorized</span>
                         )}
                         {contractorInfoCollected ? (
                           <button
@@ -1315,7 +1313,7 @@ export default function Contractors() {
                         openEdit(contractor);
                         setSelectedContractorId(null);
                       }}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-white px-3 py-2 text-xs font-black text-gray-950 hover:bg-gray-100"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50"
                     >
                       <Edit2 className="h-3.5 w-3.5" />
                       Edit
@@ -1324,7 +1322,7 @@ export default function Contractors() {
                       type="button"
                       onClick={() => requestContractorSetup(contractor)}
                       disabled={requestingSetupId === contractor.id}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-amber-400 px-3 py-2 text-xs font-black text-gray-950 hover:bg-amber-300 disabled:opacity-60"
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-black text-white hover:bg-blue-700 disabled:opacity-60"
                     >
                       <ShieldCheck className="h-3.5 w-3.5" />
                       {setupButtonLabel(contractor, requestingSetupId === contractor.id)}

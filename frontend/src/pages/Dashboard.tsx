@@ -4,6 +4,7 @@ import { useAuthStore, isAdminRole, roleLabels } from '../store/authStore';
 import api from '../lib/api';
 import { Loading, StatusBadge } from '../components/ui';
 import Avatar from '../components/Avatar';
+import RecentActivityModal from '../components/RecentActivityModal';
 import {
   FolderOpen, ClipboardList, FileText, Image,
   TrendingUp, AlertTriangle, CheckCircle2, Clock,
@@ -334,38 +335,35 @@ export default function Dashboard() {
   ];
 
   return (
-    <div style={{ background: '#F0F2F5', minHeight: '100%' }}>
+    <div className="bt-desktop-page bt-dashboard-page" style={{ minHeight: '100%' }}>
       {/* Hero header bar */}
       <div
-        className="px-6 py-6 md:px-8"
+        className="border-b border-slate-200 bg-white px-6 py-5 md:px-8"
         style={{
-          background: 'linear-gradient(135deg, #0D1117 0%, #181D25 60%, #1E2530 100%)',
-          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          boxShadow: '0 1px 2px rgba(15,23,42,0.04)',
         }}
       >
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div>
             <div className="flex items-center gap-3 mb-1">
               <span
-                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest"
-                style={{ background: 'rgba(217,157,38,0.15)', color: '#D99D26', border: '1px solid rgba(217,157,38,0.25)' }}
+                className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-blue-700"
               >
-                <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
-                Live Dashboard
+                <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                Operations Dashboard
               </span>
             </div>
-            <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight">
+            <h1 className="text-2xl font-bold tracking-tight text-slate-950">
               {greeting()}, {firstName}
             </h1>
-            <p className="text-sm mt-1" style={{ color: 'rgba(255,255,255,0.45)' }}>
+            <p className="mt-1 text-sm font-medium text-slate-500">
               {formatEasternDate(now.toISOString(), { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} - {roleLabels[user?.role || '']}
             </p>
           </div>
           <div className="hidden md:flex items-center gap-3">
             <Link
               to="/projects"
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all text-white"
-              style={{ background: 'linear-gradient(135deg, #D99D26, #C4891F)', boxShadow: '0 4px 16px rgba(217,157,38,0.3)' }}
+              className="bt-btn bt-btn-primary"
             >
               <Plus className="w-4 h-4" />
               New Project
@@ -377,13 +375,13 @@ export default function Dashboard() {
       <div className="px-6 py-6 md:px-8 max-w-7xl mx-auto space-y-6">
         {/* Desktop command center */}
         <section className="grid gap-4 xl:grid-cols-[1.18fr_0.82fr]" aria-label="BuildTrack command center">
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="bt-card p-4">
             <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <p className="text-xs font-black uppercase tracking-wide text-slate-500">Today&apos;s priorities</p>
-                <h2 className="text-lg font-black text-slate-950">Projects, money, and field work</h2>
+                <p className="bt-section-kicker">Today&apos;s priorities</p>
+                <h2 className="bt-section-title">Projects, money, and field work</h2>
               </div>
-              <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-black text-amber-800">
+              <span className="inline-flex w-fit items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-800">
                 <Bell className="h-3.5 w-3.5" />
                 {reviewSummaryTotal} updates
               </span>
@@ -394,20 +392,20 @@ export default function Dashboard() {
                   key={card.label}
                   type="button"
                   onClick={() => navigate(card.to)}
-                  className="min-h-[168px] rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition-colors hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  className="min-h-[156px] rounded-lg border border-slate-200 bg-slate-50 p-4 text-left transition-colors hover:border-blue-300 hover:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <div className="mb-3 flex items-start justify-between gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-xl text-white" style={{ background: card.accent }}>
                       <card.icon className="h-5 w-5" />
                     </div>
-                    <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 text-[11px] font-black text-slate-600 ring-1 ring-slate-200">
+                    <span className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-1 text-[11px] font-bold text-slate-600 ring-1 ring-slate-200">
                       {card.progress >= 65 ? <TrendingUp className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
                       {card.trend}
                     </span>
                   </div>
-                  <p className="text-xs font-black uppercase tracking-wide text-slate-500">{card.label}</p>
-                  <p className="mt-1 text-2xl font-black text-slate-950">{card.value}</p>
-                  <p className="mt-1 min-h-10 text-sm font-semibold leading-5 text-slate-600">{card.detail}</p>
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{card.label}</p>
+                  <p className="mt-1 text-2xl font-bold text-slate-950">{card.value}</p>
+                  <p className="mt-1 min-h-10 text-sm font-medium leading-5 text-slate-600">{card.detail}</p>
                   <div className="mt-4 h-2 overflow-hidden rounded-full bg-white ring-1 ring-slate-200" aria-hidden="true">
                     <div className="h-full rounded-full" style={{ width: `${card.progress}%`, background: card.accent }} />
                   </div>
@@ -416,24 +414,24 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="bt-card p-4">
             <div className="mb-4">
-              <p className="text-xs font-black uppercase tracking-wide text-slate-500">Construction modules</p>
-              <h2 className="text-lg font-black text-slate-950">Operational entry points</h2>
+              <p className="bt-section-kicker">Construction modules</p>
+              <h2 className="bt-section-title">Operational entry points</h2>
             </div>
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
               {operationsModules.map(module => (
                 <Link
                   key={module.label}
                   to={module.to}
-                  className="flex min-h-14 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 transition-colors hover:border-slate-300 hover:bg-white"
+                  className="flex min-h-14 items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 transition-colors hover:border-slate-300 hover:bg-white"
                 >
-                  <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-slate-900 text-white">
+                  <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md bg-slate-800 text-white">
                     <module.icon className="h-4 w-4" />
                   </span>
                   <span className="min-w-0">
-                    <span className="block text-sm font-black text-slate-900">{module.label}</span>
-                    <span className="block truncate text-xs font-semibold text-slate-500">{module.detail}</span>
+                    <span className="block text-sm font-bold text-slate-900">{module.label}</span>
+                    <span className="block truncate text-xs font-medium text-slate-500">{module.detail}</span>
                   </span>
                   <ChevronRight className="ml-auto h-4 w-4 flex-shrink-0 text-slate-400" />
                 </Link>
@@ -443,36 +441,25 @@ export default function Dashboard() {
         </section>
 
         {/* KPI Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
           {kpiCards.map(card => (
             <div
               key={card.label}
-              className="relative min-h-[88px] cursor-pointer overflow-hidden rounded-xl p-3 transition-all hover:-translate-y-0.5 active:scale-[0.99]"
+              className="relative min-h-[88px] cursor-pointer overflow-hidden rounded-lg border border-slate-200 bg-white p-3 transition-colors hover:border-blue-300 hover:bg-slate-50 active:scale-[0.99]"
               style={{
-                background: card.gradient,
-                boxShadow: '0 8px 22px rgba(15,23,42,0.14)',
+                boxShadow: '0 1px 2px rgba(15,23,42,0.04)',
               }}
               onClick={() => navigate(card.filter === 'all_projects' ? '/projects' : `/projects?status=${card.filter}`)}
             >
-              {/* Background decoration */}
-              <div
-                className="absolute top-0 right-0 h-16 w-16 rounded-full opacity-10"
-                style={{ background: 'white', transform: 'translate(28%, -34%)' }}
-              />
               <div className="relative z-10">
                 <div className="mb-2 flex items-start justify-between">
                   <div
-                    className="flex h-8 w-8 items-center justify-center rounded-lg"
-                    style={{ background: card.iconBg }}
+                    className="flex h-8 w-8 items-center justify-center rounded-md bg-slate-100 text-slate-700"
                   >
-                    <card.icon className="h-3.5 w-3.5 text-white" />
+                    <card.icon className="h-3.5 w-3.5" />
                   </div>
                   <span
-                    className="hidden md:flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                    style={{
-                      background: 'rgba(255,255,255,0.15)',
-                      color: 'rgba(255,255,255,0.9)',
-                    }}
+                    className="hidden items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600 md:flex"
                   >
                     {card.trendUp ? (
                       <TrendingUp className="w-3 h-3" />
@@ -483,10 +470,10 @@ export default function Dashboard() {
                   </span>
                 </div>
                 <div className="flex items-end gap-2">
-                  <p className="text-2xl font-black leading-none text-white">{card.value}</p>
-                  <p className="pb-0.5 text-xs font-bold leading-tight text-white opacity-95">{card.label}</p>
+                  <p className="text-2xl font-bold leading-none text-slate-950">{card.value}</p>
+                  <p className="pb-0.5 text-xs font-bold leading-tight text-slate-800">{card.label}</p>
                 </div>
-                <p className="hidden sm:block truncate text-[10px] mt-1" style={{ color: 'rgba(255,255,255,0.62)' }}>{card.sub}</p>
+                <p className="mt-1 hidden truncate text-[10px] font-medium text-slate-500 sm:block">{card.sub}</p>
               </div>
             </div>
           ))}
@@ -496,47 +483,44 @@ export default function Dashboard() {
         <div className="grid xl:grid-cols-3 gap-6">
           {/* Latest Notes Activity - takes 2/3 */}
           <div
-            className="xl:col-span-2 overflow-hidden rounded-2xl border"
+            id="recent-activity"
+            className="bt-card xl:col-span-2 overflow-hidden"
             style={{
-              background: '#0F172A',
-              borderColor: '#1F2A3D',
-              boxShadow: '0 18px 42px rgba(15,23,42,0.22)',
+              boxShadow: '0 1px 2px rgba(15,23,42,0.04)',
             }}
           >
             <div
-              className="flex items-center justify-between gap-4 px-6 py-4"
+              className="flex items-center justify-between gap-4 border-b border-slate-200 px-5 py-4"
               style={{
-                background: 'linear-gradient(135deg, #111827 0%, #172033 100%)',
-                borderBottom: '1px solid rgba(148,163,184,0.22)',
+                background: '#F8FAFC',
               }}
             >
               <div className="flex items-center gap-3">
                 <div
                   className="flex h-9 w-9 items-center justify-center rounded-xl border"
-                  style={{ background: 'rgba(217,157,38,0.14)', borderColor: 'rgba(217,157,38,0.35)' }}
+                  style={{ background: '#EFF6FF', borderColor: '#BFDBFE' }}
                 >
-                  <MessageSquare className="h-4 w-4" style={{ color: '#FBBF24' }} />
+                  <MessageSquare className="h-4 w-4" style={{ color: '#2563EB' }} />
                 </div>
                 <div>
-                  <h2 className="text-sm font-black text-white">Latest Notes Activity</h2>
-                  <p className="text-xs font-semibold text-slate-400">{recentNotes.length} notes across all projects</p>
+                  <h2 className="text-sm font-bold text-slate-950">Latest Notes Activity</h2>
+                  <p className="text-xs font-medium text-slate-500">{recentNotes.length} notes across all projects</p>
                 </div>
               </div>
             </div>
 
             {recentNotes.length === 0 ? (
-              <div className="flex min-h-[520px] flex-col items-center justify-center px-6 py-16">
+              <div className="flex min-h-[420px] flex-col items-center justify-center px-6 py-16">
                 <div
-                  className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border"
-                  style={{ background: 'rgba(255,255,255,0.04)', borderColor: 'rgba(148,163,184,0.22)' }}
+                  className="mb-4 flex h-14 w-14 items-center justify-center rounded-lg border border-slate-200 bg-slate-50"
                 >
                   <MessageSquare className="h-7 w-7 text-slate-500" />
                 </div>
-                <p className="text-sm font-bold text-slate-300">No notes yet</p>
+                <p className="text-sm font-bold text-slate-700">No notes yet</p>
                 <p className="mt-1 text-xs text-slate-500">Project notes will appear here as they are added</p>
               </div>
             ) : (
-              <div className="max-h-[660px] min-h-[560px] space-y-3 overflow-y-auto p-4">
+              <div className="max-h-[660px] min-h-[520px] space-y-3 overflow-y-auto p-4">
                 {recentNotes.map((note) => {
                   const noteStyle = getNoteTypeStyle(note.note_type);
                   const statusStyle = getProjectStatusStyle(note.project_status);
@@ -549,11 +533,9 @@ export default function Dashboard() {
                       onKeyDown={event => {
                         if (event.key === 'Enter') navigate(`/projects/${note.project_id}`);
                       }}
-                      className="group relative flex cursor-pointer items-start gap-4 rounded-xl border p-4 transition-all hover:-translate-y-0.5"
+                      className="group relative flex cursor-pointer items-start gap-4 rounded-lg border border-slate-200 bg-white p-4 transition-colors hover:border-blue-300 hover:bg-slate-50"
                       style={{
-                        background: 'linear-gradient(135deg, rgba(15,23,42,0.96) 0%, rgba(30,41,59,0.88) 100%)',
-                        borderColor: 'rgba(148,163,184,0.20)',
-                        boxShadow: '0 10px 26px rgba(0,0,0,0.16)',
+                        boxShadow: '0 1px 2px rgba(15,23,42,0.04)',
                       }}
                     >
                       <span
@@ -566,16 +548,16 @@ export default function Dashboard() {
                           name={note.user_name}
                           size={40}
                           className="border"
-                          style={{ borderColor: 'rgba(255,255,255,0.16)' }}
+                          style={{ borderColor: '#E2E8F0' }}
                         />
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-sm font-black text-white">{note.user_name}</span>
-                          <span className="text-xs font-semibold text-slate-400">
+                          <span className="text-sm font-bold text-slate-950">{note.user_name}</span>
+                          <span className="text-xs font-medium text-slate-500">
                             Inserted {formatEasternDateTime(note.created_at, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time
                           </span>
-                          <span className="text-xs font-semibold text-slate-500">added a note</span>
+                          <span className="text-xs font-medium text-slate-500">added a note</span>
                           <span
                             className="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-black uppercase tracking-wide"
                             style={{ background: noteStyle.bg, color: noteStyle.color, borderColor: noteStyle.border }}
@@ -589,21 +571,21 @@ export default function Dashboard() {
                             {statusStyle.label}
                           </span>
                         </div>
-                        <p className="mt-2 line-clamp-2 whitespace-pre-wrap text-sm leading-6 text-slate-100">
+                        <p className="mt-2 line-clamp-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">
                           {note.note}
                         </p>
                         {note.project_address && (
-                          <div className="mt-3 flex items-center gap-2 border-t border-white/10 pt-2">
-                            <MapPin className="h-3.5 w-3.5 flex-shrink-0" style={{ color: '#FBBF24' }} />
-                            <p className="truncate text-xs font-semibold text-slate-400">{note.project_address}</p>
+                          <div className="mt-3 flex items-center gap-2 border-t border-slate-100 pt-2">
+                            <MapPin className="h-3.5 w-3.5 flex-shrink-0 text-slate-400" />
+                            <p className="truncate text-xs font-semibold text-slate-500">{note.project_address}</p>
                           </div>
                         )}
                       </div>
                       <div className="flex flex-shrink-0 flex-col items-end gap-1 text-right">
-                        <span className="rounded-full bg-slate-950/70 px-2.5 py-1 text-xs font-bold text-slate-300 ring-1 ring-white/10">
+                        <span className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600 ring-1 ring-slate-200">
                           {formatEasternRelative(note.created_at)}
                         </span>
-                        <span className="hidden text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:inline">
+                        <span className="hidden text-[10px] font-semibold uppercase tracking-wide text-slate-400 sm:inline">
                           Open project
                         </span>
                       </div>
@@ -618,10 +600,9 @@ export default function Dashboard() {
           <div className="space-y-5">
             {/* Quick Actions */}
             <div
-              className="rounded-2xl p-5"
-              style={{ background: 'white', boxShadow: '0 2px 16px rgba(0,0,0,0.07)' }}
+              className="bt-card p-5"
             >
-              <h3 className="font-bold text-gray-900 text-sm mb-4">Quick Actions</h3>
+              <h3 className="font-bold text-slate-950 text-sm mb-4">Quick Actions</h3>
               <div className="grid grid-cols-2 gap-3">
                 {[
                   { to: '/projects', label: 'Add Note', icon: MessageSquare, color: '#D97706', bg: 'rgba(217,119,6,0.08)' },
@@ -632,11 +613,10 @@ export default function Dashboard() {
                   <Link
                     key={a.to}
                     to={a.to}
-                    className="flex flex-col items-center gap-2 p-4 rounded-xl transition-all hover:scale-105"
-                    style={{ background: a.bg, border: `1px solid ${a.color}20` }}
+                    className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-4 text-center transition-colors hover:border-blue-300 hover:bg-white"
                   >
                     <a.icon className="w-5 h-5" style={{ color: a.color }} />
-                    <span className="text-xs font-bold" style={{ color: a.color }}>{a.label}</span>
+                    <span className="text-xs font-bold text-slate-700">{a.label}</span>
                   </Link>
                 ))}
               </div>
@@ -644,26 +624,22 @@ export default function Dashboard() {
 
             {/* Recent Invoices */}
             <div
-              className="rounded-2xl overflow-hidden"
-              style={{ background: 'white', boxShadow: '0 2px 16px rgba(0,0,0,0.07)' }}
+              className="bt-card overflow-hidden"
             >
               <div
-                className="flex items-center justify-between px-5 py-4"
-                style={{ borderBottom: '1px solid #F3F4F6' }}
+                className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-5 py-4"
               >
                 <div className="flex items-center gap-2.5">
                   <div
-                    className="w-7 h-7 rounded-lg flex items-center justify-center"
-                    style={{ background: 'rgba(124,58,237,0.1)' }}
+                    className="w-7 h-7 rounded-md flex items-center justify-center bg-blue-50"
                   >
-                    <FileText className="w-3.5 h-3.5" style={{ color: '#7C3AED' }} />
+                    <FileText className="w-3.5 h-3.5 text-blue-700" />
                   </div>
-                  <h3 className="font-bold text-gray-900 text-sm">Recent Invoices</h3>
+                  <h3 className="font-bold text-slate-950 text-sm">Recent Invoices</h3>
                 </div>
                 <Link
                   to="/invoices"
-                  className="text-xs font-bold"
-                  style={{ color: '#7C3AED' }}
+                  className="text-xs font-bold text-blue-700 hover:text-blue-800"
                 >
                   View all
                 </Link>
@@ -674,8 +650,7 @@ export default function Dashboard() {
                 ) : invoices.slice(0, 5).map(inv => (
                   <div key={inv.id} className="flex items-center gap-3 px-5 py-3.5">
                     <div
-                      className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-white text-xs font-black"
-                      style={{ background: 'linear-gradient(135deg, #7C3AED, #6D28D9)' }}
+                      className="w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0 bg-slate-100 text-slate-700 text-xs font-bold"
                     >
                       #
                     </div>
@@ -699,6 +674,8 @@ export default function Dashboard() {
           <p className="text-xs text-gray-400">Last updated: {formatEasternTime(now.toISOString())} New York time</p>
         </div>
       </div>
+
+      <RecentActivityModal userId={user?.id} />
 
       {showReviewSummary && reviewSummaries.length > 0 && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">

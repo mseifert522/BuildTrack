@@ -325,7 +325,7 @@ export default function Invoices() {
   if (loading) return <Loading />;
 
   return (
-    <div className="min-h-full px-6 py-6 md:px-8" style={{ background: '#F0F2F5' }}>
+    <div className="bt-desktop-page min-h-full px-6 py-6 md:px-8">
       <div className="max-w-7xl mx-auto space-y-5">
         <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-3">
           {[
