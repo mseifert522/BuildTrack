@@ -4,6 +4,7 @@ import { useDropzone, type FileRejection } from 'react-dropzone';
 import { useAuthStore, canChangeProjectStatus, canManageProjects, isAdminRole } from '../store/authStore';
 import api from '../lib/api';
 import { Loading, StatusBadge, Modal } from '../components/ui';
+import Avatar from '../components/Avatar';
 import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, ClipboardList, Activity, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle, Send, Phone, Building2, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useForm } from 'react-hook-form';
@@ -66,14 +67,6 @@ const PROJECT_STATUS_OPTIONS = [
   { value: 'long_term_holding', label: 'Long-Term Holdings' },
   { value: 'commercial', label: 'Commercial' },
 ];
-
-const getInitials = (name?: string) =>
-  (name || '?')
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 2)
-    .map(part => part[0]?.toUpperCase())
-    .join('') || '?';
 
 const getNotePhotos = (note: any) => {
   if (Array.isArray(note.photos) && note.photos.length) return note.photos;
@@ -602,13 +595,7 @@ export default function ProjectDetail() {
       <div className={`space-y-4 rounded-xl border border-slate-400 bg-[#C7D2DE] p-3 shadow-inner ${compact ? 'max-h-[620px] overflow-y-auto pr-2' : ''}`}>
         {notes.map(note => (
           <div key={note.id} className="flex items-start gap-3 rounded-2xl border border-slate-400 bg-[#F1F5F9] p-4 shadow-[0_4px_14px_rgba(15,23,42,0.10)] ring-1 ring-slate-300/70">
-            {note.user_avatar_url ? (
-              <img src={note.user_avatar_url} alt={note.user_name} className="w-9 h-9 rounded-xl object-cover flex-shrink-0" style={{ objectPosition: 'center top' }} />
-            ) : (
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-xs font-black flex-shrink-0" style={{ background: 'linear-gradient(135deg, #D99D26, #C4891F)' }}>
-                {getInitials(note.user_name)}
-              </div>
-            )}
+            <Avatar src={note.user_avatar_url} name={note.user_name} size={36} />
             <div className="flex-1 min-w-0">
               <div className="mb-2 flex items-start justify-between gap-3 border-b border-slate-300 pb-2">
                 <div className="min-w-0">

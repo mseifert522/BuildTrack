@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { formatEasternDate, formatEasternDateTime, formatEasternRelative } from '../lib/time';
 import { appendProgressUploadAudit, PROGRESS_MEDIA_ACCEPT } from '../lib/progressUpload';
+import Avatar from '../components/Avatar';
 
 interface NotePhoto {
   id: string;
@@ -88,10 +89,6 @@ function editWindowLabel(note: Note, user?: { role?: string } | null) {
   const remainingMs = Math.max(CONTRACTOR_NOTE_EDIT_WINDOW_MS - (Date.now() - createdAt), 0);
   const remainingHours = Math.max(Math.ceil(remainingMs / (60 * 60 * 1000)), 1);
   return `Edit note (${remainingHours}h left)`;
-}
-
-function getInitials(name: string) {
-  return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
 }
 
 function avatarColor(userId: string) {
@@ -505,21 +502,14 @@ export default function MobileNotes() {
                   return (
                     <div key={note.id} className={`flex gap-3 ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}>
                       {/* Avatar */}
-                      {note.user_avatar_url ? (
-                        <img
-                          src={note.user_avatar_url}
-                          alt={note.user_name}
-                          className="w-9 h-9 rounded-full object-cover flex-shrink-0"
-                          style={{ marginTop: 2, objectPosition: 'center top' }}
-                        />
-                      ) : (
-                        <div
-                          className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 text-white text-xs font-black"
-                          style={{ background: color, marginTop: 2 }}
-                        >
-                          {getInitials(note.user_name)}
-                        </div>
-                      )}
+                      <Avatar
+                        src={note.user_avatar_url}
+                        name={note.user_name}
+                        size={36}
+                        roundedClassName="rounded-full"
+                        style={{ marginTop: 2 }}
+                        fallbackStyle={{ background: color }}
+                      />
 
                       {/* Bubble */}
                       <div className={`flex-1 max-w-xs ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
@@ -710,12 +700,13 @@ export default function MobileNotes() {
         />
         {/* Current user indicator */}
         <div className="flex items-center gap-2 mb-2 px-1">
-          <div
-            className="w-5 h-5 rounded-full flex items-center justify-center text-white text-xs font-black flex-shrink-0"
-            style={{ background: avatarColor(user?.id || '') }}
-          >
-            {getInitials(user?.name || '')}
-          </div>
+          <Avatar
+            src={user?.avatar_url}
+            name={user?.name}
+            size={20}
+            roundedClassName="rounded-full"
+            fallbackStyle={{ background: avatarColor(user?.id || '') }}
+          />
           <span className="text-xs text-gray-500 font-medium">
             Posting as <strong className="text-gray-700">{user?.name}</strong>
           </span>

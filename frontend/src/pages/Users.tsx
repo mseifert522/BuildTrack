@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAuthStore, roleLabels, canManageUsers } from '../store/authStore';
 import api from '../lib/api';
 import { Loading, Modal, PageHeader } from '../components/ui';
+import Avatar from '../components/Avatar';
 import { Users as UsersIcon, Plus, Edit2, Key, ToggleLeft, ToggleRight, ShieldOff, ShieldCheck, Camera, Trash2, Radio } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
@@ -232,13 +233,14 @@ export default function Users() {
           {users.map(u => (
             <div key={u.id} className={`bg-white rounded-xl border p-4 flex items-center gap-3 ${!u.is_active ? 'opacity-60 border-red-200 bg-red-50' : 'border-gray-200'}`}>
               <div className="relative flex-shrink-0">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center overflow-hidden ${u.is_active ? 'bg-blue-100' : 'bg-red-100'}`}>
-                  {u.avatar_url ? (
-                    <img src={u.avatar_url} alt={u.name} className="w-full h-full object-cover" style={{ objectPosition: 'center top' }} />
-                  ) : (
-                    <span className={`font-bold text-sm ${u.is_active ? 'text-blue-700' : 'text-red-500'}`}>{u.name?.[0]?.toUpperCase()}</span>
-                  )}
-                </div>
+                <Avatar
+                  src={u.avatar_url}
+                  name={u.name}
+                  size={40}
+                  roundedClassName="rounded-full"
+                  fallbackClassName={u.is_active ? 'text-blue-700' : 'text-red-500'}
+                  fallbackStyle={{ background: u.is_active ? '#DBEAFE' : '#FEE2E2' }}
+                />
                 <span
                   className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-white ${u.is_online ? 'bg-green-500' : 'bg-gray-300'}`}
                   title={u.is_online ? 'Live now' : 'Offline'}
@@ -374,11 +376,14 @@ export default function Users() {
           {/* Avatar Upload */}
           <div className="flex items-center gap-4 pb-4 border-b border-gray-200">
             <div className="w-20 h-20 rounded-full overflow-hidden bg-gray-100 flex items-center justify-center flex-shrink-0 relative group">
-              {editUser?.avatar_url ? (
-                <img src={editUser.avatar_url} alt={editUser.name} className="w-full h-full object-cover" style={{ objectPosition: 'center top' }} />
-              ) : (
-                <span className="text-2xl font-bold text-gray-400">{editUser?.name?.[0]?.toUpperCase()}</span>
-              )}
+              <Avatar
+                src={editUser?.avatar_url}
+                name={editUser?.name}
+                size={80}
+                roundedClassName="rounded-full"
+                fallbackClassName="text-gray-400"
+                fallbackStyle={{ background: '#F3F4F6' }}
+              />
               <label className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer rounded-full">
                 <Camera className="w-6 h-6 text-white" />
                 <input

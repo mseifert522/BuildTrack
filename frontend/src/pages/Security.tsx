@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import api from '../lib/api';
 import { Loading, PageHeader } from '../components/ui';
+import Avatar from '../components/Avatar';
 import { useAuthStore, roleLabels } from '../store/authStore';
 import { formatEasternDateTime, parseBuildTrackTimestamp } from '../lib/time';
 
@@ -448,9 +449,14 @@ export default function Security() {
                   <tr key={session.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-lg bg-gray-100 text-sm font-black text-gray-700">
-                          {row.avatar_url ? <img src={row.avatar_url} alt={row.name} className="h-full w-full object-cover" /> : row.name?.slice(0, 2).toUpperCase()}
-                        </div>
+                        <Avatar
+                          src={row.avatar_url}
+                          name={row.name}
+                          size={40}
+                          roundedClassName="rounded-lg"
+                          fallbackClassName="text-gray-700"
+                          fallbackStyle={{ background: '#F3F4F6' }}
+                        />
                         <div>
                           <p className="font-bold text-gray-950">{row.name}</p>
                           <p className="text-xs text-gray-500">{row.email}</p>

@@ -46,7 +46,13 @@ app.use(express.json({ limit: bodyLimit }));
 app.use(express.urlencoded({ extended: true, limit: bodyLimit }));
 
 // Serve uploaded files
-app.use('/uploads', express.static(path.resolve(uploadsPath)));
+app.use('/uploads', express.static(path.resolve(uploadsPath), {
+  setHeaders: (res, filePath) => {
+    if (filePath.includes(`${path.sep}avatars${path.sep}`)) {
+      res.setHeader('Cache-Control', 'private, no-cache, max-age=0, must-revalidate');
+    }
+  },
+}));
 
 // Routes
 app.use('/api/auth', authRoutes);

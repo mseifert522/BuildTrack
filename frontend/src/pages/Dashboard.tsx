@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore, isAdminRole, roleLabels } from '../store/authStore';
 import api from '../lib/api';
 import { Loading, StatusBadge } from '../components/ui';
+import Avatar from '../components/Avatar';
 import {
   FolderOpen, ClipboardList, FileText, Image,
   TrendingUp, AlertTriangle, CheckCircle2, Clock,
@@ -95,14 +96,6 @@ const greeting = () => {
 const parseDate = (value: string) => {
   return parseBuildTrackTimestamp(value) || new Date();
 };
-
-const getInitials = (name?: string) =>
-  (name || '?')
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 2)
-    .map(part => part[0]?.toUpperCase())
-    .join('') || '?';
 
 const noteTypeStyles: Record<string, { label: string; bg: string; color: string; border: string; accent: string }> = {
   general: { label: 'General note', bg: '#EFF6FF', color: '#1D4ED8', border: '#BFDBFE', accent: '#3B82F6' },
@@ -572,21 +565,13 @@ export default function Dashboard() {
                         style={{ background: noteStyle.accent }}
                       />
                       <div className="relative mt-0.5 flex-shrink-0 pl-1">
-                        {note.user_avatar_url ? (
-                          <img
-                            src={note.user_avatar_url}
-                            alt={note.user_name}
-                            className="h-10 w-10 rounded-xl border object-cover"
-                            style={{ objectPosition: 'center top', borderColor: 'rgba(255,255,255,0.16)' }}
-                          />
-                        ) : (
-                          <div
-                            className="flex h-10 w-10 items-center justify-center rounded-xl text-xs font-black text-white"
-                            style={{ background: 'linear-gradient(135deg, #D99D26, #C4891F)' }}
-                          >
-                            {getInitials(note.user_name)}
-                          </div>
-                        )}
+                        <Avatar
+                          src={note.user_avatar_url}
+                          name={note.user_name}
+                          size={40}
+                          className="border"
+                          style={{ borderColor: 'rgba(255,255,255,0.16)' }}
+                        />
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">

@@ -14,16 +14,34 @@ const { ensureContractorMobileAccount, generatePin, syncContractorProjectAssignm
 
 router.use(authenticate);
 
+const avatarUploadBase = () => path.resolve(process.env.UPLOADS_PATH || './uploads');
+const avatarUploadDir = () => path.join(avatarUploadBase(), 'avatars');
+const avatarPublicUrl = filename => `/uploads/avatars/${filename}`;
+const avatarFileName = (userId, originalName) => {
+  const safeUserId = String(userId || 'user').replace(/[^a-zA-Z0-9_-]/g, '');
+  const ext = path.extname(originalName || '').toLowerCase() || '.jpg';
+  return `avatar-${safeUserId}-${Date.now()}${ext}`;
+};
+const avatarPathFromUrl = avatarUrl => {
+  const cleanPath = String(avatarUrl || '').split('?')[0];
+  if (!cleanPath.startsWith('/uploads/avatars/')) return null;
+  return path.join(avatarUploadDir(), path.basename(cleanPath));
+};
+const unlinkAvatarFile = avatarUrl => {
+  const filePath = avatarPathFromUrl(avatarUrl);
+  if (!filePath || !fs.existsSync(filePath)) return;
+  fs.unlinkSync(filePath);
+};
+
 // Multer config for avatar uploads
 const avatarStorage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const dir = path.join(__dirname, '../../uploads/avatars');
+    const dir = avatarUploadDir();
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     cb(null, dir);
   },
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
-    cb(null, `avatar-${req.user.id}${ext}`);
+    cb(null, avatarFileName(req.user.id, file.originalname));
   },
 });
 const avatarUpload = multer({
@@ -369,9 +387,11 @@ router.get('/me', (req, res) => {
 router.post('/me/avatar', avatarUpload.single('avatar'), (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    const avatarUrl = `/uploads/avatars/${req.file.filename}`;
+    const avatarUrl = avatarPublicUrl(req.file.filename);
     const db = getDb();
+    const previous = db.prepare('SELECT avatar_url FROM users WHERE id = ?').get(req.user.id);
     db.prepare(`UPDATE users SET avatar_url = ?, updated_at = datetime('now') WHERE id = ?`).run(avatarUrl, req.user.id);
+    if (previous?.avatar_url && previous.avatar_url !== avatarUrl) unlinkAvatarFile(previous.avatar_url);
     logActivity({ userId: req.user.id, action: 'avatar_updated', entityType: 'user', entityId: req.user.id });
     res.json({ avatar_url: avatarUrl, message: 'Avatar updated successfully' });
   } catch (err) {
@@ -385,10 +405,7 @@ router.delete('/me/avatar', (req, res) => {
   try {
     const db = getDb();
     const user = db.prepare('SELECT avatar_url FROM users WHERE id = ?').get(req.user.id);
-    if (user?.avatar_url) {
-      const filePath = path.join(__dirname, '../../', user.avatar_url);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-    }
+    if (user?.avatar_url) unlinkAvatarFile(user.avatar_url);
     db.prepare(`UPDATE users SET avatar_url = NULL, updated_at = datetime('now') WHERE id = ?`).run(req.user.id);
     res.json({ message: 'Avatar removed' });
   } catch (err) {
@@ -1426,13 +1443,12 @@ router.post('/:id/avatar', authorize('super_admin', 'operations_manager'), (req,
   const targetId = req.params.id;
   const storage = require('multer').diskStorage({
     destination: (r, file, cb) => {
-      const dir = require('path').join(__dirname, '../../uploads/avatars');
-      if (!require('fs').existsSync(dir)) require('fs').mkdirSync(dir, { recursive: true });
+      const dir = avatarUploadDir();
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       cb(null, dir);
     },
     filename: (r, file, cb) => {
-      const ext = require('path').extname(file.originalname).toLowerCase() || '.jpg';
-      cb(null, `avatar-${targetId}${ext}`);
+      cb(null, avatarFileName(targetId, file.originalname));
     },
   });
   const upload = require('multer')({
@@ -1447,11 +1463,18 @@ router.post('/:id/avatar', authorize('super_admin', 'operations_manager'), (req,
   upload(req, res, (err) => {
     if (err) return res.status(400).json({ error: err.message });
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    const avatarUrl = `/uploads/avatars/${req.file.filename}`;
-    const db = getDb();
-    db.prepare(`UPDATE users SET avatar_url = ?, updated_at = datetime('now') WHERE id = ?`).run(avatarUrl, targetId);
-    logActivity({ userId: req.user.id, action: 'avatar_updated', entityType: 'user', entityId: targetId });
-    res.json({ avatar_url: avatarUrl, message: 'Avatar updated' });
+    try {
+      const avatarUrl = avatarPublicUrl(req.file.filename);
+      const db = getDb();
+      const previous = db.prepare('SELECT avatar_url FROM users WHERE id = ?').get(targetId);
+      db.prepare(`UPDATE users SET avatar_url = ?, updated_at = datetime('now') WHERE id = ?`).run(avatarUrl, targetId);
+      if (previous?.avatar_url && previous.avatar_url !== avatarUrl) unlinkAvatarFile(previous.avatar_url);
+      logActivity({ userId: req.user.id, action: 'avatar_updated', entityType: 'user', entityId: targetId });
+      res.json({ avatar_url: avatarUrl, message: 'Avatar updated' });
+    } catch (uploadErr) {
+      console.error(uploadErr);
+      res.status(500).json({ error: 'Failed to upload avatar' });
+    }
   });
 });
 

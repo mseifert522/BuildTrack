@@ -26,6 +26,7 @@ import {
 import toast from 'react-hot-toast';
 import api from '../lib/api';
 import { Loading, Modal } from '../components/ui';
+import Avatar from '../components/Avatar';
 import { useAuthStore } from '../store/authStore';
 import { formatEasternDate, formatEasternDateTime, parseBuildTrackTimestamp } from '../lib/time';
 
@@ -1201,13 +1202,7 @@ export default function Contractors() {
                             <p className="text-sm text-gray-400">No contractor notes yet</p>
                           ) : (contractorNotes[contractor.id] || []).map((note) => (
                             <div key={note.id} className="flex items-start gap-3 rounded-xl border border-gray-100 p-3">
-                              {note.user_avatar_url ? (
-                                <img src={note.user_avatar_url} alt={note.user_name} className="w-9 h-9 rounded-xl object-cover flex-shrink-0" style={{ objectPosition: 'center top' }} />
-                              ) : (
-                                <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-xs font-black flex-shrink-0" style={{ background: 'linear-gradient(135deg, #D99D26, #C4891F)' }}>
-                                  {initials(note.user_name)}
-                                </div>
-                              )}
+                              <Avatar src={note.user_avatar_url} name={note.user_name} size={36} />
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center justify-between gap-2">
                                   <p className="text-sm font-black text-gray-900">{note.user_name}</p>

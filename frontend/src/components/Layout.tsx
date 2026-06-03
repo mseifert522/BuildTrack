@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
+import Avatar from './Avatar';
 
 interface LayoutProps { children: React.ReactNode; }
 
@@ -153,33 +154,6 @@ export default function Layout({ children }: LayoutProps) {
   )?.[1] || 'BuildTrack';
 
   const W = sidebarCollapsed ? 72 : 240;
-  // Avatar display helper
-  const AvatarDisplay = ({ size = 36, className = '' }: { size?: number; className?: string }) => {
-    if (user?.avatar_url) {
-      return (
-        <img
-          src={user.avatar_url}
-          alt={user.name}
-          className={`rounded-xl object-cover flex-shrink-0 ${className}`}
-          style={{ width: size, height: size, objectPosition: 'center top' }}
-        />
-      );
-    }
-    return (
-      <div
-        className={`rounded-xl flex items-center justify-center flex-shrink-0 text-white font-black ${className}`}
-        style={{
-          width: size,
-          height: size,
-          fontSize: size * 0.38,
-          background: 'linear-gradient(135deg, #D99D26, #C4891F)',
-        }}
-      >
-        {user?.name?.[0]?.toUpperCase()}
-      </div>
-    );
-  };
-
   const SidebarContent = ({ collapsed = false }: { collapsed?: boolean }) => (
     <div className="flex flex-col h-full">
       {/* Logo area */}
@@ -279,7 +253,7 @@ export default function Layout({ children }: LayoutProps) {
             justifyContent: collapsed ? 'center' : 'flex-start',
           }}
         >
-          <AvatarDisplay size={32} />
+          <Avatar src={user?.avatar_url} name={user?.name} size={32} />
           {!collapsed && (
             <>
               <div className="flex-1 min-w-0">
@@ -534,7 +508,7 @@ export default function Layout({ children }: LayoutProps) {
                 style={{ background: '#F9FAFB', border: '1px solid #E5E7EB' }}
                 aria-label="Open profile menu"
               >
-                <AvatarDisplay size={32} />
+                <Avatar src={user?.avatar_url} name={user?.name} size={32} />
                 <div className="hidden sm:block text-left">
                   <p className="text-sm font-bold text-gray-900 leading-tight">{user?.name}</p>
                   <p className="text-xs" style={{ color: '#D99D26' }}>{user ? roleLabels[user.role] : ''}</p>
@@ -556,7 +530,7 @@ export default function Layout({ children }: LayoutProps) {
                       <div className="flex items-center gap-3">
                         {/* Avatar with upload overlay */}
                         <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-                          <AvatarDisplay size={52} />
+                          <Avatar src={user?.avatar_url} name={user?.name} size={52} />
                           <div className="absolute inset-0 rounded-xl bg-black bg-opacity-0 group-hover:bg-opacity-40 transition-all flex items-center justify-center">
                             <Camera className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
                           </div>
