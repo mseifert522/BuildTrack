@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
@@ -31,11 +31,11 @@ interface ContractorItem {
   id: string;
   name?: string;
   company?: string;
-  contact_name?: string;
-  phone?: string;
-  email?: string;
-  category?: string;
-  contractor_category?: string;
+  contact_name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  category?: string | null;
+  contractor_category?: string | null;
   connected_project_count?: number;
   assigned_project_count?: number;
 }
@@ -43,20 +43,44 @@ interface ContractorItem {
 interface SupplierItem {
   id: string;
   name?: string;
-  contact?: string;
-  phone?: string;
-  email?: string;
-  category?: string;
+  contact?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  category?: string | null;
 }
 
 type Tab = 'projects' | 'photos' | 'invoices' | 'contractors' | 'suppliers';
+
+type MobileNavItem = {
+  key: Tab;
+  label: string;
+  shortLabel: string;
+  Icon: typeof FolderOpen;
+  tone: 'blue' | 'amber' | 'teal' | 'violet';
+};
+
+const STATUS_META: Record<string, { label: string; tone: string }> = {
+  not_started: { label: 'Not started', tone: 'neutral' },
+  active_rehab: { label: 'Active rehab', tone: 'success' },
+  rehab_completed: { label: 'Completed', tone: 'success' },
+  long_term_holding: { label: 'Holding', tone: 'warning' },
+  commercial: { label: 'Commercial', tone: 'info' },
+  archived: { label: 'Archived', tone: 'neutral' },
+};
 
 function isManagementRole(role?: string) {
   return role === 'super_admin' || role === 'operations_manager' || role === 'project_manager';
 }
 
-function statusLabel(status?: string) {
-  return (status || 'active').replace(/_/g, ' ');
+function projectLabel(project: Project) {
+  return project.job_name || project.address.split(',')[0] || 'Project';
+}
+
+function statusMeta(status?: string) {
+  return STATUS_META[status || ''] || {
+    label: String(status || 'Active').replace(/_/g, ' '),
+    tone: 'neutral',
+  };
 }
 
 function clearMobilePhotoProjectState() {
@@ -81,19 +105,20 @@ export default function MobileHome() {
   const [setupEmailInputs, setSetupEmailInputs] = useState<Record<string, string>>({});
   const [sendingSetupId, setSendingSetupId] = useState<string | null>(null);
 
-  const navItems = useMemo(() => {
+  const navItems = useMemo<MobileNavItem[]>(() => {
     if (managementUser) {
       return [
-        { key: 'projects' as Tab, label: 'Projects', Icon: FolderOpen, color: '#2563EB' },
-        { key: 'photos' as Tab, label: 'Progress Photos', Icon: Camera, color: '#D99D26' },
-        { key: 'contractors' as Tab, label: 'Contractors', Icon: Users, color: '#16A34A' },
-        { key: 'suppliers' as Tab, label: 'Suppliers', Icon: Truck, color: '#7C3AED' },
+        { key: 'projects', label: 'Projects', shortLabel: 'Projects', Icon: FolderOpen, tone: 'blue' },
+        { key: 'photos', label: 'Progress Photos', shortLabel: 'Photos', Icon: Camera, tone: 'amber' },
+        { key: 'contractors', label: 'Contractors', shortLabel: 'Crews', Icon: Users, tone: 'teal' },
+        { key: 'suppliers', label: 'Suppliers', shortLabel: 'Vendors', Icon: Truck, tone: 'violet' },
       ];
     }
+
     return [
-      { key: 'projects' as Tab, label: 'Projects', Icon: FolderOpen, color: '#2563EB' },
-      { key: 'photos' as Tab, label: 'Progress Photos', Icon: Camera, color: '#D99D26' },
-      { key: 'invoices' as Tab, label: 'Invoice', Icon: FileText, color: '#7C3AED' },
+      { key: 'projects', label: 'Projects', shortLabel: 'Projects', Icon: FolderOpen, tone: 'blue' },
+      { key: 'photos', label: 'Progress Photos', shortLabel: 'Photos', Icon: Camera, tone: 'amber' },
+      { key: 'invoices', label: 'Invoices', shortLabel: 'Invoices', Icon: FileText, tone: 'violet' },
     ];
   }, [managementUser]);
 
@@ -159,6 +184,8 @@ export default function MobileHome() {
   );
 
   const rememberedProject = projects.find(project => project.id === localStorage.getItem(storageKey));
+  const activeProjects = projects.filter(project => project.status === 'active_rehab').length;
+  const openPunchCount = projects.reduce((count, project) => count + (project.open_punch_items || 0), 0);
 
   const sendContractorSetup = async (contractor: ContractorItem) => {
     const email = String(setupEmailInputs[contractor.id] ?? contractor.email ?? '').trim();
@@ -194,312 +221,344 @@ export default function MobileHome() {
     navigate('/login');
   };
 
+  const currentNav = navItems.find(item => item.key === tab) || navItems[0];
+
   if (loading) {
     return (
-      <div className="mobile-shell" style={{ background: '#0D1117', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ width: 54, height: 54, borderRadius: 16, background: 'linear-gradient(135deg, #D99D26, #C4891F)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 18 }}>
-          <MapPin size={27} color="white" />
+      <div className="mobile-shell btm-home-shell btm-loading-screen">
+        <div className="btm-loading-mark">
+          <MapPin size={28} />
         </div>
-        <RefreshCw size={34} color="#D99D26" style={{ animation: 'spin 0.8s linear infinite' }} />
-        <p style={{ color: 'rgba(255,255,255,0.55)', fontSize: 13, marginTop: 13 }}>Loading BuildTrack...</p>
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        <RefreshCw className="btm-spin" size={34} />
+        <p>Loading BuildTrack field app</p>
       </div>
     );
   }
 
   return (
-    <div className="mobile-shell" style={{ background: '#F4F5F7' }}>
-      <div className="mobile-header" style={{ background: 'linear-gradient(135deg, #0D1117 0%, #181D25 100%)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '14px 14px 10px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-            <div style={{ width: 40, height: 40, borderRadius: 12, background: 'linear-gradient(135deg, #D99D26, #C4891F)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <MapPin size={19} color="white" />
+    <div className="mobile-shell btm-home-shell">
+      <header className="btm-home-header">
+        <div className="btm-home-topbar">
+          <div className="btm-brand">
+            <div className="btm-brand-mark" aria-hidden="true">
+              <MapPin size={22} />
             </div>
-            <div style={{ minWidth: 0 }}>
-              <p style={{ color: 'white', fontSize: 15, fontWeight: 850, margin: 0 }}>BuildTrack</p>
-              <p style={{ color: '#D99D26', fontSize: 11, fontWeight: 700, margin: '1px 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {user?.name?.split(' ')[0] || 'User'} / {roleLabels[user?.role || ''] || 'Mobile'}
-              </p>
+            <div className="btm-brand-text">
+              <p>BuildTrack</p>
+              <span>{user?.name?.split(' ')[0] || 'User'} / {roleLabels[user?.role || ''] || 'Mobile'}</span>
             </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div className="btm-header-actions">
             <button
               type="button"
               onClick={() => loadData(true)}
               disabled={refreshing}
               aria-label="Refresh mobile dashboard"
-              style={{ width: 36, height: 36, borderRadius: 10, border: 'none', background: 'rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: refreshing ? 0.72 : 1 }}
+              className="btm-icon-button"
             >
-              <RefreshCw size={15} color="rgba(255,255,255,0.76)" style={refreshing ? { animation: 'spin 0.8s linear infinite' } : undefined} />
+              <RefreshCw className={refreshing ? 'btm-spin' : ''} size={21} />
             </button>
             {canCreateProjects(user?.role || '') && (
               <button
+                type="button"
                 onClick={() => navigate('/mobile/add-project')}
                 aria-label="Add new project"
-                style={{ width: 36, height: 36, borderRadius: 10, border: 'none', background: 'rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                className="btm-icon-button btm-icon-button-create"
               >
-                <Plus size={17} color="rgba(255,255,255,0.76)" />
+                <Plus size={23} />
               </button>
             )}
-            <button
-              onClick={handleLogout}
-              aria-label="Sign out"
-              style={{ width: 36, height: 36, borderRadius: 10, border: 'none', background: 'rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-            >
-              <LogOut size={16} color="rgba(255,255,255,0.76)" />
+            <button type="button" onClick={handleLogout} aria-label="Sign out" className="btm-icon-button">
+              <LogOut size={21} />
             </button>
           </div>
         </div>
 
-        <div style={{ padding: '0 14px 12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9, background: 'rgba(255,255,255,0.08)', borderRadius: 14, padding: '10px 12px' }}>
-            <Search size={15} color="rgba(255,255,255,0.45)" />
-            <input
-              type="text"
-              value={search}
-              onChange={event => setSearch(event.target.value)}
-              placeholder={managementUser ? 'Search projects, contractors, suppliers' : 'Search assigned projects'}
-              style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'white', fontSize: 14 }}
-            />
+        <label className="btm-search" aria-label="Search mobile app">
+          <Search size={22} />
+          <input
+            type="text"
+            value={search}
+            onChange={event => setSearch(event.target.value)}
+            placeholder={managementUser ? 'Search jobs, crews, vendors' : 'Search assigned jobs'}
+          />
+        </label>
+
+        <div className="btm-context-strip">
+          <div>
+            <span>{currentNav.label}</span>
+            <strong>{tab === 'projects' ? `${filteredProjects.length} jobs` : 'Field workspace'}</strong>
+          </div>
+          <div>
+            <span>Active</span>
+            <strong>{activeProjects}</strong>
+          </div>
+          <div>
+            <span>Punch</span>
+            <strong>{openPunchCount}</strong>
           </div>
         </div>
+      </header>
 
-        <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-          {navItems.map(item => {
-            const active = tab === item.key;
-            return (
-              <button
-                key={item.key}
-                onClick={() => setTab(item.key)}
-                style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '10px 3px', border: 'none', borderBottom: active ? `2px solid ${item.color}` : '2px solid transparent', background: 'transparent', color: active ? item.color : 'rgba(255,255,255,0.46)' }}
-              >
-                <item.Icon size={18} />
-                <span style={{ maxWidth: '100%', fontSize: 10, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="mobile-content" style={{ padding: '12px 14px 86px' }}>
+      <main className="mobile-content btm-home-content">
         {tab === 'projects' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <p style={{ color: '#6B7280', fontSize: 11, fontWeight: 850, letterSpacing: '0.08em', textTransform: 'uppercase', margin: '2px 2px 0' }}>
-              {filteredProjects.length} Project{filteredProjects.length === 1 ? '' : 's'}
-            </p>
+          <section className="btm-list-section" aria-label="Projects">
+            <SectionHeader
+              label={`${filteredProjects.length} Project${filteredProjects.length === 1 ? '' : 's'}`}
+              actionLabel={canCreateProjects(user?.role || '') ? 'New Project' : undefined}
+              onAction={canCreateProjects(user?.role || '') ? () => navigate('/mobile/add-project') : undefined}
+            />
 
             {filteredProjects.length === 0 ? (
-              <div style={{ textAlign: 'center', background: 'white', borderRadius: 18, padding: '48px 20px' }}>
-                <FolderOpen size={42} color="#D1D5DB" />
-                <p style={{ color: '#6B7280', fontSize: 14, fontWeight: 800, margin: '10px 0 0' }}>No projects found</p>
-              </div>
+              <EmptyState icon={<FolderOpen size={38} />} title="No projects found" />
             ) : filteredProjects.map(project => (
-              <div key={project.id} style={{ background: 'white', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 8px rgba(0,0,0,0.07)' }}>
-                <button
-                  onClick={() => navigate(`/mobile/project/${project.id}`)}
-                  style={{ width: '100%', border: 'none', background: 'white', textAlign: 'left', padding: 13, display: 'flex', gap: 10, alignItems: 'center' }}
-                >
-                  <div style={{ width: 39, height: 39, borderRadius: 10, background: 'rgba(217,157,38,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    <MapPin size={18} color="#D99D26" />
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ color: '#111827', fontSize: 13, fontWeight: 850, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{project.address}</p>
-                    <p style={{ color: '#6B7280', fontSize: 11, margin: '2px 0 0', textTransform: 'capitalize' }}>{project.job_name || statusLabel(project.status)}</p>
-                  </div>
-                  <ChevronRight size={16} color="#9CA3AF" />
-                </button>
-
-                <div style={{ padding: '0 12px 12px' }}>
-                  <button
-                    onClick={() => navigate(`/mobile/photos?projectId=${project.id}&camera=1`)}
-                    style={{
-                      minHeight: 48,
-                      width: '100%',
-                      border: 'none',
-                      borderRadius: 13,
-                      background: 'linear-gradient(135deg, #D99D26, #C4891F)',
-                      color: 'white',
-                      fontSize: 13,
-                      fontWeight: 900,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 8,
-                      boxShadow: '0 6px 14px rgba(217,157,38,0.22)',
-                    }}
-                    aria-label={`Take progress pictures for ${project.address}`}
-                  >
-                    <Camera size={18} color="white" />
-                    Take Pictures
-                  </button>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', borderTop: '1px solid #F3F4F6' }}>
-                  <button onClick={() => navigate(`/mobile/project/${project.id}`)} style={{ border: 'none', background: '#FAFAFA', padding: '10px 4px', fontSize: 11, fontWeight: 850, color: '#2563EB', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
-                    <FolderOpen size={15} color="#2563EB" /> Open
-                  </button>
-                  <button onClick={() => navigate(`/mobile/project/${project.id}/punch-list`)} style={{ border: 'none', borderLeft: '1px solid #F3F4F6', background: '#FAFAFA', padding: '10px 4px', fontSize: 11, fontWeight: 850, color: '#D99D26', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
-                    <ClipboardList size={15} color="#D99D26" /> Punch List
-                  </button>
-                  {!managementUser && (
-                    <button onClick={() => navigate(`/mobile/project/${project.id}/invoice`)} style={{ gridColumn: '1 / -1', border: 'none', borderTop: '1px solid #F3F4F6', background: '#FAFAFA', padding: '10px 4px', fontSize: 11, fontWeight: 850, color: '#7C3AED', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
-                      <FileText size={15} color="#7C3AED" /> Invoice
-                    </button>
-                  )}
-                </div>
-              </div>
+              <ProjectCard key={project.id} project={project} managementUser={managementUser} />
             ))}
-          </div>
+          </section>
         )}
 
         {tab === 'photos' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <section className="btm-list-section" aria-label="Progress photos">
             <button
+              type="button"
               onClick={() => navigate(rememberedProject ? `/mobile/photos?projectId=${rememberedProject.id}&camera=1` : '/mobile/photos')}
-              style={{ width: '100%', border: 'none', borderRadius: 18, padding: 16, textAlign: 'left', background: 'linear-gradient(135deg, #D99D26, #C4891F)', color: 'white', boxShadow: '0 8px 18px rgba(217,157,38,0.22)' }}
+              className="btm-feature-card btm-feature-card-photo"
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{ width: 44, height: 44, borderRadius: 13, background: 'rgba(255,255,255,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <Camera size={22} color="white" />
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ margin: 0, fontSize: 15, fontWeight: 900 }}>Take Pictures</p>
-                  <p style={{ margin: '3px 0 0', fontSize: 12, opacity: 0.82, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {rememberedProject ? `Continue with ${rememberedProject.address}` : 'Choose a project before uploading photos or videos'}
-                  </p>
-                </div>
-                <ChevronRight size={18} color="white" />
-              </div>
+              <Camera size={28} />
+              <span>
+                <strong>Start Photo Capture</strong>
+                <small>{rememberedProject ? `Continue with ${rememberedProject.address}` : 'Choose a job and upload field photos'}</small>
+              </span>
+              <ChevronRight size={22} />
             </button>
 
-            <p style={{ color: '#6B7280', fontSize: 11, fontWeight: 850, letterSpacing: '0.08em', textTransform: 'uppercase', margin: '4px 2px 0' }}>
-              Select Project
-            </p>
+            <SectionHeader label="Select Project" />
             {filteredProjects.map(project => (
-              <button
+              <SimpleProjectButton
                 key={project.id}
+                project={project}
+                icon={<Camera size={22} />}
+                helper="Open camera and upload timestamped batches"
                 onClick={() => navigate(`/mobile/photos?projectId=${project.id}&camera=1`)}
-                style={{ width: '100%', border: 'none', background: 'white', borderRadius: 15, padding: 13, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10, boxShadow: '0 1px 8px rgba(0,0,0,0.06)' }}
-              >
-                <Camera size={18} color="#D99D26" />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ color: '#111827', margin: 0, fontSize: 13, fontWeight: 850, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{project.address}</p>
-                  <p style={{ color: '#6B7280', margin: '2px 0 0', fontSize: 11 }}>Open camera and upload timestamped batches</p>
-                </div>
-                <ChevronRight size={16} color="#9CA3AF" />
-              </button>
+              />
             ))}
-          </div>
+          </section>
         )}
 
         {tab === 'invoices' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <p style={{ color: '#6B7280', fontSize: 11, fontWeight: 850, letterSpacing: '0.08em', textTransform: 'uppercase', margin: '2px 2px 0' }}>
-              Select Project to Invoice
-            </p>
+          <section className="btm-list-section" aria-label="Invoices">
+            <SectionHeader label="Select Project to Invoice" />
             {filteredProjects.map(project => (
-              <button
+              <SimpleProjectButton
                 key={project.id}
+                project={project}
+                icon={<FileText size={22} />}
+                helper="Create or submit an invoice"
                 onClick={() => navigate(`/mobile/project/${project.id}/invoice`)}
-                style={{ width: '100%', border: 'none', background: 'white', borderRadius: 15, padding: 13, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10, boxShadow: '0 1px 8px rgba(0,0,0,0.06)' }}
-              >
-                <FileText size={18} color="#7C3AED" />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ color: '#111827', margin: 0, fontSize: 13, fontWeight: 850, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{project.address}</p>
-                  <p style={{ color: '#6B7280', margin: '2px 0 0', fontSize: 11 }}>Create invoice</p>
-                </div>
-                <ChevronRight size={16} color="#9CA3AF" />
-              </button>
+              />
             ))}
-          </div>
+          </section>
         )}
 
         {tab === 'contractors' && managementUser && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <p style={{ color: '#6B7280', fontSize: 11, fontWeight: 850, letterSpacing: '0.08em', textTransform: 'uppercase', margin: '2px 2px 0' }}>
-              {filteredContractors.length} Contractor{filteredContractors.length === 1 ? '' : 's'}
-            </p>
+          <section className="btm-list-section" aria-label="Contractors">
+            <SectionHeader label={`${filteredContractors.length} Contractor${filteredContractors.length === 1 ? '' : 's'}`} />
             {filteredContractors.slice(0, 80).map(contractor => {
               const setupEmail = setupEmailInputs[contractor.id] ?? contractor.email ?? '';
               return (
-                <div key={contractor.id} style={{ background: 'white', borderRadius: 15, padding: 13, boxShadow: '0 1px 8px rgba(0,0,0,0.06)' }}>
-                  <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                    <div style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(22,163,74,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      <Users size={18} color="#16A34A" />
+                <article key={contractor.id} className="btm-directory-card">
+                  <div className="btm-directory-main">
+                    <div className="btm-directory-icon btm-directory-icon-crew">
+                      <Users size={22} />
                     </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ color: '#111827', margin: 0, fontSize: 13, fontWeight: 850, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{contractor.name || contractor.company || contractor.contact_name || 'Contractor'}</p>
-                      <p style={{ color: '#6B7280', margin: '2px 0 0', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{contractor.contractor_category || contractor.category || contractor.email || contractor.phone || 'Contractor'}</p>
+                    <div>
+                      <h2>{contractor.name || contractor.company || contractor.contact_name || 'Contractor'}</h2>
+                      <p>{contractor.contractor_category || contractor.category || contractor.email || contractor.phone || 'Contractor record'}</p>
                     </div>
-                    <span style={{ color: '#16A34A', fontSize: 11, fontWeight: 850 }}>{contractor.connected_project_count ?? contractor.assigned_project_count ?? 0}</span>
+                    <span>{contractor.connected_project_count ?? contractor.assigned_project_count ?? 0}</span>
                   </div>
-                  <div style={{ marginTop: 10, borderTop: '1px solid #F3F4F6', paddingTop: 10 }}>
-                    <p style={{ color: '#92400E', margin: '0 0 6px', fontSize: 10, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Secure 1099 setup</p>
-                    <div style={{ display: 'flex', gap: 7 }}>
+                  <div className="btm-setup-row">
+                    <label>
+                      <span>Secure 1099 setup</span>
                       <input
                         type="email"
                         value={setupEmail}
                         onChange={event => setSetupEmailInputs(prev => ({ ...prev, [contractor.id]: event.target.value }))}
                         placeholder="contractor@email.com"
-                        style={{ minWidth: 0, flex: 1, border: '1px solid #E5E7EB', borderRadius: 11, padding: '10px 11px', fontSize: 12, fontWeight: 750, outline: 'none' }}
                       />
-                      <button
-                        type="button"
-                        onClick={() => sendContractorSetup(contractor)}
-                        disabled={sendingSetupId === contractor.id}
-                        style={{ border: 'none', borderRadius: 11, background: '#111827', color: 'white', width: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: sendingSetupId === contractor.id ? 0.6 : 1 }}
-                        aria-label="Send secure 1099 setup link"
-                      >
-                        <Send size={16} />
-                      </button>
-                    </div>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => sendContractorSetup(contractor)}
+                      disabled={sendingSetupId === contractor.id}
+                      aria-label="Send secure 1099 setup link"
+                    >
+                      <Send size={19} />
+                    </button>
                   </div>
-                </div>
+                </article>
               );
             })}
-          </div>
+          </section>
         )}
 
         {tab === 'suppliers' && managementUser && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <p style={{ color: '#6B7280', fontSize: 11, fontWeight: 850, letterSpacing: '0.08em', textTransform: 'uppercase', margin: '2px 2px 0' }}>
-              {filteredSuppliers.length} Supplier{filteredSuppliers.length === 1 ? '' : 's'}
-            </p>
+          <section className="btm-list-section" aria-label="Suppliers">
+            <SectionHeader label={`${filteredSuppliers.length} Supplier${filteredSuppliers.length === 1 ? '' : 's'}`} />
             {filteredSuppliers.slice(0, 80).map(supplier => (
-              <div key={supplier.id} style={{ background: 'white', borderRadius: 15, padding: 13, display: 'flex', gap: 10, alignItems: 'center', boxShadow: '0 1px 8px rgba(0,0,0,0.06)' }}>
-                <div style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(124,58,237,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <Truck size={18} color="#7C3AED" />
+              <article key={supplier.id} className="btm-directory-card">
+                <div className="btm-directory-main">
+                  <div className="btm-directory-icon btm-directory-icon-vendor">
+                    <Truck size={22} />
+                  </div>
+                  <div>
+                    <h2>{supplier.name || supplier.contact || 'Supplier'}</h2>
+                    <p>{supplier.category || supplier.email || supplier.phone || 'Supplier record'}</p>
+                  </div>
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ color: '#111827', margin: 0, fontSize: 13, fontWeight: 850, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{supplier.name || supplier.contact || 'Supplier'}</p>
-                  <p style={{ color: '#6B7280', margin: '2px 0 0', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{supplier.category || supplier.email || supplier.phone || 'Supplier'}</p>
-                </div>
-              </div>
+              </article>
             ))}
-          </div>
+          </section>
         )}
-      </div>
+      </main>
 
-      <div className="mobile-bottom-nav" style={{ background: 'white', borderTop: '1px solid #E5E7EB', boxShadow: '0 -4px 18px rgba(0,0,0,0.08)' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${navItems.length}, 1fr)` }}>
-          {navItems.map(item => {
-            const active = tab === item.key;
-            return (
-              <button
-                key={item.key}
-                onClick={() => setTab(item.key)}
-                style={{ minWidth: 0, position: 'relative', border: 'none', background: 'transparent', padding: '10px 2px 8px', color: active ? item.color : '#9CA3AF', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}
-              >
-                {active && <span style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)', width: 28, height: 3, borderRadius: '0 0 3px 3px', background: item.color }} />}
-                <item.Icon size={20} />
-                <span style={{ maxWidth: '100%', fontSize: 10, fontWeight: 850, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.label}</span>
-              </button>
-            );
-          })}
+      <nav className="btm-bottom-nav" aria-label="Mobile sections">
+        {navItems.map(item => {
+          const active = tab === item.key;
+          return (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => setTab(item.key)}
+              className={`btm-nav-item btm-tone-${item.tone}${active ? ' is-active' : ''}`}
+              aria-current={active ? 'page' : undefined}
+            >
+              <item.Icon size={22} />
+              <span>{item.shortLabel}</span>
+            </button>
+          );
+        })}
+      </nav>
+    </div>
+  );
+
+  function ProjectCard({ project, managementUser }: { project: Project; managementUser: boolean }) {
+    const meta = statusMeta(project.status);
+    const openPunch = project.open_punch_items || 0;
+
+    return (
+      <article className="btm-project-card">
+        <button
+          type="button"
+          onClick={() => navigate(`/mobile/project/${project.id}`)}
+          className="btm-project-main"
+        >
+          <span className="btm-project-pin" aria-hidden="true">
+            <MapPin size={24} />
+          </span>
+          <span className="btm-project-copy">
+            <strong>{project.address}</strong>
+            <small>{projectLabel(project)}</small>
+            <span className="btm-project-badges">
+              <span className={`btm-status-pill btm-status-${meta.tone}`}>{meta.label}</span>
+              {openPunch > 0 && <span className="btm-status-pill btm-status-danger">{openPunch} punch</span>}
+            </span>
+          </span>
+          <ChevronRight className="btm-project-chevron" size={22} />
+        </button>
+
+        <div className="btm-project-actions">
+          <button
+            type="button"
+            onClick={() => navigate(`/mobile/photos?projectId=${project.id}&camera=1`)}
+            className="btm-action-button btm-action-photo"
+            aria-label={`Take progress pictures for ${project.address}`}
+          >
+            <Camera size={22} />
+            <span>Take Photos</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate(`/mobile/project/${project.id}`)}
+            className="btm-action-button btm-action-open"
+          >
+            <FolderOpen size={22} />
+            <span>Open Project</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate(`/mobile/project/${project.id}/punch-list`)}
+            className={`btm-action-button ${openPunch > 0 ? 'btm-action-punch-hot' : 'btm-action-punch'}`}
+          >
+            <ClipboardList size={22} />
+            <span>Punch List</span>
+          </button>
+          {!managementUser && (
+            <button
+              type="button"
+              onClick={() => navigate(`/mobile/project/${project.id}/invoice`)}
+              className="btm-action-button btm-action-invoice"
+            >
+              <FileText size={22} />
+              <span>Invoice</span>
+            </button>
+          )}
         </div>
-      </div>
+      </article>
+    );
+  }
 
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+  function SimpleProjectButton({
+    project,
+    icon,
+    helper,
+    onClick,
+  }: {
+    project: Project;
+    icon: ReactNode;
+    helper: string;
+    onClick: () => void;
+  }) {
+    return (
+      <button type="button" onClick={onClick} className="btm-simple-row">
+        <span className="btm-simple-icon">{icon}</span>
+        <span>
+          <strong>{project.address}</strong>
+          <small>{helper}</small>
+        </span>
+        <ChevronRight size={20} />
+      </button>
+    );
+  }
+}
+
+function SectionHeader({
+  label,
+  actionLabel,
+  onAction,
+}: {
+  label: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <div className="btm-section-header">
+      <p>{label}</p>
+      {actionLabel && onAction && (
+        <button type="button" onClick={onAction}>
+          <Plus size={16} />
+          {actionLabel}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function EmptyState({ icon, title }: { icon: ReactNode; title: string }) {
+  return (
+    <div className="btm-empty-state">
+      {icon}
+      <p>{title}</p>
     </div>
   );
 }
