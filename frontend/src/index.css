@@ -437,50 +437,94 @@ textarea,
 .bt-desktop-shell .bg-white,
 .bt-desktop-shell .bg-gray-50,
 .bt-desktop-shell .bg-gray-100,
+.bt-desktop-shell .bg-gray-200,
+.bt-desktop-shell .bg-gray-300,
+.bt-desktop-shell .bg-gray-50\/55,
+.bt-desktop-shell .bg-gray-50\/70,
 .bt-desktop-shell .bg-slate-50,
 .bt-desktop-shell .bg-slate-100,
-.bt-desktop-shell .bg-slate-200 {
+.bt-desktop-shell .bg-slate-200,
+.bt-desktop-shell .bg-slate-300,
+.bt-desktop-shell .bg-slate-50\/70,
+.bt-desktop-shell .bg-zinc-50,
+.bt-desktop-shell .bg-neutral-50,
+.bt-desktop-shell .bg-stone-50 {
   background-color: var(--bt-surface) !important;
 }
 
 .bt-desktop-shell .hover\:bg-white:hover,
 .bt-desktop-shell .hover\:bg-gray-50:hover,
 .bt-desktop-shell .hover\:bg-gray-100:hover,
+.bt-desktop-shell .hover\:bg-gray-200:hover,
 .bt-desktop-shell .hover\:bg-slate-50:hover,
-.bt-desktop-shell .hover\:bg-slate-100:hover {
+.bt-desktop-shell .hover\:bg-slate-100:hover,
+.bt-desktop-shell .hover\:bg-slate-200:hover,
+.bt-desktop-shell .hover\:bg-blue-50\/35:hover,
+.bt-desktop-shell .hover\:bg-blue-50\/40:hover,
+.bt-desktop-shell .hover\:bg-blue-50\/50:hover,
+.bt-desktop-shell .hover\:bg-amber-50\/30:hover,
+.bt-desktop-shell .hover\:bg-amber-50\/40:hover {
   background-color: var(--bt-panel-2) !important;
 }
 
 .bt-desktop-shell .bg-blue-50,
-.bt-desktop-shell .bg-blue-100 {
+.bt-desktop-shell .bg-blue-100,
+.bt-desktop-shell .bg-blue-200,
+.bt-desktop-shell .to-blue-50\/45,
+.bt-desktop-shell .bg-indigo-50,
+.bt-desktop-shell .bg-indigo-100 {
   background-color: rgba(59, 130, 246, 0.14) !important;
 }
 
 .bt-desktop-shell .bg-green-50,
 .bt-desktop-shell .bg-green-100,
+.bt-desktop-shell .bg-green-200,
 .bt-desktop-shell .bg-emerald-50,
-.bt-desktop-shell .bg-emerald-100 {
+.bt-desktop-shell .bg-emerald-100,
+.bt-desktop-shell .bg-emerald-200 {
   background-color: rgba(16, 185, 129, 0.14) !important;
 }
 
 .bt-desktop-shell .bg-amber-50,
 .bt-desktop-shell .bg-amber-100,
+.bt-desktop-shell .bg-amber-200,
 .bt-desktop-shell .bg-orange-50,
 .bt-desktop-shell .bg-orange-100,
+.bt-desktop-shell .bg-orange-200,
+.bt-desktop-shell .bg-yellow-50,
 .bt-desktop-shell .bg-yellow-100 {
   background-color: rgba(231, 139, 74, 0.14) !important;
 }
 
 .bt-desktop-shell .bg-red-50,
-.bt-desktop-shell .bg-red-100 {
+.bt-desktop-shell .bg-red-100,
+.bt-desktop-shell .bg-red-200,
+.bt-desktop-shell .bg-rose-50,
+.bt-desktop-shell .bg-rose-100 {
   background-color: rgba(220, 38, 38, 0.14) !important;
 }
 
 .bt-desktop-shell .bg-purple-50,
 .bt-desktop-shell .bg-purple-100,
+.bt-desktop-shell .bg-violet-50,
+.bt-desktop-shell .bg-violet-100,
 .bt-desktop-shell .bg-cyan-50,
 .bt-desktop-shell .bg-cyan-100 {
   background-color: rgba(125, 161, 195, 0.14) !important;
+}
+
+.bt-desktop-shell .hover\:bg-blue-50:hover,
+.bt-desktop-shell .hover\:bg-blue-100:hover,
+.bt-desktop-shell .hover\:bg-green-50:hover,
+.bt-desktop-shell .hover\:bg-green-100:hover,
+.bt-desktop-shell .hover\:bg-emerald-50:hover,
+.bt-desktop-shell .hover\:bg-emerald-100:hover,
+.bt-desktop-shell .hover\:bg-amber-50:hover,
+.bt-desktop-shell .hover\:bg-amber-100:hover,
+.bt-desktop-shell .hover\:bg-orange-50:hover,
+.bt-desktop-shell .hover\:bg-red-50:hover,
+.bt-desktop-shell .hover\:bg-red-100:hover {
+  background-color: var(--bt-panel-2) !important;
 }
 
 .bt-desktop-shell .text-gray-950,
@@ -510,16 +554,25 @@ textarea,
 .bt-desktop-shell .text-blue-500,
 .bt-desktop-shell .text-blue-600,
 .bt-desktop-shell .text-blue-700,
-.bt-desktop-shell .text-blue-800 {
-  color: #AFCFFF !important;
-}
-
+.bt-desktop-shell .text-blue-800,
 .bt-desktop-shell .text-indigo-500,
 .bt-desktop-shell .text-indigo-600,
 .bt-desktop-shell .text-indigo-700,
 .bt-desktop-shell .text-indigo-800,
 .bt-desktop-shell .text-indigo-900,
 .bt-desktop-shell .text-indigo-950 {
+  color: #AFCFFF !important;
+}
+
+.bt-desktop-shell .text-violet-500,
+.bt-desktop-shell .text-violet-600,
+.bt-desktop-shell .text-violet-700,
+.bt-desktop-shell .text-violet-800,
+.bt-desktop-shell .text-purple-500,
+.bt-desktop-shell .text-purple-600,
+.bt-desktop-shell .text-purple-700,
+.bt-desktop-shell .text-purple-800,
+.bt-desktop-shell .text-purple-900 {
   color: #C7D2FE !important;
 }
 
@@ -555,10 +608,6 @@ textarea,
   color: #FCA5A5 !important;
 }
 
-.bt-desktop-shell .text-purple-600,
-.bt-desktop-shell .text-purple-700,
-.bt-desktop-shell .text-purple-800,
-.bt-desktop-shell .text-purple-900,
 .bt-desktop-shell .text-cyan-700,
 .bt-desktop-shell .text-cyan-800,
 .bt-desktop-shell .text-cyan-900 {
@@ -601,27 +650,60 @@ textarea,
 .bt-desktop-shell [style*="color: #1D4ED8"],
 .bt-desktop-shell [style*="color:#1D4ED8"],
 .bt-desktop-shell [style*="color: rgb(29, 78, 216)"],
+.bt-desktop-shell [style*="color: #1E40AF"],
+.bt-desktop-shell [style*="color:#1E40AF"],
+.bt-desktop-shell [style*="color: rgb(30, 64, 175)"],
 .bt-desktop-shell [style*="color: #2563EB"],
 .bt-desktop-shell [style*="color:#2563EB"],
-.bt-desktop-shell [style*="color: rgb(37, 99, 235)"] {
+.bt-desktop-shell [style*="color: rgb(37, 99, 235)"],
+.bt-desktop-shell [style*="color: #3B82F6"],
+.bt-desktop-shell [style*="color:#3B82F6"],
+.bt-desktop-shell [style*="color: rgb(59, 130, 246)"],
+.bt-desktop-shell [style*="color: #0EA5E9"],
+.bt-desktop-shell [style*="color:#0EA5E9"],
+.bt-desktop-shell [style*="color: rgb(14, 165, 233)"] {
   color: #AFCFFF !important;
 }
 
 .bt-desktop-shell [style*="color: #047857"],
 .bt-desktop-shell [style*="color:#047857"],
-.bt-desktop-shell [style*="color: rgb(4, 120, 87)"] {
+.bt-desktop-shell [style*="color: rgb(4, 120, 87)"],
+.bt-desktop-shell [style*="color: #059669"],
+.bt-desktop-shell [style*="color:#059669"],
+.bt-desktop-shell [style*="color: rgb(5, 150, 105)"],
+.bt-desktop-shell [style*="color: #16A34A"],
+.bt-desktop-shell [style*="color:#16A34A"],
+.bt-desktop-shell [style*="color: rgb(22, 163, 74)"],
+.bt-desktop-shell [style*="color: #166534"],
+.bt-desktop-shell [style*="color:#166534"],
+.bt-desktop-shell [style*="color: rgb(22, 101, 52)"],
+.bt-desktop-shell [style*="color: #22C55E"],
+.bt-desktop-shell [style*="color:#22C55E"],
+.bt-desktop-shell [style*="color: rgb(34, 197, 94)"] {
   color: #86EFAC !important;
 }
 
 .bt-desktop-shell [style*="color: #92400E"],
 .bt-desktop-shell [style*="color:#92400E"],
 .bt-desktop-shell [style*="color: rgb(146, 64, 14)"],
+.bt-desktop-shell [style*="color: #9A3412"],
+.bt-desktop-shell [style*="color:#9A3412"],
+.bt-desktop-shell [style*="color: rgb(154, 52, 18)"],
+.bt-desktop-shell [style*="color: #A16207"],
+.bt-desktop-shell [style*="color:#A16207"],
+.bt-desktop-shell [style*="color: rgb(161, 98, 7)"],
 .bt-desktop-shell [style*="color: #C2410C"],
 .bt-desktop-shell [style*="color:#C2410C"],
 .bt-desktop-shell [style*="color: rgb(194, 65, 12)"],
 .bt-desktop-shell [style*="color: #D97706"],
 .bt-desktop-shell [style*="color:#D97706"],
-.bt-desktop-shell [style*="color: rgb(217, 119, 6)"] {
+.bt-desktop-shell [style*="color: rgb(217, 119, 6)"],
+.bt-desktop-shell [style*="color: #EA580C"],
+.bt-desktop-shell [style*="color:#EA580C"],
+.bt-desktop-shell [style*="color: rgb(234, 88, 12)"],
+.bt-desktop-shell [style*="color: #F97316"],
+.bt-desktop-shell [style*="color:#F97316"],
+.bt-desktop-shell [style*="color: rgb(249, 115, 22)"] {
   color: #FBBF77 !important;
 }
 
@@ -630,8 +712,23 @@ textarea,
 .bt-desktop-shell [style*="color: rgb(185, 28, 28)"],
 .bt-desktop-shell [style*="color: #DC2626"],
 .bt-desktop-shell [style*="color:#DC2626"],
-.bt-desktop-shell [style*="color: rgb(220, 38, 38)"] {
+.bt-desktop-shell [style*="color: rgb(220, 38, 38)"],
+.bt-desktop-shell [style*="color: #EF4444"],
+.bt-desktop-shell [style*="color:#EF4444"],
+.bt-desktop-shell [style*="color: rgb(239, 68, 68)"] {
   color: #FCA5A5 !important;
+}
+
+.bt-desktop-shell [style*="color: #6D28D9"],
+.bt-desktop-shell [style*="color:#6D28D9"],
+.bt-desktop-shell [style*="color: rgb(109, 40, 217)"],
+.bt-desktop-shell [style*="color: #7C3AED"],
+.bt-desktop-shell [style*="color:#7C3AED"],
+.bt-desktop-shell [style*="color: rgb(124, 58, 237)"],
+.bt-desktop-shell [style*="color: #8B5CF6"],
+.bt-desktop-shell [style*="color:#8B5CF6"],
+.bt-desktop-shell [style*="color: rgb(139, 92, 246)"] {
+  color: #C7D2FE !important;
 }
 
 .bt-desktop-shell .border-gray-200,
@@ -688,15 +785,121 @@ textarea,
   color: #6F7780 !important;
 }
 
+.bt-desktop-shell .disabled\:opacity-50:disabled,
+.bt-desktop-shell .disabled\:opacity-60:disabled,
+.bt-desktop-shell .disabled\:opacity-70:disabled,
+.bt-desktop-shell button:disabled,
+.bt-desktop-shell input:disabled,
+.bt-desktop-shell select:disabled,
+.bt-desktop-shell textarea:disabled {
+  opacity: 0.82 !important;
+}
+
+.bt-desktop-shell a:not(.text-white):not([class*="bg-gray-900"]):not([class*="bg-blue-600"]),
+.bt-desktop-shell button:not(.text-white):not([class*="bg-gray-900"]):not([class*="bg-blue-600"]) {
+  text-decoration-color: color-mix(in srgb, currentColor 55%, transparent);
+}
+
 .bt-desktop-shell [style*="background: white"],
 .bt-desktop-shell [style*="background:white"],
+.bt-desktop-shell [style*="background: #FFFFFF"],
+.bt-desktop-shell [style*="background:#FFFFFF"],
+.bt-desktop-shell [style*="background-color: #FFFFFF"],
+.bt-desktop-shell [style*="background-color:#FFFFFF"],
+.bt-desktop-shell [style*="background: rgb(255, 255, 255)"],
+.bt-desktop-shell [style*="background-color: rgb(255, 255, 255)"],
 .bt-desktop-shell [style*="background: #F8FAFC"],
 .bt-desktop-shell [style*="background:#F8FAFC"],
+.bt-desktop-shell [style*="background-color: #F8FAFC"],
+.bt-desktop-shell [style*="background-color:#F8FAFC"],
+.bt-desktop-shell [style*="background: rgb(248, 250, 252)"],
+.bt-desktop-shell [style*="background-color: rgb(248, 250, 252)"],
+.bt-desktop-shell [style*="background: #F9FAFB"],
+.bt-desktop-shell [style*="background:#F9FAFB"],
+.bt-desktop-shell [style*="background-color: #F9FAFB"],
+.bt-desktop-shell [style*="background-color:#F9FAFB"],
+.bt-desktop-shell [style*="background: rgb(249, 250, 251)"],
+.bt-desktop-shell [style*="background-color: rgb(249, 250, 251)"],
 .bt-desktop-shell [style*="background: #F0F2F5"],
 .bt-desktop-shell [style*="background:#F0F2F5"],
+.bt-desktop-shell [style*="background-color: #F0F2F5"],
+.bt-desktop-shell [style*="background-color:#F0F2F5"],
+.bt-desktop-shell [style*="background: rgb(240, 242, 245)"],
+.bt-desktop-shell [style*="background-color: rgb(240, 242, 245)"],
+.bt-desktop-shell [style*="background: #F3F4F6"],
+.bt-desktop-shell [style*="background:#F3F4F6"],
+.bt-desktop-shell [style*="background-color: #F3F4F6"],
+.bt-desktop-shell [style*="background-color:#F3F4F6"],
+.bt-desktop-shell [style*="background: rgb(243, 244, 246)"],
+.bt-desktop-shell [style*="background-color: rgb(243, 244, 246)"],
 .bt-desktop-shell [style*="background: #E4EAF2"],
-.bt-desktop-shell [style*="background:#E4EAF2"] {
+.bt-desktop-shell [style*="background:#E4EAF2"],
+.bt-desktop-shell [style*="background-color: #E4EAF2"],
+.bt-desktop-shell [style*="background-color:#E4EAF2"],
+.bt-desktop-shell [style*="background: rgb(228, 234, 242)"],
+.bt-desktop-shell [style*="background-color: rgb(228, 234, 242)"],
+.bt-desktop-shell [style*="background: #D8E0EA"],
+.bt-desktop-shell [style*="background:#D8E0EA"],
+.bt-desktop-shell [style*="background: #C7D2DE"],
+.bt-desktop-shell [style*="background:#C7D2DE"],
+.bt-desktop-shell [style*="background: #E2E8F0"],
+.bt-desktop-shell [style*="background:#E2E8F0"],
+.bt-desktop-shell [style*="background: rgb(226, 232, 240)"],
+.bt-desktop-shell [style*="background-color: rgb(226, 232, 240)"] {
   background: var(--bt-surface) !important;
+  background-color: var(--bt-surface) !important;
+}
+
+.bt-desktop-shell [style*="background: #EFF6FF"],
+.bt-desktop-shell [style*="background:#EFF6FF"],
+.bt-desktop-shell [style*="background-color: #EFF6FF"],
+.bt-desktop-shell [style*="background-color:#EFF6FF"],
+.bt-desktop-shell [style*="background: rgb(239, 246, 255)"],
+.bt-desktop-shell [style*="background-color: rgb(239, 246, 255)"],
+.bt-desktop-shell [style*="background: #DBEAFE"],
+.bt-desktop-shell [style*="background:#DBEAFE"],
+.bt-desktop-shell [style*="background-color: #DBEAFE"],
+.bt-desktop-shell [style*="background-color:#DBEAFE"],
+.bt-desktop-shell [style*="background: rgb(219, 234, 254)"],
+.bt-desktop-shell [style*="background-color: rgb(219, 234, 254)"],
+.bt-desktop-shell [style*="background: #ECFDF5"],
+.bt-desktop-shell [style*="background:#ECFDF5"],
+.bt-desktop-shell [style*="background-color: #ECFDF5"],
+.bt-desktop-shell [style*="background-color:#ECFDF5"],
+.bt-desktop-shell [style*="background: rgb(236, 253, 245)"],
+.bt-desktop-shell [style*="background-color: rgb(236, 253, 245)"],
+.bt-desktop-shell [style*="background: #DCFCE7"],
+.bt-desktop-shell [style*="background:#DCFCE7"],
+.bt-desktop-shell [style*="background: #FEF3C7"],
+.bt-desktop-shell [style*="background:#FEF3C7"],
+.bt-desktop-shell [style*="background-color: #FEF3C7"],
+.bt-desktop-shell [style*="background-color:#FEF3C7"],
+.bt-desktop-shell [style*="background: rgb(254, 243, 199)"],
+.bt-desktop-shell [style*="background-color: rgb(254, 243, 199)"],
+.bt-desktop-shell [style*="background: #FFFBEB"],
+.bt-desktop-shell [style*="background:#FFFBEB"],
+.bt-desktop-shell [style*="background-color: #FFFBEB"],
+.bt-desktop-shell [style*="background-color:#FFFBEB"],
+.bt-desktop-shell [style*="background: rgb(255, 251, 235)"],
+.bt-desktop-shell [style*="background-color: rgb(255, 251, 235)"],
+.bt-desktop-shell [style*="background: #FFF7ED"],
+.bt-desktop-shell [style*="background:#FFF7ED"],
+.bt-desktop-shell [style*="background: #FEF2F2"],
+.bt-desktop-shell [style*="background:#FEF2F2"],
+.bt-desktop-shell [style*="background-color: #FEF2F2"],
+.bt-desktop-shell [style*="background-color:#FEF2F2"],
+.bt-desktop-shell [style*="background: rgb(254, 242, 242)"],
+.bt-desktop-shell [style*="background-color: rgb(254, 242, 242)"],
+.bt-desktop-shell [style*="background: #FEE2E2"],
+.bt-desktop-shell [style*="background:#FEE2E2"],
+.bt-desktop-shell [style*="background: #F5F3FF"],
+.bt-desktop-shell [style*="background:#F5F3FF"],
+.bt-desktop-shell [style*="background-color: #F5F3FF"],
+.bt-desktop-shell [style*="background-color:#F5F3FF"],
+.bt-desktop-shell [style*="background: rgb(245, 243, 255)"],
+.bt-desktop-shell [style*="background-color: rgb(245, 243, 255)"] {
+  background: var(--bt-panel-2) !important;
+  background-color: var(--bt-panel-2) !important;
 }
 
 .bt-desktop-shell [style*="box-shadow"] {
