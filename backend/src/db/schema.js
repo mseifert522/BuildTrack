@@ -409,9 +409,6 @@ function initializeSchema() {
     CREATE INDEX IF NOT EXISTS idx_construction_plan_project_order
       ON construction_plan_items(project_id, sort_order);
 
-    CREATE INDEX IF NOT EXISTS idx_construction_plan_watch_status
-      ON construction_plan_items(project_id, status, verification_status, invoice_status, target_date);
-
     -- Multiple central scope-of-work sections per project.
     CREATE TABLE IF NOT EXISTS project_scopes (
       id TEXT PRIMARY KEY,
