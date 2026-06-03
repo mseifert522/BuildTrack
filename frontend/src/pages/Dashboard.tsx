@@ -236,7 +236,7 @@ export default function Dashboard() {
       trend: notStarted > 0 ? `${notStarted} queued` : 'No queued rehabs',
       icon: FolderOpen,
       to: '/projects?status=active_rehab',
-      accent: '#2563EB',
+      accent: '#E78B4A',
       progress: completionRate,
     },
     {
@@ -246,7 +246,7 @@ export default function Dashboard() {
       trend: `${formatMoney(paidInvoiceAmount)} paid to date`,
       icon: FileText,
       to: '/invoices',
-      accent: '#047857',
+      accent: '#5DA271',
       progress: budgetExposureRate,
     },
     {
@@ -256,7 +256,7 @@ export default function Dashboard() {
       trend: openPunchItems > 0 ? 'Needs field follow-up' : 'No open punch exposure',
       icon: ClipboardList,
       to: '/projects',
-      accent: openPunchItems > 0 ? '#C2410C' : '#047857',
+      accent: openPunchItems > 0 ? '#D46A4C' : '#5DA271',
       progress: openPunchItems > 0 ? Math.min(100, openPunchItems * 8) : 100,
     },
   ];
@@ -271,7 +271,7 @@ export default function Dashboard() {
       value: totalProjects,
       sub: 'All tracked projects',
       icon: FolderOpen,
-      gradient: 'linear-gradient(135deg, #1E3A5F 0%, #2563EB 100%)',
+      gradient: 'linear-gradient(135deg, #1A1D21 0%, #E78B4A 100%)',
       iconBg: 'rgba(255,255,255,0.15)',
       trend: 'Project total',
       trendUp: true,
@@ -282,7 +282,7 @@ export default function Dashboard() {
       value: activeRehabs,
       sub: 'Currently under construction',
       icon: TrendingUp,
-      gradient: 'linear-gradient(135deg, #7C2D12 0%, #EA580C 100%)',
+      gradient: 'linear-gradient(135deg, #231811 0%, #D46A4C 100%)',
       iconBg: 'rgba(255,255,255,0.15)',
       trend: activeRehabs > 0 ? 'In progress' : 'None active',
       trendUp: activeRehabs > 0,
@@ -304,7 +304,7 @@ export default function Dashboard() {
       value: completedProjects,
       sub: 'Finished rehab projects',
       icon: CheckCircle2,
-      gradient: 'linear-gradient(135deg, #065F46 0%, #059669 100%)',
+      gradient: 'linear-gradient(135deg, #102018 0%, #5DA271 100%)',
       iconBg: 'rgba(255,255,255,0.15)',
       trend: completedProjects > 0 ? 'Completed' : 'None complete',
       trendUp: completedProjects > 0,
@@ -315,7 +315,7 @@ export default function Dashboard() {
       value: longTermHoldings,
       sub: 'Held portfolio properties',
       icon: FolderOpen,
-      gradient: 'linear-gradient(135deg, #78350F 0%, #D97706 100%)',
+      gradient: 'linear-gradient(135deg, #25180C 0%, #B7793C 100%)',
       iconBg: 'rgba(255,255,255,0.15)',
       trend: longTermHoldings > 0 ? 'Holding' : 'None held',
       trendUp: longTermHoldings > 0,
@@ -326,7 +326,7 @@ export default function Dashboard() {
       value: commercialProjects,
       sub: 'Commercial project pipeline',
       icon: FolderOpen,
-      gradient: 'linear-gradient(135deg, #155E75 0%, #0891B2 100%)',
+      gradient: 'linear-gradient(135deg, #102027 0%, #4E879A 100%)',
       iconBg: 'rgba(255,255,255,0.15)',
       trend: commercialProjects > 0 ? 'Commercial' : 'None listed',
       trendUp: commercialProjects > 0,
@@ -338,7 +338,7 @@ export default function Dashboard() {
     <div className="bt-desktop-page bt-dashboard-page" style={{ minHeight: '100%' }}>
       {/* Hero header bar */}
       <div
-        className="border-b border-slate-200 bg-white px-6 py-5 md:px-8"
+        className="border-b border-slate-800 bg-white px-6 py-5 md:px-8"
         style={{
           boxShadow: '0 1px 2px rgba(15,23,42,0.04)',
         }}
@@ -347,13 +347,13 @@ export default function Dashboard() {
           <div>
             <div className="flex items-center gap-3 mb-1">
               <span
-                className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-blue-700"
+                className="inline-flex items-center gap-1.5 rounded-sm border border-orange-400/70 bg-orange-950/30 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-orange-300"
               >
                 <span className="w-1.5 h-1.5 rounded-full bg-current" />
                 Operations Dashboard
               </span>
             </div>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-950">
+            <h1 className="text-xl font-bold tracking-tight text-slate-950">
               {greeting()}, {firstName}
             </h1>
             <p className="mt-1 text-sm font-medium text-slate-500">
@@ -372,7 +372,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="px-6 py-6 md:px-8 max-w-7xl mx-auto space-y-6">
+      <div className="px-6 py-6 md:px-8 max-w-7xl mx-auto space-y-4">
         {/* Desktop command center */}
         <section className="grid gap-4 xl:grid-cols-[1.18fr_0.82fr]" aria-label="BuildTrack command center">
           <div className="bt-card p-4">
@@ -392,19 +392,19 @@ export default function Dashboard() {
                   key={card.label}
                   type="button"
                   onClick={() => navigate(card.to)}
-                  className="min-h-[156px] rounded-lg border border-slate-200 bg-slate-50 p-4 text-left transition-colors hover:border-blue-300 hover:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="min-h-[138px] rounded-sm border border-slate-700 bg-slate-50 p-3 text-left transition-colors hover:border-orange-400 hover:bg-white focus:outline-none focus:ring-2 focus:ring-orange-500"
                 >
                   <div className="mb-3 flex items-start justify-between gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-xl text-white" style={{ background: card.accent }}>
                       <card.icon className="h-5 w-5" />
                     </div>
-                    <span className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-1 text-[11px] font-bold text-slate-600 ring-1 ring-slate-200">
+                    <span className="inline-flex items-center gap-1 rounded-sm bg-white px-2 py-1 text-[11px] font-bold text-slate-600 ring-1 ring-slate-700">
                       {card.progress >= 65 ? <TrendingUp className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
                       {card.trend}
                     </span>
                   </div>
                   <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{card.label}</p>
-                  <p className="mt-1 text-2xl font-bold text-slate-950">{card.value}</p>
+                  <p className="mt-1 text-xl font-bold text-slate-950">{card.value}</p>
                   <p className="mt-1 min-h-10 text-sm font-medium leading-5 text-slate-600">{card.detail}</p>
                   <div className="mt-4 h-2 overflow-hidden rounded-full bg-white ring-1 ring-slate-200" aria-hidden="true">
                     <div className="h-full rounded-full" style={{ width: `${card.progress}%`, background: card.accent }} />
@@ -445,7 +445,7 @@ export default function Dashboard() {
           {kpiCards.map(card => (
             <div
               key={card.label}
-              className="relative min-h-[88px] cursor-pointer overflow-hidden rounded-lg border border-slate-200 bg-white p-3 transition-colors hover:border-blue-300 hover:bg-slate-50 active:scale-[0.99]"
+              className="relative min-h-[78px] cursor-pointer overflow-hidden rounded-sm border border-slate-700 bg-white p-3 transition-colors hover:border-orange-400 hover:bg-slate-50 active:scale-[0.99]"
               style={{
                 boxShadow: '0 1px 2px rgba(15,23,42,0.04)',
               }}
@@ -490,9 +490,9 @@ export default function Dashboard() {
             }}
           >
             <div
-              className="flex items-center justify-between gap-4 border-b border-slate-200 px-5 py-4"
+              className="flex items-center justify-between gap-4 border-b border-slate-700 px-4 py-3"
               style={{
-                background: '#F8FAFC',
+                background: 'var(--bt-panel-2)',
               }}
             >
               <div className="flex items-center gap-3">
@@ -520,7 +520,7 @@ export default function Dashboard() {
                 <p className="mt-1 text-xs text-slate-500">Project notes will appear here as they are added</p>
               </div>
             ) : (
-              <div className="max-h-[660px] min-h-[520px] space-y-3 overflow-y-auto p-4">
+              <div className="max-h-[640px] min-h-[460px] space-y-2 overflow-y-auto p-3">
                 {recentNotes.map((note) => {
                   const noteStyle = getNoteTypeStyle(note.note_type);
                   const statusStyle = getProjectStatusStyle(note.project_status);
@@ -533,7 +533,7 @@ export default function Dashboard() {
                       onKeyDown={event => {
                         if (event.key === 'Enter') navigate(`/projects/${note.project_id}`);
                       }}
-                      className="group relative flex cursor-pointer items-start gap-4 rounded-lg border border-slate-200 bg-white p-4 transition-colors hover:border-blue-300 hover:bg-slate-50"
+                      className="group relative flex cursor-pointer items-start gap-3 rounded-sm border border-slate-700 bg-white p-3 transition-colors hover:border-orange-400 hover:bg-slate-50"
                       style={{
                         boxShadow: '0 1px 2px rgba(15,23,42,0.04)',
                       }}
@@ -600,7 +600,7 @@ export default function Dashboard() {
           <div className="space-y-5">
             {/* Quick Actions */}
             <div
-              className="bt-card p-5"
+              className="bt-card p-4"
             >
               <h3 className="font-bold text-slate-950 text-sm mb-4">Quick Actions</h3>
               <div className="grid grid-cols-2 gap-3">
@@ -613,7 +613,7 @@ export default function Dashboard() {
                   <Link
                     key={a.to}
                     to={a.to}
-                    className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-4 text-center transition-colors hover:border-blue-300 hover:bg-white"
+                    className="flex min-h-20 flex-col items-center justify-center gap-2 rounded-sm border border-slate-700 bg-slate-50 p-3 text-center transition-colors hover:border-orange-400 hover:bg-white"
                   >
                     <a.icon className="w-5 h-5" style={{ color: a.color }} />
                     <span className="text-xs font-bold text-slate-700">{a.label}</span>
@@ -627,7 +627,7 @@ export default function Dashboard() {
               className="bt-card overflow-hidden"
             >
               <div
-                className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-5 py-4"
+                className="flex items-center justify-between border-b border-slate-700 bg-slate-50 px-4 py-3"
               >
                 <div className="flex items-center gap-2.5">
                   <div
@@ -682,7 +682,7 @@ export default function Dashboard() {
           <div className="absolute inset-0 bg-black/45 backdrop-blur-sm" />
           <div
             className="relative w-full max-w-3xl max-h-[82vh] overflow-hidden rounded-2xl shadow-2xl"
-            style={{ background: 'white', border: '1px solid #E5E7EB' }}
+            style={{ background: 'var(--bt-surface)', border: '1px solid var(--bt-border-strong)' }}
           >
             <div className="flex items-start justify-between gap-4 px-6 py-5 border-b border-gray-100">
               <div className="flex items-start gap-3">

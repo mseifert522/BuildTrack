@@ -156,14 +156,14 @@ export default function Layout({ children }: LayoutProps) {
         <div className="flex items-center gap-3 min-w-0">
           <div
             className="w-9 h-9 rounded-xl overflow-hidden flex-shrink-0 border-2"
-            style={{ borderColor: 'rgba(96,165,250,0.45)' }}
+            style={{ borderColor: 'rgba(231,139,74,0.72)' }}
           >
             <img src="/buildtrack-logo-mark.png" alt="BuildTrack" className="h-full w-full object-cover" />
           </div>
           {!collapsed && (
             <div className="min-w-0">
               <p className="text-white font-bold text-sm leading-tight truncate">BuildTrack</p>
-              <p className="text-xs font-medium truncate" style={{ color: '#93C5FD' }}>Construction Ops</p>
+              <p className="text-xs font-medium truncate" style={{ color: '#F4A261' }}>Construction Ops</p>
             </div>
           )}
         </div>
@@ -204,10 +204,10 @@ export default function Layout({ children }: LayoutProps) {
                 padding: collapsed ? '10px 0' : '10px 12px',
                 justifyContent: collapsed ? 'center' : 'flex-start',
                 background: active
-                  ? 'rgba(37,99,235,0.16)'
+                  ? 'rgba(231,139,74,0.12)'
                   : 'transparent',
-                color: active ? '#BFDBFE' : 'rgba(255,255,255,0.64)',
-                borderLeft: active ? '3px solid #60A5FA' : '3px solid transparent',
+                color: active ? '#F4A261' : 'rgba(220,222,224,0.68)',
+                borderLeft: active ? '3px solid #E78B4A' : '3px solid transparent',
               }}
             >
               <Icon className="w-5 h-5 flex-shrink-0" style={{ opacity: active ? 1 : 0.7 }} />
@@ -217,7 +217,7 @@ export default function Layout({ children }: LayoutProps) {
                 </span>
               )}
               {active && !collapsed && (
-                <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: '#60A5FA' }} />
+                <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: '#E78B4A' }} />
               )}
               {collapsed && (
                 <div
@@ -299,8 +299,8 @@ export default function Layout({ children }: LayoutProps) {
         className="hidden lg:flex flex-col flex-shrink-0 transition-all duration-300"
         style={{
           width: W,
-          background: '#111827',
-          boxShadow: '1px 0 0 rgba(15,23,42,0.45)',
+          background: '#080A0C',
+          boxShadow: '1px 0 0 #2E343B',
         }}
       >
         <SidebarContent collapsed={sidebarCollapsed} />
@@ -347,10 +347,10 @@ export default function Layout({ children }: LayoutProps) {
         <header
           className="bt-desktop-topbar bt-horizontal-lock flex items-center justify-between gap-3 px-4 sm:gap-4 sm:px-6 flex-shrink-0"
           style={{
-            height: 64,
-            background: '#FFFFFF',
+            height: 58,
+            background: '#0B0D0F',
             borderBottom: '1px solid var(--bt-border)',
-            boxShadow: '0 1px 2px rgba(15,23,42,0.04)',
+            boxShadow: '0 1px 0 #222831',
           }}
         >
           {/* Left: hamburger + breadcrumb */}
@@ -373,7 +373,7 @@ export default function Layout({ children }: LayoutProps) {
           {/* Global search */}
           <div className="relative hidden md:block flex-1 max-w-2xl">
             <div className="relative">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: '#6B7280' }} />
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: '#8A929C' }} />
               <input
                 value={searchTerm}
                 onChange={e => {
@@ -382,9 +382,9 @@ export default function Layout({ children }: LayoutProps) {
                 }}
                 onFocus={() => setSearchOpen(true)}
                 placeholder="Search anything in BuildTrack..."
-                className="w-full rounded-lg py-2.5 pl-10 pr-10 text-sm font-medium placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full rounded-md py-2 pl-10 pr-10 text-sm font-medium placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
                 style={{
-                  background: '#F8FAFC',
+                  background: '#111315',
                   color: 'var(--bt-text)',
                   border: '1px solid var(--bt-border)',
                 }}
@@ -451,9 +451,9 @@ export default function Layout({ children }: LayoutProps) {
                 aria-label="User Management"
                 className="p-2 rounded-xl transition-all sm:p-2.5"
                 style={{
-                  background: location.pathname.startsWith('/users') ? '#F3F4F6' : '#F9FAFB',
-                  border: `1px solid ${location.pathname.startsWith('/users') ? '#2563EB' : '#E5E7EB'}`,
-                  color: location.pathname.startsWith('/users') ? '#2563EB' : '#64748B',
+                  background: location.pathname.startsWith('/users') ? '#1E1610' : '#111315',
+                  border: `1px solid ${location.pathname.startsWith('/users') ? '#E78B4A' : '#343A42'}`,
+                  color: location.pathname.startsWith('/users') ? '#F4A261' : '#B8BEC6',
                 }}
               >
                 <Users className="w-[18px] h-[18px]" />
@@ -468,9 +468,9 @@ export default function Layout({ children }: LayoutProps) {
                 aria-label="Settings"
                 className="p-2 rounded-xl transition-all sm:p-2.5"
                 style={{
-                  background: location.pathname.startsWith('/settings') ? '#F3F4F6' : '#F9FAFB',
-                  border: `1px solid ${location.pathname.startsWith('/settings') ? '#2563EB' : '#E5E7EB'}`,
-                  color: location.pathname.startsWith('/settings') ? '#2563EB' : '#64748B',
+                  background: location.pathname.startsWith('/settings') ? '#1E1610' : '#111315',
+                  border: `1px solid ${location.pathname.startsWith('/settings') ? '#E78B4A' : '#343A42'}`,
+                  color: location.pathname.startsWith('/settings') ? '#F4A261' : '#B8BEC6',
                 }}
               >
                 <Settings className="w-[18px] h-[18px]" />
@@ -480,7 +480,7 @@ export default function Layout({ children }: LayoutProps) {
             {/* Notification bell */}
             <button
               className="relative p-2 rounded-xl transition-all sm:p-2.5"
-              style={{ background: '#F9FAFB', border: '1px solid #E5E7EB', color: '#64748B' }}
+              style={{ background: '#111315', border: '1px solid #343A42', color: '#B8BEC6' }}
               aria-label="Notifications"
             >
               <Bell className="w-[18px] h-[18px]" />
@@ -491,15 +491,15 @@ export default function Layout({ children }: LayoutProps) {
             <div className="relative">
               <button
                 onClick={() => setProfileOpen(!profileOpen)}
-                className="flex h-11 min-w-0 max-w-[176px] cursor-pointer items-center gap-2 overflow-hidden rounded-lg px-2.5 py-0 transition-all"
-                style={{ background: '#F9FAFB', border: '1px solid #E5E7EB' }}
+                className="flex h-10 min-w-0 max-w-[176px] cursor-pointer items-center gap-2 overflow-hidden rounded-md px-2.5 py-0 transition-all"
+                style={{ background: '#111315', border: '1px solid #343A42' }}
                 aria-label="Open profile menu"
               >
                 <Avatar src={user?.avatar_url} name={user?.name} size={30} />
                 <div className="hidden min-w-0 text-left sm:block">
                   <p className="truncate text-[13px] font-bold leading-4 text-gray-900">{user?.name}</p>
                   <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
-                    <p className="truncate text-[11px] font-semibold leading-3 text-blue-700">
+                    <p className="truncate text-[11px] font-semibold leading-3" style={{ color: '#F4A261' }}>
                       {user ? roleLabels[user.role] : ''}
                     </p>
                     <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full" style={{ background: '#059669' }} aria-label="Online now" />
@@ -513,11 +513,11 @@ export default function Layout({ children }: LayoutProps) {
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setProfileOpen(false)} />
                   <div
-                    className="absolute right-0 top-full mt-2 w-72 rounded-2xl shadow-xl z-20 overflow-hidden"
-                    style={{ background: 'white', border: '1px solid #E5E7EB' }}
+                    className="absolute right-0 top-full mt-2 w-72 rounded-md shadow-xl z-20 overflow-hidden"
+                    style={{ background: '#111315', border: '1px solid #E78B4A' }}
                   >
                     {/* Profile header */}
-                    <div className="p-4 border-b" style={{ borderColor: '#F3F4F6' }}>
+                    <div className="p-4 border-b" style={{ borderColor: '#343A42' }}>
                       <div className="flex items-center gap-3">
                         {/* Avatar with upload overlay */}
                         <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
@@ -548,8 +548,8 @@ export default function Layout({ children }: LayoutProps) {
                         <button
                           onClick={() => fileInputRef.current?.click()}
                           disabled={uploadingAvatar}
-                          className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-colors"
-                          style={{ background: '#F3F4F6', color: '#374151' }}
+                          className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-colors"
+                          style={{ background: '#171A1D', color: '#E7E0D7', border: '1px solid #343A42' }}
                         >
                           <Camera className="w-3.5 h-3.5" />
                           {uploadingAvatar ? 'Uploading...' : 'Upload Photo'}
@@ -557,8 +557,8 @@ export default function Layout({ children }: LayoutProps) {
                         {user?.avatar_url && (
                           <button
                             onClick={handleRemoveAvatar}
-                            className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-                            style={{ background: '#FEF2F2', color: '#DC2626' }}
+                            className="px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
+                            style={{ background: '#261010', color: '#FCA5A5', border: '1px solid #7F1D1D' }}
                             title="Remove photo"
                             aria-label="Remove profile photo"
                           >
@@ -583,7 +583,7 @@ export default function Layout({ children }: LayoutProps) {
                         <Link
                           to="/users"
                           onClick={() => setProfileOpen(false)}
-                          className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                          className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                         >
                           <Users className="w-4 h-4 text-gray-400" />
                           User Management
@@ -593,17 +593,17 @@ export default function Layout({ children }: LayoutProps) {
                         <Link
                           to="/settings"
                           onClick={() => setProfileOpen(false)}
-                          className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                          className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                         >
                           <Settings className="w-4 h-4 text-gray-400" />
                           Settings
                         </Link>
                       )}
-                      <div className="border-t my-1" style={{ borderColor: '#F3F4F6' }} />
+                      <div className="border-t my-1" style={{ borderColor: '#343A42' }} />
                       <button
                         onClick={() => { setProfileOpen(false); handleLogout(); }}
-                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors"
-                        style={{ color: '#DC2626' }}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors"
+                        style={{ color: '#FCA5A5' }}
                       >
                         <LogOut className="w-4 h-4" />
                         Sign Out
