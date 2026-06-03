@@ -260,12 +260,8 @@ export default function Dashboard() {
     },
   ];
   const operationsModules = [
-    { label: 'Scheduling', detail: 'Timeline fields and slip review', to: '/projects', icon: Clock },
-    { label: 'Budgeting', detail: 'Budget vs invoices', to: '/invoices', icon: FileText },
-    { label: 'Documents', detail: 'Versionable project files', to: '/documents', icon: FolderOpen },
-    { label: 'Safety / Quality', detail: 'Punch lists and field notes', to: '/projects', icon: CheckCircle2 },
-    { label: 'Resources', detail: 'Contractors and assignments', to: '/contractors', icon: ClipboardList },
-    { label: 'Reporting', detail: 'KPIs and export queues', to: '/invoices', icon: TrendingUp },
+    { label: 'Project Work Status', detail: 'Review active project progress', to: '/projects', icon: FolderOpen },
+    { label: 'Final Punch Lists', detail: 'Track closeout work items', to: '/punch-list', icon: ClipboardList },
   ];
 
   const kpiCards = [
