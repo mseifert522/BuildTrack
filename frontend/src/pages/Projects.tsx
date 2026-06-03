@@ -222,22 +222,24 @@ export default function Projects() {
 
   return (
     <div
-      className="bt-horizontal-lock min-h-full w-full max-w-full overflow-x-hidden px-4 py-4 md:px-8 md:py-6"
+      className="bt-projects-page bt-horizontal-lock min-h-full w-full max-w-full overflow-x-hidden px-4 py-4 md:px-8 md:py-6"
       style={{ background: '#F0F2F5', touchAction: 'pan-y', overscrollBehaviorX: 'none' }}
     >
-      <div className="bt-horizontal-lock mx-auto w-full max-w-7xl min-w-0">
-      <PageHeader
-        title="Projects"
-        subtitle={`${projectRows.length} of ${projects.length} project${projects.length !== 1 ? 's' : ''}`}
-        actions={canCreate ? (
-          <button onClick={() => setShowCreate(true)} className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl font-medium text-sm hover:bg-blue-700 transition-colors shadow-sm">
-            <Plus className="w-4 h-4" /> New Project
-          </button>
-        ) : undefined}
-      />
+      <div className="mx-auto w-full max-w-7xl min-w-0">
+      <div className="bt-projects-header">
+        <PageHeader
+          title="Projects"
+          subtitle={`${projectRows.length} of ${projects.length} project${projects.length !== 1 ? 's' : ''}`}
+          actions={canCreate ? (
+            <button onClick={() => setShowCreate(true)} className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl font-medium text-sm hover:bg-blue-700 transition-colors shadow-sm">
+              <Plus className="w-4 h-4" /> New Project
+            </button>
+          ) : undefined}
+        />
+      </div>
 
       {/* Filters */}
-      <div className="bt-horizontal-lock mb-5 flex w-full min-w-0 flex-col gap-3 rounded-2xl border border-gray-200 p-3 sm:flex-row" style={{ background: 'white', boxShadow: '0 8px 24px rgba(17,24,39,0.06)' }}>
+      <div className="bt-project-filterbar mb-5 flex w-full min-w-0 flex-col gap-3 rounded-2xl border border-gray-200 p-3 sm:flex-row" style={{ background: 'white', boxShadow: '0 8px 24px rgba(17,24,39,0.06)' }}>
         <form onSubmit={handleSearch} className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -302,7 +304,7 @@ export default function Projects() {
               <div
                 key={p.id}
                 onClick={() => navigate(`/projects/${p.id}`)}
-                className="bt-horizontal-lock group relative flex w-full min-w-0 cursor-pointer flex-col items-stretch gap-3 overflow-visible rounded-[1.35rem] border border-slate-300 bg-gradient-to-br from-white via-white to-blue-50/45 p-4 transition-all hover:border-blue-400 hover:bg-blue-50/35 hover:shadow-xl sm:flex-row sm:items-center sm:gap-4"
+                className="bt-project-card group relative flex w-full min-w-0 cursor-pointer flex-col items-stretch gap-3 overflow-visible rounded-[1.35rem] border border-slate-300 bg-gradient-to-br from-white via-white to-blue-50/45 p-4 transition-all hover:border-blue-400 hover:bg-blue-50/35 hover:shadow-xl sm:flex-row sm:items-center sm:gap-4"
                 style={{
                   boxShadow: '0 10px 28px rgba(15,23,42,0.10), 0 1px 0 rgba(15,23,42,0.04)',
                   borderLeft: '5px solid #2563EB',
@@ -355,8 +357,8 @@ export default function Projects() {
                 <div className="w-full flex-1 min-w-0 max-w-full">
                   <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
-                      <p className="font-semibold text-gray-900 truncate">{p.address}</p>
-                      <p className="text-sm text-gray-500 truncate">{p.job_name}</p>
+                      <p className="bt-project-title font-semibold text-gray-900 truncate">{p.address}</p>
+                      <p className="bt-project-subtitle text-sm text-gray-500 truncate">{p.job_name}</p>
                     </div>
                     <div className="flex flex-shrink-0 flex-wrap items-start gap-2 sm:items-center sm:justify-end">
                       {review && (
@@ -492,7 +494,7 @@ export default function Projects() {
                     </div>
                   </div>
                   {review?.changes?.[0] && (
-                    <p className="mt-2 text-xs text-amber-700 truncate">
+                    <p className="bt-project-review mt-2 text-xs text-amber-700 truncate">
                       {review.change_count} new update{review.change_count !== 1 ? 's' : ''}: {review.changes[0].summary}
                     </p>
                   )}
@@ -510,7 +512,7 @@ export default function Projects() {
                       </span>
                     )}
                     {p.budget && (
-                      <span className="text-xs text-gray-500">${Number(p.budget).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      <span className="bt-project-meta text-xs text-gray-500">${Number(p.budget).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                     )}
                   </div>
                   <div className="mt-3 grid w-full min-w-0 grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">

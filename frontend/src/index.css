@@ -547,6 +547,59 @@ aside ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
   .contractor-setup-shell [style*="#9CA3AF"] {
     color: var(--bt-text-muted) !important;
   }
+
+  .bt-projects-page {
+    background: var(--bt-bg) !important;
+    color: var(--bt-text);
+  }
+
+  .bt-projects-header h1 {
+    color: var(--bt-text) !important;
+  }
+
+  .bt-projects-header p {
+    color: var(--bt-text-muted) !important;
+  }
+
+  .bt-project-filterbar {
+    background: var(--bt-surface) !important;
+    border-color: var(--bt-border) !important;
+  }
+
+  .bt-project-filterbar input,
+  .bt-project-filterbar select {
+    background: var(--bt-surface-raised) !important;
+    border-color: #94A3B8 !important;
+    color: var(--bt-text) !important;
+  }
+
+  .bt-project-filterbar input::placeholder {
+    color: var(--bt-text-soft) !important;
+  }
+
+  .bt-project-card {
+    background: linear-gradient(135deg, #151C27 0%, #111827 58%, #172033 100%) !important;
+    border-color: #94A3B8 !important;
+    color: var(--bt-text) !important;
+  }
+
+  .bt-project-card:hover {
+    background: linear-gradient(135deg, #1C2634 0%, #172033 100%) !important;
+  }
+
+  .bt-project-title {
+    color: #F8FAFC !important;
+  }
+
+  .bt-project-subtitle,
+  .bt-project-meta,
+  .bt-project-card .text-gray-500 {
+    color: #CBD5E1 !important;
+  }
+
+  .bt-project-review {
+    color: #FCD34D !important;
+  }
 }
 
 /* Horizontal pan guard for desktop admin pages viewed on phones/tablets. */
