@@ -331,40 +331,6 @@ aside ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
 /* ── Focus ── */
 :focus-visible { outline: 3px solid var(--bt-ring); outline-offset: 3px; }
 
-.bt-mobile-admin-nav {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 35;
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  min-height: calc(var(--bt-bottom-nav-height) + env(safe-area-inset-bottom, 0px));
-  padding: 6px 6px calc(6px + env(safe-area-inset-bottom, 0px));
-  background: color-mix(in srgb, var(--bt-surface) 94%, transparent);
-  border-top: 1px solid var(--bt-border);
-  box-shadow: 0 -12px 30px rgba(15,23,42,0.12);
-  backdrop-filter: blur(14px);
-}
-
-.bt-mobile-admin-nav__item {
-  min-height: 48px;
-  min-width: 48px;
-  border-radius: 14px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  font-size: 10px;
-  font-weight: 850;
-  text-decoration: none;
-}
-
-.bt-mobile-admin-nav__item[aria-current="page"] {
-  background: color-mix(in srgb, var(--brand-gold) 14%, transparent);
-}
-
 /* ── Google Places Autocomplete ── */
 .pac-container {
   border-radius: 14px !important;

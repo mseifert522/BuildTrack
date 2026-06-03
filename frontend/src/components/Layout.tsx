@@ -123,18 +123,6 @@ export default function Layout({ children }: LayoutProps) {
     ...(user && canAccessSecurity(user.role) ? [{ to: '/security', icon: ShieldCheck, label: 'Security' }] : []),
   ];
 
-  const mobileBottomNavItems = [
-    { to: '/dashboard', icon: LayoutDashboard, label: 'Home' },
-    { to: '/projects', icon: FolderOpen, label: 'Projects' },
-    { to: '/invoices', icon: FileText, label: 'Invoices' },
-    { to: '/contractors', icon: Users, label: 'Contacts' },
-    user && canAccessSettings(user.role)
-      ? { to: '/settings', icon: Settings, label: 'Settings' }
-      : user && canAccessSecurity(user.role)
-        ? { to: '/security', icon: ShieldCheck, label: 'Security' }
-        : { to: '/documents', icon: ClipboardList, label: 'Docs' },
-  ];
-
   const isActive = (path: string) => location.pathname.startsWith(path);
 
   const pageTitles: Record<string, string> = {
@@ -630,26 +618,9 @@ export default function Layout({ children }: LayoutProps) {
         </header>
 
         {/* Page content */}
-        <main className="bt-horizontal-lock flex-1 overflow-y-auto overflow-x-hidden pb-24 lg:pb-0" style={{ touchAction: 'pan-y', overscrollBehaviorX: 'none' }}>
+        <main className="bt-horizontal-lock flex-1 overflow-y-auto overflow-x-hidden" style={{ touchAction: 'pan-y', overscrollBehaviorX: 'none' }}>
           {children}
         </main>
-        <nav className="bt-mobile-admin-nav lg:hidden" aria-label="Primary mobile navigation">
-          {mobileBottomNavItems.map(({ to, icon: Icon, label }) => {
-            const active = isActive(to);
-            return (
-              <Link
-                key={to}
-                to={to}
-                aria-current={active ? 'page' : undefined}
-                className="bt-mobile-admin-nav__item"
-                style={{ color: active ? '#D99D26' : 'var(--bt-text-muted)' }}
-              >
-                <Icon className="h-5 w-5" aria-hidden="true" />
-                <span>{label}</span>
-              </Link>
-            );
-          })}
-        </nav>
       </div>
     </div>
   );

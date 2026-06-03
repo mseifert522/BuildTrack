@@ -287,8 +287,7 @@ function MobileGestureShortcuts() {
         || document.querySelector('.mobile-content') as HTMLElement | null;
     };
 
-    const isMobileContext = () =>
-      window.matchMedia?.('(max-width: 1023px)').matches || window.location.pathname.startsWith('/mobile');
+    const isMobileContext = () => window.location.pathname.startsWith('/mobile');
 
     const handleTouchStart = (event: TouchEvent) => {
       if (!isMobileContext() || event.touches.length !== 1) return;
