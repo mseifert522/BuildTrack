@@ -1,34 +1,37 @@
-import { useEffect, useRef } from 'react';
+import { lazy, Suspense, useEffect, useRef, type ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { useAuthStore, canManageUsers, canAccessSettings, canAccessSecurity } from './store/authStore';
 import Layout from './components/Layout';
-import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
-import Projects from './pages/Projects';
-import ProjectDetail from './pages/ProjectDetail';
-import PunchList from './pages/PunchList';
-import Photos from './pages/Photos';
-import Invoices from './pages/Invoices';
-import InvoiceBuilder from './pages/InvoiceBuilder';
-import Contractors from './pages/Contractors';
-import Suppliers from './pages/Suppliers';
-import Users from './pages/Users';
-import Settings from './pages/Settings';
-import Security from './pages/Security';
-import ChangePassword from './pages/ChangePassword';
-import ForgotPassword from './pages/ForgotPassword';
-import ResetPassword from './pages/ResetPassword';
-import ContractorSetup from './pages/ContractorSetup';
-import MobileHome from './pages/MobileHome';
-import MobileProjects from './pages/MobileProjects';
-import MobileProjectHub from './pages/MobileProjectHub';
-import MobilePunchList from './pages/MobilePunchList';
-import MobileInvoice from './pages/MobileInvoice';
-import MobileAddProject from './pages/MobileAddProject';
-import MobileNotes from './pages/MobileNotes';
-import MobileProgress from './pages/MobileProgress';
-import MobilePhotos from './pages/MobilePhotos';
+import { Loading } from './components/ui';
+
+const Login = lazy(() => import('./pages/Login'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Projects = lazy(() => import('./pages/Projects'));
+const ProjectDetail = lazy(() => import('./pages/ProjectDetail'));
+const PunchList = lazy(() => import('./pages/PunchList'));
+const Photos = lazy(() => import('./pages/Photos'));
+const Invoices = lazy(() => import('./pages/Invoices'));
+const InvoiceBuilder = lazy(() => import('./pages/InvoiceBuilder'));
+const Contractors = lazy(() => import('./pages/Contractors'));
+const Suppliers = lazy(() => import('./pages/Suppliers'));
+const Users = lazy(() => import('./pages/Users'));
+const Settings = lazy(() => import('./pages/Settings'));
+const Security = lazy(() => import('./pages/Security'));
+const ChangePassword = lazy(() => import('./pages/ChangePassword'));
+const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
+const ResetPassword = lazy(() => import('./pages/ResetPassword'));
+const ContractorSetup = lazy(() => import('./pages/ContractorSetup'));
+const Documents = lazy(() => import('./pages/Documents'));
+const MobileHome = lazy(() => import('./pages/MobileHome'));
+const MobileProjects = lazy(() => import('./pages/MobileProjects'));
+const MobileProjectHub = lazy(() => import('./pages/MobileProjectHub'));
+const MobilePunchList = lazy(() => import('./pages/MobilePunchList'));
+const MobileInvoice = lazy(() => import('./pages/MobileInvoice'));
+const MobileAddProject = lazy(() => import('./pages/MobileAddProject'));
+const MobileNotes = lazy(() => import('./pages/MobileNotes'));
+const MobileProgress = lazy(() => import('./pages/MobileProgress'));
+const MobilePhotos = lazy(() => import('./pages/MobilePhotos'));
 
 const IDLE_TIMEOUT_MS = 45 * 60 * 1000;
 const ACTIVITY_WRITE_INTERVAL_MS = 15 * 1000;
@@ -56,14 +59,14 @@ function SmartHomeRedirect() {
   return <Navigate to="/dashboard" replace />;
 }
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
+function ProtectedRoute({ children }: { children: ReactNode }) {
   const { user, token } = useAuthStore();
   if (!token || !user) return <Navigate to="/login" replace />;
   if (user.force_password_reset) return <Navigate to="/change-password" replace />;
   return <>{children}</>;
 }
 
-function MobileRoute({ children }: { children: React.ReactNode }) {
+function MobileRoute({ children }: { children: ReactNode }) {
   const { user, token } = useAuthStore();
   if (!token || !user) return <Navigate to="/login" replace />;
   const isPinSession = user.role === 'contractor' && localStorage.getItem('contractor_token') === token;
@@ -77,7 +80,7 @@ function LegacyMobileProjectRedirect() {
 }
 
 /** Redirect contractors away from desktop — they should use mobile */
-function DesktopRoute({ children }: { children: React.ReactNode }) {
+function DesktopRoute({ children }: { children: ReactNode }) {
   const { user, token } = useAuthStore();
   if (!token || !user) return <Navigate to="/login" replace />;
   if (user.force_password_reset) return <Navigate to="/change-password" replace />;
@@ -86,7 +89,7 @@ function DesktopRoute({ children }: { children: React.ReactNode }) {
 }
 
 /** Only super_admin and operations_manager can access Users page */
-function AdminRoute({ children }: { children: React.ReactNode }) {
+function AdminRoute({ children }: { children: ReactNode }) {
   const { user, token } = useAuthStore();
   if (!token || !user) return <Navigate to="/login" replace />;
   if (user.force_password_reset) return <Navigate to="/change-password" replace />;
@@ -95,7 +98,7 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 }
 
 /** Only super_admin and operations_manager can access Settings page */
-function SettingsRoute({ children }: { children: React.ReactNode }) {
+function SettingsRoute({ children }: { children: ReactNode }) {
   const { user, token } = useAuthStore();
   if (!token || !user) return <Navigate to="/login" replace />;
   if (user.force_password_reset) return <Navigate to="/change-password" replace />;
@@ -104,7 +107,7 @@ function SettingsRoute({ children }: { children: React.ReactNode }) {
 }
 
 /** Only super_admin and operations_manager can access Security page */
-function SecurityRoute({ children }: { children: React.ReactNode }) {
+function SecurityRoute({ children }: { children: ReactNode }) {
   const { user, token } = useAuthStore();
   if (!token || !user) return <Navigate to="/login" replace />;
   if (user.force_password_reset) return <Navigate to="/change-password" replace />;
@@ -112,7 +115,7 @@ function SecurityRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-function AuthRoute({ children }: { children: React.ReactNode }) {
+function AuthRoute({ children }: { children: ReactNode }) {
   const { token, user } = useAuthStore();
   if (token && user && !user.force_password_reset) {
     return user.role === 'contractor'
@@ -247,10 +250,67 @@ function SessionTimeout() {
   return null;
 }
 
+function MobileGestureShortcuts() {
+  const navigate = useNavigate();
+  const startRef = useRef<{ x: number; y: number; scrollTop: number } | null>(null);
+
+  useEffect(() => {
+    const getScrollableTarget = (target: EventTarget | null) => {
+      if (!(target instanceof Element)) return document.querySelector('.mobile-content') as HTMLElement | null;
+      return target.closest('.mobile-content') as HTMLElement | null
+        || document.querySelector('.mobile-content') as HTMLElement | null;
+    };
+
+    const isMobileContext = () =>
+      window.matchMedia?.('(max-width: 1023px)').matches || window.location.pathname.startsWith('/mobile');
+
+    const handleTouchStart = (event: TouchEvent) => {
+      if (!isMobileContext() || event.touches.length !== 1) return;
+      const touch = event.touches[0];
+      const scroller = getScrollableTarget(event.target);
+      startRef.current = {
+        x: touch.clientX,
+        y: touch.clientY,
+        scrollTop: scroller?.scrollTop ?? window.scrollY,
+      };
+    };
+
+    const handleTouchEnd = (event: TouchEvent) => {
+      const start = startRef.current;
+      if (!start || !isMobileContext() || event.changedTouches.length !== 1) return;
+      startRef.current = null;
+      const touch = event.changedTouches[0];
+      const dx = touch.clientX - start.x;
+      const dy = touch.clientY - start.y;
+      const mostlyHorizontal = Math.abs(dx) > Math.abs(dy) * 1.6;
+      const mostlyVertical = Math.abs(dy) > Math.abs(dx) * 1.6;
+
+      if (start.x <= 32 && dx > 78 && mostlyHorizontal && window.history.length > 1) {
+        navigate(-1);
+        return;
+      }
+
+      if (window.location.pathname.startsWith('/mobile') && start.scrollTop <= 2 && dy > 92 && mostlyVertical) {
+        window.dispatchEvent(new CustomEvent('buildtrack:pull-refresh'));
+      }
+    };
+
+    window.addEventListener('touchstart', handleTouchStart, { passive: true });
+    window.addEventListener('touchend', handleTouchEnd, { passive: true });
+    return () => {
+      window.removeEventListener('touchstart', handleTouchStart);
+      window.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [navigate]);
+
+  return null;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
       <SessionTimeout />
+      <MobileGestureShortcuts />
       <Toaster
         position="top-center"
         toastOptions={{
@@ -267,6 +327,7 @@ export default function App() {
           error: { iconTheme: { primary: '#ef4444', secondary: '#fff' } },
         }}
       />
+      <Suspense fallback={<Loading message="Loading BuildTrack..." />}>
       <Routes>
         {/* Auth */}
         <Route path="/login" element={<AuthRoute><Login /></AuthRoute>} />
@@ -334,7 +395,7 @@ export default function App() {
         <Route path="/invoice-agent" element={<Navigate to="/invoices" replace />} />
         <Route path="/documents" element={
           <DesktopRoute>
-            <Navigate to="/projects" replace />
+            <Layout><Documents /></Layout>
           </DesktopRoute>
         } />
         <Route path="/contractors" element={
@@ -375,6 +436,7 @@ export default function App() {
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }

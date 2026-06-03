@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Camera } from 'lucide-react';
+import { Activity, Calendar, Camera, ClipboardList, DollarSign, FileText, MessageSquare, Package, Users } from 'lucide-react';
 import api from '../lib/api';
+import { useAuthStore } from '../store/authStore';
 
 interface Project {
   id: string;
@@ -15,12 +16,14 @@ interface Project {
 export default function MobileProjectHub() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuthStore();
   const [project, setProject] = useState<Project | null>(null);
   const [punchCount, setPunchCount] = useState(0);
   const [openCount, setOpenCount] = useState(0);
   const [invoiceCount, setInvoiceCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const managementUser = user?.role !== 'contractor';
 
   useEffect(() => {
     if (!id) return;
@@ -79,6 +82,7 @@ export default function MobileProjectHub() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 16px 8px' }}>
           <button
             onClick={() => navigate('/mobile')}
+            aria-label="Back to mobile home"
             style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 10, padding: 8, cursor: 'pointer', display: 'flex', alignItems: 'center' }}
           >
             <svg width="20" height="20" fill="none" stroke="white" viewBox="0 0 24 24">
@@ -169,6 +173,56 @@ export default function MobileProjectHub() {
           </svg>
         </button>
 
+        {managementUser && (
+          <>
+            <p style={{ color: '#9CA3AF', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', margin: '8px 0 0' }}>
+              Construction Operations
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+              {[
+                { label: 'Schedule & Scope', text: 'Milestones, dependencies and rehab steps', Icon: Calendar, color: '#2563EB', bg: '#EFF6FF', to: `/projects/${id}#construction-plan` },
+                { label: 'Budget & Quotes', text: 'Forecast costs and compare contractor quotes', Icon: DollarSign, color: '#059669', bg: '#ECFDF5', to: `/projects/${id}#quotes` },
+                { label: 'Documents', text: 'Central files, downloads and uploads', Icon: FileText, color: '#7C3AED', bg: '#F5F3FF', to: '/documents' },
+                { label: 'Resources', text: 'Assigned contractors and labor coverage', Icon: Users, color: '#0F766E', bg: '#CCFBF1', to: `/projects/${id}#assigned-contractors` },
+                { label: 'Materials', text: 'Supplies, delivery timing and order status', Icon: Package, color: '#A16207', bg: '#FEF3C7', to: `/projects/${id}#construction-plan` },
+                { label: 'Reports', text: 'Progress history and field activity', Icon: Activity, color: '#BE123C', bg: '#FFF1F2', to: `/projects/${id}#progress-history` },
+                { label: 'Messaging', text: 'Text contractors and track responses', Icon: MessageSquare, color: '#4338CA', bg: '#EEF2FF', to: `/projects/${id}#texts` },
+                { label: 'Safety & Quality', text: 'Issue capture, reviews and closeout', Icon: ClipboardList, color: '#EA580C', bg: '#FFEDD5', to: `/mobile/project/${id}/punch-list` },
+              ].map(card => (
+                <button
+                  key={card.label}
+                  type="button"
+                  onClick={() => navigate(card.to)}
+                  aria-label={`${card.label}: ${card.text}`}
+                  style={{
+                    minHeight: 112,
+                    width: '100%',
+                    textAlign: 'left',
+                    backgroundColor: 'white',
+                    borderRadius: 16,
+                    border: '1px solid #F3F4F6',
+                    boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+                    padding: 14,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    gap: 10,
+                  }}
+                >
+                  <span style={{ width: 42, height: 42, borderRadius: 13, backgroundColor: card.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <card.Icon size={21} color={card.color} />
+                  </span>
+                  <span>
+                    <span style={{ display: 'block', color: '#111827', fontSize: 13, fontWeight: 900, lineHeight: 1.2 }}>{card.label}</span>
+                    <span style={{ display: 'block', color: '#6B7280', fontSize: 11, lineHeight: 1.35, marginTop: 3 }}>{card.text}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
         {/* Punch List Card */}
         <button
           onClick={() => navigate(`/mobile/project/${id}/punch-list`)}
@@ -181,9 +235,9 @@ export default function MobileProjectHub() {
               </svg>
             </div>
             <div>
-              <p style={{ fontWeight: 700, color: '#111827', fontSize: 16, margin: 0 }}>Punch List</p>
+              <p style={{ fontWeight: 700, color: '#111827', fontSize: 16, margin: 0 }}>Safety & Quality Punch List</p>
               {punchCount === 0 ? (
-                <p style={{ color: '#9CA3AF', fontSize: 13, margin: '4px 0 0' }}>No items yet — tap to create</p>
+                <p style={{ color: '#9CA3AF', fontSize: 13, margin: '4px 0 0' }}>No issues yet - tap to create</p>
               ) : (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
                   <span style={{ color: '#6B7280', fontSize: 13 }}>{punchCount} items</span>
@@ -272,26 +326,27 @@ export default function MobileProjectHub() {
           </div>
         </button>
 
-        {/* Full Project View Card */}
-        <button
-          onClick={() => navigate(`/projects/${id}`)}
-          style={{ width: '100%', textAlign: 'left', backgroundColor: 'white', borderRadius: 16, boxShadow: '0 1px 4px rgba(0,0,0,0.08)', padding: 20, border: '1px solid #F3F4F6', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <div style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: '#EFF6FF', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <svg width="28" height="28" fill="none" stroke="#3b82f6" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
+        {managementUser && (
+          <button
+            onClick={() => navigate(`/projects/${id}`)}
+            style={{ width: '100%', textAlign: 'left', backgroundColor: 'white', borderRadius: 16, boxShadow: '0 1px 4px rgba(0,0,0,0.08)', padding: 20, border: '1px solid #F3F4F6', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <div style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: '#EFF6FF', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <svg width="28" height="28" fill="none" stroke="#3b82f6" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+              </div>
+              <div>
+                <p style={{ fontWeight: 700, color: '#111827', fontSize: 16, margin: 0 }}>Full Project View</p>
+                <p style={{ color: '#9CA3AF', fontSize: 13, margin: '4px 0 0' }}>Photos, notes, details & more</p>
+              </div>
             </div>
-            <div>
-              <p style={{ fontWeight: 700, color: '#111827', fontSize: 16, margin: 0 }}>Full Project View</p>
-              <p style={{ color: '#9CA3AF', fontSize: 13, margin: '4px 0 0' }}>Photos, notes, details & more</p>
-            </div>
-          </div>
-          <svg width="20" height="20" fill="none" stroke="#D1D5DB" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
-        </button>
+            <svg width="20" height="20" fill="none" stroke="#D1D5DB" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Footer */}

@@ -72,11 +72,24 @@ export function StatusBadge({ status, type = 'status', className = '' }: BadgePr
 interface LoadingProps { message?: string; }
 export function Loading({ message = 'Loading...' }: LoadingProps) {
   return (
-    <div className="flex items-center justify-center py-16">
-      <div className="text-center">
-        <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" style={{ borderWidth: 3 }} />
-        <p className="text-sm text-gray-500">{message}</p>
+    <div className="bt-responsive-container py-8" role="status" aria-live="polite" aria-label={message}>
+      <div className="mb-5 flex items-center justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="bt-skeleton-line mb-3 h-5 w-44" />
+          <div className="bt-skeleton-line h-3 w-64 max-w-full" />
+        </div>
+        <div className="bt-skeleton-block h-12 w-12 flex-shrink-0" />
       </div>
+      <div className="bt-fluid-grid">
+        {Array.from({ length: 6 }).map((_, index) => (
+          <div key={index} className="bt-skeleton-card">
+            <div className="bt-skeleton-block mb-4 h-24 w-full" />
+            <div className="bt-skeleton-line mb-3 h-4 w-3/4" />
+            <div className="bt-skeleton-line h-3 w-1/2" />
+          </div>
+        ))}
+      </div>
+      <span className="sr-only">{message}</span>
     </div>
   );
 }
@@ -108,7 +121,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalPr
       <div className={`relative bg-white w-full ${sizeClass} rounded-t-2xl sm:rounded-2xl shadow-2xl max-h-[90vh] flex flex-col`}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 flex-shrink-0">
           <h3 className="font-semibold text-gray-900 text-base">{title}</h3>
-          <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
+          <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors" aria-label={`Close ${title}`}>
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>

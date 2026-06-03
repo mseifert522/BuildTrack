@@ -101,16 +101,18 @@ export default function MobileHome() {
     else setLoading(true);
 
     try {
-      const projectRes = await api.get('/projects');
-      setProjects(Array.isArray(projectRes.data) ? projectRes.data : []);
-
       if (managementUser) {
-        const [contractorRes, supplierRes] = await Promise.all([
+        const [projectRes, contractorRes, supplierRes] = await Promise.all([
+          api.get('/projects'),
           api.get('/users/contractors/directory').catch(() => ({ data: { contractors: [] } })),
           api.get('/users/suppliers').catch(() => ({ data: [] })),
         ]);
+        setProjects(Array.isArray(projectRes.data) ? projectRes.data : []);
         setContractors(Array.isArray(contractorRes.data?.contractors) ? contractorRes.data.contractors : []);
         setSuppliers(Array.isArray(supplierRes.data) ? supplierRes.data : []);
+      } else {
+        const projectRes = await api.get('/projects');
+        setProjects(Array.isArray(projectRes.data) ? projectRes.data : []);
       }
     } catch {
       toast.error('Failed to load mobile data');
@@ -122,6 +124,12 @@ export default function MobileHome() {
 
   useEffect(() => {
     loadData();
+  }, [loadData]);
+
+  useEffect(() => {
+    const refreshFromGesture = () => loadData(true);
+    window.addEventListener('buildtrack:pull-refresh', refreshFromGesture);
+    return () => window.removeEventListener('buildtrack:pull-refresh', refreshFromGesture);
   }, [loadData]);
 
   useEffect(() => {
@@ -214,10 +222,19 @@ export default function MobileHome() {
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {refreshing && <RefreshCw size={15} color="rgba(255,255,255,0.45)" style={{ animation: 'spin 0.8s linear infinite' }} />}
+            <button
+              type="button"
+              onClick={() => loadData(true)}
+              disabled={refreshing}
+              aria-label="Refresh mobile dashboard"
+              style={{ width: 36, height: 36, borderRadius: 10, border: 'none', background: 'rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: refreshing ? 0.72 : 1 }}
+            >
+              <RefreshCw size={15} color="rgba(255,255,255,0.76)" style={refreshing ? { animation: 'spin 0.8s linear infinite' } : undefined} />
+            </button>
             {canCreateProjects(user?.role || '') && (
               <button
                 onClick={() => navigate('/mobile/add-project')}
+                aria-label="Add new project"
                 style={{ width: 36, height: 36, borderRadius: 10, border: 'none', background: 'rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               >
                 <Plus size={17} color="rgba(255,255,255,0.76)" />
@@ -225,6 +242,7 @@ export default function MobileHome() {
             )}
             <button
               onClick={handleLogout}
+              aria-label="Sign out"
               style={{ width: 36, height: 36, borderRadius: 10, border: 'none', background: 'rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
               <LogOut size={16} color="rgba(255,255,255,0.76)" />

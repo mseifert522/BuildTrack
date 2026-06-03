@@ -116,9 +116,22 @@ export default function Layout({ children }: LayoutProps) {
     { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/projects', icon: FolderOpen, label: 'Projects' },
     { to: '/invoices', icon: FileText, label: 'Invoices' },
+    { to: '/documents', icon: ClipboardList, label: 'Documents' },
     { to: '/contractors', icon: Users, label: 'Contractors' },
     { to: '/suppliers', icon: Truck, label: 'Suppliers' },
     ...(user && canAccessSecurity(user.role) ? [{ to: '/security', icon: ShieldCheck, label: 'Security' }] : []),
+  ];
+
+  const mobileBottomNavItems = [
+    { to: '/dashboard', icon: LayoutDashboard, label: 'Home' },
+    { to: '/projects', icon: FolderOpen, label: 'Projects' },
+    { to: '/invoices', icon: FileText, label: 'Invoices' },
+    { to: '/contractors', icon: Users, label: 'Contacts' },
+    user && canAccessSettings(user.role)
+      ? { to: '/settings', icon: Settings, label: 'Settings' }
+      : user && canAccessSecurity(user.role)
+        ? { to: '/security', icon: ShieldCheck, label: 'Security' }
+        : { to: '/documents', icon: ClipboardList, label: 'Docs' },
   ];
 
   const isActive = (path: string) => location.pathname.startsWith(path);
@@ -127,6 +140,7 @@ export default function Layout({ children }: LayoutProps) {
     '/dashboard': 'Dashboard',
     '/projects': 'Projects',
     '/invoices': 'Invoices',
+    '/documents': 'Documents',
     '/contractors': 'Contractors',
     '/suppliers': 'Suppliers',
     '/security': 'Security',
@@ -197,6 +211,7 @@ export default function Layout({ children }: LayoutProps) {
             className="p-1.5 rounded-lg transition-colors hidden lg:flex"
             style={{ color: 'rgba(255,255,255,0.4)' }}
             title="Collapse sidebar"
+            aria-label="Collapse sidebar"
           >
             <ChevronRight className="w-4 h-4 rotate-180" />
           </button>
@@ -278,6 +293,7 @@ export default function Layout({ children }: LayoutProps) {
                 className="p-1.5 rounded-lg transition-colors flex-shrink-0"
                 style={{ color: 'rgba(255,255,255,0.35)' }}
                 title="Sign out"
+                aria-label="Sign out"
               >
                 <LogOut className="w-4 h-4" />
               </button>
@@ -290,6 +306,7 @@ export default function Layout({ children }: LayoutProps) {
             className="w-full flex items-center justify-center p-2 rounded-xl mt-1 transition-colors"
             style={{ color: 'rgba(255,255,255,0.35)' }}
             title="Sign out"
+            aria-label="Sign out"
           >
             <LogOut className="w-4 h-4" />
           </button>
@@ -304,6 +321,7 @@ export default function Layout({ children }: LayoutProps) {
             className="w-full flex items-center justify-center p-2 rounded-xl transition-colors"
             style={{ color: 'rgba(255,255,255,0.3)', background: 'rgba(255,255,255,0.04)' }}
             title="Expand sidebar"
+            aria-label="Expand sidebar"
           >
             <ChevronRight className="w-4 h-4" />
           </button>
@@ -313,7 +331,7 @@ export default function Layout({ children }: LayoutProps) {
   );
 
   return (
-    <div className="bt-horizontal-lock flex h-screen max-w-full overflow-hidden" style={{ background: '#F0F2F5' }}>
+    <div className="bt-horizontal-lock flex h-screen max-w-full overflow-hidden" style={{ background: 'var(--bt-bg)' }}>
       {/* Desktop Sidebar */}
       <aside
         className="hidden lg:flex flex-col flex-shrink-0 transition-all duration-300"
@@ -352,7 +370,7 @@ export default function Layout({ children }: LayoutProps) {
                   <p className="text-xs" style={{ color: '#D99D26' }}>Field Operations</p>
                 </div>
               </div>
-              <button onClick={() => setSidebarOpen(false)} className="p-2 rounded-lg" style={{ color: 'rgba(255,255,255,0.4)' }}>
+              <button onClick={() => setSidebarOpen(false)} className="p-2 rounded-lg" style={{ color: 'rgba(255,255,255,0.4)' }} aria-label="Close navigation menu">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -368,8 +386,8 @@ export default function Layout({ children }: LayoutProps) {
           className="bt-horizontal-lock flex items-center justify-between gap-3 px-4 sm:gap-4 sm:px-6 flex-shrink-0"
           style={{
             height: 64,
-            background: 'white',
-            borderBottom: '1px solid #E5E7EB',
+            background: 'var(--bt-surface)',
+            borderBottom: '1px solid var(--bt-border)',
             boxShadow: '0 1px 8px rgba(0,0,0,0.06)',
           }}
         >
@@ -378,14 +396,15 @@ export default function Layout({ children }: LayoutProps) {
             <button
               onClick={() => setSidebarOpen(true)}
               className="p-2 rounded-xl transition-colors lg:hidden"
-              style={{ color: '#6B7280' }}
+              style={{ color: 'var(--bt-text-muted)' }}
+              aria-label="Open navigation menu"
             >
               <Menu className="w-5 h-5" />
             </button>
             <div className="flex min-w-0 items-center gap-2 text-sm">
-              <span className="flex-shrink-0 font-medium" style={{ color: '#9CA3AF' }}>BuildTrack</span>
+              <span className="flex-shrink-0 font-medium" style={{ color: 'var(--bt-text-muted)' }}>BuildTrack</span>
               <ChevronRight className="w-3.5 h-3.5" style={{ color: '#D1D5DB' }} />
-              <span className="min-w-0 truncate font-bold text-gray-900">{currentTitle}</span>
+              <span className="min-w-0 truncate font-bold" style={{ color: 'var(--bt-text)' }}>{currentTitle}</span>
             </div>
           </div>
 
@@ -403,9 +422,9 @@ export default function Layout({ children }: LayoutProps) {
                 placeholder="Search anything in BuildTrack..."
                 className="w-full pl-11 pr-10 py-3 rounded-2xl text-sm font-medium placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
                 style={{
-                  background: '#FFFFFF',
-                  color: '#111827',
-                  border: '1px solid #D1D5DB',
+                  background: 'var(--bt-surface)',
+                  color: 'var(--bt-text)',
+                  border: '1px solid var(--bt-border)',
                   boxShadow: '0 8px 24px rgba(17,24,39,0.08)',
                 }}
               />
@@ -418,6 +437,7 @@ export default function Layout({ children }: LayoutProps) {
                   }}
                   className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-lg text-gray-400 hover:text-gray-700"
                   title="Clear search"
+                  aria-label="Clear search"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -467,6 +487,7 @@ export default function Layout({ children }: LayoutProps) {
               <Link
                 to="/users"
                 title="User Management"
+                aria-label="User Management"
                 className="p-2 rounded-xl transition-all sm:p-2.5"
                 style={{
                   background: location.pathname.startsWith('/users') ? '#F3F4F6' : '#F9FAFB',
@@ -483,6 +504,7 @@ export default function Layout({ children }: LayoutProps) {
               <Link
                 to="/settings"
                 title="Settings"
+                aria-label="Settings"
                 className="p-2 rounded-xl transition-all sm:p-2.5"
                 style={{
                   background: location.pathname.startsWith('/settings') ? '#F3F4F6' : '#F9FAFB',
@@ -498,6 +520,7 @@ export default function Layout({ children }: LayoutProps) {
             <button
               className="relative p-2 rounded-xl transition-all sm:p-2.5"
               style={{ background: '#F9FAFB', border: '1px solid #E5E7EB', color: '#6B7280' }}
+              aria-label="Notifications"
             >
               <Bell className="w-[18px] h-[18px]" />
               <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style={{ background: '#D99D26' }} />
@@ -509,6 +532,7 @@ export default function Layout({ children }: LayoutProps) {
                 onClick={() => setProfileOpen(!profileOpen)}
                 className="flex items-center gap-2 px-2 py-2 rounded-xl cursor-pointer transition-all sm:gap-3 sm:px-3"
                 style={{ background: '#F9FAFB', border: '1px solid #E5E7EB' }}
+                aria-label="Open profile menu"
               >
                 <AvatarDisplay size={32} />
                 <div className="hidden sm:block text-left">
@@ -571,6 +595,7 @@ export default function Layout({ children }: LayoutProps) {
                             className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
                             style={{ background: '#FEF2F2', color: '#DC2626' }}
                             title="Remove photo"
+                            aria-label="Remove profile photo"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -627,9 +652,26 @@ export default function Layout({ children }: LayoutProps) {
         </header>
 
         {/* Page content */}
-        <main className="bt-horizontal-lock flex-1 overflow-y-auto overflow-x-hidden pb-24" style={{ touchAction: 'pan-y', overscrollBehaviorX: 'none' }}>
+        <main className="bt-horizontal-lock flex-1 overflow-y-auto overflow-x-hidden pb-24 lg:pb-0" style={{ touchAction: 'pan-y', overscrollBehaviorX: 'none' }}>
           {children}
         </main>
+        <nav className="bt-mobile-admin-nav lg:hidden" aria-label="Primary mobile navigation">
+          {mobileBottomNavItems.map(({ to, icon: Icon, label }) => {
+            const active = isActive(to);
+            return (
+              <Link
+                key={to}
+                to={to}
+                aria-current={active ? 'page' : undefined}
+                className="bt-mobile-admin-nav__item"
+                style={{ color: active ? '#D99D26' : 'var(--bt-text-muted)' }}
+              >
+                <Icon className="h-5 w-5" aria-hidden="true" />
+                <span>{label}</span>
+              </Link>
+            );
+          })}
+        </nav>
       </div>
     </div>
   );

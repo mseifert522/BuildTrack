@@ -9,6 +9,53 @@
   --border: #E5E7EB;
   --text-primary: #111827;
   --text-secondary: #6B7280;
+  --bt-bg: #F0F2F5;
+  --bt-surface: #FFFFFF;
+  --bt-surface-raised: #F9FAFB;
+  --bt-border: #E5E7EB;
+  --bt-text: #111827;
+  --bt-text-muted: #6B7280;
+  --bt-text-soft: #9CA3AF;
+  --bt-ring: #D99D26;
+  --bt-page-pad: 14px;
+  --bt-content-max: 1280px;
+  --bt-bottom-nav-height: 72px;
+  color-scheme: light dark;
+}
+
+@media (min-width: 480px) {
+  :root { --bt-page-pad: 18px; }
+}
+
+@media (min-width: 768px) {
+  :root { --bt-page-pad: 24px; }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --bt-page-pad: 32px;
+    --bt-bottom-nav-height: 0px;
+  }
+}
+
+@media (min-width: 1280px) {
+  :root { --bt-page-pad: 40px; }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bt-bg: #0F141C;
+    --bt-surface: #151C27;
+    --bt-surface-raised: #1C2634;
+    --bt-border: #2D3748;
+    --bt-text: #F4F1EA;
+    --bt-text-muted: #CBD5E1;
+    --bt-text-soft: #94A3B8;
+    --surface-3: #0F141C;
+    --border: #2D3748;
+    --text-primary: #F4F1EA;
+    --text-secondary: #CBD5E1;
+  }
 }
 
 /* ── Base Reset ── */
@@ -35,8 +82,8 @@ body {
   overflow-x: hidden;
   overscroll-behavior: none;
   overscroll-behavior-x: none;
-  background: #F0F2F5;
-  color: #111827;
+  background: var(--bt-bg);
+  color: var(--bt-text);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -45,6 +92,22 @@ body {
   width: 100%;
   top: 0;
   left: 0;
+}
+
+img,
+video,
+picture {
+  max-width: 100%;
+  height: auto;
+}
+
+button,
+a,
+input,
+select,
+textarea,
+[role="button"] {
+  font: inherit;
 }
 
 #root {
@@ -74,7 +137,7 @@ body {
   overscroll-behavior: none;
   overscroll-behavior-x: none;
   touch-action: pan-y;
-  background: #F0F2F5;
+  background: var(--bt-bg);
   /* Safe area for iPhone notch + home indicator */
   padding-top: env(safe-area-inset-top, 0px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
@@ -95,6 +158,52 @@ body {
   -webkit-overflow-scrolling: touch;
   /* Prevent horizontal drift */
   max-width: 100vw;
+}
+
+.bt-responsive-container {
+  width: min(100%, var(--bt-content-max));
+  margin-inline: auto;
+  padding-inline: var(--bt-page-pad);
+}
+
+.bt-fluid-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  gap: clamp(12px, 2vw, 24px);
+}
+
+.bt-skeleton-card {
+  border-radius: 16px;
+  border: 1px solid var(--bt-border);
+  background: var(--bt-surface);
+  padding: 16px;
+  box-shadow: 0 10px 28px rgba(15,23,42,0.08);
+}
+
+.bt-skeleton-line,
+.bt-skeleton-block {
+  position: relative;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bt-text-muted) 16%, transparent);
+}
+
+.bt-skeleton-block {
+  border-radius: 14px;
+}
+
+.bt-skeleton-line::after,
+.bt-skeleton-block::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.38), transparent);
+  animation: bt-skeleton-shimmer 1.25s ease-in-out infinite;
+}
+
+@keyframes bt-skeleton-shimmer {
+  100% { transform: translateX(100%); }
 }
 
 .contractor-setup-shell {
@@ -220,7 +329,41 @@ aside ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
 ::selection { background: rgba(217,157,38,0.2); color: #111827; }
 
 /* ── Focus ── */
-:focus-visible { outline: 2px solid #D99D26; outline-offset: 2px; }
+:focus-visible { outline: 3px solid var(--bt-ring); outline-offset: 3px; }
+
+.bt-mobile-admin-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 35;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  min-height: calc(var(--bt-bottom-nav-height) + env(safe-area-inset-bottom, 0px));
+  padding: 6px 6px calc(6px + env(safe-area-inset-bottom, 0px));
+  background: color-mix(in srgb, var(--bt-surface) 94%, transparent);
+  border-top: 1px solid var(--bt-border);
+  box-shadow: 0 -12px 30px rgba(15,23,42,0.12);
+  backdrop-filter: blur(14px);
+}
+
+.bt-mobile-admin-nav__item {
+  min-height: 48px;
+  min-width: 48px;
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 850;
+  text-decoration: none;
+}
+
+.bt-mobile-admin-nav__item[aria-current="page"] {
+  background: color-mix(in srgb, var(--brand-gold) 14%, transparent);
+}
 
 /* ── Google Places Autocomplete ── */
 .pac-container {
@@ -328,6 +471,82 @@ aside ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
     overscroll-behavior-x: none;
     touch-action: pan-y;
   }
+
+  button,
+  a,
+  [role="button"],
+  input,
+  select,
+  textarea {
+    min-height: 48px;
+  }
+
+  button,
+  a,
+  [role="button"] {
+    min-width: 48px;
+  }
+
+  .mobile-shell {
+    font-size: 1rem;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  ::selection {
+    background: rgba(217,157,38,0.34);
+    color: #FFF7E6;
+  }
+
+  .mobile-shell,
+  .contractor-setup-shell,
+  .mobile-content,
+  .bt-horizontal-lock {
+    background: var(--bt-bg) !important;
+    color: var(--bt-text);
+  }
+
+  .mobile-shell [style*="background: white"],
+  .mobile-shell [style*="background-color: white"],
+  .contractor-setup-shell [style*="background: white"],
+  .contractor-setup-shell [style*="background-color: white"],
+  .modal-sheet {
+    background: var(--bt-surface) !important;
+    border-color: var(--bt-border) !important;
+    color: var(--bt-text) !important;
+  }
+
+  .mobile-shell p,
+  .mobile-shell h1,
+  .mobile-shell h2,
+  .mobile-shell h3,
+  .mobile-shell label,
+  .mobile-shell input,
+  .mobile-shell textarea,
+  .contractor-setup-shell p,
+  .contractor-setup-shell h1,
+  .contractor-setup-shell h2,
+  .contractor-setup-shell h3,
+  .contractor-setup-shell label,
+  .contractor-setup-shell input,
+  .contractor-setup-shell textarea {
+    color: var(--bt-text) !important;
+  }
+
+  .mobile-shell input,
+  .mobile-shell textarea,
+  .contractor-setup-shell input,
+  .contractor-setup-shell textarea {
+    background: var(--bt-surface-raised) !important;
+    border-color: var(--bt-border) !important;
+  }
+
+  .mobile-shell [style*="#6B7280"],
+  .mobile-shell [style*="#9CA3AF"],
+  .contractor-setup-shell [style*="#6B7280"],
+  .contractor-setup-shell [style*="#9CA3AF"] {
+    color: var(--bt-text-muted) !important;
+  }
 }
 
 /* Horizontal pan guard for desktop admin pages viewed on phones/tablets. */
@@ -367,5 +586,16 @@ body,
   #root,
   .bt-horizontal-lock {
     overflow-x: clip;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
   }
 }
