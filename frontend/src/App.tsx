@@ -33,9 +33,10 @@ const MobileNotes = lazy(() => import('./pages/MobileNotes'));
 const MobileProgress = lazy(() => import('./pages/MobileProgress'));
 const MobilePhotos = lazy(() => import('./pages/MobilePhotos'));
 
-const DESKTOP_IDLE_TIMEOUT_MS = 45 * 60 * 1000;
+const DESKTOP_SESSION_TIMEOUT_MS = 45 * 60 * 1000;
 const ACTIVITY_WRITE_INTERVAL_MS = 15 * 1000;
 const TOKEN_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
+const AUTH_SESSION_STARTED_KEY = 'auth_session_started_at';
 const AUTH_LAST_ACTIVITY_KEY = 'auth_last_activity_at';
 const AUTH_LAST_REFRESH_KEY = 'auth_last_refresh_at';
 const CONTRACTOR_LAST_ACTIVITY_KEY = 'contractor_last_activity_at';
@@ -142,6 +143,7 @@ function SessionTimeout() {
     let lastActivityWrite = 0;
 
     const clearDesktopSession = () => {
+      localStorage.removeItem(AUTH_SESSION_STARTED_KEY);
       localStorage.removeItem(AUTH_LAST_ACTIVITY_KEY);
       localStorage.removeItem(AUTH_LAST_REFRESH_KEY);
       logout();
@@ -203,26 +205,26 @@ function SessionTimeout() {
       refreshKey: string,
       userKey: 'user' | 'contractor_user',
       sessionType: 'desktop' | 'contractor',
-      enforceIdleTimeout: boolean
+      enforceDesktopTimeout: boolean
     ) => {
       const now = Date.now();
       const activeToken = localStorage.getItem(tokenKey);
       if (!activeToken) return true;
 
-      const lastActivity = Number(localStorage.getItem(activityKey) || now);
       if (!localStorage.getItem(activityKey)) {
         localStorage.setItem(activityKey, String(now));
       }
 
-      if (enforceIdleTimeout && now - lastActivity >= DESKTOP_IDLE_TIMEOUT_MS) {
-        if (sessionType === 'desktop') {
+      if (enforceDesktopTimeout) {
+        const startedAt = Number(localStorage.getItem(AUTH_SESSION_STARTED_KEY) || now);
+        if (!localStorage.getItem(AUTH_SESSION_STARTED_KEY)) {
+          localStorage.setItem(AUTH_SESSION_STARTED_KEY, String(startedAt));
+        }
+        if (now - startedAt >= DESKTOP_SESSION_TIMEOUT_MS) {
           clearDesktopSession();
           navigate('/login', { replace: true });
-        } else {
-          clearContractorSession();
-          navigate('/app', { replace: true });
+          return false;
         }
-        return false;
       }
 
       const lastRefresh = Number(localStorage.getItem(refreshKey) || 0);
@@ -251,6 +253,9 @@ function SessionTimeout() {
 
     if (localStorage.getItem('token') && !localStorage.getItem(AUTH_LAST_ACTIVITY_KEY)) {
       localStorage.setItem(AUTH_LAST_ACTIVITY_KEY, String(Date.now()));
+    }
+    if (localStorage.getItem('token') && !localStorage.getItem(AUTH_SESSION_STARTED_KEY)) {
+      localStorage.setItem(AUTH_SESSION_STARTED_KEY, String(Date.now()));
     }
     if (localStorage.getItem('contractor_token') && !localStorage.getItem(CONTRACTOR_LAST_ACTIVITY_KEY)) {
       localStorage.setItem(CONTRACTOR_LAST_ACTIVITY_KEY, String(Date.now()));

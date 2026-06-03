@@ -13,12 +13,27 @@ const router = express.Router();
 const MANAGEMENT_ROLES = ['super_admin', 'operations_manager', 'project_manager'];
 const TRUSTED_DEVICE_DAYS = 60;
 const MOBILE_QUICK_ACCESS_DAYS = 7;
+const DESKTOP_SESSION_MAX_AGE_MS = 45 * 60 * 1000;
 const DESKTOP_SESSION_EXPIRES_IN = '45m';
 const MOBILE_SESSION_EXPIRES_IN = '7d';
 const CONTRACTOR_EMAIL_LOGIN_MESSAGE = 'If that contractor email is on file, BuildTrack will send login instructions.';
 
 function sqliteDateTime(date) {
   return date.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
+}
+
+function parseSqliteDateTime(value) {
+  if (!value) return 0;
+  const normalized = String(value).includes('T') ? String(value) : `${String(value).replace(' ', 'T')}Z`;
+  const timestamp = new Date(normalized).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function desktopSessionSecondsRemaining(issuedAt) {
+  const issuedAtMs = typeof issuedAt === 'number' ? issuedAt * 1000 : parseSqliteDateTime(issuedAt);
+  if (!issuedAtMs) return Math.ceil(DESKTOP_SESSION_MAX_AGE_MS / 1000);
+  const remainingMs = issuedAtMs + DESKTOP_SESSION_MAX_AGE_MS - Date.now();
+  return Math.max(0, Math.ceil(remainingMs / 1000));
 }
 
 function minutesFromNow(minutes) {
@@ -92,16 +107,17 @@ function publicUser(user) {
   };
 }
 
-function sessionExpiryFor(sessionType) {
+function sessionExpiryFor(sessionType, overrideExpiresIn = null) {
+  if (overrideExpiresIn) return overrideExpiresIn;
   return sessionType === 'mobile_app' ? MOBILE_SESSION_EXPIRES_IN : DESKTOP_SESSION_EXPIRES_IN;
 }
 
-function createSessionToken(user, sessionId = null, sessionType = null) {
+function createSessionToken(user, sessionId = null, sessionType = null, expiresIn = null) {
   const resolvedSessionType = sessionType || (user.role === 'contractor' ? 'mobile_app' : 'desktop');
   return jwt.sign(
     { userId: user.id, role: user.role, sid: sessionId || undefined, st: resolvedSessionType },
     process.env.JWT_SECRET,
-    { expiresIn: sessionExpiryFor(resolvedSessionType) }
+    { expiresIn: sessionExpiryFor(resolvedSessionType, expiresIn) }
   );
 }
 
@@ -594,21 +610,37 @@ router.post('/refresh', authenticate, (req, res) => {
     const db = getDb();
     let sessionId = req.auth?.session_id || null;
     let sessionType = req.auth?.session_type || null;
+    let sessionRow = null;
     if (!sessionId) {
       const session = createAuthSession(db, req.user, req, { refresh_from_legacy_token: true });
       sessionId = session.id;
       sessionType = session.sessionType;
-    } else if (!sessionType) {
-      const row = db.prepare(`
-        SELECT session_type
+    } else {
+      sessionRow = db.prepare(`
+        SELECT session_type, issued_at
         FROM auth_sessions
         WHERE id = ? AND user_id = ? AND revoked_at IS NULL
         LIMIT 1
       `).get(sessionId, req.user.id);
-      sessionType = row?.session_type || inferSessionType(req.user, req);
+      sessionType = sessionRow?.session_type || sessionType || inferSessionType(req.user, req);
     }
+
+    let expiresIn = null;
+    if (sessionType === 'desktop') {
+      const remainingSeconds = desktopSessionSecondsRemaining(sessionRow?.issued_at || req.auth?.issued_at || null);
+      if (remainingSeconds <= 0) {
+        db.prepare(`
+          UPDATE auth_sessions
+          SET revoked_at = COALESCE(revoked_at, datetime('now')), updated_at = datetime('now')
+          WHERE id = ? AND user_id = ?
+        `).run(sessionId, req.user.id);
+        return res.status(401).json({ error: 'Desktop session expired. Please log in again.' });
+      }
+      expiresIn = remainingSeconds;
+    }
+
     markUserOnline(db, req.user.id, false, sessionId);
-    res.json({ token: createSessionToken(req.user, sessionId, sessionType), user: publicUser(req.user) });
+    res.json({ token: createSessionToken(req.user, sessionId, sessionType, expiresIn), user: publicUser(req.user) });
   } catch (err) {
     console.error('Token refresh error:', err);
     res.status(500).json({ error: 'Failed to refresh session' });
