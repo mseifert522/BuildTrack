@@ -426,7 +426,8 @@ router.get('/:id', authorizeProjectAccess, (req, res) => {
     LEFT JOIN users u ON u.id = ph.uploaded_by
     LEFT JOIN photo_categories pc ON pc.id = ph.category_id
     WHERE ph.project_id = ?
-    ORDER BY ph.created_at DESC LIMIT 6
+    ORDER BY datetime(COALESCE(ph.captured_at, ph.taken_at, ph.uploaded_at, ph.created_at)) DESC, ph.created_at DESC
+    LIMIT 8
   `).all(req.params.id);
 
   const recentInvoices = db.prepare(`

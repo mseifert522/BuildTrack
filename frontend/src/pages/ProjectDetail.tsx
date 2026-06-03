@@ -197,7 +197,7 @@ export default function ProjectDetail() {
   const noteMediaInputRef = useRef<HTMLInputElement>(null);
   const noteCameraInputRef = useRef<HTMLInputElement>(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       const res = await api.get(`/projects/${id}`);
       setProject(res.data);
@@ -206,9 +206,15 @@ export default function ProjectDetail() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
 
-  useEffect(() => { load(); }, [id]);
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (tab !== 'overview') return;
+    const interval = window.setInterval(load, 30000);
+    return () => window.clearInterval(interval);
+  }, [load, tab]);
 
   useEffect(() => {
     const hashTabMap: Record<string, Tab> = {
@@ -785,11 +791,12 @@ export default function ProjectDetail() {
         {tab === 'overview' && (
           <div className="space-y-4">
             {/* Stats row */}
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {[
                 { label: 'Open Punch Items', value: project.punch_stats?.filter((s: any) => s.status !== 'completed').reduce((a: number, b: any) => a + b.cnt, 0) || 0, color: 'text-orange-600', bg: 'bg-orange-50' },
                 { label: 'Completed Items', value: project.punch_stats?.find((s: any) => s.status === 'completed')?.cnt || 0, color: 'text-green-600', bg: 'bg-green-50' },
                 { label: 'Assigned Contractors', value: project.assignments?.length || 0, color: 'text-blue-600', bg: 'bg-blue-50' },
+                { label: 'Recent Field Photos', value: project.recent_photos?.length || 0, color: 'text-amber-600', bg: 'bg-amber-50' },
               ].map(({ label, value, color, bg }) => (
                 <div key={label} className="bg-white rounded-xl border border-gray-200 p-4">
                   <p className={`text-2xl font-bold ${color}`}>{value}</p>
@@ -823,6 +830,12 @@ export default function ProjectDetail() {
                 ))}
               </div>
             </div>
+
+              <RecentFieldPhotosCard
+                projectId={id!}
+                photos={Array.isArray(project.recent_photos) ? project.recent_photos : []}
+                onViewAll={() => setTab('progress-history')}
+              />
 
               <button id="construction-plan" type="button" onClick={() => setTab('construction-plan')} className="w-full bg-white rounded-xl border border-gray-200 p-4 text-left hover:border-blue-300 hover:bg-blue-50 transition-colors">
                 <h3 className="font-semibold text-gray-900 mb-2 text-sm">Scope of Work</h3>
@@ -2769,6 +2782,88 @@ function ProgressMediaGrid({
         </div>
       )}
     </div>
+  );
+}
+
+function RecentFieldPhotosCard({
+  projectId,
+  photos,
+  onViewAll,
+}: {
+  projectId: string;
+  photos: any[];
+  onViewAll: () => void;
+}) {
+  const visiblePhotos = photos.slice(0, 4);
+
+  return (
+    <section className="rounded-xl border border-gray-200 bg-white p-4">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-900">Recent Field Photos</h3>
+          <p className="mt-1 text-xs font-semibold text-gray-500">
+            {photos.length ? `${photos.length} latest project media item${photos.length === 1 ? '' : 's'}` : 'No field photos yet'}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onViewAll}
+          className="rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-xs font-black text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
+        >
+          View all
+        </button>
+      </div>
+
+      {visiblePhotos.length ? (
+        <div className="grid grid-cols-2 gap-2">
+          {visiblePhotos.map(photo => {
+            const src = `/uploads/${projectId}/${photo.filename}`;
+            const mediaKind = getProgressMediaKind(photo);
+            const isVideo = mediaKind === 'video';
+            const timestamp = getProgressTimestamp(photo);
+
+            return (
+              <button
+                key={photo.id || photo.filename}
+                type="button"
+                onClick={onViewAll}
+                className="group overflow-hidden rounded-lg border border-gray-200 bg-gray-50 text-left transition hover:border-blue-300 hover:shadow-sm"
+                aria-label={`Open ${photo.original_name || 'field photo'} in progress history`}
+              >
+                <div className="relative aspect-[4/3] bg-gray-100">
+                  {isVideo ? (
+                    <>
+                      <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+                      <PlayCircle className="absolute inset-0 m-auto h-8 w-8 text-white drop-shadow" />
+                    </>
+                  ) : mediaKind === 'image' ? (
+                    <img src={src} alt={photo.original_name || 'Recent field photo'} className="h-full w-full object-cover" loading="lazy" />
+                  ) : (
+                    <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
+                  )}
+                  <span className="absolute left-1.5 top-1.5 rounded-full bg-black/70 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-white">
+                    {photo.photo_type || 'media'}
+                  </span>
+                </div>
+                <div className="p-2">
+                  <p className="truncate text-xs font-black text-gray-900">
+                    {photo.uploader_name || 'Unknown user'}
+                  </p>
+                  <p className="mt-0.5 text-[11px] font-semibold text-gray-500">
+                    {timestamp ? formatEasternDateTime(timestamp, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'No timestamp'}
+                  </p>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4 text-center">
+          <Camera className="mx-auto mb-2 h-7 w-7 text-gray-300" />
+          <p className="text-sm font-bold text-gray-500">No field photos connected yet.</p>
+        </div>
+      )}
+    </section>
   );
 }
 
