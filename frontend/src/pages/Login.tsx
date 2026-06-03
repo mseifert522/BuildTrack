@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import api from '../lib/api';
+import { isMobileAppHost, mobilePath } from '../lib/appUrls';
 import toast from 'react-hot-toast';
 
 const DEVICE_TOKEN_KEY = 'bt_device_token';
@@ -58,7 +59,7 @@ type LoginPayload = {
 
 const landingPathFor = (user: { role?: string; force_password_reset?: boolean }) => {
   if (user.force_password_reset) return '/change-password';
-  return user.role === 'contractor' ? '/mobile' : '/dashboard';
+  return isMobileAppHost() || user.role === 'contractor' ? mobilePath() : '/dashboard';
 };
 
 const clearReviewSummaryDismissals = (user: { id?: string; role?: string }) => {
@@ -249,7 +250,7 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
         const contractorUser = JSON.parse(localStorage.getItem(CONTRACTOR_USER_KEY) || 'null');
         if (contractorUser) {
           setAuth(contractorUser, contractorToken);
-          navigate('/mobile', { replace: true });
+          navigate(mobilePath(), { replace: true });
         }
       } catch {
         clearContractorSession();

@@ -1,9 +1,16 @@
 import { lazy, Suspense, useEffect, useRef, type ReactNode } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { useAuthStore, canManageUsers, canAccessSettings, canAccessSecurity } from './store/authStore';
 import Layout from './components/Layout';
 import { Loading } from './components/ui';
+import {
+  isLegacyContractorAppPath,
+  isLegacyMobilePath,
+  isMobileAppHost,
+  legacyMobilePathToMobileHostPath,
+  mobilePath,
+} from './lib/appUrls';
 
 const Login = lazy(() => import('./pages/Login'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -45,8 +52,9 @@ const MOBILE_USER_AGENT_PATTERN = /android|iphone|ipad|ipod|mobile|tablet|silk|k
 
 function isMobileDeviceSession() {
   if (typeof window === 'undefined') return false;
-  return window.location.pathname.startsWith('/mobile')
-    || window.location.pathname.startsWith('/app')
+  return isMobileAppHost()
+    || isLegacyMobilePath(window.location.pathname)
+    || isLegacyContractorAppPath(window.location.pathname)
     || MOBILE_USER_AGENT_PATTERN.test(window.navigator.userAgent || '');
 }
 
@@ -62,8 +70,8 @@ function clearContractorSession() {
 /** After login, redirect to the right experience based on role */
 function SmartHomeRedirect() {
   const { user } = useAuthStore();
-  if (user?.role === 'contractor') {
-    return <Navigate to="/mobile" replace />;
+  if (isMobileAppHost() || user?.role === 'contractor') {
+    return <Navigate to={mobilePath()} replace />;
   }
   return <Navigate to="/dashboard" replace />;
 }
@@ -85,7 +93,13 @@ function MobileRoute({ children }: { children: ReactNode }) {
 
 function LegacyMobileProjectRedirect() {
   const { id } = useParams<{ id: string }>();
-  return <Navigate to={id ? `/mobile/project/${id}` : '/mobile'} replace />;
+  return <Navigate to={id ? mobilePath(`/project/${id}`) : mobilePath()} replace />;
+}
+
+function LegacyMobilePathRedirect() {
+  const location = useLocation();
+  const destination = `${legacyMobilePathToMobileHostPath(location.pathname)}${location.search}${location.hash}`;
+  return <Navigate to={destination} replace />;
 }
 
 /** Redirect contractors away from desktop — they should use mobile */
@@ -93,7 +107,7 @@ function DesktopRoute({ children }: { children: ReactNode }) {
   const { user, token } = useAuthStore();
   if (!token || !user) return <Navigate to="/login" replace />;
   if (user.force_password_reset) return <Navigate to="/change-password" replace />;
-  if (user.role === 'contractor') return <Navigate to="/mobile" replace />;
+  if (isMobileAppHost() || user.role === 'contractor') return <Navigate to={mobilePath()} replace />;
   return <>{children}</>;
 }
 
@@ -127,8 +141,8 @@ function SecurityRoute({ children }: { children: ReactNode }) {
 function AuthRoute({ children }: { children: ReactNode }) {
   const { token, user } = useAuthStore();
   if (token && user && !user.force_password_reset) {
-    return user.role === 'contractor'
-      ? <Navigate to="/mobile" replace />
+    return isMobileAppHost() || user.role === 'contractor'
+      ? <Navigate to={mobilePath()} replace />
       : <Navigate to="/dashboard" replace />;
   }
   return <>{children}</>;
@@ -192,7 +206,7 @@ function SessionTimeout() {
           navigate('/login', { replace: true });
         } else {
           clearContractorSession();
-          navigate('/app', { replace: true });
+          navigate(isMobileAppHost() ? '/login' : '/app', { replace: true });
         }
       } finally {
         refreshInFlight.current[sessionType] = false;
@@ -287,7 +301,7 @@ function MobileGestureShortcuts() {
         || document.querySelector('.mobile-content') as HTMLElement | null;
     };
 
-    const isMobileContext = () => window.location.pathname.startsWith('/mobile');
+    const isMobileContext = () => isMobileAppHost() || isLegacyMobilePath(window.location.pathname);
 
     const handleTouchStart = (event: TouchEvent) => {
       if (!isMobileContext() || event.touches.length !== 1) return;
@@ -315,7 +329,7 @@ function MobileGestureShortcuts() {
         return;
       }
 
-      if (window.location.pathname.startsWith('/mobile') && start.scrollTop <= 2 && dy > 92 && mostlyVertical) {
+      if (isMobileContext() && start.scrollTop <= 2 && dy > 92 && mostlyVertical) {
         window.dispatchEvent(new CustomEvent('buildtrack:pull-refresh'));
       }
     };
@@ -329,6 +343,47 @@ function MobileGestureShortcuts() {
   }, [navigate]);
 
   return null;
+}
+
+function MobileHostRoutes() {
+  return (
+    <Routes>
+      {/* Auth */}
+      <Route path="/login" element={<AuthRoute><Login initialMode="pin" /></AuthRoute>} />
+      <Route path="/change-password" element={<ChangePassword />} />
+      <Route path="/forgot-password" element={<AuthRoute><ForgotPassword /></AuthRoute>} />
+      <Route path="/reset-password" element={<ResetPassword />} />
+      <Route path="/contractor-setup" element={<ContractorSetup />} />
+
+      {/* Mobile-first BuildTrack app on the dedicated mobile host */}
+      <Route path="/" element={<MobileRoute><MobileHome /></MobileRoute>} />
+      <Route path="/projects" element={<MobileRoute><MobileProjects /></MobileRoute>} />
+      <Route path="/photos" element={<MobileRoute><MobilePhotos /></MobileRoute>} />
+      <Route path="/project/:id" element={<MobileRoute><MobileProjectHub /></MobileRoute>} />
+      <Route path="/project/:id/punch-list" element={<MobileRoute><MobilePunchList /></MobileRoute>} />
+      <Route path="/project/:id/invoice" element={<MobileRoute><MobileInvoice /></MobileRoute>} />
+      <Route path="/project/:id/notes" element={<MobileRoute><MobileNotes /></MobileRoute>} />
+      <Route path="/project/:id/progress" element={<MobileRoute><MobileProgress /></MobileRoute>} />
+      <Route path="/add-project" element={<MobileRoute><MobileAddProject /></MobileRoute>} />
+
+      {/* Legacy mobile paths are normalized on the mobile host. */}
+      <Route path="/mobile/*" element={<MobileRoute><LegacyMobilePathRedirect /></MobileRoute>} />
+      <Route path="/app" element={<AuthRoute><Login initialMode="pin" /></AuthRoute>} />
+      <Route path="/app/*" element={<MobileRoute><LegacyMobilePathRedirect /></MobileRoute>} />
+
+      {/* Keep the desktop app out of the mobile host. */}
+      <Route path="/dashboard" element={<Navigate to="/" replace />} />
+      <Route path="/contractors" element={<Navigate to="/" replace />} />
+      <Route path="/suppliers" element={<Navigate to="/" replace />} />
+      <Route path="/invoices" element={<Navigate to="/" replace />} />
+      <Route path="/documents" element={<Navigate to="/" replace />} />
+      <Route path="/security" element={<Navigate to="/" replace />} />
+      <Route path="/settings" element={<Navigate to="/" replace />} />
+      <Route path="/users" element={<Navigate to="/" replace />} />
+
+      <Route path="*" element={<Navigate to="/login" replace />} />
+    </Routes>
+  );
 }
 
 export default function App() {
@@ -353,6 +408,9 @@ export default function App() {
         }}
       />
       <Suspense fallback={<Loading message="Loading BuildTrack..." />}>
+      {isMobileAppHost() ? (
+        <MobileHostRoutes />
+      ) : (
       <Routes>
         {/* Auth */}
         <Route path="/login" element={<AuthRoute><Login /></AuthRoute>} />
@@ -461,6 +519,7 @@ export default function App() {
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
+      )}
       </Suspense>
     </BrowserRouter>
   );

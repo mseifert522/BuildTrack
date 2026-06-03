@@ -28,6 +28,27 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 app.set('trust proxy', true);
 
+const MOBILE_APP_HOSTS = new Set(
+  (process.env.MOBILE_APP_HOSTS || 'mobile.buildtrack.newurbandev.com,m.buildtrack.newurbandev.com')
+    .split(',')
+    .map(host => host.trim().toLowerCase())
+    .filter(Boolean)
+);
+
+function isMobileAppRequest(req) {
+  return MOBILE_APP_HOSTS.has(String(req.hostname || '').toLowerCase());
+}
+
+function mobileHostRedirectPath(originalUrl) {
+  const [rawPath, suffix = ''] = originalUrl.split(/(?=[?#])/, 2);
+  if (rawPath === '/mobile') return `/${suffix}`;
+  if (rawPath.startsWith('/mobile/')) return `${rawPath.slice('/mobile'.length)}${suffix}`;
+  if (rawPath === '/app' || rawPath === '/app/home') return `/login${suffix}`;
+  if (rawPath === '/app/projects') return `/projects${suffix}`;
+  if (rawPath.startsWith('/app/project/')) return `${rawPath.replace('/app/project', '/project')}${suffix}`;
+  return null;
+}
+
 // Ensure uploads directory exists
 const uploadsPath = process.env.UPLOADS_PATH || './uploads';
 if (!fs.existsSync(uploadsPath)) fs.mkdirSync(uploadsPath, { recursive: true });
@@ -208,6 +229,15 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
 // Unknown API paths should return machine-readable JSON, not the React shell.
 app.use('/api', (req, res) => {
   res.status(404).json({ error: 'API endpoint not found', path: req.originalUrl });
+});
+
+// The dedicated mobile host uses root-level mobile routes. Legacy /mobile and
+// /app paths remain supported, but are normalized before the SPA loads.
+app.use((req, res, next) => {
+  if (!isMobileAppRequest(req)) return next();
+  const redirectPath = mobileHostRedirectPath(req.originalUrl);
+  if (!redirectPath) return next();
+  return res.redirect(308, redirectPath);
 });
 
 // Redirect app.newurbandev.com root to /app
