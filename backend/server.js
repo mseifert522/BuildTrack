@@ -34,6 +34,8 @@ const MOBILE_APP_HOSTS = new Set(
     .map(host => host.trim().toLowerCase())
     .filter(Boolean)
 );
+const MOBILE_APP_ORIGIN = process.env.MOBILE_APP_ORIGIN || 'https://mobile.buildtrack.newurbandev.com';
+const REDIRECT_LEGACY_MOBILE_TO_HOST = process.env.REDIRECT_LEGACY_MOBILE_TO_HOST === 'true';
 
 function isMobileAppRequest(req) {
   return MOBILE_APP_HOSTS.has(String(req.hostname || '').toLowerCase());
@@ -234,8 +236,11 @@ app.use('/api', (req, res) => {
 // The dedicated mobile host uses root-level mobile routes. Legacy /mobile and
 // /app paths remain supported, but are normalized before the SPA loads.
 app.use((req, res, next) => {
-  if (!isMobileAppRequest(req)) return next();
   const redirectPath = mobileHostRedirectPath(req.originalUrl);
+  if (REDIRECT_LEGACY_MOBILE_TO_HOST && !isMobileAppRequest(req) && redirectPath) {
+    return res.redirect(308, `${MOBILE_APP_ORIGIN}${redirectPath}`);
+  }
+  if (!isMobileAppRequest(req)) return next();
   if (!redirectPath) return next();
   return res.redirect(308, redirectPath);
 });
