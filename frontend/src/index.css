@@ -364,6 +364,59 @@ textarea,
   color: var(--bt-text-muted) !important;
 }
 
+.bt-desktop-shell .bt-project-notes-panel {
+  border-color: var(--bt-border) !important;
+  background: #0B0D0F !important;
+  color: var(--bt-text) !important;
+  box-shadow: none !important;
+}
+
+.bt-desktop-shell .bt-project-notes-header,
+.bt-desktop-shell .bt-project-note-composer,
+.bt-desktop-shell .bt-project-notes-list,
+.bt-desktop-shell .bt-project-note-card,
+.bt-desktop-shell .bt-project-progress-card,
+.bt-desktop-shell .bt-project-progress-media-grid,
+.bt-desktop-shell .bt-project-note-media-panel {
+  border-color: var(--bt-border) !important;
+  background: var(--bt-surface) !important;
+  color: var(--bt-text) !important;
+  box-shadow: none !important;
+}
+
+.bt-desktop-shell .bt-project-notes-list,
+.bt-desktop-shell .bt-project-note-media-panel,
+.bt-desktop-shell .bt-project-progress-media-grid {
+  background: var(--bt-panel) !important;
+}
+
+.bt-desktop-shell .bt-project-note-card,
+.bt-desktop-shell .bt-project-progress-card {
+  background: #111315 !important;
+  border-left-color: var(--bt-accent) !important;
+}
+
+.bt-desktop-shell .bt-project-note-card:hover,
+.bt-desktop-shell .bt-project-progress-card:hover {
+  background: #15181C !important;
+  border-color: var(--bt-accent) !important;
+}
+
+.bt-desktop-shell .bt-project-note-meta-bar {
+  border-color: var(--bt-border) !important;
+}
+
+.bt-desktop-shell .bt-project-note-body,
+.bt-desktop-shell .bt-project-progress-note-body {
+  color: var(--bt-text) !important;
+  font-weight: 650;
+}
+
+.bt-desktop-shell .bt-project-note-media-label,
+.bt-desktop-shell .bt-project-progress-hidden-count {
+  color: var(--bt-text-muted) !important;
+}
+
 .bt-desktop-shell .max-w-7xl {
   max-width: none !important;
 }

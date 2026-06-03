@@ -448,7 +448,7 @@ export default function ProjectDetail() {
   };
 
   const notesPanel = (compact = false) => (
-    <div className="h-full rounded-xl border border-slate-400 bg-[#D8E0EA] p-3 shadow-[0_10px_24px_rgba(15,23,42,0.12)] sm:p-4">
+    <div className="bt-project-notes-panel h-full rounded-xl border border-slate-400 bg-[#D8E0EA] p-3 shadow-[0_10px_24px_rgba(15,23,42,0.12)] sm:p-4">
       <input
         ref={attachExistingNoteInputRef}
         type="file"
@@ -457,7 +457,7 @@ export default function ProjectDetail() {
         className="hidden"
         onChange={event => attachProgressPicturesToExistingNote(event.target.files)}
       />
-      <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-slate-400 bg-slate-50 px-3 py-2.5 shadow-sm">
+      <div className="bt-project-notes-header mb-3 flex items-center justify-between gap-3 rounded-xl border border-slate-400 bg-slate-50 px-3 py-2.5 shadow-sm">
         <div className="min-w-0">
           <h3 className="text-sm font-black text-slate-950">Project Notes</h3>
           <p className="mt-0.5 text-xs font-semibold text-slate-600">Office, field, and general updates for this project</p>
@@ -483,7 +483,7 @@ export default function ProjectDetail() {
           )}
         </div>
       </div>
-      <div className="mb-4 rounded-2xl border border-slate-400 bg-[#EDF3F8] p-3 shadow-sm">
+      <div className="bt-project-note-composer mb-4 rounded-2xl border border-slate-400 bg-[#EDF3F8] p-3 shadow-sm">
         <textarea
           value={newNote}
           onChange={e => setNewNote(e.target.value)}
@@ -592,12 +592,12 @@ export default function ProjectDetail() {
         </div>
       )}
       </div>
-      <div className={`space-y-4 rounded-xl border border-slate-400 bg-[#C7D2DE] p-3 shadow-inner ${compact ? 'max-h-[620px] overflow-y-auto pr-2' : ''}`}>
+      <div className={`bt-project-notes-list space-y-4 rounded-xl border border-slate-400 bg-[#C7D2DE] p-3 shadow-inner ${compact ? 'max-h-[620px] overflow-y-auto pr-2' : ''}`}>
         {notes.map(note => (
-          <div key={note.id} className="flex items-start gap-3 rounded-2xl border border-slate-400 bg-[#F1F5F9] p-4 shadow-[0_4px_14px_rgba(15,23,42,0.10)] ring-1 ring-slate-300/70">
+          <div key={note.id} className="bt-project-note-card flex items-start gap-3 rounded-2xl border border-slate-400 bg-[#F1F5F9] p-4 shadow-[0_4px_14px_rgba(15,23,42,0.10)] ring-1 ring-slate-300/70">
             <Avatar src={note.user_avatar_url} name={note.user_name} size={36} />
             <div className="flex-1 min-w-0">
-              <div className="mb-2 flex items-start justify-between gap-3 border-b border-slate-300 pb-2">
+              <div className="bt-project-note-meta-bar mb-2 flex items-start justify-between gap-3 border-b border-slate-300 pb-2">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="text-sm font-black text-slate-950 truncate">{note.user_name}</span>
@@ -639,12 +639,12 @@ export default function ProjectDetail() {
                 </div>
               ) : (
                 <>
-                  <p className="pt-2 text-sm leading-6 text-slate-800 whitespace-pre-wrap">{note.note}</p>
+                  <p className="bt-project-note-body pt-2 text-sm leading-6 text-slate-800 whitespace-pre-wrap">{note.note}</p>
                   <span className={`inline-flex mt-2 rounded-full border px-2 py-0.5 text-xs font-bold ${note.visibility === 'public' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-300 bg-white text-slate-700'}`}>
                     {note.visibility === 'public' ? 'Public to contractors' : 'Private management note'}
                   </span>
                   {getNotePhotos(note).length > 0 && (
-                    <div className="mt-3 rounded-xl border border-slate-400 bg-[#E2E8F0] p-2 shadow-inner">
+                    <div className="bt-project-note-media-panel mt-3 rounded-xl border border-slate-400 bg-[#E2E8F0] p-2 shadow-inner">
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                         {getNotePhotos(note).map((photo: any) => {
                           const src = `/uploads/${note.project_id}/${photo.filename}`;
@@ -675,7 +675,7 @@ export default function ProjectDetail() {
                           );
                         })}
                       </div>
-                      <p className="px-1 pt-2 text-xs font-bold text-slate-600">Progress pictures attached to this note</p>
+                      <p className="bt-project-note-media-label px-1 pt-2 text-xs font-bold text-slate-600">Progress pictures attached to this note</p>
                     </div>
                   )}
                   {note.edited_at && (
@@ -2625,7 +2625,7 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
             {group.records.map(record => (
               <article
                 key={record.id}
-                className={`rounded-lg border bg-white p-3 shadow-sm ${record.kind === 'note' ? 'border-slate-200 border-l-4 border-l-blue-500' : 'border-amber-200 border-l-4 border-l-amber-500'}`}
+                className={`bt-project-progress-card rounded-lg border bg-white p-3 shadow-sm ${record.kind === 'note' ? 'border-slate-200 border-l-4 border-l-blue-500' : 'border-amber-200 border-l-4 border-l-amber-500'}`}
               >
                 <div className="min-w-0">
                   <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -2667,7 +2667,7 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
                       )}
                     </div>
                     {record.noteText && (
-                      <div className={`${record.kind === 'media' ? 'mt-2 max-h-16' : 'mt-2 max-h-28'} overflow-y-auto whitespace-pre-wrap pr-2 text-sm leading-6 text-slate-700`}>
+                      <div className={`bt-project-progress-note-body ${record.kind === 'media' ? 'mt-2 max-h-16' : 'mt-2 max-h-28'} overflow-y-auto whitespace-pre-wrap pr-2 text-sm leading-6 text-slate-700`}>
                         {record.noteText}
                       </div>
                     )}
@@ -2722,7 +2722,7 @@ function ProgressMediaGrid({
   const hiddenCount = photos.length - visiblePhotos.length;
 
   return (
-    <div className="mt-3 flex flex-wrap gap-2 rounded-lg border border-slate-100 bg-slate-50/70 p-2">
+    <div className="bt-project-progress-media-grid mt-3 flex flex-wrap gap-2 rounded-lg border border-slate-100 bg-slate-50/70 p-2">
       {visiblePhotos.map(photo => {
         const src = `/uploads/${projectId}/${photo.filename}`;
         const mediaKind = getProgressMediaKind(photo);
@@ -2764,7 +2764,7 @@ function ProgressMediaGrid({
         );
       })}
       {hiddenCount > 0 && (
-        <div className="flex h-20 w-20 flex-shrink-0 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white text-sm font-black text-slate-500 md:h-24 md:w-24">
+        <div className="bt-project-progress-hidden-count flex h-20 w-20 flex-shrink-0 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white text-sm font-black text-slate-500 md:h-24 md:w-24">
           +{hiddenCount}
         </div>
       )}
