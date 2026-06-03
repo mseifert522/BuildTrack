@@ -8,7 +8,7 @@ import RecentActivityModal from '../components/RecentActivityModal';
 import {
   FolderOpen, ClipboardList, FileText, Image,
   TrendingUp, AlertTriangle, CheckCircle2, Clock,
-  ArrowUpRight, Plus, ChevronRight, MapPin, MessageSquare, Camera,
+  ArrowUpRight, Plus, ChevronRight, MapPin, MessageSquare,
   X, Bell
 } from 'lucide-react';
 import { EASTERN_TIME_ZONE, formatEasternDate, formatEasternDateTime, formatEasternRelative, formatEasternTime, parseBuildTrackTimestamp } from '../lib/time';
@@ -480,11 +480,11 @@ export default function Dashboard() {
         </div>
 
         {/* Main content grid */}
-        <div className="grid xl:grid-cols-3 gap-6">
-          {/* Latest Notes Activity - takes 2/3 */}
+        <div className="grid gap-6">
+          {/* Latest Notes Activity */}
           <div
             id="recent-activity"
-            className="bt-card xl:col-span-2 overflow-hidden"
+            className="bt-card overflow-hidden"
             style={{
               boxShadow: '0 1px 2px rgba(15,23,42,0.04)',
             }}
@@ -594,77 +594,6 @@ export default function Dashboard() {
                 })}
               </div>
             )}
-          </div>
-
-          {/* Right column */}
-          <div className="space-y-5">
-            {/* Quick Actions */}
-            <div
-              className="bt-card p-4"
-            >
-              <h3 className="font-bold text-slate-950 text-sm mb-4">Quick Actions</h3>
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { to: '/projects', label: 'Add Note', icon: MessageSquare, color: '#D97706', bg: 'rgba(217,119,6,0.08)' },
-                  { to: '/projects', label: 'Punch List', icon: ClipboardList, color: '#EA580C', bg: 'rgba(234,88,12,0.08)' },
-                  { to: '/photos', label: 'Upload Photos', icon: Camera, color: '#059669', bg: 'rgba(5,150,105,0.08)' },
-                  { to: '/invoices', label: 'Invoices', icon: FileText, color: '#7C3AED', bg: 'rgba(124,58,237,0.08)' },
-                ].map(a => (
-                  <Link
-                    key={a.to}
-                    to={a.to}
-                    className="flex min-h-20 flex-col items-center justify-center gap-2 rounded-sm border border-slate-700 bg-slate-50 p-3 text-center transition-colors hover:border-orange-400 hover:bg-white"
-                  >
-                    <a.icon className="w-5 h-5" style={{ color: a.color }} />
-                    <span className="text-xs font-bold text-slate-700">{a.label}</span>
-                  </Link>
-                ))}
-              </div>
-            </div>
-
-            {/* Recent Invoices */}
-            <div
-              className="bt-card overflow-hidden"
-            >
-              <div
-                className="flex items-center justify-between border-b border-slate-700 bg-slate-50 px-4 py-3"
-              >
-                <div className="flex items-center gap-2.5">
-                  <div
-                    className="w-7 h-7 rounded-md flex items-center justify-center bg-blue-50"
-                  >
-                    <FileText className="w-3.5 h-3.5 text-blue-700" />
-                  </div>
-                  <h3 className="font-bold text-slate-950 text-sm">Recent Invoices</h3>
-                </div>
-                <Link
-                  to="/invoices"
-                  className="text-xs font-bold text-blue-700 hover:text-blue-800"
-                >
-                  View all
-                </Link>
-              </div>
-              <div className="divide-y divide-gray-50">
-                {invoices.length === 0 ? (
-                  <p className="text-center text-gray-400 text-sm py-8">No invoices yet</p>
-                ) : invoices.slice(0, 5).map(inv => (
-                  <div key={inv.id} className="flex items-center gap-3 px-5 py-3.5">
-                    <div
-                      className="w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0 bg-slate-100 text-slate-700 text-xs font-bold"
-                    >
-                      #
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-bold text-gray-900 truncate">{inv.contractor_name}</p>
-                      <p className="text-xs text-gray-400">{formatEasternDate(inv.created_at, { month: 'short', day: 'numeric', year: 'numeric' })}</p>
-                    </div>
-                    <div className="text-right flex-shrink-0">
-                      <p className="text-sm font-black text-gray-900">${Number(inv.total).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
           </div>
         </div>
 
