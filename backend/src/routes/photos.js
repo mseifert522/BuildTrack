@@ -516,7 +516,10 @@ router.post('/', uploadProjectPhotos, async (req, res) => {
         action: 'field_work_evidence_uploaded',
         entityType: 'construction_plan_item',
         entityId: construction_plan_item_id,
-        details: { photo_count: inserted.length },
+        details: {
+          photo_count: inserted.length,
+          note: sharedBatchNote || inserted.find(photo => photo.individual_note)?.individual_note || caption || null,
+        },
       });
     }
 

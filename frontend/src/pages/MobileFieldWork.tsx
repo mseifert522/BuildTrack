@@ -32,6 +32,7 @@ export default function MobileFieldWork() {
   const [sendingNote, setSendingNote] = useState(false);
   const [uploadingTaskId, setUploadingTaskId] = useState<string | null>(null);
   const [noteFiles, setNoteFiles] = useState<File[]>([]);
+  const [taskEvidenceDrafts, setTaskEvidenceDrafts] = useState<Record<string, { note: string; files: File[] }>>({});
   const [taskForm, setTaskForm] = useState({
     title: '',
     category: 'Field Work',
@@ -57,6 +58,23 @@ export default function MobileFieldWork() {
   };
 
   useEffect(() => { load(); }, [projectId]);
+
+  const getTaskEvidenceDraft = (taskId: string) => taskEvidenceDrafts[taskId] || { note: '', files: [] };
+
+  const updateTaskEvidenceDraft = (taskId: string, patch: Partial<{ note: string; files: File[] }>) => {
+    setTaskEvidenceDrafts(current => ({
+      ...current,
+      [taskId]: { ...(current[taskId] || { note: '', files: [] }), ...patch },
+    }));
+  };
+
+  const clearTaskEvidenceDraft = (taskId: string) => {
+    setTaskEvidenceDrafts(current => {
+      const next = { ...current };
+      delete next[taskId];
+      return next;
+    });
+  };
 
   const createTask = async () => {
     if (!projectId || !taskForm.title.trim()) return;
@@ -130,18 +148,28 @@ export default function MobileFieldWork() {
     }
   };
 
-  const uploadTaskPhotos = async (task: any, files?: FileList | null) => {
-    const selected = Array.from(files || []);
+  const uploadTaskPhotos = async (task: any) => {
+    const draft = getTaskEvidenceDraft(task.id);
+    const selected = [...draft.files];
+    const evidenceNote = draft.note.trim();
     if (!projectId || !selected.length) return;
     setUploadingTaskId(task.id);
     try {
       const formData = new FormData();
       selected.forEach(file => formData.append('photos', file));
       formData.append('construction_plan_item_id', task.id);
-      formData.append('caption', `Field work evidence for ${task.title}`);
-      await appendProgressUploadAudit(formData, selected, selected.map(() => 'device_camera'));
+      formData.append('caption', evidenceNote || `Field work evidence for ${task.title}`);
+      if (evidenceNote) {
+        formData.append('batch_note', evidenceNote);
+        formData.append('individual_note_values', JSON.stringify(selected.map(() => evidenceNote)));
+      }
+      await appendProgressUploadAudit(formData, selected, selected.map(() => 'device_camera'), {
+        batchNote: evidenceNote,
+        individualNotes: selected.map(() => evidenceNote),
+      });
       await api.post(`/projects/${projectId}/photos`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
-      toast.success('Evidence uploaded for review');
+      toast.success(evidenceNote ? 'Photo and note uploaded for review' : 'Evidence uploaded for review');
+      clearTaskEvidenceDraft(task.id);
       await load();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to upload evidence');
@@ -249,6 +277,7 @@ export default function MobileFieldWork() {
           <div className="btm-section-header"><p>{fieldWork.tasks?.length || 0} Work Items</p></div>
           {(fieldWork.tasks || []).map((task: any) => {
             const paymentHold = task.invoice_blocks_payment;
+            const taskDraft = getTaskEvidenceDraft(task.id);
             return (
               <article key={task.id} className="btm-project-card" style={{ padding: 14 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
@@ -268,12 +297,56 @@ export default function MobileFieldWork() {
                     {invoiceStatuses.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                   </select>
                 </div>
+                {task.latest_photo_note && (
+                  <div style={{ marginTop: 12, border: '1px solid #DBEAFE', borderRadius: 14, background: '#EFF6FF', padding: 10 }}>
+                    <p style={{ margin: 0, color: '#1E3A8A', fontSize: 11, fontWeight: 950, textTransform: 'uppercase' }}>Latest photo note</p>
+                    <p style={{ margin: '4px 0 0', color: '#111827', fontSize: 13, fontWeight: 750, lineHeight: 1.35 }}>{task.latest_photo_note}</p>
+                  </div>
+                )}
+                <div style={{ marginTop: 12, border: '1px solid #D7DEE8', borderRadius: 16, background: '#F8FAFC', padding: 11 }}>
+                  <label style={{ display: 'grid', gap: 6 }}>
+                    <span style={{ color: '#4B5563', fontSize: 11, fontWeight: 950, textTransform: 'uppercase' }}>Note for these pictures</span>
+                    <textarea
+                      value={taskDraft.note}
+                      onChange={event => updateTaskEvidenceDraft(task.id, { note: event.target.value })}
+                      rows={3}
+                      disabled={uploadingTaskId === task.id}
+                      placeholder="Example: Furnace installed, needs final wiring check before invoice approval."
+                      style={{ width: '100%', boxSizing: 'border-box', borderRadius: 13, border: '1px solid #CBD5E1', padding: 11, color: '#111827', fontSize: 14, fontWeight: 800, resize: 'vertical', background: 'white' }}
+                    />
+                  </label>
+                  {taskDraft.files.length > 0 && (
+                    <p style={{ margin: '8px 0 0', color: '#374151', fontSize: 12, fontWeight: 850 }}>
+                      {taskDraft.files.length} picture{taskDraft.files.length === 1 ? '' : 's'} selected for this note.
+                    </p>
+                  )}
+                </div>
                 <div className="btm-project-actions" style={{ padding: '10px 0 0' }}>
                   <label className="btm-action-button btm-action-photo" style={{ cursor: 'pointer' }}>
-                    <input type="file" accept="image/*" capture="environment" multiple style={{ display: 'none' }} disabled={uploadingTaskId === task.id} onChange={event => { uploadTaskPhotos(task, event.target.files); event.currentTarget.value = ''; }} />
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      multiple
+                      style={{ display: 'none' }}
+                      disabled={uploadingTaskId === task.id}
+                      onChange={event => {
+                        updateTaskEvidenceDraft(task.id, { files: Array.from(event.target.files || []) });
+                        event.currentTarget.value = '';
+                      }}
+                    />
                     <ImagePlus size={21} />
-                    <span>{uploadingTaskId === task.id ? 'Uploading...' : 'Task Photos'}</span>
+                    <span>{taskDraft.files.length ? `${taskDraft.files.length} Ready` : 'Task Photos'}</span>
                   </label>
+                  <button
+                    type="button"
+                    onClick={() => uploadTaskPhotos(task)}
+                    disabled={uploadingTaskId === task.id || taskDraft.files.length === 0}
+                    className="btm-action-button btm-action-open"
+                  >
+                    <Send size={21} />
+                    <span>{uploadingTaskId === task.id ? 'Uploading...' : 'Send Photo + Note'}</span>
+                  </button>
                   {task.verification_status !== 'approved' && (
                     <button type="button" onClick={() => approveTask(task)} className="btm-action-button btm-action-punch">
                       <CheckCircle2 size={21} />

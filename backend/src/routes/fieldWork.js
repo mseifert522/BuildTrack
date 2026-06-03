@@ -57,6 +57,20 @@ function taskSelectSql() {
       creator.name as created_by_name,
       approver.name as approved_by_name,
       (SELECT COUNT(*) FROM photos ph WHERE ph.construction_plan_item_id = cpi.id) as photo_count,
+      (
+        SELECT COALESCE(NULLIF(ph.individual_note, ''), NULLIF(ph.batch_note, ''), NULLIF(ph.caption, ''))
+        FROM photos ph
+        WHERE ph.construction_plan_item_id = cpi.id
+        ORDER BY datetime(COALESCE(ph.captured_at, ph.taken_at, ph.uploaded_at, ph.created_at)) DESC, ph.created_at DESC
+        LIMIT 1
+      ) as latest_photo_note,
+      (
+        SELECT COALESCE(ph.captured_at, ph.taken_at, ph.uploaded_at, ph.created_at)
+        FROM photos ph
+        WHERE ph.construction_plan_item_id = cpi.id
+        ORDER BY datetime(COALESCE(ph.captured_at, ph.taken_at, ph.uploaded_at, ph.created_at)) DESC, ph.created_at DESC
+        LIMIT 1
+      ) as latest_photo_at,
       (SELECT COUNT(*) FROM project_notes pn WHERE pn.project_id = cpi.project_id AND pn.note_type = 'field' AND datetime(pn.created_at) > datetime('now', '-7 days')) as recent_field_note_count
     FROM construction_plan_items cpi
     JOIN projects p ON p.id = cpi.project_id
@@ -121,6 +135,11 @@ function getWatchlist(req) {
       ph.filename,
       ph.original_name,
       ph.label,
+      ph.caption,
+      ph.batch_note,
+      ph.individual_note,
+      ph.construction_plan_item_id,
+      COALESCE(NULLIF(ph.individual_note, ''), NULLIF(ph.batch_note, ''), NULLIF(ph.caption, '')) as photo_note,
       ph.photo_type,
       COALESCE(ph.captured_at, ph.taken_at, ph.uploaded_at, ph.created_at) as captured_at,
       u.name as user_name,

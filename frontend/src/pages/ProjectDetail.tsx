@@ -1421,6 +1421,12 @@ function FieldWorkStatusPanel({
                 </div>
 
                 <div className="mt-3 grid gap-2">
+                  {task.latest_photo_note && (
+                    <div className="rounded-md border border-blue-100 bg-white px-3 py-2 text-xs font-semibold text-slate-700">
+                      <span className="block font-black uppercase tracking-wide text-blue-700">Latest photo note</span>
+                      <span className="mt-1 block leading-5">{task.latest_photo_note}</span>
+                    </div>
+                  )}
                   {canManage ? (
                     <>
                       <label className="text-xs font-black uppercase tracking-wide text-slate-500">

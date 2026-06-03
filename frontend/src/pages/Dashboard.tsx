@@ -96,6 +96,7 @@ interface FieldWorkTask {
   project_job_name?: string;
   alert_level: 'normal' | 'attention' | 'critical';
   invoice_blocks_payment?: number;
+  latest_photo_note?: string | null;
 }
 
 interface FieldWorkNote {
@@ -116,6 +117,7 @@ interface FieldWorkPhoto {
   captured_at?: string;
   user_name: string;
   project_address: string;
+  photo_note?: string | null;
 }
 
 interface FieldWorkInvoiceHold {
@@ -782,10 +784,15 @@ export default function Dashboard() {
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm font-black text-slate-950">{task.title}</span>
                       <span className="block truncate text-xs font-semibold text-slate-500">{task.project_address}</span>
-                      <span className="mt-1 block text-xs text-slate-600">
-                        Status: {task.status.replace(/_/g, ' ')} · Verification: {task.verification_status.replace(/_/g, ' ')} · Invoice: {task.invoice_status.replace(/_/g, ' ')}
-                      </span>
-                    </span>
+                            <span className="mt-1 block text-xs text-slate-600">
+                              Status: {task.status.replace(/_/g, ' ')} · Verification: {task.verification_status.replace(/_/g, ' ')} · Invoice: {task.invoice_status.replace(/_/g, ' ')}
+                            </span>
+                            {task.latest_photo_note && (
+                              <span className="mt-1 block line-clamp-2 text-xs font-semibold text-slate-700">
+                                Photo note: {task.latest_photo_note}
+                              </span>
+                            )}
+                          </span>
                     <ChevronRight className="mt-2 h-4 w-4 text-slate-400" />
                   </button>
                 ))}
