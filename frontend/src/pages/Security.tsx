@@ -8,6 +8,7 @@ import {
   LogOut,
   Monitor,
   RefreshCw,
+  Search,
   ShieldAlert,
   ShieldCheck,
   Smartphone,
@@ -179,6 +180,9 @@ export default function Security() {
   const [globalLogoutLoading, setGlobalLogoutLoading] = useState(false);
   const [userLogoutId, setUserLogoutId] = useState<string | null>(null);
   const [sessionLogoutId, setSessionLogoutId] = useState<string | null>(null);
+  const [securitySearch, setSecuritySearch] = useState('');
+  const [securityStatusFilter, setSecurityStatusFilter] = useState('');
+  const [securityClientFilter, setSecurityClientFilter] = useState('');
   const { user: currentUser, logout } = useAuthStore();
   const navigate = useNavigate();
 
@@ -194,6 +198,40 @@ export default function Security() {
   const savedAccessRows = useMemo(() => users.filter(row =>
     (!row.sessions || row.sessions.length === 0) && (row.trusted_device_count > 0 || row.quick_access_count > 0 || row.last_login_at)
   ), [users]);
+
+  const filteredSessionRows = useMemo(() => {
+    const q = securitySearch.trim().toLowerCase();
+    return sessionRows.filter(({ user: row, session }) => {
+      if (securityStatusFilter && session.security_status !== securityStatusFilter) return false;
+      if (securityClientFilter && session.client_type !== securityClientFilter && session.device_type !== securityClientFilter) return false;
+      if (!q) return true;
+      return [
+        row.name,
+        row.email,
+        roleLabels[row.role] || row.role,
+        session.ip_address,
+        session.client_label,
+        session.device_label,
+        session.os_label,
+        session.browser_label,
+        session.user_agent,
+        sessionAccessMethod(session),
+      ].filter(Boolean).join(' ').toLowerCase().includes(q);
+    });
+  }, [sessionRows, securityClientFilter, securitySearch, securityStatusFilter]);
+
+  const filteredSavedAccessRows = useMemo(() => {
+    const q = securitySearch.trim().toLowerCase();
+    return savedAccessRows.filter(row => {
+      if (!q) return true;
+      return [
+        row.name,
+        row.email,
+        roleLabels[row.role] || row.role,
+        row.company,
+      ].filter(Boolean).join(' ').toLowerCase().includes(q);
+    });
+  }, [savedAccessRows, securitySearch]);
 
   const counts = useMemo(() => ({
     online: sessions.filter(row => row.security_status === 'online').length,
@@ -349,8 +387,45 @@ export default function Security() {
             <p className="text-sm text-gray-500">Each active desktop, mobile, and tablet session is shown separately with IP address and device details.</p>
           </div>
           <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-bold text-gray-600">
-            {sessionRows.length} session record{sessionRows.length === 1 ? '' : 's'}
+            {filteredSessionRows.length} of {sessionRows.length} session record{sessionRows.length === 1 ? '' : 's'}
           </span>
+        </div>
+
+        <div className="grid gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 lg:grid-cols-[1fr_auto_auto]">
+          <label className="relative block">
+            <span className="sr-only">Search sessions by user, IP, device, browser, or access method</span>
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <input
+              value={securitySearch}
+              onChange={event => setSecuritySearch(event.target.value)}
+              placeholder="Search user, IP, device, browser, or access method"
+              className="min-h-11 w-full rounded-xl border border-gray-300 bg-white py-2.5 pl-9 pr-3 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+          <select
+            value={securityStatusFilter}
+            onChange={event => setSecurityStatusFilter(event.target.value)}
+            className="min-h-11 rounded-xl border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            aria-label="Filter sessions by status"
+          >
+            <option value="">All statuses</option>
+            <option value="online">Online now</option>
+            <option value="recently_active">Recently active</option>
+            <option value="signed_in">Signed in</option>
+            <option value="offline">Offline</option>
+          </select>
+          <select
+            value={securityClientFilter}
+            onChange={event => setSecurityClientFilter(event.target.value)}
+            className="min-h-11 rounded-xl border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            aria-label="Filter sessions by client"
+          >
+            <option value="">All clients</option>
+            <option value="desktop">Desktop</option>
+            <option value="mobile_app">Mobile app</option>
+            <option value="mobile">Mobile browser</option>
+            <option value="tablet">Tablet</option>
+          </select>
         </div>
 
         <div className="overflow-x-auto">
@@ -365,7 +440,7 @@ export default function Security() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 bg-white">
-              {sessionRows.map(({ user: row, session, index, total }) => {
+              {filteredSessionRows.map(({ user: row, session, index, total }) => {
                 const status = statusCopy[session.security_status] || statusCopy.offline;
                 const SessionIcon = sessionIcon(session);
                 const lastSeen = session.last_seen_at || session.issued_at;
@@ -452,10 +527,10 @@ export default function Security() {
                   </tr>
                 );
               })}
-              {sessionRows.length === 0 && (
+              {filteredSessionRows.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-4 py-10 text-center text-sm text-gray-500">
-                    No active session records found.
+                    No session records match these filters.
                   </td>
                 </tr>
               )}
@@ -463,11 +538,11 @@ export default function Security() {
           </table>
         </div>
 
-        {savedAccessRows.length > 0 && (
+        {filteredSavedAccessRows.length > 0 && (
           <div className="border-t border-gray-200 bg-gray-50 px-4 py-3">
             <p className="mb-3 text-xs font-black uppercase tracking-wide text-gray-500">Saved access without an active session</p>
             <div className="grid gap-2 md:grid-cols-2">
-              {savedAccessRows.map(row => (
+              {filteredSavedAccessRows.map(row => (
                 <div key={row.id} className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-3">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-bold text-gray-950">{row.name}</p>

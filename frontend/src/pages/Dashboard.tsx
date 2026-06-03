@@ -124,6 +124,9 @@ const getProjectStatusStyle = (status?: string) => (
   projectStatusStyles[status || ''] || { label: 'Project', bg: 'rgba(217,157,38,0.12)', color: '#FDE68A', border: 'rgba(217,157,38,0.35)' }
 );
 
+const formatMoney = (value: number) =>
+  Number(value || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+
 
 export default function Dashboard() {
   const { user } = useAuthStore();
@@ -157,7 +160,7 @@ export default function Dashboard() {
         setProjects(projRes.data.slice(0, 6));
         setRecentNotes(notesRes.data.slice(0, 50));
         setAllProjects(allProjRes.data);
-        setInvoices(invRes.data.slice(0, 5));
+        setInvoices(Array.isArray(invRes.data) ? invRes.data : []);
 
         const summaries = Array.isArray(reviewRes.data?.projects) ? reviewRes.data.projects : [];
         setReviewSummaries(summaries);
@@ -220,6 +223,57 @@ export default function Dashboard() {
   ).length;
   const longTermHoldings = stats?.long_term_holdings ?? allProjects.filter(p => p.status === 'long_term_holding').length;
   const commercialProjects = stats?.commercial_projects ?? allProjects.filter(p => p.status === 'commercial').length;
+  const openInvoices = invoices.filter(invoice => invoice.status !== 'paid');
+  const paidInvoices = invoices.filter(invoice => invoice.status === 'paid');
+  const openInvoiceAmount = openInvoices.reduce((sum, invoice) => sum + Number(invoice.total || 0), 0);
+  const paidInvoiceAmount = paidInvoices.reduce((sum, invoice) => sum + Number(invoice.total || 0), 0);
+  const totalBudget = allProjects.reduce((sum, project) => sum + Number(project.budget || 0), 0);
+  const activeBudget = allProjects.filter(project => project.status === 'active_rehab').reduce((sum, project) => sum + Number(project.budget || 0), 0);
+  const openPunchItems = stats?.open_punch_items ?? allProjects.reduce((sum, project) => sum + Number(project.open_punch_items || 0), 0);
+  const pendingInvoices = stats?.pending_invoices ?? openInvoices.length;
+  const recentPhotoCount = stats?.recent_photos ?? 0;
+  const completionRate = totalProjects ? Math.round((completedProjects / totalProjects) * 100) : 0;
+  const budgetExposureRate = totalBudget ? Math.min(100, Math.round((openInvoiceAmount / totalBudget) * 100)) : 0;
+  const priorityCards = [
+    {
+      label: 'Projects',
+      value: `${activeRehabs} active`,
+      detail: `${completionRate}% completion across ${totalProjects} tracked projects`,
+      trend: notStarted > 0 ? `${notStarted} queued` : 'No queued rehabs',
+      icon: FolderOpen,
+      to: '/projects?status=active_rehab',
+      accent: '#2563EB',
+      progress: completionRate,
+    },
+    {
+      label: 'Financials',
+      value: formatMoney(openInvoiceAmount),
+      detail: `${pendingInvoices} open invoices against ${formatMoney(activeBudget)} active rehab budget`,
+      trend: `${formatMoney(paidInvoiceAmount)} paid to date`,
+      icon: FileText,
+      to: '/invoices',
+      accent: '#047857',
+      progress: budgetExposureRate,
+    },
+    {
+      label: 'Tasks',
+      value: `${openPunchItems} open`,
+      detail: `${reviewSummaryTotal} new review update${reviewSummaryTotal === 1 ? '' : 's'} and ${recentPhotoCount} recent photos`,
+      trend: openPunchItems > 0 ? 'Needs field follow-up' : 'No open punch exposure',
+      icon: ClipboardList,
+      to: '/projects',
+      accent: openPunchItems > 0 ? '#C2410C' : '#047857',
+      progress: openPunchItems > 0 ? Math.min(100, openPunchItems * 8) : 100,
+    },
+  ];
+  const operationsModules = [
+    { label: 'Scheduling', detail: 'Timeline fields and slip review', to: '/projects', icon: Clock },
+    { label: 'Budgeting', detail: 'Budget vs invoices', to: '/invoices', icon: FileText },
+    { label: 'Documents', detail: 'Versionable project files', to: '/documents', icon: FolderOpen },
+    { label: 'Safety / Quality', detail: 'Punch lists and field notes', to: '/projects', icon: CheckCircle2 },
+    { label: 'Resources', detail: 'Contractors and assignments', to: '/contractors', icon: ClipboardList },
+    { label: 'Reporting', detail: 'KPIs and export queues', to: '/invoices', icon: TrendingUp },
+  ];
 
   const kpiCards = [
     {
@@ -332,6 +386,73 @@ export default function Dashboard() {
       </div>
 
       <div className="px-6 py-6 md:px-8 max-w-7xl mx-auto space-y-6">
+        {/* Desktop command center */}
+        <section className="grid gap-4 xl:grid-cols-[1.18fr_0.82fr]" aria-label="BuildTrack command center">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-xs font-black uppercase tracking-wide text-slate-500">Today&apos;s priorities</p>
+                <h2 className="text-lg font-black text-slate-950">Projects, money, and field work</h2>
+              </div>
+              <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-black text-amber-800">
+                <Bell className="h-3.5 w-3.5" />
+                {reviewSummaryTotal} updates
+              </span>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              {priorityCards.map(card => (
+                <button
+                  key={card.label}
+                  type="button"
+                  onClick={() => navigate(card.to)}
+                  className="min-h-[168px] rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition-colors hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                >
+                  <div className="mb-3 flex items-start justify-between gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl text-white" style={{ background: card.accent }}>
+                      <card.icon className="h-5 w-5" />
+                    </div>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 text-[11px] font-black text-slate-600 ring-1 ring-slate-200">
+                      {card.progress >= 65 ? <TrendingUp className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
+                      {card.trend}
+                    </span>
+                  </div>
+                  <p className="text-xs font-black uppercase tracking-wide text-slate-500">{card.label}</p>
+                  <p className="mt-1 text-2xl font-black text-slate-950">{card.value}</p>
+                  <p className="mt-1 min-h-10 text-sm font-semibold leading-5 text-slate-600">{card.detail}</p>
+                  <div className="mt-4 h-2 overflow-hidden rounded-full bg-white ring-1 ring-slate-200" aria-hidden="true">
+                    <div className="h-full rounded-full" style={{ width: `${card.progress}%`, background: card.accent }} />
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-4">
+              <p className="text-xs font-black uppercase tracking-wide text-slate-500">Construction modules</p>
+              <h2 className="text-lg font-black text-slate-950">Operational entry points</h2>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+              {operationsModules.map(module => (
+                <Link
+                  key={module.label}
+                  to={module.to}
+                  className="flex min-h-14 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 transition-colors hover:border-slate-300 hover:bg-white"
+                >
+                  <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-slate-900 text-white">
+                    <module.icon className="h-4 w-4" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-black text-slate-900">{module.label}</span>
+                    <span className="block truncate text-xs font-semibold text-slate-500">{module.detail}</span>
+                  </span>
+                  <ChevronRight className="ml-auto h-4 w-4 flex-shrink-0 text-slate-400" />
+                </Link>
+              ))}
+            </div>
+          </div>
+        </section>
+
         {/* KPI Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-3">
           {kpiCards.map(card => (
@@ -569,7 +690,7 @@ export default function Dashboard() {
               <div className="divide-y divide-gray-50">
                 {invoices.length === 0 ? (
                   <p className="text-center text-gray-400 text-sm py-8">No invoices yet</p>
-                ) : invoices.map(inv => (
+                ) : invoices.slice(0, 5).map(inv => (
                   <div key={inv.id} className="flex items-center gap-3 px-5 py-3.5">
                     <div
                       className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-white text-xs font-black"

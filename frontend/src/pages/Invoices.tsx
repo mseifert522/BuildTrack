@@ -14,6 +14,7 @@ import {
   Receipt,
   RefreshCw,
   Search,
+  TrendingUp,
   WalletCards,
 } from 'lucide-react';
 import { useAuthStore, isAdminRole } from '../store/authStore';
@@ -104,6 +105,12 @@ export default function Invoices() {
   const [emailBoxLoading, setEmailBoxLoading] = useState(false);
   const [emailBoxStatus, setEmailBoxStatus] = useState('');
   const [emailBoxItems, setEmailBoxItems] = useState<InvoiceEmailItem[]>([]);
+  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<string[]>([]);
+  const [visibleInvoiceColumns, setVisibleInvoiceColumns] = useState({
+    contractor: true,
+    status: true,
+    submitted: true,
+  });
 
   const load = async () => {
     setLoading(true);
@@ -140,6 +147,10 @@ export default function Invoices() {
   useEffect(() => {
     if (emailBoxOpen) loadEmailBox();
   }, [emailBoxOpen, emailBoxStatus]);
+
+  useEffect(() => {
+    setSelectedInvoiceIds([]);
+  }, [selectedProjectId, statusFilter]);
 
   const selectedProject = projects.find(project => project.id === selectedProjectId) || null;
 
@@ -214,6 +225,17 @@ export default function Invoices() {
   }), [invoices, selectedProjectId]);
 
   const visibleTotal = selectedInvoices.reduce((sum, invoice) => sum + Number(invoice.total || 0), 0);
+  const selectedInvoiceSet = useMemo(() => new Set(selectedInvoiceIds), [selectedInvoiceIds]);
+  const selectedInvoiceRows = selectedInvoices.filter(invoice => selectedInvoiceSet.has(invoice.id));
+  const selectedInvoiceTotal = selectedInvoiceRows.reduce((sum, invoice) => sum + Number(invoice.total || 0), 0);
+  const invoiceColumnTemplate = [
+    'minmax(210px, 1.25fr)',
+    visibleInvoiceColumns.contractor ? 'minmax(160px, 1fr)' : '',
+    visibleInvoiceColumns.status ? 'minmax(130px, 0.72fr)' : '',
+    visibleInvoiceColumns.submitted ? 'minmax(150px, 0.8fr)' : '',
+    'minmax(110px, 0.7fr)',
+    'minmax(250px, 1.15fr)',
+  ].filter(Boolean).join(' ');
   const invoiceStats = useMemo(() => {
     const openStatuses = new Set(['draft', 'submitted', 'reviewed', 'approved']);
     const openInvoices = invoices.filter(invoice => openStatuses.has(invoice.status));
@@ -242,6 +264,40 @@ export default function Invoices() {
       toast.success(status === 'paid' ? 'Invoice marked paid' : 'Invoice status updated');
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to update invoice status');
+    } finally {
+      setUpdatingInvoiceId(null);
+    }
+  };
+
+  const toggleInvoiceSelection = (invoiceId: string, selected: boolean) => {
+    setSelectedInvoiceIds(current => {
+      if (selected) return Array.from(new Set([...current, invoiceId]));
+      return current.filter(id => id !== invoiceId);
+    });
+  };
+
+  const toggleVisibleInvoiceSelection = (selected: boolean) => {
+    setSelectedInvoiceIds(selected ? selectedInvoices.map(invoice => invoice.id) : []);
+  };
+
+  const bulkUpdateStatus = async (status: string) => {
+    if (!isAdminRole(user?.role || '') || selectedInvoiceRows.length === 0) return;
+    const targets = selectedInvoiceRows.filter(invoice => invoice.status !== status);
+    if (targets.length === 0) return toast('Selected invoices already have that status');
+    setUpdatingInvoiceId('bulk');
+    try {
+      await Promise.all(targets.map(invoice =>
+        api.put(`/projects/${invoice.project_id}/invoices/${invoice.id}/status`, { status })
+      ));
+      setInvoices(prev => prev.map(item =>
+        targets.some(invoice => invoice.id === item.id)
+          ? { ...item, status, updated_at: new Date().toISOString() }
+          : item
+      ));
+      setSelectedInvoiceIds([]);
+      toast.success(status === 'paid' ? 'Selected invoices marked paid' : 'Selected invoices approved');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to update selected invoices');
     } finally {
       setUpdatingInvoiceId(null);
     }
@@ -277,6 +333,7 @@ export default function Invoices() {
               label: 'Open Invoice Exposure',
               value: money(invoiceStats.openAmount),
               sub: `${invoiceStats.openCount} invoice${invoiceStats.openCount !== 1 ? 's' : ''} not paid`,
+              trend: invoiceStats.openAmount > 0 ? 'Watch exposure' : 'No open exposure',
               icon: WalletCards,
               bg: '#EFF6FF',
               color: '#1D4ED8',
@@ -285,6 +342,7 @@ export default function Invoices() {
               label: 'New Invoices',
               value: money(invoiceStats.newAmount),
               sub: `${invoiceStats.newCount} awaiting review`,
+              trend: invoiceStats.newCount > 0 ? 'Review queue' : 'Queue clear',
               icon: Receipt,
               bg: '#FFF7ED',
               color: '#C2410C',
@@ -293,6 +351,7 @@ export default function Invoices() {
               label: 'Approved To Pay',
               value: money(invoiceStats.approvedAmount),
               sub: 'Ready for payment action',
+              trend: invoiceStats.approvedAmount > 0 ? 'Payment ready' : 'None approved',
               icon: CheckCircle2,
               bg: '#ECFDF5',
               color: '#047857',
@@ -301,6 +360,7 @@ export default function Invoices() {
               label: 'Paid To Date',
               value: money(invoiceStats.paidAmount),
               sub: `${invoiceStats.paidCount} paid invoices`,
+              trend: 'Paid trend',
               icon: FileText,
               bg: '#F5F3FF',
               color: '#6D28D9',
@@ -312,6 +372,10 @@ export default function Invoices() {
                   <p className="text-xs font-black uppercase tracking-wide text-gray-500">{card.label}</p>
                   <p className="mt-2 text-2xl font-black text-gray-900 truncate">{card.value}</p>
                   <p className="mt-1 text-xs font-semibold text-gray-500">{card.sub}</p>
+                  <p className="mt-3 inline-flex items-center gap-1 rounded-full bg-gray-50 px-2 py-1 text-[11px] font-black text-gray-600">
+                    <TrendingUp className="h-3 w-3" />
+                    {card.trend}
+                  </p>
                 </div>
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: card.bg, color: card.color }}>
                   <card.icon className="w-5 h-5" />
@@ -463,7 +527,7 @@ export default function Invoices() {
             </div>
 
             <div className="rounded-2xl overflow-hidden border border-gray-200" style={{ background: 'white', boxShadow: '0 10px 30px rgba(17,24,39,0.08)' }}>
-              <div className="grid grid-cols-12 px-5 py-3 text-xs font-black uppercase tracking-wide text-gray-500 border-b border-gray-100 bg-gray-50">
+              <div className="sticky top-0 z-10 grid grid-cols-12 px-5 py-3 text-xs font-black uppercase tracking-wide text-gray-500 border-b border-gray-100 bg-gray-50">
                 <div className="col-span-5">Project Address</div>
                 <div className="col-span-2 text-right">Invoices</div>
                 <div className="col-span-2 text-right">Open Amount</div>
@@ -478,7 +542,7 @@ export default function Invoices() {
                 </div>
               ) : (
                 <div className="divide-y divide-gray-100">
-                  {projectSummaries.map(project => (
+                  {projectSummaries.map((project, index) => (
                     <button
                       key={project.id}
                       type="button"
@@ -486,7 +550,7 @@ export default function Invoices() {
                         setSelectedProjectId(project.id);
                         setStatusFilter('');
                       }}
-                      className="grid grid-cols-12 w-full px-5 py-4 text-left hover:bg-blue-50/50 transition-colors cursor-pointer"
+                      className={`grid grid-cols-12 w-full px-5 py-4 text-left transition-colors cursor-pointer hover:bg-blue-50/50 ${index % 2 === 1 ? 'bg-gray-50/55' : 'bg-white'}`}
                     >
                       <div className="col-span-5 min-w-0 flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center flex-shrink-0">
@@ -579,72 +643,166 @@ export default function Invoices() {
                 <p className="text-gray-500 font-bold">No invoices in this category</p>
               </div>
             ) : (
-              <div className="rounded-2xl overflow-hidden border border-gray-200" style={{ background: 'white', boxShadow: '0 10px 30px rgba(17,24,39,0.08)' }}>
-                <div className="grid grid-cols-12 px-5 py-3 text-xs font-black uppercase tracking-wide text-gray-500 border-b border-gray-100 bg-gray-50">
-                  <div className="col-span-3">Invoice</div>
-                  <div className="col-span-3">Contractor</div>
-                  <div className="col-span-2">Status</div>
-                  <div className="col-span-2 text-right">Amount</div>
-                  <div className="col-span-2 text-right">Actions</div>
+              <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
+                <div className="flex flex-col gap-3 border-b border-gray-100 p-4 xl:flex-row xl:items-center xl:justify-between">
+                  <div>
+                    <p className="text-sm font-black text-gray-900">Invoice review table</p>
+                    <p className="text-xs font-semibold text-gray-500">
+                      {selectedInvoiceRows.length} selected ({money(selectedInvoiceTotal)}) across {selectedInvoices.length} visible invoices.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {(['contractor', 'status', 'submitted'] as const).map(column => (
+                      <label key={column} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-black text-gray-700">
+                        <input
+                          type="checkbox"
+                          checked={visibleInvoiceColumns[column]}
+                          onChange={event => setVisibleInvoiceColumns(current => ({ ...current, [column]: event.target.checked }))}
+                          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        {column === 'submitted' ? 'Date' : column[0].toUpperCase() + column.slice(1)}
+                      </label>
+                    ))}
+                  </div>
                 </div>
-                <div className="divide-y divide-gray-100">
-                  {selectedInvoices.map(invoice => (
-                    <div key={invoice.id} className="grid grid-cols-12 gap-3 px-5 py-4 items-center">
-                      <div className="col-span-3 min-w-0">
-                        <p className="text-sm font-black text-gray-900">#{invoice.invoice_number}</p>
-                        <p className="text-xs text-gray-500">
-                          {invoice.submitted_at
-                            ? `Submitted ${formatEasternDate(invoice.submitted_at, { month: 'short', day: 'numeric', year: 'numeric' })}`
-                            : `Created ${formatEasternDate(invoice.created_at, { month: 'short', day: 'numeric', year: 'numeric' })}`}
-                        </p>
-                      </div>
-                      <div className="col-span-3 min-w-0">
-                        <p className="text-sm font-bold text-gray-900 truncate">{invoice.contractor_name || 'Unassigned contractor'}</p>
-                      </div>
-                      <div className="col-span-2">
-                        <span className={`inline-flex px-2.5 py-1 rounded-full border text-xs font-black ${statusClass[invoice.status] || statusClass.draft}`}>
-                          {statusLabel(invoice.status)}
-                        </span>
-                      </div>
-                      <div className="col-span-2 text-right text-sm font-black text-gray-900">{money(invoice.total)}</div>
-                      <div className="col-span-2 flex justify-end items-center gap-2">
-                        {isAdminRole(user?.role || '') && invoice.status !== 'paid' && (
+
+                {selectedInvoiceRows.length > 0 && (
+                  <div className="flex flex-col gap-3 border-b border-blue-100 bg-blue-50 px-4 py-3 md:flex-row md:items-center md:justify-between">
+                    <p className="text-sm font-black text-blue-900">
+                      Bulk actions for {selectedInvoiceRows.length} invoice{selectedInvoiceRows.length === 1 ? '' : 's'}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => bulkUpdateStatus('approved')}
+                        disabled={!isAdminRole(user?.role || '') || updatingInvoiceId === 'bulk'}
+                        className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-emerald-200 bg-white px-3 py-2 text-xs font-black text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                      >
+                        <CheckCircle2 className="h-4 w-4" />
+                        Approve Selected
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => bulkUpdateStatus('paid')}
+                        disabled={!isAdminRole(user?.role || '') || updatingInvoiceId === 'bulk'}
+                        className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-gray-900 px-3 py-2 text-xs font-black text-white hover:bg-gray-800 disabled:opacity-50"
+                      >
+                        <CheckCircle2 className="h-4 w-4" />
+                        Mark Paid
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedInvoiceIds([])}
+                        className="min-h-10 rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-black text-gray-700 hover:bg-gray-50"
+                      >
+                        Clear Selection
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="max-h-[620px] overflow-auto">
+                  <div
+                    className="sticky top-0 z-10 grid min-w-[940px] gap-3 border-b border-gray-100 bg-gray-50 px-5 py-3 text-xs font-black uppercase tracking-wide text-gray-500"
+                    style={{ gridTemplateColumns: invoiceColumnTemplate }}
+                  >
+                    <label className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedInvoices.length > 0 && selectedInvoiceIds.length === selectedInvoices.length}
+                        onChange={event => toggleVisibleInvoiceSelection(event.target.checked)}
+                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        aria-label="Select all visible invoices"
+                      />
+                      Invoice
+                    </label>
+                    {visibleInvoiceColumns.contractor && <div>Contractor</div>}
+                    {visibleInvoiceColumns.status && <div>Status</div>}
+                    {visibleInvoiceColumns.submitted && <div>Submitted</div>}
+                    <div className="text-right">Amount</div>
+                    <div className="text-right">Actions</div>
+                  </div>
+                  <div className="divide-y divide-gray-100">
+                    {selectedInvoices.map((invoice, index) => (
+                      <div
+                        key={invoice.id}
+                        className={`grid min-w-[940px] items-center gap-3 px-5 py-4 ${index % 2 === 1 ? 'bg-gray-50/70' : 'bg-white'}`}
+                        style={{ gridTemplateColumns: invoiceColumnTemplate }}
+                      >
+                        <label className="flex min-w-0 items-center gap-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedInvoiceSet.has(invoice.id)}
+                            onChange={event => toggleInvoiceSelection(invoice.id, event.target.checked)}
+                            className="h-4 w-4 flex-shrink-0 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                            aria-label={`Select invoice ${invoice.invoice_number}`}
+                          />
+                          <span className="min-w-0">
+                            <span className="block text-sm font-black text-gray-900">#{invoice.invoice_number}</span>
+                            <span className="block text-xs font-semibold text-gray-500">Notes and attachments in detail view</span>
+                          </span>
+                        </label>
+                        {visibleInvoiceColumns.contractor && (
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-bold text-gray-900">{invoice.contractor_name || 'Unassigned contractor'}</p>
+                          </div>
+                        )}
+                        {visibleInvoiceColumns.status && (
+                          <div>
+                            <span className={`inline-flex px-2.5 py-1 rounded-full border text-xs font-black ${statusClass[invoice.status] || statusClass.draft}`}>
+                              {statusLabel(invoice.status)}
+                            </span>
+                          </div>
+                        )}
+                        {visibleInvoiceColumns.submitted && (
+                          <div className="text-xs font-semibold text-gray-500">
+                            {invoice.submitted_at
+                              ? formatEasternDate(invoice.submitted_at, { month: 'short', day: 'numeric', year: 'numeric' })
+                              : formatEasternDate(invoice.created_at, { month: 'short', day: 'numeric', year: 'numeric' })}
+                          </div>
+                        )}
+                        <div className="text-right text-sm font-black text-gray-900">{money(invoice.total)}</div>
+                        <div className="flex flex-wrap justify-end gap-2">
+                          {isAdminRole(user?.role || '') && invoice.status !== 'paid' && (
+                            <button
+                              type="button"
+                              disabled={updatingInvoiceId === invoice.id}
+                              onClick={() => updateStatus(invoice, 'paid')}
+                              className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-green-100 bg-green-50 px-3 py-2 text-xs font-black text-green-700 hover:bg-green-100 disabled:opacity-50 cursor-pointer"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              Mark Paid
+                            </button>
+                          )}
+                          {isAdminRole(user?.role || '') && invoice.status !== 'paid' && (
+                            <select
+                              value={invoice.status}
+                              onChange={e => updateStatus(invoice, e.target.value)}
+                              className="min-h-10 rounded-xl border border-gray-300 bg-white px-2 py-2 text-xs font-bold text-gray-700 cursor-pointer"
+                              aria-label={`Change status for invoice ${invoice.invoice_number}`}
+                            >
+                              <option value="submitted">New Invoice</option>
+                              <option value="reviewed">Reviewed</option>
+                              <option value="approved">Approved</option>
+                              <option value="paid">Paid</option>
+                            </select>
+                          )}
                           <button
                             type="button"
-                            disabled={updatingInvoiceId === invoice.id}
-                            onClick={() => updateStatus(invoice, 'paid')}
-                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black text-green-700 bg-green-50 border border-green-100 hover:bg-green-100 disabled:opacity-50 cursor-pointer"
+                            onClick={() => downloadPDF(invoice)}
+                            className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-xl text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 cursor-pointer"
+                            title="Download PDF"
+                            aria-label={`Download invoice ${invoice.invoice_number} PDF`}
                           >
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            Mark Paid
+                            <Download className="w-4 h-4" />
                           </button>
-                        )}
-                        {isAdminRole(user?.role || '') && invoice.status !== 'paid' && (
-                          <select
-                            value={invoice.status}
-                            onChange={e => updateStatus(invoice, e.target.value)}
-                            className="px-2 py-2 rounded-xl border border-gray-300 bg-white text-xs font-bold text-gray-700 cursor-pointer"
-                          >
-                            <option value="submitted">New Invoice</option>
-                            <option value="reviewed">Reviewed</option>
-                            <option value="approved">Approved</option>
-                            <option value="paid">Paid</option>
-                          </select>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => downloadPDF(invoice)}
-                          className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-xl transition-colors cursor-pointer"
-                          title="Download PDF"
-                        >
-                          <Download className="w-4 h-4" />
-                        </button>
-                        <Link to={`/projects/${invoice.project_id}/invoices/${invoice.id}`} className="px-3 py-2 rounded-xl text-xs font-black text-blue-700 bg-blue-50 border border-blue-100 hover:bg-blue-100 cursor-pointer">
-                          View
-                        </Link>
+                          <Link to={`/projects/${invoice.project_id}/invoices/${invoice.id}`} className="inline-flex min-h-10 items-center rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700 hover:bg-blue-100 cursor-pointer">
+                            View
+                          </Link>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               </div>
             )}

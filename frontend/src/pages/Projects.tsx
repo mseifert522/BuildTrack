@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthStore, canChangeProjectStatus, canCreateProjects, isAdminRole } from '../store/authStore';
 import api from '../lib/api';
 import { Loading, StatusBadge, Modal, PageHeader } from '../components/ui';
-import { Activity, Camera, CheckCircle2, FileText, Plus, Search, MapPin, Users, ClipboardList, ChevronRight, Bell, KeyRound, MessageSquare, Upload } from 'lucide-react';
+import { Activity, Camera, CheckCircle2, FileText, Plus, Search, MapPin, Users, ClipboardList, ChevronRight, Bell, KeyRound, MessageSquare, Upload, MoreHorizontal } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useForm } from 'react-hook-form';
 import GooglePlacesInput from '../components/GooglePlacesInput';
@@ -96,7 +96,10 @@ export default function Projects() {
   const [addressValue, setAddressValue] = useState('');
   const [budgetValue, setBudgetValue] = useState('');
   const [purchasePriceValue, setPurchasePriceValue] = useState('');
-  const { register, handleSubmit, reset, setValue, formState: { isSubmitting } } = useForm<ProjectForm>();
+  const [activeActionsProjectId, setActiveActionsProjectId] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState('updated');
+  const [teamFilter, setTeamFilter] = useState('');
+  const { register, handleSubmit, reset, setValue, formState: { isSubmitting, errors } } = useForm<ProjectForm>();
 
   const load = async () => {
     try {
@@ -141,6 +144,23 @@ export default function Projects() {
   const canCreate = user && canCreateProjects(user.role);
   const canManageProjectActions = user && isAdminRole(user.role);
   const canChangeStatus = user && canChangeProjectStatus(user.role);
+
+  const projectRows = useMemo(() => {
+    const toTime = (value?: string) => value ? new Date(value).getTime() || 0 : 0;
+    return [...projects]
+      .filter(project => {
+        if (teamFilter === 'assigned') return Number(project.assigned_count || 0) > 0;
+        if (teamFilter === 'unassigned') return Number(project.assigned_count || 0) === 0;
+        return true;
+      })
+      .sort((a, b) => {
+        if (sortBy === 'address') return String(a.address || '').localeCompare(String(b.address || ''));
+        if (sortBy === 'budget') return Number(b.budget || 0) - Number(a.budget || 0);
+        if (sortBy === 'punch') return Number(b.open_punch_items || 0) - Number(a.open_punch_items || 0);
+        if (sortBy === 'target') return toTime(a.target_completion) - toTime(b.target_completion);
+        return toTime(b.updated_at) - toTime(a.updated_at);
+      });
+  }, [projects, sortBy, teamFilter]);
 
   const updateProjectStatus = async (project: Project, nextStatus: string) => {
     if (!canChangeStatus || project.status === nextStatus) return;
@@ -208,7 +228,7 @@ export default function Projects() {
       <div className="bt-horizontal-lock mx-auto w-full max-w-7xl min-w-0">
       <PageHeader
         title="Projects"
-        subtitle={`${projects.length} project${projects.length !== 1 ? 's' : ''}`}
+        subtitle={`${projectRows.length} of ${projects.length} project${projects.length !== 1 ? 's' : ''}`}
         actions={canCreate ? (
           <button onClick={() => setShowCreate(true)} className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl font-medium text-sm hover:bg-blue-700 transition-colors shadow-sm">
             <Plus className="w-4 h-4" /> New Project
@@ -234,16 +254,39 @@ export default function Projects() {
           value={statusFilter}
           onChange={e => setStatusFilter(e.target.value)}
           className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-auto"
+          aria-label="Filter projects by status"
         >
           {PROJECT_FILTER_OPTIONS.map(option => (
             <option key={option.value} value={option.value}>{option.label}</option>
           ))}
         </select>
+        <select
+          value={teamFilter}
+          onChange={e => setTeamFilter(e.target.value)}
+          className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-auto"
+          aria-label="Filter projects by team assignment"
+        >
+          <option value="">All teams</option>
+          <option value="assigned">Assigned contractors</option>
+          <option value="unassigned">Unassigned projects</option>
+        </select>
+        <select
+          value={sortBy}
+          onChange={e => setSortBy(e.target.value)}
+          className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-auto"
+          aria-label="Sort projects"
+        >
+          <option value="updated">Sort: Recently updated</option>
+          <option value="target">Sort: Target completion</option>
+          <option value="punch">Sort: Open punch items</option>
+          <option value="budget">Sort: Budget high to low</option>
+          <option value="address">Sort: Location A-Z</option>
+        </select>
       </div>
 
       {loading ? <Loading /> : (
         <div className="grid min-w-0 gap-4">
-          {projects.length === 0 ? (
+          {projectRows.length === 0 ? (
             <div className="text-center py-16 bg-white rounded-xl border border-gray-200">
               <MapPin className="w-10 h-10 text-gray-300 mx-auto mb-3" />
               <p className="text-gray-500 font-medium">No projects found</p>
@@ -253,13 +296,13 @@ export default function Projects() {
                 </button>
               )}
             </div>
-          ) : projects.map(p => {
+          ) : projectRows.map(p => {
             const review = reviewSummaries[p.id];
             return (
               <div
                 key={p.id}
                 onClick={() => navigate(`/projects/${p.id}`)}
-                className="bt-horizontal-lock group relative flex w-full min-w-0 cursor-pointer flex-col items-stretch gap-3 overflow-hidden rounded-[1.35rem] border border-slate-300 bg-gradient-to-br from-white via-white to-blue-50/45 p-4 transition-all hover:border-blue-400 hover:bg-blue-50/35 hover:shadow-xl sm:flex-row sm:items-center sm:gap-4"
+                className="bt-horizontal-lock group relative flex w-full min-w-0 cursor-pointer flex-col items-stretch gap-3 overflow-visible rounded-[1.35rem] border border-slate-300 bg-gradient-to-br from-white via-white to-blue-50/45 p-4 transition-all hover:border-blue-400 hover:bg-blue-50/35 hover:shadow-xl sm:flex-row sm:items-center sm:gap-4"
                 style={{
                   boxShadow: '0 10px 28px rgba(15,23,42,0.10), 0 1px 0 rgba(15,23,42,0.04)',
                   borderLeft: '5px solid #2563EB',
@@ -327,6 +370,125 @@ export default function Projects() {
                         </span>
                       )}
                       <StatusBadge status={p.status} className="flex-shrink-0" />
+                      <div
+                        className="relative z-30"
+                        onClick={event => event.stopPropagation()}
+                        onMouseDown={event => event.stopPropagation()}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setActiveActionsProjectId(activeActionsProjectId === p.id ? null : p.id)}
+                          className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
+                          aria-haspopup="menu"
+                          aria-expanded={activeActionsProjectId === p.id}
+                          aria-label={`Open actions for ${p.address}`}
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
+                          Actions
+                        </button>
+                        {activeActionsProjectId === p.id && (
+                          <div
+                            role="menu"
+                            className="absolute right-0 top-full mt-2 w-72 overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 text-sm shadow-2xl"
+                          >
+                            {[
+                              { label: 'Scope of Work', icon: FileText, hash: 'construction-plan' },
+                              { label: 'Upload Quotes', icon: Upload, hash: 'quotes' },
+                              { label: p.open_punch_items > 0 ? 'Punch List' : 'Punch List: Not Started', icon: ClipboardList, hash: 'punch-list' },
+                              { label: 'Assigned Contractors', icon: Users, hash: 'assigned-contractors' },
+                              { label: 'Enter Notes', icon: MessageSquare, hash: 'notes' },
+                            ].map(action => (
+                              <button
+                                key={action.label}
+                                type="button"
+                                role="menuitem"
+                                onClick={() => {
+                                  setActiveActionsProjectId(null);
+                                  navigate(`/projects/${p.id}#${action.hash}`);
+                                }}
+                                className="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 py-2 text-left font-bold text-slate-700 transition-colors hover:bg-slate-50"
+                              >
+                                <action.icon className="h-4 w-4 text-slate-500" />
+                                {action.label}
+                              </button>
+                            ))}
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                setActiveActionsProjectId(null);
+                                setLockboxProject(p);
+                              }}
+                              className="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 py-2 text-left font-bold text-slate-700 transition-colors hover:bg-slate-50"
+                            >
+                              <KeyRound className="h-4 w-4 text-slate-500" />
+                              Lockbox Code
+                            </button>
+                            {canManageProjectActions && (
+                              <>
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  onClick={() => {
+                                    setActiveActionsProjectId(null);
+                                    setDocumentUploadProject(p);
+                                  }}
+                                  className="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 py-2 text-left font-bold text-slate-700 transition-colors hover:bg-slate-50"
+                                >
+                                  <Upload className="h-4 w-4 text-slate-500" />
+                                  Upload Documents
+                                </button>
+                                <label
+                                  role="menuitem"
+                                  className={`flex min-h-11 w-full items-center gap-2 rounded-xl px-3 py-2 text-left font-bold transition-colors ${p.main_photo_url ? 'text-slate-400' : 'cursor-pointer text-slate-700 hover:bg-slate-50'}`}
+                                >
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    className="hidden"
+                                    disabled={uploadingPhoto === p.id || !!p.main_photo_url}
+                                    onChange={event => {
+                                      const file = event.target.files?.[0];
+                                      uploadProjectPhoto(p, file);
+                                      event.currentTarget.value = '';
+                                      setActiveActionsProjectId(null);
+                                    }}
+                                  />
+                                  <Camera className="h-4 w-4 text-slate-500" />
+                                  {p.main_photo_url ? 'House Photo Added' : uploadingPhoto === p.id ? 'Uploading...' : 'Add House Photo'}
+                                </label>
+                              </>
+                            )}
+                            {canChangeStatus && (
+                              <div className="mt-2 border-t border-slate-100 p-2">
+                                <label className="mb-1 block text-[11px] font-black uppercase tracking-wide text-slate-500">
+                                  Project status
+                                </label>
+                                <select
+                                  value={p.status}
+                                  disabled={updatingStatus === p.id}
+                                  onChange={event => updateProjectStatus(p, event.target.value)}
+                                  className="mb-2 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-60"
+                                  aria-label={`Change status for ${p.address}`}
+                                >
+                                  {PROJECT_STATUS_OPTIONS.map(option => (
+                                    <option key={option.value} value={option.value}>{option.label}</option>
+                                  ))}
+                                </select>
+                                <button
+                                  type="button"
+                                  disabled={updatingStatus === p.id || p.status === 'rehab_completed'}
+                                  onClick={() => updateProjectStatus(p, 'rehab_completed')}
+                                  className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-50"
+                                >
+                                  <CheckCircle2 className="h-4 w-4" />
+                                  {p.status === 'rehab_completed' ? 'Completed' : 'Mark Completed'}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                   {review?.changes?.[0] && (
@@ -380,138 +542,6 @@ export default function Projects() {
                     >
                       <Activity className="h-3.5 w-3.5 flex-shrink-0" />
                       <span className="min-w-0 whitespace-normal">View Progress, Pictures, and Notes</span>
-                    </button>
-                    {[
-                      { label: 'Scope of Work', icon: FileText, hash: 'construction-plan', color: '#1D4ED8', bg: '#EFF6FF' },
-                      { label: 'Upload Quotes', icon: Upload, hash: 'quotes', color: '#0F766E', bg: '#CCFBF1' },
-                      { label: p.open_punch_items > 0 ? 'Punch List' : 'Punch List: Not Started', icon: ClipboardList, hash: 'punch-list', color: '#C2410C', bg: '#FFF7ED' },
-                      { label: 'Assigned Contractors', icon: Users, hash: 'assigned-contractors', color: '#047857', bg: '#ECFDF5' },
-                    ].map(action => (
-                      <button
-                        key={action.label}
-                        type="button"
-                        onClick={e => {
-                          e.stopPropagation();
-                          navigate(`/projects/${p.id}#${action.hash}`);
-                        }}
-                        className="relative z-20 inline-flex w-full max-w-full items-center justify-center gap-1.5 rounded-xl px-2.5 py-1.5 text-center text-xs font-black leading-tight transition-colors cursor-pointer hover:brightness-95 sm:w-auto"
-                        style={{ background: action.bg, color: action.color, border: `1px solid ${action.color}22` }}
-                      >
-                        <action.icon className="h-3.5 w-3.5 flex-shrink-0" />
-                        <span className="min-w-0 whitespace-normal">{action.label}</span>
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={e => {
-                        e.stopPropagation();
-                        setLockboxProject(p);
-                      }}
-                      className="relative z-20 inline-flex w-full max-w-full items-center justify-center gap-1.5 rounded-xl px-2.5 py-1.5 text-center text-xs font-black leading-tight transition-colors cursor-pointer hover:brightness-95 sm:w-auto"
-                      style={{ background: '#F5F3FF', color: '#6D28D9', border: '1px solid #6D28D922' }}
-                    >
-                      <KeyRound className="h-3.5 w-3.5 flex-shrink-0" />
-                      <span className="min-w-0 whitespace-normal">Lockbox Code</span>
-                    </button>
-                    {canManageProjectActions && (
-                      <button
-                        type="button"
-                        onClick={e => {
-                          e.stopPropagation();
-                          setDocumentUploadProject(p);
-                        }}
-                        className="relative z-20 inline-flex w-full max-w-full items-center justify-center gap-1.5 rounded-xl px-2.5 py-1.5 text-center text-xs font-black leading-tight transition-colors cursor-pointer hover:brightness-95 sm:w-auto"
-                        style={{ background: '#ECFDF5', color: '#047857', border: '1px solid #04785722' }}
-                      >
-                        <Upload className="h-3.5 w-3.5 flex-shrink-0" />
-                        <span className="min-w-0 whitespace-normal">Upload Documents</span>
-                      </button>
-                    )}
-                  </div>
-                  <div className="mt-3 grid w-full min-w-0 grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">
-                    {canManageProjectActions && (
-                      <>
-                        <label
-                          className={`inline-flex w-full max-w-full items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-center text-xs font-black leading-tight cursor-pointer transition-colors sm:w-auto ${p.main_photo_url ? 'relative z-0' : 'relative z-20'}`}
-                          style={{ background: '#F9FAFB', color: '#374151', border: '1px solid #E5E7EB' }}
-                          title="Upload one main house photo"
-                          onClick={e => {
-                            if (!p.main_photo_url) e.stopPropagation();
-                          }}
-                          onMouseDown={e => {
-                            if (!p.main_photo_url) e.stopPropagation();
-                          }}
-                        >
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            disabled={uploadingPhoto === p.id || !!p.main_photo_url}
-                            onChange={e => {
-                              const file = e.target.files?.[0];
-                              uploadProjectPhoto(p, file);
-                              e.currentTarget.value = '';
-                            }}
-                          />
-                          <Camera className="h-3.5 w-3.5 flex-shrink-0" />
-                          <span className="min-w-0 whitespace-normal">{p.main_photo_url ? 'House Photo Added' : uploadingPhoto === p.id ? 'Uploading...' : 'Add House Photo'}</span>
-                        </label>
-                        {canChangeStatus && (
-                          <>
-                            <div
-                              className="relative z-20 inline-flex min-h-10 w-full max-w-full items-center justify-between gap-2 rounded-xl border border-slate-300 bg-white px-2 py-1 shadow-sm sm:w-auto"
-                              onClick={e => e.stopPropagation()}
-                              onMouseDown={e => e.stopPropagation()}
-                              title="Change project status"
-                            >
-                              <span className="text-[11px] font-black uppercase tracking-wide text-slate-500">Status</span>
-                              <select
-                                value={p.status}
-                                disabled={updatingStatus === p.id}
-                                onChange={e => updateProjectStatus(p, e.target.value)}
-                                className="min-h-8 min-w-0 flex-1 rounded-lg border-0 bg-transparent px-1 text-xs font-black text-slate-800 outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-60 cursor-pointer sm:flex-none"
-                                aria-label={`Change status for ${p.address}`}
-                              >
-                                {PROJECT_STATUS_OPTIONS.map(option => (
-                                  <option key={option.value} value={option.value}>{option.label}</option>
-                                ))}
-                              </select>
-                            </div>
-                            <button
-                              type="button"
-                              disabled={updatingStatus === p.id || p.status === 'rehab_completed'}
-                              onClick={e => {
-                                e.stopPropagation();
-                                updateProjectStatus(p, 'rehab_completed');
-                              }}
-                              className="relative z-20 inline-flex min-h-10 w-full max-w-full items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-center text-xs font-black leading-tight transition-colors disabled:opacity-50 cursor-pointer sm:w-auto"
-                              style={{
-                                background: p.status === 'rehab_completed' ? '#DCFCE7' : '#ECFDF5',
-                                color: '#047857',
-                                border: '1px solid #A7F3D0',
-                              }}
-                              title="Mark project completed"
-                            >
-                              <CheckCircle2 className="h-3.5 w-3.5 flex-shrink-0" />
-                              <span className="min-w-0 whitespace-normal">{p.status === 'rehab_completed' ? 'Completed' : 'Mark Completed'}</span>
-                            </button>
-                          </>
-                        )}
-                      </>
-                    )}
-                    <button
-                      type="button"
-                      onClick={e => {
-                        e.stopPropagation();
-                        navigate(`/projects/${p.id}#notes`);
-                      }}
-                      className="relative z-20 inline-flex w-full max-w-full items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-center text-xs font-black leading-tight transition-colors cursor-pointer hover:brightness-95 sm:w-auto"
-                      style={{ background: '#EFF6FF', color: '#1D4ED8', border: '1px solid #BFDBFE' }}
-                      title="Enter a project note"
-                      aria-label={`Enter notes for ${p.address}`}
-                    >
-                      <MessageSquare className="h-3.5 w-3.5 flex-shrink-0" />
-                      <span className="min-w-0 whitespace-normal">Enter Notes</span>
                     </button>
                   </div>
                 </div>
@@ -602,65 +632,99 @@ export default function Projects() {
       </Modal>
 
       {/* Create Project Modal */}
-      <Modal isOpen={showCreate} onClose={() => { setShowCreate(false); reset(); setBudgetValue(''); setPurchasePriceValue(''); }} title="Create New Project" size="lg">
+      <Modal isOpen={showCreate} onClose={() => { setShowCreate(false); reset(); setAddressValue(''); setBudgetValue(''); setPurchasePriceValue(''); }} title="Create New Project" size="lg">
         <form onSubmit={handleSubmit(onCreateProject)} className="space-y-4">
-          <div className="grid sm:grid-cols-2 gap-4">
-            <div className="sm:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Property Address *</label>
-              <GooglePlacesInput
-                value={addressValue}
-                onChange={(val) => { setAddressValue(val); setValue('address', val); }}
-                placeholder="123 Main St, City, State"
-                className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+          <input type="hidden" {...register('address', { required: 'Property address is required' })} />
+
+          <fieldset className="rounded-2xl border border-gray-200 bg-gray-50/70 p-4">
+            <legend className="px-2 text-xs font-black uppercase tracking-wide text-gray-500">Project Info</legend>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <label className="block text-sm font-semibold text-gray-800 mb-1">
+                  Property Address <span className="text-red-600">*</span>
+                </label>
+                <GooglePlacesInput
+                  value={addressValue}
+                  onChange={(val) => { setAddressValue(val); setValue('address', val, { shouldValidate: true }); }}
+                  placeholder="123 Main St, City, State"
+                  className={`w-full px-3.5 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${errors.address ? 'border-red-400' : 'border-gray-300'}`}
+                />
+                {errors.address && <p className="mt-1 text-xs font-semibold text-red-600" role="alert">{errors.address.message}</p>}
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block text-sm font-semibold text-gray-800 mb-1">
+                  Job Name <span className="text-red-600">*</span>
+                </label>
+                <input
+                  {...register('job_name', { required: 'Job name is required' })}
+                  aria-invalid={Boolean(errors.job_name)}
+                  className={`w-full px-3.5 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${errors.job_name ? 'border-red-400' : 'border-gray-300'}`}
+                  placeholder="Full Kitchen Renovation"
+                />
+                {errors.job_name && <p className="mt-1 text-xs font-semibold text-red-600" role="alert">{errors.job_name.message}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-800 mb-1">Status</label>
+                <select {...register('status')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                  {PROJECT_STATUS_OPTIONS.map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-800 mb-1">Lockbox Code</label>
+                <input {...register('lockbox_code')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Enter code" />
+              </div>
             </div>
-            <div className="sm:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Job Name *</label>
-              <input {...register('job_name', { required: true })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Full Kitchen Renovation" />
+          </fieldset>
+
+          <fieldset className="rounded-2xl border border-gray-200 bg-white p-4">
+            <legend className="px-2 text-xs font-black uppercase tracking-wide text-gray-500">Financials</legend>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="block text-sm font-semibold text-gray-800 mb-1">Acquisition Price</label>
+                <CurrencyInput value={purchasePriceValue} onChange={setPurchasePriceValue} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-800 mb-1">Budget</label>
+                <CurrencyInput value={budgetValue} onChange={setBudgetValue} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-              <select {...register('status')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-                {PROJECT_STATUS_OPTIONS.map(option => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
+          </fieldset>
+
+          <fieldset className="rounded-2xl border border-gray-200 bg-white p-4">
+            <legend className="px-2 text-xs font-black uppercase tracking-wide text-gray-500">Timeline</legend>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div>
+                <label className="block text-sm font-semibold text-gray-800 mb-1">Acquisition Date</label>
+                <input type="date" {...register('acquisition_date')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-800 mb-1">Start Date</label>
+                <input type="date" {...register('start_date')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-800 mb-1">Target Completion</label>
+                <input type="date" {...register('target_completion')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Lockbox Code</label>
-              <input {...register('lockbox_code')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Enter code" />
+          </fieldset>
+
+          <fieldset className="rounded-2xl border border-gray-200 bg-white p-4">
+            <legend className="px-2 text-xs font-black uppercase tracking-wide text-gray-500">Scope and Notes</legend>
+            <div className="grid gap-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-800 mb-1">Scope of Work</label>
+                <textarea {...register('scope_of_work')} rows={3} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" placeholder="Describe the scope of work..." />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-800 mb-1">Office Notes</label>
+                <textarea {...register('office_notes')} rows={2} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" placeholder="Internal notes..." />
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Acquisition Price</label>
-              <CurrencyInput value={purchasePriceValue} onChange={setPurchasePriceValue} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Acquisition Date</label>
-              <input type="date" {...register('acquisition_date')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
-              <input type="date" {...register('start_date')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Target Completion</label>
-              <input type="date" {...register('target_completion')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Budget</label>
-              <CurrencyInput value={budgetValue} onChange={setBudgetValue} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div className="sm:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Scope of Work</label>
-              <textarea {...register('scope_of_work')} rows={3} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" placeholder="Describe the scope of work..." />
-            </div>
-            <div className="sm:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Office Notes</label>
-              <textarea {...register('office_notes')} rows={2} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" placeholder="Internal notes..." />
-            </div>
-          </div>
+          </fieldset>
           <div className="flex gap-3 pt-2">
-            <button type="button" onClick={() => { setShowCreate(false); reset(); setBudgetValue(''); setPurchasePriceValue(''); }} className="flex-1 py-2.5 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">Cancel</button>
+            <button type="button" onClick={() => { setShowCreate(false); reset(); setAddressValue(''); setBudgetValue(''); setPurchasePriceValue(''); }} className="flex-1 py-2.5 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">Cancel</button>
             <button type="submit" disabled={isSubmitting} className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50">
               {isSubmitting ? 'Creating...' : 'Create Project'}
             </button>

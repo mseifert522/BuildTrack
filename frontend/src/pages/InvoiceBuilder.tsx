@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import api from '../lib/api';
 import { Loading } from '../components/ui';
-import { Plus, Trash2, ArrowLeft, Send, Save, Download } from 'lucide-react';
+import { Plus, Trash2, ArrowLeft, Send, Save, Download, Paperclip } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface LineItem {
@@ -126,6 +126,7 @@ export default function InvoiceBuilder() {
   const isReadOnly = invoice?.status && invoice.status !== 'draft';
 
   const displayInvoiceNum = invoice?.invoice_number || nextInvoiceNumber;
+  const attachments = Array.isArray(invoice?.attachments) ? invoice.attachments : [];
 
   return (
     <div className="min-h-full bg-gray-50">
@@ -244,16 +245,43 @@ export default function InvoiceBuilder() {
         </div>
 
         {/* Notes */}
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <label className="block text-sm font-medium text-gray-700 mb-2">Notes</label>
-          <textarea
-            value={notes}
-            onChange={e => setNotes(e.target.value)}
-            rows={3}
-            disabled={isReadOnly}
-            className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none disabled:bg-gray-50 disabled:text-gray-500"
-            placeholder="Payment terms, additional notes..."
-          />
+        <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+          <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <label className="block text-sm font-medium text-gray-700 mb-2">Notes</label>
+            <textarea
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              rows={4}
+              disabled={isReadOnly}
+              className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none disabled:bg-gray-50 disabled:text-gray-500"
+              placeholder="Payment terms, approval notes, or contractor instructions..."
+            />
+          </div>
+
+          <section className="bg-white rounded-xl border border-gray-200 p-5" aria-labelledby="invoice-attachments-heading">
+            <div className="mb-3 flex items-center gap-2">
+              <Paperclip className="h-4 w-4 text-blue-600" />
+              <h2 id="invoice-attachments-heading" className="text-sm font-black text-gray-900">Attachments</h2>
+            </div>
+            {attachments.length > 0 ? (
+              <div className="space-y-2">
+                {attachments.map((attachment: any) => (
+                  <a
+                    key={attachment.id || attachment.url || attachment.original_name}
+                    href={attachment.url || '#'}
+                    className="flex min-h-11 items-center gap-2 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-bold text-blue-700 hover:bg-blue-100"
+                  >
+                    <Paperclip className="h-4 w-4 flex-shrink-0" />
+                    <span className="truncate">{attachment.original_name || attachment.filename || 'Invoice attachment'}</span>
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-4 text-sm font-semibold text-gray-500">
+                No separate attachments are linked to this invoice record yet. Use the invoice PDF and notes for review, and attach source files through the project document workflow.
+              </div>
+            )}
+          </section>
         </div>
 
         {/* Actions */}
