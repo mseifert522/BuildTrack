@@ -175,9 +175,9 @@ textarea,
   --bt-panel-2: #15181C;
   --bt-border: #343A42;
   --bt-border-strong: #E78B4A;
-  --bt-text: #E7E0D7;
-  --bt-text-muted: #A7ACB3;
-  --bt-text-soft: #737B84;
+  --bt-text: #F0E8DD;
+  --bt-text-muted: #C4CAD2;
+  --bt-text-soft: #98A2AD;
   --bt-ring: #E78B4A;
   --bt-accent: #E78B4A;
   color-scheme: dark;
@@ -432,6 +432,7 @@ textarea,
 
 .bt-desktop-shell .text-gray-950,
 .bt-desktop-shell .text-gray-900,
+.bt-desktop-shell .text-gray-800,
 .bt-desktop-shell .text-slate-950,
 .bt-desktop-shell .text-slate-900,
 .bt-desktop-shell .text-slate-800 {
@@ -442,45 +443,142 @@ textarea,
 .bt-desktop-shell .text-gray-600,
 .bt-desktop-shell .text-gray-500,
 .bt-desktop-shell .text-gray-400,
+.bt-desktop-shell .text-gray-300,
 .bt-desktop-shell .text-slate-700,
 .bt-desktop-shell .text-slate-600,
 .bt-desktop-shell .text-slate-500,
-.bt-desktop-shell .text-slate-400 {
+.bt-desktop-shell .text-slate-400,
+.bt-desktop-shell .text-slate-300 {
   color: var(--bt-text-muted) !important;
 }
 
+.bt-desktop-shell .text-blue-950,
+.bt-desktop-shell .text-blue-900,
+.bt-desktop-shell .text-blue-500,
 .bt-desktop-shell .text-blue-600,
 .bt-desktop-shell .text-blue-700,
 .bt-desktop-shell .text-blue-800 {
-  color: #93C5FD !important;
+  color: #AFCFFF !important;
+}
+
+.bt-desktop-shell .text-indigo-500,
+.bt-desktop-shell .text-indigo-600,
+.bt-desktop-shell .text-indigo-700,
+.bt-desktop-shell .text-indigo-800,
+.bt-desktop-shell .text-indigo-900,
+.bt-desktop-shell .text-indigo-950 {
+  color: #C7D2FE !important;
 }
 
 .bt-desktop-shell .text-green-700,
 .bt-desktop-shell .text-green-800,
+.bt-desktop-shell .text-green-900,
+.bt-desktop-shell .text-emerald-600,
 .bt-desktop-shell .text-emerald-700,
-.bt-desktop-shell .text-emerald-800 {
+.bt-desktop-shell .text-emerald-800,
+.bt-desktop-shell .text-emerald-900 {
   color: #86EFAC !important;
 }
 
+.bt-desktop-shell .text-amber-600,
 .bt-desktop-shell .text-amber-700,
 .bt-desktop-shell .text-amber-800,
+.bt-desktop-shell .text-amber-900,
+.bt-desktop-shell .text-orange-600,
 .bt-desktop-shell .text-orange-700,
 .bt-desktop-shell .text-orange-800,
-.bt-desktop-shell .text-yellow-800 {
+.bt-desktop-shell .text-orange-900,
+.bt-desktop-shell .text-yellow-700,
+.bt-desktop-shell .text-yellow-800,
+.bt-desktop-shell .text-yellow-900 {
   color: #FBBF77 !important;
 }
 
+.bt-desktop-shell .text-red-500,
 .bt-desktop-shell .text-red-600,
 .bt-desktop-shell .text-red-700,
-.bt-desktop-shell .text-red-800 {
+.bt-desktop-shell .text-red-800,
+.bt-desktop-shell .text-red-900 {
   color: #FCA5A5 !important;
 }
 
+.bt-desktop-shell .text-purple-600,
 .bt-desktop-shell .text-purple-700,
 .bt-desktop-shell .text-purple-800,
+.bt-desktop-shell .text-purple-900,
 .bt-desktop-shell .text-cyan-700,
-.bt-desktop-shell .text-cyan-800 {
+.bt-desktop-shell .text-cyan-800,
+.bt-desktop-shell .text-cyan-900 {
   color: #B7C7D7 !important;
+}
+
+.bt-desktop-shell [style*="color: #111827"],
+.bt-desktop-shell [style*="color:#111827"],
+.bt-desktop-shell [style*="color: rgb(17, 24, 39)"],
+.bt-desktop-shell [style*="color: #1F2937"],
+.bt-desktop-shell [style*="color:#1F2937"],
+.bt-desktop-shell [style*="color: rgb(31, 41, 55)"],
+.bt-desktop-shell [style*="color: #374151"],
+.bt-desktop-shell [style*="color:#374151"],
+.bt-desktop-shell [style*="color: rgb(55, 65, 81)"],
+.bt-desktop-shell [style*="color: #0F172A"],
+.bt-desktop-shell [style*="color:#0F172A"],
+.bt-desktop-shell [style*="color: rgb(15, 23, 42)"],
+.bt-desktop-shell [style*="color: #1E293B"],
+.bt-desktop-shell [style*="color:#1E293B"],
+.bt-desktop-shell [style*="color: rgb(30, 41, 59)"] {
+  color: var(--bt-text) !important;
+}
+
+.bt-desktop-shell [style*="color: #4B5563"],
+.bt-desktop-shell [style*="color:#4B5563"],
+.bt-desktop-shell [style*="color: rgb(75, 85, 99)"],
+.bt-desktop-shell [style*="color: #6B7280"],
+.bt-desktop-shell [style*="color:#6B7280"],
+.bt-desktop-shell [style*="color: rgb(107, 114, 128)"],
+.bt-desktop-shell [style*="color: #64748B"],
+.bt-desktop-shell [style*="color:#64748B"],
+.bt-desktop-shell [style*="color: rgb(100, 116, 139)"],
+.bt-desktop-shell [style*="color: #94A3B8"],
+.bt-desktop-shell [style*="color:#94A3B8"],
+.bt-desktop-shell [style*="color: rgb(148, 163, 184)"] {
+  color: var(--bt-text-muted) !important;
+}
+
+.bt-desktop-shell [style*="color: #1D4ED8"],
+.bt-desktop-shell [style*="color:#1D4ED8"],
+.bt-desktop-shell [style*="color: rgb(29, 78, 216)"],
+.bt-desktop-shell [style*="color: #2563EB"],
+.bt-desktop-shell [style*="color:#2563EB"],
+.bt-desktop-shell [style*="color: rgb(37, 99, 235)"] {
+  color: #AFCFFF !important;
+}
+
+.bt-desktop-shell [style*="color: #047857"],
+.bt-desktop-shell [style*="color:#047857"],
+.bt-desktop-shell [style*="color: rgb(4, 120, 87)"] {
+  color: #86EFAC !important;
+}
+
+.bt-desktop-shell [style*="color: #92400E"],
+.bt-desktop-shell [style*="color:#92400E"],
+.bt-desktop-shell [style*="color: rgb(146, 64, 14)"],
+.bt-desktop-shell [style*="color: #C2410C"],
+.bt-desktop-shell [style*="color:#C2410C"],
+.bt-desktop-shell [style*="color: rgb(194, 65, 12)"],
+.bt-desktop-shell [style*="color: #D97706"],
+.bt-desktop-shell [style*="color:#D97706"],
+.bt-desktop-shell [style*="color: rgb(217, 119, 6)"] {
+  color: #FBBF77 !important;
+}
+
+.bt-desktop-shell [style*="color: #B91C1C"],
+.bt-desktop-shell [style*="color:#B91C1C"],
+.bt-desktop-shell [style*="color: rgb(185, 28, 28)"],
+.bt-desktop-shell [style*="color: #DC2626"],
+.bt-desktop-shell [style*="color:#DC2626"],
+.bt-desktop-shell [style*="color: rgb(220, 38, 38)"] {
+  color: #FCA5A5 !important;
 }
 
 .bt-desktop-shell .border-gray-200,
