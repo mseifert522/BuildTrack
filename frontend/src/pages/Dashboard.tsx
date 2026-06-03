@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore, isAdminRole, roleLabels } from '../store/authStore';
 import api from '../lib/api';
-import { Loading, StatusBadge } from '../components/ui';
+import { Loading, Modal, StatusBadge } from '../components/ui';
 import Avatar from '../components/Avatar';
 import RecentActivityModal from '../components/RecentActivityModal';
 import {
@@ -83,6 +83,67 @@ interface ProjectReviewSummary {
   changes: ReviewChange[];
 }
 
+interface FieldWorkTask {
+  id: string;
+  project_id: string;
+  title: string;
+  category?: string;
+  status: string;
+  verification_status: string;
+  invoice_status: string;
+  target_date?: string | null;
+  project_address: string;
+  project_job_name?: string;
+  alert_level: 'normal' | 'attention' | 'critical';
+  invoice_blocks_payment?: number;
+}
+
+interface FieldWorkNote {
+  id: string;
+  project_id: string;
+  note?: string;
+  created_at: string;
+  user_name: string;
+  project_address: string;
+  photo_count?: number;
+}
+
+interface FieldWorkPhoto {
+  id: string;
+  project_id: string;
+  original_name?: string;
+  label?: string;
+  captured_at?: string;
+  user_name: string;
+  project_address: string;
+}
+
+interface FieldWorkInvoiceHold {
+  id: string;
+  invoice_number: string;
+  project_id: string;
+  status: string;
+  total: number;
+  contractor_name: string;
+  project_address: string;
+  blocking_item_count: number;
+}
+
+interface FieldWorkWatchlist {
+  counts: {
+    field_notes: number;
+    field_photos: number;
+    scheduled_tasks: number;
+    approvals_needed: number;
+    invoice_holds: number;
+    total_alerts: number;
+  };
+  tasks: FieldWorkTask[];
+  field_notes: FieldWorkNote[];
+  field_photos: FieldWorkPhoto[];
+  invoice_holds: FieldWorkInvoiceHold[];
+}
+
 const greeting = () => {
   const h = Number(new Intl.DateTimeFormat('en-US', {
     timeZone: EASTERN_TIME_ZONE,
@@ -131,7 +192,9 @@ export default function Dashboard() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [recentNotes, setRecentNotes] = useState<RecentNote[]>([]);
   const [reviewSummaries, setReviewSummaries] = useState<ProjectReviewSummary[]>([]);
+  const [fieldWatch, setFieldWatch] = useState<FieldWorkWatchlist | null>(null);
   const [showReviewSummary, setShowReviewSummary] = useState(false);
+  const [showFieldWatchReminder, setShowFieldWatchReminder] = useState(false);
   const [reviewDismissKey, setReviewDismissKey] = useState('');
   const [reviewLoginKey, setReviewLoginKey] = useState('');
   const [loading, setLoading] = useState(true);
@@ -142,7 +205,7 @@ export default function Dashboard() {
         const canShowReview = !!user && isAdminRole(user.role);
         const loginSummaryKey = user?.id ? `buildtrack-login-review-summary:${user.id}` : '';
         const forceLoginSummary = canShowReview && !!loginSummaryKey && sessionStorage.getItem(loginSummaryKey) === '1';
-        const [projRes, allProjRes, invRes, notesRes, reviewRes] = await Promise.all([
+        const [projRes, allProjRes, invRes, notesRes, reviewRes, fieldWatchRes] = await Promise.all([
           api.get('/projects?status=active_rehab'),
           api.get('/projects'),
           api.get('/invoices'),
@@ -150,11 +213,24 @@ export default function Dashboard() {
           canShowReview
             ? api.get(`/projects/unreviewed-summary${forceLoginSummary ? '?scope=recent' : ''}`).catch(() => ({ data: { projects: [] } }))
             : Promise.resolve({ data: { projects: [] } }),
+          canShowReview
+            ? api.get('/field-work/watchlist').catch(() => ({ data: null }))
+            : Promise.resolve({ data: null }),
         ]);
         setProjects(projRes.data.slice(0, 6));
         setRecentNotes(notesRes.data.slice(0, 50));
         setAllProjects(allProjRes.data);
         setInvoices(Array.isArray(invRes.data) ? invRes.data : []);
+        const nextFieldWatch = fieldWatchRes.data && typeof fieldWatchRes.data === 'object'
+          ? fieldWatchRes.data as FieldWorkWatchlist
+          : null;
+        setFieldWatch(nextFieldWatch);
+        if (canShowReview && nextFieldWatch?.counts?.total_alerts) {
+          const fieldWatchDismissKey = `buildtrack-field-watch:${user.id}:${nextFieldWatch.counts.total_alerts}`;
+          setShowFieldWatchReminder(!sessionStorage.getItem(fieldWatchDismissKey));
+        } else {
+          setShowFieldWatchReminder(false);
+        }
 
         const summaries = Array.isArray(reviewRes.data?.projects) ? reviewRes.data.projects : [];
         setReviewSummaries(summaries);
@@ -193,6 +269,7 @@ export default function Dashboard() {
   const firstName = user?.name?.split(' ')[0] || 'there';
   const now = new Date();
   const reviewSummaryTotal = reviewSummaries.reduce((sum, project) => sum + project.change_count, 0);
+  const fieldWatchTotal = fieldWatch?.counts?.total_alerts ?? 0;
 
   const markReviewSummariesReviewed = () => {
     const projectIds = Array.from(new Set(reviewSummaries.map(project => project.project_id).filter(Boolean)));
@@ -206,6 +283,13 @@ export default function Dashboard() {
     if (reviewDismissKey) sessionStorage.setItem(reviewDismissKey, '1');
     if (reviewLoginKey) sessionStorage.removeItem(reviewLoginKey);
     setShowReviewSummary(false);
+  };
+
+  const closeFieldWatchReminder = () => {
+    if (user?.id && fieldWatch?.counts?.total_alerts) {
+      sessionStorage.setItem(`buildtrack-field-watch:${user.id}:${fieldWatch.counts.total_alerts}`, '1');
+    }
+    setShowFieldWatchReminder(false);
   };
 
   // Lifecycle KPI counts
@@ -252,12 +336,12 @@ export default function Dashboard() {
     {
       label: 'Tasks',
       value: `${openPunchItems} open`,
-      detail: `${reviewSummaryTotal} new review update${reviewSummaryTotal === 1 ? '' : 's'} and ${recentPhotoCount} recent photos`,
-      trend: openPunchItems > 0 ? 'Needs field follow-up' : 'No open punch exposure',
+      detail: `${fieldWatchTotal} field alert${fieldWatchTotal === 1 ? '' : 's'}, ${reviewSummaryTotal} review update${reviewSummaryTotal === 1 ? '' : 's'}, ${recentPhotoCount} recent photos`,
+      trend: fieldWatchTotal > 0 ? 'Field check required' : openPunchItems > 0 ? 'Needs field follow-up' : 'No open punch exposure',
       icon: ClipboardList,
       to: '/projects',
-      accent: openPunchItems > 0 ? '#D46A4C' : '#5DA271',
-      progress: openPunchItems > 0 ? Math.min(100, openPunchItems * 8) : 100,
+      accent: fieldWatchTotal > 0 || openPunchItems > 0 ? '#D46A4C' : '#5DA271',
+      progress: fieldWatchTotal > 0 ? Math.min(100, fieldWatchTotal * 10) : openPunchItems > 0 ? Math.min(100, openPunchItems * 8) : 100,
     },
   ];
   const operationsModules = [
@@ -437,6 +521,63 @@ export default function Dashboard() {
                 </Link>
               ))}
             </div>
+            <div className="mt-4 border-t border-slate-700 pt-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="bt-section-kicker">Final watch list</p>
+                  <h3 className="text-sm font-bold text-slate-950">Field checks before payment</h3>
+                </div>
+                <span className={`rounded-sm px-2 py-1 text-xs font-black ${fieldWatchTotal > 0 ? 'bg-red-50 text-red-700 ring-1 ring-red-200' : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'}`}>
+                  {fieldWatchTotal > 0 ? `${fieldWatchTotal} alerts` : 'Clear'}
+                </span>
+              </div>
+              <div className="grid gap-2">
+                {[
+                  {
+                    label: 'Field notes & pictures',
+                    value: `${(fieldWatch?.counts?.field_notes || 0) + (fieldWatch?.counts?.field_photos || 0)}`,
+                    detail: 'New evidence to review from the field',
+                    icon: Image,
+                    tone: '#2563EB',
+                  },
+                  {
+                    label: 'Scheduled work status',
+                    value: `${fieldWatch?.counts?.scheduled_tasks || 0}`,
+                    detail: 'Upcoming or in-process scope tasks',
+                    icon: Clock,
+                    tone: '#D97706',
+                  },
+                  {
+                    label: 'Approval / invoice holds',
+                    value: `${(fieldWatch?.counts?.approvals_needed || 0) + (fieldWatch?.counts?.invoice_holds || 0)}`,
+                    detail: 'Must be approved before payment',
+                    icon: AlertTriangle,
+                    tone: '#DC2626',
+                  },
+                ].map(item => (
+                  <button
+                    key={item.label}
+                    type="button"
+                    onClick={() => {
+                      const firstTaskProject = fieldWatch?.tasks?.[0]?.project_id;
+                      const firstHoldProject = fieldWatch?.invoice_holds?.[0]?.project_id;
+                      const firstNoteProject = fieldWatch?.field_notes?.[0]?.project_id;
+                      navigate(`/projects/${firstTaskProject || firstHoldProject || firstNoteProject || ''}`.replace(/\/$/, ''));
+                    }}
+                    className="flex min-h-12 items-center gap-3 rounded-sm border border-slate-700 bg-white px-3 py-2 text-left transition-colors hover:border-orange-400 hover:bg-slate-50"
+                  >
+                    <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-slate-100" style={{ color: item.tone }}>
+                      <item.icon className="h-4 w-4" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-xs font-black uppercase tracking-wide text-slate-700">{item.label}</span>
+                      <span className="block truncate text-xs font-medium text-slate-500">{item.detail}</span>
+                    </span>
+                    <span className="text-lg font-black text-slate-950">{item.value}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </section>
 
@@ -603,6 +744,99 @@ export default function Dashboard() {
           <p className="text-xs text-gray-400">Last updated: {formatEasternTime(now.toISOString())} New York time</p>
         </div>
       </div>
+
+      <Modal
+        isOpen={showFieldWatchReminder && !!fieldWatch && fieldWatchTotal > 0}
+        onClose={closeFieldWatchReminder}
+        title="Field Work Needs Review"
+        description="Review field notes, pictures, scheduled tasks, and payment holds before invoices are approved."
+        size="xl"
+      >
+        <div className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-4">
+            {[
+              { label: 'Field evidence', value: (fieldWatch?.counts.field_notes || 0) + (fieldWatch?.counts.field_photos || 0), tone: 'bg-blue-50 text-blue-700 ring-blue-200' },
+              { label: 'Scheduled tasks', value: fieldWatch?.counts.scheduled_tasks || 0, tone: 'bg-amber-50 text-amber-800 ring-amber-200' },
+              { label: 'Needs approval', value: fieldWatch?.counts.approvals_needed || 0, tone: 'bg-purple-50 text-purple-700 ring-purple-200' },
+              { label: 'Payment holds', value: fieldWatch?.counts.invoice_holds || 0, tone: 'bg-red-50 text-red-700 ring-red-200' },
+            ].map(card => (
+              <div key={card.label} className={`rounded-sm px-3 py-3 ring-1 ${card.tone}`}>
+                <p className="text-2xl font-black leading-none">{card.value}</p>
+                <p className="mt-1 text-xs font-black uppercase tracking-wide">{card.label}</p>
+              </div>
+            ))}
+          </div>
+
+          {fieldWatch?.tasks?.length ? (
+            <div>
+              <h3 className="mb-2 text-sm font-black text-slate-950">Work status requiring attention</h3>
+              <div className="max-h-72 divide-y divide-slate-200 overflow-y-auto rounded-sm border border-slate-200">
+                {fieldWatch.tasks.slice(0, 12).map(task => (
+                  <button
+                    key={task.id}
+                    type="button"
+                    onClick={() => { closeFieldWatchReminder(); navigate(`/projects/${task.project_id}#construction-plan`); }}
+                    className="flex w-full items-start gap-3 bg-white px-3 py-3 text-left hover:bg-slate-50"
+                  >
+                    <span className={`mt-1 h-2.5 w-2.5 flex-shrink-0 rounded-full ${task.alert_level === 'critical' ? 'bg-red-500' : task.alert_level === 'attention' ? 'bg-amber-500' : 'bg-slate-400'}`} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-black text-slate-950">{task.title}</span>
+                      <span className="block truncate text-xs font-semibold text-slate-500">{task.project_address}</span>
+                      <span className="mt-1 block text-xs text-slate-600">
+                        Status: {task.status.replace(/_/g, ' ')} · Verification: {task.verification_status.replace(/_/g, ' ')} · Invoice: {task.invoice_status.replace(/_/g, ' ')}
+                      </span>
+                    </span>
+                    <ChevronRight className="mt-2 h-4 w-4 text-slate-400" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {fieldWatch?.invoice_holds?.length ? (
+            <div className="rounded-sm border border-red-200 bg-red-50 px-4 py-3">
+              <h3 className="text-sm font-black text-red-800">Invoices blocked by unapproved field work</h3>
+              <div className="mt-2 space-y-2">
+                {fieldWatch.invoice_holds.slice(0, 5).map(invoice => (
+                  <button
+                    key={invoice.id}
+                    type="button"
+                    onClick={() => { closeFieldWatchReminder(); navigate(`/projects/${invoice.project_id}/invoices/${invoice.id}`); }}
+                    className="flex w-full items-center justify-between gap-3 rounded-sm bg-white px-3 py-2 text-left ring-1 ring-red-100 hover:ring-red-300"
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-black text-slate-950">{invoice.invoice_number} · {invoice.contractor_name}</span>
+                      <span className="block truncate text-xs font-semibold text-slate-500">{invoice.project_address}</span>
+                    </span>
+                    <span className="text-sm font-black text-red-700">{formatMoney(invoice.total)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              onClick={closeFieldWatchReminder}
+              className="bt-btn bt-btn-secondary"
+            >
+              Dismiss
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const projectId = fieldWatch?.tasks?.[0]?.project_id || fieldWatch?.invoice_holds?.[0]?.project_id || fieldWatch?.field_notes?.[0]?.project_id;
+                closeFieldWatchReminder();
+                navigate(projectId ? `/projects/${projectId}#construction-plan` : '/projects');
+              }}
+              className="bt-btn bt-btn-primary"
+            >
+              Open first field item
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       <RecentActivityModal userId={user?.id} />
 

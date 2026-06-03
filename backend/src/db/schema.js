@@ -386,21 +386,31 @@ function initializeSchema() {
       description TEXT,
       category TEXT NOT NULL DEFAULT 'General',
       status TEXT NOT NULL DEFAULT 'not_started' CHECK(status IN ('not_started','in_progress','waiting_materials','needs_review','completed')),
+      verification_status TEXT NOT NULL DEFAULT 'not_requested',
+      invoice_status TEXT NOT NULL DEFAULT 'not_received',
       sort_order INTEGER NOT NULL DEFAULT 0,
       assigned_to TEXT,
       start_date TEXT,
       target_date TEXT,
+      approved_by TEXT,
+      approved_at TEXT,
+      approval_notes TEXT,
+      last_field_update_at TEXT,
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       completed_at TEXT,
       FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
       FOREIGN KEY (assigned_to) REFERENCES users(id),
+      FOREIGN KEY (approved_by) REFERENCES users(id),
       FOREIGN KEY (created_by) REFERENCES users(id)
     );
 
     CREATE INDEX IF NOT EXISTS idx_construction_plan_project_order
       ON construction_plan_items(project_id, sort_order);
+
+    CREATE INDEX IF NOT EXISTS idx_construction_plan_watch_status
+      ON construction_plan_items(project_id, status, verification_status, invoice_status, target_date);
 
     -- Multiple central scope-of-work sections per project.
     CREATE TABLE IF NOT EXISTS project_scopes (
@@ -1204,6 +1214,27 @@ function initializeSchema() {
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_photos_note_taken ON photos(note_id, taken_at, created_at)`); } catch (_) { /* best-effort */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_photos_project_batch ON photos(project_id, batch_id, batch_sequence)`); } catch (_) { /* best-effort */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_photos_project_label_uploaded ON photos(project_id, label, uploaded_at)`); } catch (_) { /* best-effort */ }
+  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN verification_status TEXT NOT NULL DEFAULT 'not_requested'`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN invoice_status TEXT NOT NULL DEFAULT 'not_received'`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN approved_by TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN approved_at TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN approval_notes TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN last_field_update_at TEXT`); } catch (_) { /* already exists */ }
+  try {
+    db.exec(`
+      UPDATE construction_plan_items
+      SET
+        verification_status = CASE
+          WHEN verification_status IS NULL OR verification_status NOT IN ('not_requested','pending_review','approved','rejected') THEN 'not_requested'
+          ELSE verification_status
+        END,
+        invoice_status = CASE
+          WHEN invoice_status IS NULL OR invoice_status NOT IN ('not_received','received','approval_needed','approved_for_payment','paid') THEN 'not_received'
+          ELSE invoice_status
+        END
+    `);
+  } catch (_) { /* best-effort */ }
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_construction_plan_watch_status ON construction_plan_items(project_id, status, verification_status, invoice_status, target_date)`); } catch (_) { /* best-effort */ }
   try { db.exec(`ALTER TABLE users ADD COLUMN pin TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE users ADD COLUMN contractor_category TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE users ADD COLUMN contractor_secondary_category TEXT`); } catch (_) { /* already exists */ }

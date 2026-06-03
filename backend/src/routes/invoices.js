@@ -21,6 +21,18 @@ function buildDesktopInvoicesUrl() {
   return `${appUrl}/invoices`;
 }
 
+function getFieldWorkPaymentHolds(db, projectId) {
+  return db.prepare(`
+    SELECT id, title, status, verification_status, invoice_status, target_date
+    FROM construction_plan_items
+    WHERE project_id = ?
+      AND invoice_status IN ('received','approval_needed')
+      AND verification_status != 'approved'
+    ORDER BY datetime(COALESCE(target_date, updated_at, created_at)) ASC
+    LIMIT 25
+  `).all(projectId);
+}
+
 // GET /api/projects/:projectId/invoices
 router.get('/', authorizeProjectAccess, (req, res) => {
   const db = getDb();
@@ -252,6 +264,18 @@ router.put('/:id/status', authorize('super_admin', 'operations_manager', 'projec
   const validStatuses = ['draft', 'submitted', 'reviewed', 'approved', 'paid'];
   if (!validStatuses.includes(status)) return res.status(400).json({ error: 'Invalid status' });
   const db = getDb();
+  const invoice = db.prepare('SELECT id, project_id FROM invoices WHERE id = ? AND project_id = ?').get(req.params.id, req.params.projectId);
+  if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+  if (['approved', 'paid'].includes(status)) {
+    const holds = getFieldWorkPaymentHolds(db, req.params.projectId);
+    if (holds.length) {
+      return res.status(409).json({
+        error: 'Field work must be completed and approved before this invoice can be approved for payment.',
+        code: 'FIELD_WORK_APPROVAL_REQUIRED',
+        holds,
+      });
+    }
+  }
   db.prepare("UPDATE invoices SET status = ?, updated_at = datetime('now') WHERE id = ?").run(status, req.params.id);
   logActivity({ userId: req.user.id, projectId: req.params.projectId, action: 'invoice_status_updated', entityType: 'invoice', entityId: req.params.id, details: { status } });
   res.json({ message: 'Status updated' });

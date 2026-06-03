@@ -39,6 +39,7 @@ const MobileAddProject = lazy(() => import('./pages/MobileAddProject'));
 const MobileNotes = lazy(() => import('./pages/MobileNotes'));
 const MobileProgress = lazy(() => import('./pages/MobileProgress'));
 const MobilePhotos = lazy(() => import('./pages/MobilePhotos'));
+const MobileFieldWork = lazy(() => import('./pages/MobileFieldWork'));
 
 const DESKTOP_SESSION_TIMEOUT_MS = 45 * 60 * 1000;
 const ACTIVITY_WRITE_INTERVAL_MS = 15 * 1000;
@@ -364,6 +365,7 @@ function MobileHostRoutes() {
       <Route path="/project/:id/invoice" element={<MobileRoute><MobileInvoice /></MobileRoute>} />
       <Route path="/project/:id/notes" element={<MobileRoute><MobileNotes /></MobileRoute>} />
       <Route path="/project/:id/progress" element={<MobileRoute><MobileProgress /></MobileRoute>} />
+      <Route path="/project/:id/field-work" element={<MobileRoute><MobileFieldWork /></MobileRoute>} />
       <Route path="/add-project" element={<MobileRoute><MobileAddProject /></MobileRoute>} />
 
       {/* Legacy mobile paths are normalized on the mobile host. */}
@@ -431,6 +433,7 @@ export default function App() {
         <Route path="/mobile/project/:id/invoice" element={<MobileRoute><MobileInvoice /></MobileRoute>} />
         <Route path="/mobile/project/:id/notes" element={<MobileRoute><MobileNotes /></MobileRoute>} />
         <Route path="/mobile/project/:id/progress" element={<MobileRoute><MobileProgress /></MobileRoute>} />
+        <Route path="/mobile/project/:id/field-work" element={<MobileRoute><MobileFieldWork /></MobileRoute>} />
         <Route path="/mobile/add-project" element={<MobileRoute><MobileAddProject /></MobileRoute>} />
         <Route path="/mobile/*" element={<MobileRoute><Navigate to="/mobile" replace /></MobileRoute>} />
 

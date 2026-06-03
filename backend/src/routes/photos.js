@@ -495,6 +495,31 @@ router.post('/', uploadProjectPhotos, async (req, res) => {
       });
     }
 
+    if (construction_plan_item_id) {
+      db.prepare(`
+        UPDATE construction_plan_items
+        SET last_field_update_at = datetime('now'),
+            verification_status = CASE
+              WHEN verification_status = 'approved' THEN verification_status
+              ELSE 'pending_review'
+            END,
+            status = CASE
+              WHEN status = 'not_started' THEN 'in_progress'
+              ELSE status
+            END,
+            updated_at = datetime('now')
+        WHERE id = ? AND project_id = ?
+      `).run(construction_plan_item_id, req.params.projectId);
+      logActivity({
+        userId: req.user.id,
+        projectId: req.params.projectId,
+        action: 'field_work_evidence_uploaded',
+        entityType: 'construction_plan_item',
+        entityId: construction_plan_item_id,
+        details: { photo_count: inserted.length },
+      });
+    }
+
     logActivity({
       userId: req.user.id,
       projectId: req.params.projectId,

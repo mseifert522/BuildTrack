@@ -147,6 +147,10 @@ const REVIEW_ACTIONS = [
   'construction_plan_item_created',
   'construction_plan_item_updated',
   'construction_plan_item_deleted',
+  'field_work_task_created',
+  'field_work_task_updated',
+  'field_work_task_approved',
+  'field_work_evidence_uploaded',
   'project_scope_created',
   'project_scope_updated',
   'project_scope_deleted',
@@ -195,6 +199,14 @@ function summarizeActivity(row) {
       return `Updated construction plan step${details.status ? ` to ${String(details.status).replace(/_/g, ' ')}` : ''}`;
     case 'construction_plan_item_deleted':
       return 'Deleted a construction plan step';
+    case 'field_work_task_created':
+      return `Added field work task${details.title ? `: ${details.title}` : ''}`;
+    case 'field_work_task_updated':
+      return `Updated field work task${details.status ? ` to ${String(details.status).replace(/_/g, ' ')}` : ''}`;
+    case 'field_work_task_approved':
+      return `Approved field work task${details.title ? `: ${details.title}` : ''}`;
+    case 'field_work_evidence_uploaded':
+      return `Uploaded field work evidence${details.photo_count ? ` (${details.photo_count} photo${Number(details.photo_count) === 1 ? '' : 's'})` : ''}`;
     case 'project_scope_created':
       return `Added scope of work${details.scope_title ? `: ${details.scope_title}` : ''}`;
     case 'project_scope_updated':
@@ -441,6 +453,14 @@ router.get('/:id', authorizeProjectAccess, (req, res) => {
 });
 
 const PROJECT_SCOPE_STATUSES = ['draft', 'active', 'on_hold', 'completed'];
+const CONSTRUCTION_PLAN_STATUSES = ['not_started', 'in_progress', 'waiting_materials', 'needs_review', 'completed'];
+const FIELD_VERIFICATION_STATUSES = ['not_requested', 'pending_review', 'approved', 'rejected'];
+const FIELD_INVOICE_STATUSES = ['not_received', 'received', 'approval_needed', 'approved_for_payment', 'paid'];
+
+function normalizeFieldStatus(value, allowed, fallback) {
+  const requested = String(value || '').trim();
+  return allowed.includes(requested) ? requested : fallback;
+}
 
 // GET /api/projects/:id/scopes - multiple scope-of-work sections for the project
 router.get('/:id/scopes', authorizeProjectAccess, (req, res) => {
@@ -575,7 +595,7 @@ router.get('/:id/construction-plan', authorizeProjectAccess, (req, res) => {
 // POST /api/projects/:id/construction-plan
 router.post('/:id/construction-plan', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, (req, res) => {
   try {
-    const { title, description, category, status, assigned_to, start_date, target_date } = req.body;
+    const { title, description, category, status, assigned_to, start_date, target_date, verification_status, invoice_status, approval_notes } = req.body;
     if (!title || !title.trim()) return res.status(400).json({ error: 'Title is required' });
 
     const db = getDb();
@@ -584,24 +604,37 @@ router.post('/:id/construction-plan', authorize(...MANAGEMENT_ROLES), authorizeP
 
     const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) as max FROM construction_plan_items WHERE project_id = ?').get(req.params.id);
     const itemId = uuidv4();
+    const nextStatus = normalizeFieldStatus(status, CONSTRUCTION_PLAN_STATUSES, 'not_started');
+    const nextVerificationStatus = normalizeFieldStatus(
+      verification_status,
+      FIELD_VERIFICATION_STATUSES,
+      nextStatus === 'needs_review' ? 'pending_review' : 'not_requested'
+    );
+    const nextInvoiceStatus = normalizeFieldStatus(invoice_status, FIELD_INVOICE_STATUSES, 'not_received');
     db.prepare(`
-      INSERT INTO construction_plan_items (id, project_id, title, description, category, status, sort_order, assigned_to, start_date, target_date, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO construction_plan_items (
+        id, project_id, title, description, category, status, verification_status, invoice_status,
+        sort_order, assigned_to, start_date, target_date, approval_notes, created_by
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       itemId,
       req.params.id,
       title.trim(),
       description || null,
       category ? String(category).trim() : '',
-      status || 'not_started',
+      nextStatus,
+      nextVerificationStatus,
+      nextInvoiceStatus,
       maxOrder.max + 1,
       assigned_to || null,
       start_date || null,
       target_date || null,
+      approval_notes || null,
       req.user.id
     );
 
-    logActivity({ userId: req.user.id, projectId: req.params.id, action: 'construction_plan_item_created', entityType: 'construction_plan_item', entityId: itemId, details: { title: title.trim() } });
+    logActivity({ userId: req.user.id, projectId: req.params.id, action: 'construction_plan_item_created', entityType: 'construction_plan_item', entityId: itemId, details: { title: title.trim(), status: nextStatus, verification_status: nextVerificationStatus, invoice_status: nextInvoiceStatus } });
     res.status(201).json({ id: itemId });
   } catch (err) {
     console.error(err);
@@ -616,29 +649,52 @@ router.put('/:id/construction-plan/:itemId', authorize(...MANAGEMENT_ROLES), aut
     const item = db.prepare('SELECT * FROM construction_plan_items WHERE id = ? AND project_id = ?').get(req.params.itemId, req.params.id);
     if (!item) return res.status(404).json({ error: 'Construction plan item not found' });
 
-    const { title, description, category, status, assigned_to, start_date, target_date } = req.body;
-    const completedAt = status === 'completed' && item.status !== 'completed'
+    const { title, description, category, status, assigned_to, start_date, target_date, verification_status, invoice_status, approval_notes } = req.body;
+    const nextStatus = status !== undefined ? normalizeFieldStatus(status, CONSTRUCTION_PLAN_STATUSES, item.status) : item.status;
+    let nextVerificationStatus = verification_status !== undefined
+      ? normalizeFieldStatus(verification_status, FIELD_VERIFICATION_STATUSES, item.verification_status || 'not_requested')
+      : (item.verification_status || 'not_requested');
+    const nextInvoiceStatus = invoice_status !== undefined
+      ? normalizeFieldStatus(invoice_status, FIELD_INVOICE_STATUSES, item.invoice_status || 'not_received')
+      : (item.invoice_status || 'not_received');
+    if ((nextStatus === 'needs_review' || nextStatus === 'completed' || nextInvoiceStatus === 'received') && nextVerificationStatus === 'not_requested') {
+      nextVerificationStatus = 'pending_review';
+    }
+    const approvedAt = nextVerificationStatus === 'approved' && item.verification_status !== 'approved'
       ? new Date().toISOString()
-      : (status && status !== 'completed' ? null : item.completed_at);
+      : item.approved_at;
+    const approvedBy = nextVerificationStatus === 'approved' && item.verification_status !== 'approved'
+      ? req.user.id
+      : item.approved_by;
+    const completedAt = nextStatus === 'completed' && item.status !== 'completed'
+      ? new Date().toISOString()
+      : (nextStatus !== 'completed' ? null : item.completed_at);
 
     db.prepare(`
       UPDATE construction_plan_items
-      SET title = ?, description = ?, category = ?, status = ?, assigned_to = ?, start_date = ?, target_date = ?, completed_at = ?, updated_at = datetime('now')
+      SET title = ?, description = ?, category = ?, status = ?, verification_status = ?, invoice_status = ?,
+          assigned_to = ?, start_date = ?, target_date = ?, approved_by = ?, approved_at = ?,
+          approval_notes = ?, completed_at = ?, updated_at = datetime('now')
       WHERE id = ? AND project_id = ?
     `).run(
       title ?? item.title,
       description !== undefined ? description : item.description,
       category !== undefined ? String(category || '').trim() : item.category,
-      status ?? item.status,
+      nextStatus,
+      nextVerificationStatus,
+      nextInvoiceStatus,
       assigned_to !== undefined ? assigned_to : item.assigned_to,
       start_date !== undefined ? start_date : item.start_date,
       target_date !== undefined ? target_date : item.target_date,
+      approvedBy,
+      approvedAt,
+      approval_notes !== undefined ? approval_notes || null : item.approval_notes,
       completedAt,
       req.params.itemId,
       req.params.id
     );
 
-    logActivity({ userId: req.user.id, projectId: req.params.id, action: 'construction_plan_item_updated', entityType: 'construction_plan_item', entityId: req.params.itemId, details: { status } });
+    logActivity({ userId: req.user.id, projectId: req.params.id, action: 'construction_plan_item_updated', entityType: 'construction_plan_item', entityId: req.params.itemId, details: { status: nextStatus, verification_status: nextVerificationStatus, invoice_status: nextInvoiceStatus } });
     res.json({ message: 'Construction plan item updated' });
   } catch (err) {
     console.error(err);

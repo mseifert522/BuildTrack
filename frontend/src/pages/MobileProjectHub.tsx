@@ -121,6 +121,39 @@ export default function MobileProjectHub() {
           Field actions
         </p>
 
+        {managementUser && (
+          <button
+            onClick={() => navigate(`/mobile/project/${id}/field-work`)}
+            style={{
+              width: '100%',
+              textAlign: 'left',
+              background: 'linear-gradient(135deg, #1D4ED8, #0F766E)',
+              color: 'white',
+              borderRadius: 18,
+              boxShadow: '0 12px 24px rgba(15,118,110,0.24)',
+              padding: 20,
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              minHeight: 92,
+            }}
+            aria-label="Open field work tasks, notes, photos, and approvals"
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
+              <div style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <ClipboardList size={28} color="white" />
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <p style={{ fontWeight: 950, color: 'white', fontSize: 18, margin: 0 }}>Field Work Status</p>
+                <p style={{ color: 'rgba(255,255,255,0.84)', fontSize: 13, margin: '4px 0 0', lineHeight: 1.35 }}>Create scope tasks, add field notes, attach photos, and mark work ready for approval.</p>
+              </div>
+            </div>
+            <ImagePlus size={26} color="white" style={{ flexShrink: 0 }} />
+          </button>
+        )}
+
         <button
           onClick={() => navigate(`/mobile/photos?projectId=${id}&camera=1`)}
           style={{

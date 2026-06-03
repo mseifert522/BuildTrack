@@ -5,7 +5,7 @@ import { useAuthStore, canChangeProjectStatus, canManageProjects, isAdminRole } 
 import api from '../lib/api';
 import { Loading, StatusBadge, Modal } from '../components/ui';
 import Avatar from '../components/Avatar';
-import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, ClipboardList, Activity, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle, Send, Phone, Building2, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, ClipboardList, Activity, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle, Send, Phone, Building2, AlertTriangle, Check } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useForm } from 'react-hook-form';
 import { format } from 'date-fns';
@@ -199,8 +199,11 @@ export default function ProjectDetail() {
 
   const load = useCallback(async () => {
     try {
-      const res = await api.get(`/projects/${id}`);
-      setProject(res.data);
+      const [projectRes, fieldWorkRes] = await Promise.all([
+        api.get(`/projects/${id}`),
+        api.get(`/field-work/projects/${id}`).catch(() => ({ data: null })),
+      ]);
+      setProject({ ...projectRes.data, field_work: fieldWorkRes.data });
     } catch (err) {
       toast.error('Failed to load project');
     } finally {
@@ -442,6 +445,7 @@ export default function ProjectDetail() {
 
   const canEdit = user && canManageProjects(user.role);
   const canAssign = user && isAdminRole(user.role);
+  const fieldWork = project.field_work || { counts: {}, tasks: [], invoice_holds: [] };
 
   const openProjectPhotoCapture = () => {
     const projectId = id || project?.id;
@@ -451,6 +455,26 @@ export default function ProjectDetail() {
       return;
     }
     navigate(`/photos?projectId=${projectId}`);
+  };
+
+  const updateFieldWorkTask = async (taskId: string, patch: Record<string, any>) => {
+    try {
+      await api.put(`/field-work/projects/${id}/tasks/${taskId}`, patch);
+      toast.success('Field work status updated');
+      await load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to update field work status');
+    }
+  };
+
+  const approveFieldWorkTask = async (taskId: string) => {
+    try {
+      await api.post(`/field-work/projects/${id}/tasks/${taskId}/approve`, {});
+      toast.success('Field work approved for payment');
+      await load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to approve field work');
+    }
   };
 
   const notesPanel = (compact = false) => (
@@ -830,6 +854,15 @@ export default function ProjectDetail() {
                 ))}
               </div>
             </div>
+
+              <FieldWorkStatusPanel
+                tasks={Array.isArray(fieldWork.tasks) ? fieldWork.tasks : []}
+                counts={fieldWork.counts || {}}
+                canManage={!!canEdit}
+                onStatusChange={updateFieldWorkTask}
+                onApprove={approveFieldWorkTask}
+                onOpenScope={() => setTab('construction-plan')}
+              />
 
               <RecentFieldPhotosCard
                 projectId={id!}
@@ -1305,6 +1338,145 @@ function ProjectTextMessagesTab({ projectId, project }: { projectId: string; pro
   );
 }
 
+const fieldWorkStatusOptions = [
+  { value: 'not_started', label: 'Not Started' },
+  { value: 'in_progress', label: 'In Progress' },
+  { value: 'waiting_materials', label: 'Waiting Materials' },
+  { value: 'needs_review', label: 'Needs Review' },
+  { value: 'completed', label: 'Completed' },
+];
+
+const fieldInvoiceStatusOptions = [
+  { value: 'not_received', label: 'Invoice Not Received' },
+  { value: 'received', label: 'Invoice Received' },
+  { value: 'approval_needed', label: 'Approval Needed' },
+  { value: 'approved_for_payment', label: 'Approved for Payment' },
+  { value: 'paid', label: 'Paid' },
+];
+
+function fieldStatusLabel(value?: string) {
+  return String(value || 'not_requested').replace(/_/g, ' ');
+}
+
+function FieldWorkStatusPanel({
+  tasks,
+  counts,
+  canManage,
+  onStatusChange,
+  onApprove,
+  onOpenScope,
+}: {
+  tasks: any[];
+  counts: any;
+  canManage: boolean;
+  onStatusChange: (taskId: string, patch: Record<string, any>) => void;
+  onApprove: (taskId: string) => void;
+  onOpenScope: () => void;
+}) {
+  const visibleTasks = tasks
+    .filter(task => task.status !== 'completed' || task.invoice_status !== 'paid')
+    .slice(0, 8);
+  const approvalCount = Number(counts?.approvals_needed || 0);
+  const holdCount = Number(counts?.invoice_holds || 0);
+
+  return (
+    <section className="rounded-xl border border-slate-300 bg-white p-4 shadow-sm">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-black text-slate-950">Field Work Status</h3>
+          <p className="mt-1 text-xs font-semibold text-slate-500">Scheduled work, field verification, and invoice readiness for this project.</p>
+        </div>
+        <span className={`rounded-full px-2.5 py-1 text-xs font-black ${approvalCount + holdCount > 0 ? 'bg-red-50 text-red-700 ring-1 ring-red-200' : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'}`}>
+          {approvalCount + holdCount > 0 ? `${approvalCount + holdCount} check` : 'Clear'}
+        </span>
+      </div>
+
+      {visibleTasks.length === 0 ? (
+        <button
+          type="button"
+          onClick={onOpenScope}
+          className="w-full rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-4 text-left text-sm font-semibold text-slate-600 hover:border-blue-300 hover:bg-blue-50"
+        >
+          No active field work items yet. Open Scope of Work to schedule HVAC, drywall, inspections, or other job tasks.
+        </button>
+      ) : (
+        <div className="space-y-3">
+          {visibleTasks.map(task => {
+            const blocksPayment = Boolean(task.invoice_blocks_payment);
+            return (
+              <article key={task.id} className={`rounded-lg border p-3 ${blocksPayment ? 'border-red-200 bg-red-50' : task.verification_status === 'pending_review' ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-black text-slate-950">{task.title}</p>
+                    <p className="mt-1 text-xs font-semibold text-slate-500">
+                      {task.category || 'Field Work'}
+                      {task.target_date ? ` - Due ${formatEasternDate(task.target_date, { month: 'short', day: 'numeric' })}` : ''}
+                    </p>
+                  </div>
+                  {blocksPayment ? (
+                    <span className="rounded-full bg-red-600 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-white">Payment Hold</span>
+                  ) : (
+                    <span className="rounded-full bg-white px-2 py-1 text-[10px] font-black uppercase tracking-wide text-slate-600 ring-1 ring-slate-200">{fieldStatusLabel(task.verification_status)}</span>
+                  )}
+                </div>
+
+                <div className="mt-3 grid gap-2">
+                  {canManage ? (
+                    <>
+                      <label className="text-xs font-black uppercase tracking-wide text-slate-500">
+                        Job status
+                        <select
+                          value={task.status || 'not_started'}
+                          onChange={event => onStatusChange(task.id, { status: event.target.value })}
+                          className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-2 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          {fieldWorkStatusOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                        </select>
+                      </label>
+                      <label className="text-xs font-black uppercase tracking-wide text-slate-500">
+                        Invoice status
+                        <select
+                          value={task.invoice_status || 'not_received'}
+                          onChange={event => onStatusChange(task.id, { invoice_status: event.target.value })}
+                          className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-2 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          {fieldInvoiceStatusOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                        </select>
+                      </label>
+                      {task.verification_status !== 'approved' && (
+                        <button
+                          type="button"
+                          onClick={() => onApprove(task.id)}
+                          className="inline-flex min-h-10 items-center justify-center rounded-md bg-emerald-600 px-3 text-sm font-black text-white hover:bg-emerald-700"
+                        >
+                          Approve Field Work
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <div className="grid grid-cols-3 gap-2 text-xs">
+                      <span className="rounded-md bg-white px-2 py-2 font-bold text-slate-700 ring-1 ring-slate-200">{fieldStatusLabel(task.status)}</span>
+                      <span className="rounded-md bg-white px-2 py-2 font-bold text-slate-700 ring-1 ring-slate-200">{fieldStatusLabel(task.verification_status)}</span>
+                      <span className="rounded-md bg-white px-2 py-2 font-bold text-slate-700 ring-1 ring-slate-200">{fieldStatusLabel(task.invoice_status)}</span>
+                    </div>
+                  )}
+                </div>
+              </article>
+            );
+          })}
+          <button
+            type="button"
+            onClick={onOpenScope}
+            className="text-sm font-black text-blue-600 hover:underline"
+          >
+            Open full Scope of Work
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
 type ProjectScopeForm = {
   section_name: string;
   scope_title: string;
@@ -1553,7 +1725,17 @@ function ConstructionPlanBoard({ projectId, canManage }: { projectId: string; ca
   const [editingStep, setEditingStep] = useState<any | null>(null);
   const [editingMaterial, setEditingMaterial] = useState<any | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState<string | null>(null);
-  const blankStepForm = { title: '', category: '', description: '', status: 'not_started', start_date: '', target_date: '' };
+  const blankStepForm = {
+    title: '',
+    category: '',
+    description: '',
+    status: 'not_started',
+    verification_status: 'not_requested',
+    invoice_status: 'not_received',
+    start_date: '',
+    target_date: '',
+    approval_notes: '',
+  };
   const blankMaterialForm = {
     plan_item_id: '',
     material_name: '',
@@ -1620,8 +1802,11 @@ function ConstructionPlanBoard({ projectId, canManage }: { projectId: string; ca
       category: item.category || '',
       description: item.description || '',
       status: item.status || 'not_started',
+      verification_status: item.verification_status || 'not_requested',
+      invoice_status: item.invoice_status || 'not_received',
       start_date: item.start_date || '',
       target_date: item.target_date || '',
+      approval_notes: item.approval_notes || '',
     });
     setShowStepEditor(true);
   };
@@ -1675,9 +1860,9 @@ function ConstructionPlanBoard({ projectId, canManage }: { projectId: string; ca
     }
   };
 
-  const quickStatus = async (item: any, status: string) => {
+  const quickStatus = async (item: any, status: string, patch: Record<string, any> = {}) => {
     try {
-      await api.put(`/projects/${projectId}/construction-plan/${item.id}`, { ...item, status });
+      await api.put(`/projects/${projectId}/construction-plan/${item.id}`, { ...item, status, ...patch });
       load();
     } catch {
       toast.error('Failed to update line status');
@@ -1854,6 +2039,12 @@ function ConstructionPlanBoard({ projectId, canManage }: { projectId: string; ca
                           </>
                         )}
                         <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${statusColors[item.status] || statusColors.not_started}`}>{String(item.status).replace(/_/g, ' ')}</span>
+                        <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${item.verification_status === 'approved' ? 'bg-emerald-100 text-emerald-700' : item.verification_status === 'pending_review' ? 'bg-purple-100 text-purple-700' : item.verification_status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}`}>
+                          {String(item.verification_status || 'not_requested').replace(/_/g, ' ')}
+                        </span>
+                        <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${['received', 'approval_needed'].includes(item.invoice_status) && item.verification_status !== 'approved' ? 'bg-red-100 text-red-700' : item.invoice_status === 'approved_for_payment' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                          {String(item.invoice_status || 'not_received').replace(/_/g, ' ')}
+                        </span>
                       </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 mt-3">
@@ -1864,6 +2055,14 @@ function ConstructionPlanBoard({ projectId, canManage }: { projectId: string; ca
                           <select value={item.status} onClick={e => e.stopPropagation()} onChange={e => { e.stopPropagation(); quickStatus(item, e.target.value); }} className="px-2 py-1.5 rounded-lg border border-gray-300 text-xs bg-white cursor-pointer">
                             {['not_started', 'in_progress', 'waiting_materials', 'needs_review', 'completed'].map(status => <option key={status} value={status}>{status.replace(/_/g, ' ')}</option>)}
                           </select>
+                          <select value={item.invoice_status || 'not_received'} onClick={e => e.stopPropagation()} onChange={e => { e.stopPropagation(); quickStatus(item, item.status, { invoice_status: e.target.value }); }} className="px-2 py-1.5 rounded-lg border border-gray-300 text-xs bg-white cursor-pointer">
+                            {fieldInvoiceStatusOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                          </select>
+                          {item.verification_status !== 'approved' && (
+                            <button type="button" onClick={e => { e.stopPropagation(); quickStatus(item, 'completed', { verification_status: 'approved' }); }} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 cursor-pointer">
+                              <Check className="w-3.5 h-3.5" /> Approve
+                            </button>
+                          )}
                           <label onClick={e => e.stopPropagation()} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold text-blue-700 bg-blue-50 border border-blue-100 cursor-pointer">
                             <input type="file" accept="image/*" capture="environment" multiple className="hidden" disabled={uploadingPhoto === item.id} onChange={e => { uploadStepPhoto(item.id, e.target.files); e.currentTarget.value = ''; }} />
                             <Camera className="w-3.5 h-3.5" />
@@ -1953,6 +2152,18 @@ function ConstructionPlanBoard({ projectId, canManage }: { projectId: string; ca
               </select>
             </div>
             <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Field Verification</label>
+              <select value={stepForm.verification_status} onChange={e => setStepForm({ ...stepForm, verification_status: e.target.value })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                {['not_requested', 'pending_review', 'approved', 'rejected'].map(status => <option key={status} value={status}>{status.replace(/_/g, ' ')}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Invoice Status</label>
+              <select value={stepForm.invoice_status} onChange={e => setStepForm({ ...stepForm, invoice_status: e.target.value })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                {fieldInvoiceStatusOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </div>
+            <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
               <input type="date" value={stepForm.start_date} onChange={e => setStepForm({ ...stepForm, start_date: e.target.value })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
@@ -1963,6 +2174,10 @@ function ConstructionPlanBoard({ projectId, canManage }: { projectId: string; ca
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
               <textarea value={stepForm.description} onChange={e => setStepForm({ ...stepForm, description: e.target.value })} rows={4} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Approval Notes</label>
+              <textarea value={stepForm.approval_notes} onChange={e => setStepForm({ ...stepForm, approval_notes: e.target.value })} rows={2} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" placeholder="What was checked before invoice approval?" />
             </div>
           </div>
           <div className="flex gap-3">

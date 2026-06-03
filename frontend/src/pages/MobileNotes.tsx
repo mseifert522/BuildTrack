@@ -284,7 +284,7 @@ export default function MobileNotes() {
       user_role: user!.role,
       user_avatar_url: user!.avatar_url || null,
       note: text.trim(),
-      note_type: 'general',
+      note_type: 'field',
       photos: [],
       created_at: new Date().toISOString(),
     };
@@ -294,7 +294,7 @@ export default function MobileNotes() {
     textareaRef.current?.focus();
 
     try {
-      const res = await api.post(`/projects/${projectId}/notes`, { note: text.trim() });
+      const res = await api.post(`/projects/${projectId}/notes`, { note: text.trim(), note_type: 'field', visibility: 'private' });
       if (filesForNote.length) {
         await uploadFilesToNote(res.data.id, filesForNote);
         await refreshNotes();
