@@ -271,7 +271,7 @@ export default function Users() {
                       Seen {formatDistanceToNow(new Date(/[zZ]|[+-]\d{2}:?\d{2}$/.test(u.last_seen_at) ? u.last_seen_at : `${u.last_seen_at}Z`), { addSuffix: true })}
                     </p>
                   )}
-                  {u.pin && <span className="text-xs font-mono font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded">PIN: {u.pin}</span>}
+                  {u.pin && <span className="text-xs font-mono font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded">Mobile App Pin#: {u.pin}</span>}
                 </div>
               </div>
               {canManage && u.id !== currentUser?.id && u.role !== 'super_admin' && (

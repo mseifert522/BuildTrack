@@ -1296,7 +1296,7 @@ router.post('/', authorize('super_admin', 'operations_manager'), async (req, res
       console.error('Failed to send invite email:', emailErr);
     }
 
-    res.status(201).json({ id, name, email, role, pin, message: pin ? `User created. PIN: ${pin}. Invite sent to ${email}.` : `User created. Invite sent to ${email}.` });
+    res.status(201).json({ id, name, email, role, pin, message: pin ? `User created. Mobile App Pin#: ${pin}. Invite sent to ${email}.` : `User created. Invite sent to ${email}.` });
   } catch (err) {
     if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message });
     console.error(err);

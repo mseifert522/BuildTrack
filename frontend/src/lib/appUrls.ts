@@ -41,7 +41,7 @@ export function normalizeMobilePath(path = '/'): string {
     normalized = `/${normalized}`;
   }
 
-  if (normalized === '/mobile' || normalized === '/app' || normalized === '/app/home') {
+  if (normalized === '/mobile' || normalized === '/app' || normalized === '/app/home' || normalized === '/app/invoice') {
     normalized = '/';
   } else if (normalized.startsWith('/mobile/')) {
     normalized = normalized.slice('/mobile'.length) || '/';
@@ -49,6 +49,8 @@ export function normalizeMobilePath(path = '/'): string {
     normalized = '/projects';
   } else if (normalized.startsWith('/app/project/')) {
     normalized = normalized.replace('/app/project', '/project');
+  } else if (normalized.startsWith('/app/')) {
+    normalized = '/';
   }
 
   return `${normalized}${suffix}`;

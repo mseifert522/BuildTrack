@@ -29,6 +29,7 @@ const BRAND = {
   name: 'New Urban Development',
   color: '#D99D26',
   url: process.env.APP_URL || 'https://buildtrack.newurbandev.com',
+  mobileUrl: process.env.MOBILE_APP_URL || 'https://mobile.buildtrack.newurbandev.com',
 };
 
 function emailWrapper(content) {
@@ -231,10 +232,10 @@ async function sendInviteEmail({ name, email, tempPassword, role, invitedBy, pin
       <table style="width: 100%;">
         <tr><td style="padding: 6px 0; font-size: 13px; color: #6B7280;">Email</td><td style="padding: 6px 0; font-size: 13px; color: #111827; font-weight: 600;">${email}</td></tr>
         <tr><td style="padding: 6px 0; font-size: 13px; color: #6B7280;">Temporary Password</td><td style="padding: 6px 0; font-size: 13px; color: #111827; font-weight: 600; font-family: monospace;">${tempPassword}</td></tr>
-        ${pin ? `<tr><td style="padding: 6px 0; font-size: 13px; color: #6B7280;">Quick Access PIN</td><td style="padding: 6px 0; font-size: 13px; color: #111827; font-weight: 600; font-family: monospace; font-size: 18px; letter-spacing: 4px;">${pin}</td></tr>` : ''}
+        ${pin ? `<tr><td style="padding: 6px 0; font-size: 13px; color: #6B7280;">Mobile App Pin#</td><td style="padding: 6px 0; font-size: 13px; color: #111827; font-weight: 600; font-family: monospace; font-size: 18px; letter-spacing: 4px;">${pin}</td></tr>` : ''}
       </table>
     </div>
-    ${pin ? `<a href="${BRAND.url}/app" style="display: block; text-align: center; background: #181D25; color: white; padding: 14px 24px; border-radius: 12px; text-decoration: none; font-weight: 700; font-size: 14px; margin-bottom: 8px;">Open Mobile App (PIN Login)</a>` : ''}
+    ${pin ? `<a href="${BRAND.mobileUrl}" style="display: block; text-align: center; background: #181D25; color: white; padding: 14px 24px; border-radius: 12px; text-decoration: none; font-weight: 700; font-size: 14px; margin-bottom: 8px;">Open BuildTrack Mobile App</a>` : ''}
     <a href="${BRAND.url}" style="display: block; text-align: center; background: ${BRAND.color}; color: white; padding: 14px 24px; border-radius: 12px; text-decoration: none; font-weight: 700; font-size: 14px; margin-bottom: 16px;">
       Sign In to BuildTrack
     </a>
@@ -256,7 +257,7 @@ async function sendContractorPinEmail({ name, email, pin }) {
   const displayName = escapeHtml(name || 'there');
 
   const html = emailWrapper(`
-    <h2 style="color: #111827; font-size: 20px; font-weight: 700; margin: 0 0 8px;">Your BuildTrack contractor PIN</h2>
+    <h2 style="color: #111827; font-size: 20px; font-weight: 700; margin: 0 0 8px;">Your BuildTrack Mobile App Pin#</h2>
     <p style="color: #6B7280; font-size: 14px; line-height: 1.6; margin: 0 0 24px;">
       Hi ${displayName}, use this 5-digit PIN to open your assigned projects in the BuildTrack mobile app.
     </p>
@@ -265,7 +266,7 @@ async function sendContractorPinEmail({ name, email, pin }) {
         ${pin}
       </span>
     </div>
-    <a href="${BRAND.url}/app" style="display: block; text-align: center; background: ${BRAND.color}; color: white; padding: 14px 24px; border-radius: 12px; text-decoration: none; font-weight: 700; font-size: 14px; margin-bottom: 14px;">
+    <a href="${BRAND.mobileUrl}" style="display: block; text-align: center; background: ${BRAND.color}; color: white; padding: 14px 24px; border-radius: 12px; text-decoration: none; font-weight: 700; font-size: 14px; margin-bottom: 14px;">
       Open BuildTrack Mobile
     </a>
     <p style="color: #6B7280; font-size: 12px; line-height: 1.6; text-align: center; margin: 0 0 14px;">
@@ -279,7 +280,7 @@ async function sendContractorPinEmail({ name, email, pin }) {
   await transporter.sendMail({
     from: process.env.EMAIL_FROM || `BuildTrack <noreply@newurbandev.com>`,
     to: email,
-    subject: `Your BuildTrack contractor PIN`,
+    subject: `Your BuildTrack Mobile App Pin#`,
     html,
   });
 }

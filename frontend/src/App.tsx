@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, type ReactNode } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { useAuthStore, canManageUsers, canAccessSettings, canAccessSecurity } from './store/authStore';
 import Layout from './components/Layout';
@@ -9,6 +9,7 @@ import {
   isLegacyMobilePath,
   isMobileAppHost,
   legacyMobilePathToMobileHostPath,
+  mobileExternalUrl,
   mobilePath,
 } from './lib/appUrls';
 
@@ -92,15 +93,21 @@ function MobileRoute({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-function LegacyMobileProjectRedirect() {
-  const { id } = useParams<{ id: string }>();
-  return <Navigate to={id ? mobilePath(`/project/${id}`) : mobilePath()} replace />;
-}
-
 function LegacyMobilePathRedirect() {
   const location = useLocation();
   const destination = `${legacyMobilePathToMobileHostPath(location.pathname)}${location.search}${location.hash}`;
   return <Navigate to={destination} replace />;
+}
+
+function DesktopMobileAppRedirect() {
+  const location = useLocation();
+
+  useEffect(() => {
+    const requestedPath = `${location.pathname}${location.search}${location.hash}`;
+    window.location.replace(mobileExternalUrl(requestedPath));
+  }, [location.hash, location.pathname, location.search]);
+
+  return <Loading message="Opening BuildTrack mobile app..." />;
 }
 
 /** Redirect contractors away from desktop — they should use mobile */
@@ -512,12 +519,9 @@ export default function App() {
           </SecurityRoute>
         } />
 
-        {/* Legacy contractor app entry points */}
-        <Route path="/app" element={<AuthRoute><Login initialMode="pin" /></AuthRoute>} />
-        <Route path="/app/home" element={<MobileRoute><Navigate to="/mobile" replace /></MobileRoute>} />
-        <Route path="/app/projects" element={<MobileRoute><Navigate to="/mobile/projects" replace /></MobileRoute>} />
-        <Route path="/app/project/:id" element={<MobileRoute><LegacyMobileProjectRedirect /></MobileRoute>} />
-        <Route path="/app/invoice" element={<MobileRoute><Navigate to="/mobile" replace /></MobileRoute>} />
+        {/* Legacy contractor app entry points now leave the desktop host. */}
+        <Route path="/app" element={<DesktopMobileAppRedirect />} />
+        <Route path="/app/*" element={<DesktopMobileAppRedirect />} />
 
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/login" replace />} />

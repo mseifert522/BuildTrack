@@ -167,6 +167,7 @@ const getMobileQuickAccessState = () => {
 };
 
 export default function Login({ initialMode = 'password' }: LoginProps) {
+  const mobileLoginHost = isMobileAppHost();
   const [email, setEmail] = useState(() => localStorage.getItem(REMEMBERED_EMAIL_KEY) || '');
   const [password, setPassword] = useState('');
   const [stayLoggedIn, setStayLoggedIn] = useState(
@@ -183,7 +184,7 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
   const [twofaCode, setTwofaCode] = useState('');
   const [trustDevice, setTrustDevice] = useState(false);
   const [twofaLoading, setTwofaLoading] = useState(false);
-  const [loginMode, setLoginMode] = useState<LoginMode>(initialMode);
+  const [loginMode, setLoginMode] = useState<LoginMode>(() => mobileLoginHost ? initialMode : 'password');
   const [contractorAccessMode, setContractorAccessMode] = useState<ContractorAccessMode>('pin');
   const [pinDigits, setPinDigits] = useState('');
   const [contractorEmail, setContractorEmail] = useState(() => localStorage.getItem(REMEMBERED_CONTRACTOR_EMAIL_KEY) || '');
@@ -194,6 +195,12 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
   const [focusedField, setFocusedField] = useState<string | null>(null);
   const { setAuth } = useAuthStore();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!mobileLoginHost && loginMode === 'pin') {
+      setLoginMode('password');
+    }
+  }, [mobileLoginHost, loginMode]);
 
   const wantsTrustedDevice = () => trustDevice || stayLoggedIn;
 
@@ -278,7 +285,10 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
     if (!quickAccess.available || !quickAccess.token) {
       clearMobileQuickAccess();
       setQuickAccessReady(false);
-      toast.error('Quick app access expired. Please sign in with your password or PIN.');
+      toast.error(mobileLoginHost
+        ? 'Quick app access expired. Please sign in with your password or mobile app PIN.'
+        : 'Quick app access expired. Please sign in with your password.'
+      );
       return;
     }
 
@@ -389,7 +399,7 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
       localStorage.setItem('stayLoggedIn', rememberThisDevice ? 'true' : 'false');
       completeLogin(res.data);
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Invalid contractor PIN');
+      toast.error(err.response?.data?.error || 'Invalid mobile app PIN');
       setPinDigits('');
     } finally {
       setLoading(false);
@@ -683,6 +693,7 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                 </button>
               )}
 
+              {mobileLoginHost && (
               <div className="grid grid-cols-2 gap-2 rounded-lg p-1" style={{ background: '#E8ECF3' }}>
                 <button
                   type="button"
@@ -708,9 +719,10 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                   }}
                 >
                   <KeyRound className="w-4 h-4" />
-                  Contractor PIN
+                  Mobile App PIN
                 </button>
               </div>
+              )}
 
               {loginMode === 'password' ? (
                 <form onSubmit={handleSubmit} className="space-y-4">
@@ -811,7 +823,7 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                     )}
                   </button>
                 </form>
-              ) : (
+              ) : mobileLoginHost ? (
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-2">
                     {[
@@ -850,8 +862,8 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                         <div className="w-12 h-12 rounded-lg flex items-center justify-center mx-auto mb-4" style={{ background: 'rgba(217,157,38,0.1)' }}>
                           <Smartphone className="w-6 h-6" style={{ color: '#D99D26' }} />
                         </div>
-                        <h3 className="font-black text-gray-900 text-lg">Contractor PIN Access</h3>
-                        <p className="text-sm text-gray-500 mt-1 mb-5">Enter the contractor PIN to open assigned projects.</p>
+                        <h3 className="font-black text-gray-900 text-lg">Mobile App Pin# Access</h3>
+                        <p className="text-sm text-gray-500 mt-1 mb-5">Enter the mobile app PIN to open assigned projects.</p>
                         <input
                           name="one-time-code"
                           type="text"
@@ -867,8 +879,8 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                       </div>
 
                       {renderTrustDevicePreference(
-                        'Trust this device after PIN verification',
-                        'Use this PIN once, then continue faster next time on this browser.'
+                        'Trust this device after mobile app PIN verification',
+                        'Use this mobile app PIN once, then continue faster next time on this device.'
                       )}
 
                       <button
@@ -948,7 +960,7 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                     <form onSubmit={sendContractorPin} className="space-y-4">
                       <div className="rounded-lg p-5" style={{ background: 'white', border: '1px solid #E5E7EB' }}>
                         <h3 className="font-black text-gray-900 text-lg">Forgot PIN or Login?</h3>
-                        <p className="text-sm text-gray-500 mt-1 mb-5">Enter the email management has on file. BuildTrack will email the contractor PIN if the account exists.</p>
+                        <p className="text-sm text-gray-500 mt-1 mb-5">Enter the email management has on file. BuildTrack will email the Mobile App Pin# if the account exists.</p>
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Contractor Email</label>
                         <input
                           type="email"
@@ -975,7 +987,7 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                     <form onSubmit={submitContractorSignup} className="space-y-4">
                       <div className="rounded-lg p-5" style={{ background: 'white', border: '1px solid #E5E7EB' }}>
                         <h3 className="font-black text-gray-900 text-lg">Contractor Sign Up</h3>
-                        <p className="text-sm text-gray-500 mt-1 mb-5">Start your secure contractor setup and 1099 form. Your mobile PIN is emailed after submission.</p>
+                        <p className="text-sm text-gray-500 mt-1 mb-5">Start your secure contractor setup and 1099 form. Your Mobile App Pin# is emailed after submission.</p>
                         <div className="grid gap-3">
                           <input
                             type="text"
@@ -1024,7 +1036,7 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                     </form>
                   )}
                 </div>
-              )}
+              ) : null}
             </div>
           )}
 
