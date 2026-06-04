@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { type CSSProperties, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore, isAdminRole, roleLabels } from '../store/authStore';
 import api from '../lib/api';
@@ -552,7 +552,11 @@ export default function Dashboard() {
                 key={card.label}
                 role="button"
                 tabIndex={0}
-                className="bt-dashboard-stat-card relative min-h-[78px] cursor-pointer overflow-hidden rounded-sm p-3 transition-colors active:scale-[0.99]"
+                className="bt-dashboard-stat-card relative min-h-[78px] cursor-pointer overflow-hidden rounded-sm p-3 active:scale-[0.99]"
+                style={{
+                  '--bt-dashboard-card-accent': card.iconColor,
+                  '--bt-dashboard-icon-panel': card.iconPanel,
+                } as CSSProperties}
                 onClick={() => navigate(target)}
                 onKeyDown={event => {
                   if (event.key === 'Enter' || event.key === ' ') {
@@ -564,7 +568,7 @@ export default function Dashboard() {
                 <div className="relative z-10">
                   <div className="mb-2 flex items-start justify-between">
                     <div
-                      className="flex h-8 w-8 items-center justify-center rounded-md border"
+                      className="bt-dashboard-stat-icon flex h-8 w-8 items-center justify-center rounded-md border"
                       style={{
                         background: card.iconPanel,
                         borderColor: card.iconBorder,
