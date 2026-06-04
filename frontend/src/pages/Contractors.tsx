@@ -133,6 +133,7 @@ interface ContractorNote {
 interface ContractorNotePreview {
   note: string;
   user_name: string;
+  user_avatar_url?: string | null;
   created_at: string;
 }
 
@@ -351,7 +352,7 @@ export default function Contractors() {
             ...contractor,
             note_count: Number(contractor.note_count || 0) + 1,
             latest_note_at: res.data.created_at,
-            latest_notes: [{ note: res.data.note, user_name: res.data.user_name, created_at: res.data.created_at }, ...(contractor.latest_notes || [])].slice(0, 2),
+            latest_notes: [{ note: res.data.note, user_name: res.data.user_name, user_avatar_url: res.data.user_avatar_url || null, created_at: res.data.created_at }, ...(contractor.latest_notes || [])].slice(0, 2),
           }
         : contractor
       ));
@@ -1087,6 +1088,10 @@ export default function Contractors() {
                           <div className="space-y-2">
                             {(contractor.latest_notes || []).slice(0, 2).map((note, index) => (
                               <div key={`${note.created_at}-${index}`} className="rounded-lg bg-white border border-slate-200 px-2.5 py-2 hover:border-amber-200">
+                                <div className="mb-1.5 flex items-center gap-2">
+                                  <Avatar src={note.user_avatar_url} name={note.user_name} size={24} roundedClassName="rounded-full" />
+                                  <p className="truncate text-[11px] font-black text-gray-700">{note.user_name}</p>
+                                </div>
                                 <p
                                   className="text-xs font-semibold text-gray-700"
                                   style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
@@ -1588,8 +1593,11 @@ export default function Contractors() {
                     {notes.map(note => (
                       <div key={note.id} className="rounded-xl border border-gray-100 bg-white p-4">
                         <div className="mb-2 flex items-center justify-between gap-3">
-                          <p className="text-sm font-black text-gray-900">{note.user_name}</p>
-                          <p className="text-xs font-semibold text-gray-400">{formatEasternDateTime(note.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} ET</p>
+                          <div className="flex min-w-0 items-center gap-2">
+                            <Avatar src={note.user_avatar_url} name={note.user_name} size={32} roundedClassName="rounded-full" />
+                            <p className="truncate text-sm font-black text-gray-900">{note.user_name}</p>
+                          </div>
+                          <p className="flex-shrink-0 text-xs font-semibold text-gray-400">{formatEasternDateTime(note.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} ET</p>
                         </div>
                         <p className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-700">{note.note}</p>
                       </div>
@@ -1600,8 +1608,11 @@ export default function Contractors() {
                     {previewNotes.map((note, index) => (
                       <div key={`${note.created_at}-${index}`} className="rounded-xl border border-gray-100 bg-white p-4">
                         <div className="mb-2 flex items-center justify-between gap-3">
-                          <p className="text-sm font-black text-gray-900">{note.user_name}</p>
-                          <p className="text-xs font-semibold text-gray-400">{formatEasternDateTime(note.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} ET</p>
+                          <div className="flex min-w-0 items-center gap-2">
+                            <Avatar src={note.user_avatar_url} name={note.user_name} size={32} roundedClassName="rounded-full" />
+                            <p className="truncate text-sm font-black text-gray-900">{note.user_name}</p>
+                          </div>
+                          <p className="flex-shrink-0 text-xs font-semibold text-gray-400">{formatEasternDateTime(note.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} ET</p>
                         </div>
                         <p className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-700">{note.note}</p>
                       </div>

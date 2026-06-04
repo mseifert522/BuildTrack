@@ -274,11 +274,13 @@ router.get('/', (req, res) => {
     SELECT
       ph.*,
       u.name as uploader_name,
+      u.avatar_url as uploader_avatar_url,
       pc.name as category_name,
       n.note as note_text,
       n.note_type as note_type,
       n.created_at as note_created_at,
-      nu.name as note_user_name
+      nu.name as note_user_name,
+      nu.avatar_url as note_user_avatar_url
     FROM photos ph
     LEFT JOIN users u ON u.id = ph.uploaded_by
     LEFT JOIN photo_categories pc ON pc.id = ph.category_id
@@ -336,10 +338,12 @@ router.get('/progress', (req, res) => {
     SELECT
       ph.*,
       u.name as uploader_name,
+      u.avatar_url as uploader_avatar_url,
       n.note as note_text,
       n.note_type as note_type,
       n.created_at as note_created_at,
-      nu.name as note_user_name
+      nu.name as note_user_name,
+      nu.avatar_url as note_user_avatar_url
     FROM photos ph
     LEFT JOIN users u ON u.id = ph.uploaded_by
     LEFT JOIN project_notes n ON n.id = ph.note_id

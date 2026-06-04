@@ -32,6 +32,7 @@ interface ActivityLog {
   id: string;
   project_id?: string | null;
   user_name: string;
+  user_avatar_url?: string | null;
   action: string;
   entity_type?: string | null;
   entity_id?: string | null;
@@ -46,6 +47,7 @@ interface ActivityItem {
   tab: ActivityTab;
   icon: typeof Activity;
   userName: string;
+  userAvatarUrl?: string | null;
   description: string;
   connectedRecord: string;
   preview?: string;
@@ -151,6 +153,7 @@ export default function RecentActivityModal({ userId }: { userId?: string }) {
         tab: 'notes',
         icon: MessageSquare,
         userName: note.user_name || 'Unknown user',
+        userAvatarUrl: note.user_avatar_url || null,
         description: 'added a project note',
         connectedRecord: note.project_address || note.project_job_name || 'Project note',
         preview: note.note,
@@ -165,6 +168,7 @@ export default function RecentActivityModal({ userId }: { userId?: string }) {
           tab,
           icon: iconFor(tab),
           userName: log.user_name || 'Unknown user',
+          userAvatarUrl: log.user_avatar_url || null,
           description: actionLabel(log.action, details),
           connectedRecord: log.project_address || log.project_job_name || log.entity_type || 'BuildTrack',
           preview: details?.note || details?.title || details?.name || details?.scope_title || details?.material_name,
@@ -264,7 +268,7 @@ export default function RecentActivityModal({ userId }: { userId?: string }) {
                     onClick={() => openItem(item.to)}
                     className="grid w-full grid-cols-[auto_1fr_auto] gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50 focus:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500"
                   >
-                    <Avatar name={item.userName} size={36} />
+                    <Avatar src={item.userAvatarUrl} name={item.userName} size={36} />
                     <span className="min-w-0">
                       <span className="flex flex-wrap items-center gap-2">
                         <span className="font-bold text-slate-950">{item.userName}</span>

@@ -718,13 +718,14 @@ router.get('/contractors/directory', authorize('super_admin', 'operations_manage
   if (contractorIds.length > 0) {
     const placeholders = contractorIds.map(() => '?').join(',');
     const noteRows = db.prepare(`
-      SELECT contractor_id, note, created_at, user_name
+      SELECT contractor_id, note, created_at, user_name, user_avatar_url
       FROM (
         SELECT
           cn.contractor_id,
           cn.note,
           cn.created_at,
           u.name as user_name,
+          u.avatar_url as user_avatar_url,
           ROW_NUMBER() OVER (
             PARTITION BY cn.contractor_id
             ORDER BY datetime(cn.created_at) DESC, cn.created_at DESC
@@ -738,7 +739,7 @@ router.get('/contractors/directory', authorize('super_admin', 'operations_manage
     `).all(...contractorIds);
     for (const row of noteRows) {
       const notes = notesByContractor.get(row.contractor_id) || [];
-      notes.push({ note: row.note, created_at: row.created_at, user_name: row.user_name });
+      notes.push({ note: row.note, created_at: row.created_at, user_name: row.user_name, user_avatar_url: row.user_avatar_url });
       notesByContractor.set(row.contractor_id, notes);
     }
   }

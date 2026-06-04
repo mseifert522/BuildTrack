@@ -1063,7 +1063,7 @@ router.delete('/:id/assign/:userId', authorize('super_admin', 'operations_manage
 router.get('/:id/activity', authorizeProjectAccess, (req, res) => {
   const db = getDb();
   const logs = db.prepare(`
-    SELECT al.*, u.name as user_name
+    SELECT al.*, u.name as user_name, u.avatar_url as user_avatar_url
     FROM activity_log al JOIN users u ON u.id = al.user_id
     WHERE al.project_id = ?
     ORDER BY al.created_at DESC LIMIT 50

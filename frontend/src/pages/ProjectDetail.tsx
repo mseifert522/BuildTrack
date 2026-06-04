@@ -135,6 +135,7 @@ const groupStandaloneProgressMedia = (photos: any[], maxPerCard = 20) => {
 
     return chunks.map((chunk, chunkIndex) => {
       const uploaderNames = [...new Set(chunk.map(photo => photo.uploader_name || 'Unknown user'))];
+      const uploaderAvatars = [...new Set(chunk.map(photo => photo.uploader_avatar_url).filter(Boolean).map(String))];
       const mediaTypes = new Set(chunk.map(photo => (isVideoMedia(photo) ? 'video' : 'picture')));
       const notes = [...new Set(chunk
         .map(photo => photo.individual_note || photo.batch_note || photo.caption)
@@ -146,6 +147,7 @@ const groupStandaloneProgressMedia = (photos: any[], maxPerCard = 20) => {
         kind: 'media',
         timestamp: getProgressTimestamp(chunk[0]),
         userName: uploaderNames.length === 1 ? uploaderNames[0] : `${uploaderNames.length} users`,
+        userAvatarUrl: uploaderNames.length === 1 && uploaderAvatars.length === 1 ? uploaderAvatars[0] : null,
         mediaType: mediaTypes.has('video') && mediaTypes.size === 1 ? 'video' : mediaTypes.has('video') ? 'mixed' : 'picture',
         noteText: notes.length === 1 ? notes[0] : null,
         photos: chunk,
@@ -956,9 +958,7 @@ export default function ProjectDetail() {
           <div className="space-y-2">
             {activity.map(log => (
               <div key={log.id} className="bg-white rounded-xl border border-gray-200 p-4 flex items-start gap-3">
-                <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <Activity className="w-4 h-4 text-gray-500" />
-                </div>
+                <Avatar src={log.user_avatar_url} name={log.user_name} size={36} roundedClassName="rounded-full" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-gray-900"><span className="font-medium">{log.user_name}</span> {log.action.replace(/_/g, ' ')}</p>
                   <p className="text-xs text-gray-400 mt-0.5">{formatEasternDateTime(log.created_at, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time</p>
@@ -2798,6 +2798,7 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
         kind: 'note',
         timestamp: note.created_at,
         userName: note.user_name || 'Unknown user',
+        userAvatarUrl: note.user_avatar_url || null,
         noteText: note.note,
         noteType: note.note_type || 'general',
         visibility: note.visibility || 'private',
@@ -2873,19 +2874,20 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
                 key={record.id}
                 className={`bt-project-progress-card rounded-lg border bg-white p-3 shadow-sm ${record.kind === 'note' ? 'border-slate-200 border-l-4 border-l-blue-500' : 'border-amber-200 border-l-4 border-l-amber-500'}`}
               >
-                <div className="min-w-0">
-                  <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <p className="text-sm font-black text-slate-950">
-                      {record.kind === 'note' ? 'Entered by' : 'Uploaded by'} {record.userName}
-                    </p>
-                    <p className="text-xs font-semibold text-slate-500">
-                      Inserted {formatEasternDateTime(record.timestamp, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time
-                    </p>
-                    {record.kind === 'note' && record.photos.length > 0 && (
-                      <p className="text-xs font-bold text-blue-700">{record.photos.length} attached</p>
-                    )}
-                  </div>
+                <div className="flex min-w-0 gap-3">
+                  <Avatar src={record.userAvatarUrl} name={record.userName} size={38} roundedClassName="rounded-full" />
                   <div className="min-w-0">
+                    <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <p className="text-sm font-black text-slate-950">
+                        {record.kind === 'note' ? 'Entered by' : 'Uploaded by'} {record.userName}
+                      </p>
+                      <p className="text-xs font-semibold text-slate-500">
+                        Inserted {formatEasternDateTime(record.timestamp, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time
+                      </p>
+                      {record.kind === 'note' && record.photos.length > 0 && (
+                        <p className="text-xs font-bold text-blue-700">{record.photos.length} attached</p>
+                      )}
+                    </div>
                     <div className="flex flex-wrap items-center gap-2">
                       {record.kind === 'note' ? (
                         <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2 py-1 text-xs font-black text-blue-700">

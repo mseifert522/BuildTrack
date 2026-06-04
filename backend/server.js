@@ -218,7 +218,12 @@ app.get('/api/activity', authenticate, (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
   const logs = db.prepare(`
-    SELECT al.*, u.name as user_name, p.address as project_address, p.job_name as project_job_name
+    SELECT
+      al.*,
+      u.name as user_name,
+      u.avatar_url as user_avatar_url,
+      p.address as project_address,
+      p.job_name as project_job_name
     FROM activity_log al
     JOIN users u ON u.id = al.user_id
     LEFT JOIN projects p ON p.id = al.project_id
