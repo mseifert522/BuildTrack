@@ -4,11 +4,12 @@ import { useAuthStore, roleLabels, canManageUsers, canAccessSettings, canAccessS
 import {
   LayoutDashboard, FolderOpen, ClipboardList, FileText,
   Users, Settings, LogOut, Menu, X, Bell, ChevronRight,
-  Camera, Search, Trash2, Truck, ShieldCheck
+  Camera, Search, Trash2, Truck, ShieldCheck, MessageSquare
 } from 'lucide-react';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
 import Avatar from './Avatar';
+import { formatEasternRelative, parseBuildTrackTimestamp } from '../lib/time';
 
 interface LayoutProps { children: React.ReactNode; }
 
@@ -20,10 +21,93 @@ interface SearchResult {
   meta?: string;
 }
 
+interface RecentNote {
+  id: string;
+  project_id: string;
+  user_name: string;
+  user_avatar_url?: string | null;
+  note: string;
+  created_at: string;
+  project_address?: string | null;
+  project_job_name?: string | null;
+}
+
+interface ActivityLog {
+  id: string;
+  project_id?: string | null;
+  user_name: string;
+  user_avatar_url?: string | null;
+  action: string;
+  entity_type?: string | null;
+  entity_id?: string | null;
+  details?: string | null;
+  created_at: string;
+  project_address?: string | null;
+  project_job_name?: string | null;
+}
+
+interface NotificationItem {
+  id: string;
+  userName: string;
+  userAvatarUrl?: string | null;
+  icon: typeof Bell;
+  description: string;
+  connectedRecord: string;
+  preview?: string;
+  createdAt: string;
+  to: string;
+}
+
+function safeDetails(raw?: string | null) {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function notificationLabel(action: string, details?: Record<string, any> | null) {
+  const labels: Record<string, string> = {
+    note_added: 'added a project note',
+    note_updated: 'updated a project note',
+    project_created: 'created a project',
+    project_updated: 'updated a project',
+    invoice_created: 'created an invoice',
+    invoice_submitted: 'submitted an invoice',
+    invoice_status_updated: `updated invoice status${details?.status ? ` to ${String(details.status).replace(/_/g, ' ')}` : ''}`,
+    punch_item_created: 'created a punch list item',
+    punch_item_updated: 'updated a punch list item',
+    document_uploaded: 'uploaded a document',
+    contractor_profile_created: 'created a contractor record',
+    contractor_profile_updated: 'updated a contractor record',
+    supplier_profile_created: 'created a supplier record',
+    supplier_profile_updated: 'updated a supplier record',
+    avatar_updated: 'updated a profile photo',
+  };
+  return labels[action] || action.replace(/_/g, ' ');
+}
+
+function notificationLink(log: ActivityLog) {
+  if (log.project_id && log.entity_type === 'invoice' && log.entity_id) {
+    return `/projects/${log.project_id}/invoices/${log.entity_id}`;
+  }
+  if (log.project_id) return `/projects/${log.project_id}`;
+  const subject = `${log.action} ${log.entity_type || ''}`.toLowerCase();
+  if (subject.includes('contractor')) return '/contractors';
+  if (subject.includes('supplier')) return '/suppliers';
+  if (subject.includes('invoice')) return '/invoices';
+  return '/dashboard';
+}
+
 export default function Layout({ children }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notificationsLoaded, setNotificationsLoaded] = useState(false);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [notificationItems, setNotificationItems] = useState<NotificationItem[]>([]);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -37,6 +121,68 @@ export default function Layout({ children }: LayoutProps) {
   const handleLogout = () => {
     logout();
     navigate('/login');
+  };
+
+  const loadNotifications = async () => {
+    if (notificationsLoading) return;
+    setNotificationsLoading(true);
+    try {
+      const [notesRes, activityRes] = await Promise.all([
+        api.get('/notes/recent?limit=8').catch(() => ({ data: [] })),
+        api.get('/activity').catch(() => ({ data: [] })),
+      ]);
+      const noteItems: NotificationItem[] = (Array.isArray(notesRes.data) ? notesRes.data : []).map((note: RecentNote) => ({
+        id: `note-${note.id}`,
+        userName: note.user_name || 'Unknown user',
+        userAvatarUrl: note.user_avatar_url || null,
+        icon: MessageSquare,
+        description: 'added a project note',
+        connectedRecord: note.project_address || note.project_job_name || 'Project note',
+        preview: note.note,
+        createdAt: note.created_at,
+        to: `/projects/${note.project_id}#notes`,
+      }));
+      const activityItems: NotificationItem[] = (Array.isArray(activityRes.data) ? activityRes.data : []).map((log: ActivityLog) => {
+        const details = safeDetails(log.details);
+        const subject = `${log.action} ${log.entity_type || ''}`.toLowerCase();
+        const Icon = subject.includes('note') ? MessageSquare : ClipboardList;
+        return {
+          id: `activity-${log.id}`,
+          userName: log.user_name || 'Unknown user',
+          userAvatarUrl: log.user_avatar_url || null,
+          icon: Icon,
+          description: notificationLabel(log.action, details),
+          connectedRecord: log.project_address || log.project_job_name || log.entity_type || 'BuildTrack',
+          preview: details?.note || details?.title || details?.name || details?.scope_title || details?.material_name,
+          createdAt: log.created_at,
+          to: notificationLink(log),
+        };
+      });
+      setNotificationItems([...noteItems, ...activityItems]
+        .sort((left, right) =>
+          (parseBuildTrackTimestamp(right.createdAt)?.getTime() || 0) -
+          (parseBuildTrackTimestamp(left.createdAt)?.getTime() || 0)
+        )
+        .slice(0, 8));
+      setNotificationsLoaded(true);
+    } catch {
+      toast.error('Unable to load notifications');
+    } finally {
+      setNotificationsLoading(false);
+    }
+  };
+
+  const toggleNotifications = () => {
+    const nextOpen = !notificationsOpen;
+    setNotificationsOpen(nextOpen);
+    setProfileOpen(false);
+    setSearchOpen(false);
+    if (nextOpen && !notificationsLoaded) loadNotifications();
+  };
+
+  const openNotification = (to: string) => {
+    setNotificationsOpen(false);
+    navigate(to);
   };
 
   useEffect(() => {
@@ -140,6 +286,11 @@ export default function Layout({ children }: LayoutProps) {
   const currentTitle = Object.entries(pageTitles).find(([path]) =>
     location.pathname.startsWith(path)
   )?.[1] || 'BuildTrack';
+
+  useEffect(() => {
+    setProfileOpen(false);
+    setNotificationsOpen(false);
+  }, [location.pathname]);
 
   const W = sidebarCollapsed ? 72 : 240;
   const SidebarContent = ({ collapsed = false }: { collapsed?: boolean }) => (
@@ -449,7 +600,7 @@ export default function Layout({ children }: LayoutProps) {
                 to="/users"
                 title="User Management"
                 aria-label="User Management"
-                className="p-2 rounded-xl transition-all sm:p-2.5"
+                className="bt-topbar-action p-2 rounded-xl transition-all sm:p-2.5"
                 style={{
                   background: location.pathname.startsWith('/users') ? '#1E1610' : '#111315',
                   border: `1px solid ${location.pathname.startsWith('/users') ? '#E78B4A' : '#343A42'}`,
@@ -466,7 +617,7 @@ export default function Layout({ children }: LayoutProps) {
                 to="/settings"
                 title="Settings"
                 aria-label="Settings"
-                className="p-2 rounded-xl transition-all sm:p-2.5"
+                className="bt-topbar-action p-2 rounded-xl transition-all sm:p-2.5"
                 style={{
                   background: location.pathname.startsWith('/settings') ? '#1E1610' : '#111315',
                   border: `1px solid ${location.pathname.startsWith('/settings') ? '#E78B4A' : '#343A42'}`,
@@ -478,20 +629,109 @@ export default function Layout({ children }: LayoutProps) {
             )}
 
             {/* Notification bell */}
-            <button
-              className="relative p-2 rounded-xl transition-all sm:p-2.5"
-              style={{ background: '#111315', border: '1px solid #343A42', color: '#B8BEC6' }}
-              aria-label="Notifications"
-            >
-              <Bell className="w-[18px] h-[18px]" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style={{ background: '#D97706' }} />
-            </button>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={toggleNotifications}
+                className="bt-topbar-action relative p-2 rounded-xl transition-all sm:p-2.5"
+                style={{
+                  background: notificationsOpen ? '#1E1610' : '#111315',
+                  border: `1px solid ${notificationsOpen ? '#E78B4A' : '#343A42'}`,
+                  color: notificationsOpen ? '#F4A261' : '#B8BEC6',
+                }}
+                aria-label="Open notifications"
+                aria-haspopup="menu"
+                aria-expanded={notificationsOpen}
+              >
+                <Bell className="w-[18px] h-[18px]" />
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style={{ background: '#D97706' }} />
+              </button>
+
+              {notificationsOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setNotificationsOpen(false)} />
+                  <div
+                    className="absolute right-0 top-full z-20 mt-2 w-[22rem] max-w-[calc(100vw-1rem)] overflow-hidden rounded-md"
+                    style={{ background: '#111315', border: '1px solid #E78B4A', boxShadow: '0 18px 36px rgba(0,0,0,0.38)' }}
+                    role="menu"
+                    aria-label="Notifications"
+                  >
+                    <div className="flex items-center justify-between border-b px-3 py-2.5" style={{ borderColor: '#343A42' }}>
+                      <div>
+                        <p className="text-sm font-bold" style={{ color: 'var(--bt-text)' }}>Notifications</p>
+                        <p className="text-[11px] font-semibold" style={{ color: 'var(--bt-text-soft)' }}>Recent team activity</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={loadNotifications}
+                        disabled={notificationsLoading}
+                        className="rounded border px-2 py-1 text-[11px] font-bold transition-colors disabled:opacity-60"
+                        style={{ borderColor: '#343A42', color: '#C4CAD2', background: '#0E1012' }}
+                      >
+                        {notificationsLoading ? 'Loading' : 'Refresh'}
+                      </button>
+                    </div>
+                    <div className="max-h-96 overflow-y-auto p-2">
+                      {notificationsLoading && !notificationItems.length ? (
+                        <div className="space-y-2 p-1">
+                          {[0, 1, 2].map(index => (
+                            <div key={index} className="h-14 animate-pulse rounded border" style={{ background: '#15181C', borderColor: '#343A42' }} />
+                          ))}
+                        </div>
+                      ) : notificationItems.length === 0 ? (
+                        <div className="px-3 py-8 text-center text-sm font-semibold" style={{ color: 'var(--bt-text-muted)' }}>
+                          No notifications yet.
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          {notificationItems.map(item => {
+                            const Icon = item.icon;
+                            return (
+                              <button
+                                key={item.id}
+                                type="button"
+                                onClick={() => openNotification(item.to)}
+                                className="bt-notification-row flex w-full items-start gap-3 rounded-md border p-2.5 text-left transition-colors"
+                                style={{ borderColor: '#26313A', background: '#0E1012' }}
+                                role="menuitem"
+                              >
+                                <Avatar src={item.userAvatarUrl} name={item.userName} size={30} />
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex min-w-0 items-center gap-1.5">
+                                    <Icon className="h-3.5 w-3.5 flex-shrink-0" style={{ color: '#E78B4A' }} />
+                                    <p className="truncate text-xs font-bold" style={{ color: 'var(--bt-text)' }}>{item.userName}</p>
+                                    <span className="text-[10px] font-semibold" style={{ color: 'var(--bt-text-soft)' }}>
+                                      {formatEasternRelative(item.createdAt)}
+                                    </span>
+                                  </div>
+                                  <p className="mt-0.5 truncate text-xs font-semibold" style={{ color: '#C4CAD2' }}>
+                                    {item.description}
+                                  </p>
+                                  <p className="truncate text-[11px] font-semibold" style={{ color: '#98A2AD' }}>
+                                    {item.connectedRecord}
+                                  </p>
+                                  {item.preview && (
+                                    <p className="mt-1 line-clamp-2 text-[11px] leading-4" style={{ color: '#D8D1C8' }}>
+                                      {item.preview}
+                                    </p>
+                                  )}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
 
             {/* User avatar + profile dropdown */}
             <div className="relative">
               <button
-                onClick={() => setProfileOpen(!profileOpen)}
-                className="flex h-10 min-w-0 max-w-[176px] cursor-pointer items-center gap-2 overflow-hidden rounded-md px-2.5 py-0 transition-all"
+                onClick={() => { setProfileOpen(!profileOpen); setNotificationsOpen(false); }}
+                className="bt-profile-chip flex h-10 min-w-0 max-w-[176px] cursor-pointer items-center gap-2 overflow-hidden rounded-md px-2.5 py-0 transition-all"
                 style={{ background: '#111315', border: '1px solid #343A42' }}
                 aria-label="Open profile menu"
               >

@@ -359,6 +359,60 @@ textarea,
   outline-offset: 2px;
 }
 
+.bt-desktop-shell .bt-topbar-action {
+  display: inline-flex;
+  min-width: 42px;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    transform 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.bt-desktop-shell .bt-topbar-action:hover,
+.bt-desktop-shell .bt-profile-chip:hover {
+  background: #1D2228 !important;
+  border-color: var(--bt-accent) !important;
+  color: var(--bt-text) !important;
+  box-shadow: inset 0 0 0 1px rgba(231, 139, 74, 0.18);
+}
+
+.bt-desktop-shell .bt-topbar-action:active,
+.bt-desktop-shell .bt-profile-chip:active {
+  transform: translateY(1px);
+  background: #24190F !important;
+}
+
+.bt-desktop-shell .bt-profile-chip {
+  cursor: pointer;
+  touch-action: manipulation;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    transform 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.bt-desktop-shell .bt-notification-row {
+  cursor: pointer;
+}
+
+.bt-desktop-shell .bt-notification-row:hover {
+  background: #171A1D !important;
+  border-color: var(--bt-accent) !important;
+}
+
+.bt-desktop-shell .bt-notification-row:active {
+  background: #1E1610 !important;
+}
+
 .bt-desktop-shell .bt-scope-editor-label {
   color: var(--bt-text-muted) !important;
 }
