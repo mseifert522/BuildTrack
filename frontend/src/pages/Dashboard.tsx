@@ -435,16 +435,19 @@ export default function Dashboard() {
 
       <div className="px-6 py-6 md:px-8 max-w-7xl mx-auto space-y-4">
         {/* Construction command center */}
-        <section className="bt-card p-4 md:p-5" aria-label="Construction modules and field payment checks">
-          <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
+        <section className="bt-card overflow-hidden" aria-label="Construction modules and field payment checks">
+          <div
+            className="grid gap-3 border-b px-4 py-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-start md:px-5"
+            style={{ borderColor: 'var(--bt-border)' }}
+          >
+            <div className="min-w-0">
               <p className="bt-section-kicker">Construction modules</p>
               <h2 className="bt-section-title">Project tasks, punch lists, and field checks before payment approval</h2>
               <p className="mt-1 max-w-3xl text-xs font-semibold" style={{ color: 'var(--bt-text-muted)' }}>
                 Use this first: review active work, close out punch items, verify field notes and pictures, then release invoices only after management approval.
               </p>
             </div>
-            <span className="inline-flex w-fit items-center gap-1.5 rounded-sm border px-2.5 py-1 text-xs font-bold"
+            <span className="inline-flex min-h-8 w-fit items-center gap-1.5 justify-self-start rounded-sm border px-2.5 py-1 text-xs font-bold md:justify-self-end"
               style={{ background: '#1E1610', borderColor: '#E78B4A', color: '#FFD0A8' }}
             >
               <Bell className="h-3.5 w-3.5" />
@@ -452,18 +455,18 @@ export default function Dashboard() {
             </span>
           </div>
 
-          <div className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
-            <div>
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <h3 className="text-sm font-black" style={{ color: 'var(--bt-text)' }}>Operational entry points</h3>
-                <span className="text-[11px] font-black uppercase tracking-wide" style={{ color: 'var(--bt-text-soft)' }}>Start here</span>
+          <div className="grid xl:grid-cols-[minmax(0,0.98fr)_minmax(0,1.02fr)]">
+            <div className="p-4 md:p-5">
+              <div className="mb-3 grid min-h-8 grid-cols-[minmax(0,1fr)_auto] items-end gap-3">
+                <h3 className="truncate text-sm font-black" style={{ color: 'var(--bt-text)' }}>Operational entry points</h3>
+                <span className="rounded-sm border px-2 py-1 text-[10px] font-black uppercase tracking-wide" style={{ borderColor: '#263241', color: 'var(--bt-text-soft)' }}>Start here</span>
               </div>
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
               {operationsModules.map(module => (
                 <Link
                   key={module.label}
                   to={module.to}
-                  className="flex min-h-20 items-center gap-3 rounded-sm border px-3 py-3 transition-colors hover:border-orange-400"
+                  className="grid min-h-[72px] grid-cols-[44px_minmax(0,1fr)_18px] items-center gap-3 rounded-sm border px-3 py-3 transition-colors hover:border-orange-400"
                   style={{ background: '#0E1012', borderColor: module.border }}
                 >
                   <span
@@ -476,19 +479,19 @@ export default function Dashboard() {
                     <span className="block text-sm font-black" style={{ color: 'var(--bt-text)' }}>{module.label}</span>
                     <span className="block truncate text-xs font-semibold" style={{ color: 'var(--bt-text-muted)' }}>{module.detail}</span>
                   </span>
-                  <ChevronRight className="ml-auto h-4 w-4 flex-shrink-0" style={{ color: 'var(--bt-text-soft)' }} />
+                  <ChevronRight className="h-4 w-4 justify-self-end" style={{ color: 'var(--bt-text-soft)' }} />
                 </Link>
               ))}
               </div>
             </div>
 
-            <div className="border-t pt-4 xl:border-l xl:border-t-0 xl:pl-4 xl:pt-0" style={{ borderColor: 'var(--bt-border)' }}>
-              <div className="mb-3 flex items-start justify-between gap-3">
-                <div>
+            <div className="border-t p-4 md:p-5 xl:border-l xl:border-t-0" style={{ borderColor: 'var(--bt-border)' }}>
+              <div className="mb-3 grid min-h-8 grid-cols-[minmax(0,1fr)_auto] items-end gap-3">
+                <div className="min-w-0">
                   <p className="bt-section-kicker">Final watch list</p>
-                  <h3 className="text-sm font-black" style={{ color: 'var(--bt-text)' }}>Field checks before payment</h3>
+                  <h3 className="truncate text-sm font-black" style={{ color: 'var(--bt-text)' }}>Field checks before payment</h3>
                 </div>
-                <span className={`rounded-sm px-2 py-1 text-xs font-black ${fieldWatchTotal > 0 ? 'bg-red-50 text-red-700 ring-1 ring-red-200' : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'}`}>
+                <span className={`inline-flex min-h-8 items-center rounded-sm px-2.5 py-1 text-xs font-black ${fieldWatchTotal > 0 ? 'bg-red-50 text-red-700 ring-1 ring-red-200' : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'}`}>
                   {fieldWatchTotal > 0 ? `${fieldWatchTotal} alerts` : 'Clear'}
                 </span>
               </div>
@@ -525,7 +528,7 @@ export default function Dashboard() {
                       const firstNoteProject = fieldWatch?.field_notes?.[0]?.project_id;
                       navigate(`/projects/${firstTaskProject || firstHoldProject || firstNoteProject || ''}`.replace(/\/$/, ''));
                     }}
-                    className="flex min-h-14 items-center gap-3 rounded-sm border px-3 py-2 text-left transition-colors hover:border-orange-400"
+                    className="grid min-h-[58px] grid-cols-[44px_minmax(0,1fr)_40px] items-center gap-3 rounded-sm border px-3 py-2 text-left transition-colors hover:border-orange-400"
                     style={{ background: '#0E1012', borderColor: '#343A42' }}
                   >
                     <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md border" style={{ background: `${item.tone}22`, borderColor: `${item.tone}66`, color: item.tone }}>
@@ -535,7 +538,7 @@ export default function Dashboard() {
                       <span className="block text-xs font-black uppercase tracking-wide" style={{ color: 'var(--bt-text)' }}>{item.label}</span>
                       <span className="block truncate text-xs font-semibold" style={{ color: 'var(--bt-text-muted)' }}>{item.detail}</span>
                     </span>
-                    <span className="text-lg font-black" style={{ color: 'var(--bt-text)' }}>{item.value}</span>
+                    <span className="justify-self-end text-right text-lg font-black tabular-nums" style={{ color: 'var(--bt-text)' }}>{item.value}</span>
                   </button>
                 ))}
               </div>
