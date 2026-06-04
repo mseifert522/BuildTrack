@@ -506,6 +506,10 @@ function initializeSchema() {
       gps_longitude REAL,
       gps_accuracy REAL,
       upload_status TEXT NOT NULL DEFAULT 'uploaded',
+      correction_delete_count INTEGER NOT NULL DEFAULT 0,
+      correction_deleted_at TEXT,
+      correction_deleted_by TEXT,
+      correction_delete_reason TEXT,
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       uploaded_by TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -1225,12 +1229,17 @@ function initializeSchema() {
   try { db.exec(`ALTER TABLE photos ADD COLUMN gps_longitude REAL`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE photos ADD COLUMN gps_accuracy REAL`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE photos ADD COLUMN upload_status TEXT NOT NULL DEFAULT 'uploaded'`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN correction_delete_count INTEGER NOT NULL DEFAULT 0`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN correction_deleted_at TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN correction_deleted_by TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN correction_delete_reason TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE photos ADD COLUMN updated_at TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`UPDATE photos SET updated_at = COALESCE(updated_at, created_at, datetime('now')) WHERE updated_at IS NULL`); } catch (_) { /* best-effort */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_photos_project_type_taken ON photos(project_id, photo_type, taken_at, created_at)`); } catch (_) { /* best-effort */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_photos_note_taken ON photos(note_id, taken_at, created_at)`); } catch (_) { /* best-effort */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_photos_project_batch ON photos(project_id, batch_id, batch_sequence)`); } catch (_) { /* best-effort */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_photos_project_label_uploaded ON photos(project_id, label, uploaded_at)`); } catch (_) { /* best-effort */ }
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_photos_project_correction_status ON photos(project_id, upload_status, correction_deleted_at)`); } catch (_) { /* best-effort */ }
   try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN verification_status TEXT NOT NULL DEFAULT 'not_requested'`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN invoice_status TEXT NOT NULL DEFAULT 'not_received'`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN approved_by TEXT`); } catch (_) { /* already exists */ }

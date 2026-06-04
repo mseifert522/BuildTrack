@@ -8,6 +8,10 @@ const router = express.Router({ mergeParams: true });
 router.use(authenticate);
 router.use(authorizeProjectAccess);
 
+function activePhotoSql(alias = 'ph') {
+  return `COALESCE(${alias}.upload_status, 'uploaded') != 'correction_deleted' AND ${alias}.correction_deleted_at IS NULL`;
+}
+
 // GET /api/projects/:projectId/punch-list
 router.get('/', (req, res) => {
   const db = getDb();
@@ -31,7 +35,7 @@ router.get('/', (req, res) => {
 
   // Attach photo counts
   const enriched = items.map(item => {
-    const photoCount = db.prepare('SELECT COUNT(*) as cnt FROM photos WHERE punch_list_item_id = ?').get(item.id);
+    const photoCount = db.prepare(`SELECT COUNT(*) as cnt FROM photos WHERE punch_list_item_id = ? AND ${activePhotoSql('photos')}`).get(item.id);
     const commentCount = db.prepare('SELECT COUNT(*) as cnt FROM punch_list_comments WHERE item_id = ?').get(item.id);
     return { ...item, photo_count: photoCount.cnt, comment_count: commentCount.cnt };
   });

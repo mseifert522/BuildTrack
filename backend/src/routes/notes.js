@@ -10,10 +10,32 @@ router.use(authenticate);
 router.use(authorizeProjectAccess);
 const MANAGEMENT_ROLES = ['super_admin', 'operations_manager', 'project_manager'];
 
+function activePhotoSql(alias = 'ph') {
+  return `COALESCE(${alias}.upload_status, 'uploaded') != 'correction_deleted' AND ${alias}.correction_deleted_at IS NULL`;
+}
+
+const SELF_CORRECTION_DELETE_PHOTO_TYPES = new Set(['progress', 'note', 'construction_plan']);
+
+function canUseCorrectionDelete(photo, user) {
+  if (!photo || !user) return false;
+  if (photo.uploaded_by !== user.id) return false;
+  if (!SELF_CORRECTION_DELETE_PHOTO_TYPES.has(String(photo.photo_type || 'general'))) return false;
+  if (photo.correction_deleted_at || String(photo.upload_status || 'uploaded') === 'correction_deleted') return false;
+  return Number(photo.correction_delete_count || 0) < 1;
+}
+
+function withCorrectionDeletePermission(photo, user) {
+  return {
+    ...photo,
+    can_delete_correction: canUseCorrectionDelete(photo, user),
+    correction_locked: Number(photo.correction_delete_count || 0) >= 1 || Boolean(photo.correction_deleted_at),
+  };
+}
+
 // In-memory SSE client registry: { projectId: [{ res, userId }] }
 const sseClients = {};
 
-function attachPhotosToNotes(db, notes) {
+function attachPhotosToNotes(db, notes, user) {
   if (!notes.length) return notes;
   const noteIds = notes.map(note => note.id);
   const placeholders = noteIds.map(() => '?').join(',');
@@ -22,13 +44,14 @@ function attachPhotosToNotes(db, notes) {
     FROM photos ph
     LEFT JOIN users u ON u.id = ph.uploaded_by
     WHERE ph.note_id IN (${placeholders})
+      AND ${activePhotoSql('ph')}
     ORDER BY datetime(COALESCE(ph.taken_at, ph.created_at)) DESC, ph.created_at DESC
   `).all(...noteIds);
 
   const photosByNote = new Map();
   for (const photo of photos) {
     const bucket = photosByNote.get(photo.note_id) || [];
-    bucket.push(photo);
+    bucket.push(withCorrectionDeletePermission(photo, user));
     photosByNote.set(photo.note_id, bucket);
   }
 
@@ -75,7 +98,7 @@ router.get('/', (req, res) => {
       )
     ORDER BY n.created_at ASC
   `).all(req.params.projectId, req.user.role, req.user.id);
-  res.json(attachPhotosToNotes(db, notes));
+  res.json(attachPhotosToNotes(db, notes, req.user));
 });
 
 // GET /api/projects/:projectId/notes/stream — SSE real-time stream
@@ -199,7 +222,7 @@ router.put('/:id', (req, res) => {
     WHERE n.id = ? AND n.project_id = ?
   `).get(req.params.id, req.params.projectId);
 
-  const noteWithPhotos = attachPhotosToNotes(db, updated ? [updated] : [])[0] || updated;
+  const noteWithPhotos = attachPhotosToNotes(db, updated ? [updated] : [], req.user)[0] || updated;
   broadcastToProject(req.params.projectId, { type: 'update_note', note: noteWithPhotos });
   logActivity({ userId: req.user.id, projectId: req.params.projectId, action: 'note_updated', entityType: 'note', entityId: req.params.id });
   res.json(noteWithPhotos);

@@ -64,6 +64,10 @@ interface ProjectPhoto {
   captured_at?: string | null;
   timezone?: string | null;
   upload_status?: string | null;
+  uploaded_by?: string;
+  can_delete_correction?: boolean;
+  correction_locked?: boolean;
+  correction_delete_count?: number;
 }
 
 interface LightboxMedia {
@@ -185,6 +189,7 @@ export default function MobilePhotos() {
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState('');
   const [lightbox, setLightbox] = useState<LightboxMedia | null>(null);
+  const [deletingPhotoId, setDeletingPhotoId] = useState('');
 
   const selectedProject = useMemo(
     () => projects.find(project => project.id === selectedProjectId) || null,
@@ -621,6 +626,22 @@ export default function MobilePhotos() {
     stopBatchCamera();
   };
 
+  const deleteProgressPhoto = async (photo: ProjectPhoto) => {
+    if (!selectedProjectId || !photo.can_delete_correction || deletingPhotoId) return;
+    const confirmed = window.confirm('Remove this uploaded progress picture? This uses your one correction and then locks this upload record.');
+    if (!confirmed) return;
+    setDeletingPhotoId(photo.id);
+    try {
+      await api.delete(`/projects/${selectedProjectId}/photos/${photo.id}`);
+      toast.success('Progress picture removed. Correction is now locked.');
+      await loadPhotos(selectedProjectId);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to delete progress picture');
+    } finally {
+      setDeletingPhotoId('');
+    }
+  };
+
   useEffect(() => {
     const requestKey = `${requestedProjectId || selectedProjectId}:camera`;
     if (!cameraFirstRequested || cameraFirstHandledRef.current === requestKey || loading || !selectedProjectId) return;
@@ -1031,9 +1052,16 @@ export default function MobilePhotos() {
                       : `${photoBaseUrl}/uploads/${selectedProjectId}/${photo.filename}`;
                     const isVideo = isVideoMedia(photo);
                     return (
-                      <button
+                      <div
                         key={photo.id}
+                        role="button"
+                        tabIndex={0}
                         onClick={() => setLightbox({ src, isVideo })}
+                        onKeyDown={event => {
+                          if (event.key !== 'Enter' && event.key !== ' ') return;
+                          event.preventDefault();
+                          setLightbox({ src, isVideo });
+                        }}
                         style={{ border: 'none', background: 'white', borderRadius: 14, overflow: 'hidden', padding: 0, textAlign: 'left', boxShadow: '0 1px 8px rgba(0,0,0,0.08)' }}
                       >
                         <div style={{ aspectRatio: '1 / 1', background: '#E5E7EB', position: 'relative' }}>
@@ -1055,6 +1083,39 @@ export default function MobilePhotos() {
                               Note
                             </span>
                           )}
+                          {photo.can_delete_correction && (
+                            <button
+                              type="button"
+                              onClick={event => {
+                                event.stopPropagation();
+                                void deleteProgressPhoto(photo);
+                              }}
+                              disabled={deletingPhotoId === photo.id}
+                              aria-label="Delete this progress picture as your one correction"
+                              style={{
+                                position: 'absolute',
+                                left: 6,
+                                bottom: 6,
+                                minHeight: 44,
+                                border: '1px solid #FECACA',
+                                borderRadius: 12,
+                                background: 'rgba(255,255,255,0.96)',
+                                color: '#B91C1C',
+                                padding: '0 10px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: 5,
+                                fontSize: 11,
+                                fontWeight: 900,
+                                boxShadow: '0 4px 12px rgba(0,0,0,0.16)',
+                                opacity: deletingPhotoId === photo.id ? 0.65 : 1,
+                              }}
+                            >
+                              <Trash2 size={14} color="#B91C1C" />
+                              {deletingPhotoId === photo.id ? 'Deleting' : 'Delete once'}
+                            </button>
+                          )}
                         </div>
                         <div style={{ padding: 9 }}>
                           <p style={{ margin: 0, color: '#111827', fontSize: 11, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{photo.individual_note || photo.batch_note || photo.caption || photo.note_text || photo.original_name || (isVideo ? 'Project video' : 'Progress photo')}</p>
@@ -1064,7 +1125,7 @@ export default function MobilePhotos() {
                           )}
                           <p style={{ margin: '2px 0 0', color: photo.capture_latitude ? '#16A34A' : '#9CA3AF', fontSize: 10, fontWeight: 750 }}>{auditLabel(photo)}{photo.capture_latitude ? ' / GPS' : ''}{photo.batch_id ? ' / Batch' : ''}</p>
                         </div>
-                      </button>
+                      </div>
                     );
                   })}
                 </div>

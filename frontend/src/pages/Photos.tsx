@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import api from '../lib/api';
 import { Loading } from '../components/ui';
-import { Camera, FileImage, Grid, List, PlayCircle, X } from 'lucide-react';
+import { Camera, FileImage, Grid, List, PlayCircle, Trash2, X } from 'lucide-react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import { appendProgressUploadAudit, PROGRESS_MEDIA_ACCEPT } from '../lib/progressUpload';
@@ -28,6 +28,10 @@ interface Photo {
   capture_longitude?: number | null;
   capture_accuracy?: number | null;
   capture_source?: string | null;
+  uploaded_by?: string;
+  can_delete_correction?: boolean;
+  correction_locked?: boolean;
+  correction_delete_count?: number;
 }
 
 interface LightboxMedia {
@@ -70,6 +74,7 @@ export default function Photos() {
   const [lightbox, setLightbox] = useState<LightboxMedia | null>(null);
   const [selectedProject, setSelectedProject] = useState(requestedProjectId);
   const [caption, setCaption] = useState('');
+  const [deletingPhotoId, setDeletingPhotoId] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const groupedPhotos = groupPhotosByDay(photos);
 
@@ -153,6 +158,22 @@ export default function Photos() {
       src,
       isVideo: kind === 'video',
     });
+  };
+
+  const deleteProgressPhoto = async (photo: Photo) => {
+    if (!photo.can_delete_correction || deletingPhotoId) return;
+    const confirmed = window.confirm('Remove this uploaded progress picture? This uses your one correction and then locks this upload record.');
+    if (!confirmed) return;
+    setDeletingPhotoId(photo.id);
+    try {
+      await api.delete(`/projects/${photo.project_id}/photos/${photo.id}`);
+      toast.success('Progress picture removed. Correction is now locked.');
+      await load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to delete progress picture');
+    } finally {
+      setDeletingPhotoId('');
+    }
   };
 
   return (
@@ -253,6 +274,21 @@ export default function Photos() {
                           </div>
                         )}
                         {photo.note_id && <span className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-black text-white">Note</span>}
+                        {photo.can_delete_correction && (
+                          <button
+                            type="button"
+                            onClick={event => {
+                              event.stopPropagation();
+                              void deleteProgressPhoto(photo);
+                            }}
+                            disabled={deletingPhotoId === photo.id}
+                            className="absolute right-2 top-2 inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-white/95 px-2 text-[11px] font-black text-red-700 shadow-sm transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                            aria-label="Delete this progress picture as your one correction"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            {deletingPhotoId === photo.id ? 'Deleting' : 'Delete once'}
+                          </button>
+                        )}
                         <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent opacity-100 transition-opacity" />
                         <div className="absolute bottom-0 left-0 right-0 p-2">
                           <p className="text-white text-xs font-bold truncate">{photo.project_address}</p>
@@ -297,6 +333,17 @@ export default function Photos() {
                           {photo.caption && <p className="text-xs text-gray-400 truncate">{photo.caption}</p>}
                           <p className="text-xs text-gray-400">{format(new Date(photo.taken_at || photo.created_at), 'MMM d, yyyy h:mm a')} / {photo.capture_latitude ? 'GPS recorded' : 'IP recorded'}{photo.upload_ip_address ? ` / ${photo.upload_ip_address}` : ''}</p>
                         </div>
+                        {photo.can_delete_correction && (
+                          <button
+                            type="button"
+                            onClick={() => void deleteProgressPhoto(photo)}
+                            disabled={deletingPhotoId === photo.id}
+                            className="inline-flex min-h-10 flex-shrink-0 items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 text-xs font-black text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            {deletingPhotoId === photo.id ? 'Deleting' : 'Delete once'}
+                          </button>
+                        )}
                         <Link to={`/projects/${photo.project_id}`} className="text-xs text-blue-600 hover:underline flex-shrink-0">View Project</Link>
                       </div>
                     );

@@ -2830,6 +2830,7 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<{ src: string; isVideo: boolean; name?: string } | null>(null);
+  const [deletingPhotoId, setDeletingPhotoId] = useState('');
 
   const load = async () => {
     try {
@@ -2844,6 +2845,22 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
       toast.error('Failed to load project progress history');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const deleteProgressPhoto = async (photo: any) => {
+    if (!photo?.can_delete_correction || deletingPhotoId) return;
+    const confirmed = window.confirm('Remove this uploaded progress picture? This uses your one correction and then locks this upload record.');
+    if (!confirmed) return;
+    setDeletingPhotoId(photo.id);
+    try {
+      await api.delete(`/projects/${projectId}/photos/${photo.id}`);
+      toast.success('Progress picture removed. Correction is now locked.');
+      await load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to delete progress picture');
+    } finally {
+      setDeletingPhotoId('');
     }
   };
 
@@ -3013,6 +3030,8 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
                       photos={record.photos}
                       maxItems={20}
                       onLightbox={setLightbox}
+                      onDeleteCorrection={deleteProgressPhoto}
+                      deletingPhotoId={deletingPhotoId}
                     />
                   </div>
                 </div>
@@ -3048,11 +3067,15 @@ function ProgressMediaGrid({
   photos,
   maxItems,
   onLightbox,
+  onDeleteCorrection,
+  deletingPhotoId,
 }: {
   projectId: string;
   photos: any[];
   maxItems: number;
   onLightbox: (value: { src: string; isVideo: boolean; name?: string }) => void;
+  onDeleteCorrection?: (photo: any) => void;
+  deletingPhotoId?: string;
 }) {
   if (!photos.length) return null;
   const visiblePhotos = photos.slice(0, maxItems);
@@ -3067,10 +3090,17 @@ function ProgressMediaGrid({
         const timestamp = getProgressTimestamp(photo);
 
         return (
-          <button
+          <div
             key={photo.id || photo.filename}
-            type="button"
+            role="button"
+            tabIndex={0}
             onClick={() => {
+              if (mediaKind === 'file') window.open(src, '_blank', 'noopener,noreferrer');
+              else onLightbox({ src, isVideo, name: photo.original_name || photo.filename });
+            }}
+            onKeyDown={event => {
+              if (event.key !== 'Enter' && event.key !== ' ') return;
+              event.preventDefault();
               if (mediaKind === 'file') window.open(src, '_blank', 'noopener,noreferrer');
               else onLightbox({ src, isVideo, name: photo.original_name || photo.filename });
             }}
@@ -3092,12 +3122,26 @@ function ProgressMediaGrid({
                 Click to expand
               </div>
             )}
+            {photo.can_delete_correction && onDeleteCorrection && (
+              <button
+                type="button"
+                onClick={event => {
+                  event.stopPropagation();
+                  onDeleteCorrection(photo);
+                }}
+                disabled={deletingPhotoId === photo.id}
+                className="absolute right-1 top-1 inline-flex min-h-10 min-w-10 items-center justify-center rounded-md border border-red-200 bg-white/95 px-1.5 text-[10px] font-black text-red-700 shadow-sm transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                aria-label="Delete this progress picture as your one correction"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            )}
             {timestamp && (
               <div className="absolute bottom-1 left-1 rounded bg-black/75 px-1.5 py-0.5 text-[10px] font-black text-white">
                 {formatEasternDateTime(timestamp, { hour: 'numeric', minute: '2-digit' })}
               </div>
             )}
-          </button>
+          </div>
         );
       })}
       {hiddenCount > 0 && (
@@ -3212,6 +3256,7 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
   const [selectedCategory, setSelectedCategory] = useState('');
   const [uploading, setUploading] = useState(false);
   const [lightbox, setLightbox] = useState<{ src: string; isVideo: boolean } | null>(null);
+  const [deletingPhotoId, setDeletingPhotoId] = useState('');
   const [showNewCat, setShowNewCat] = useState(false);
   const [newCatName, setNewCatName] = useState('');
   const groupedPhotos = groupMediaByDay(photos);
@@ -3296,6 +3341,22 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
       setShowNewCat(false);
       load();
     } catch (err) { toast.error('Failed to add category'); }
+  };
+
+  const deleteProgressPhoto = async (photo: any) => {
+    if (!photo?.can_delete_correction || deletingPhotoId) return;
+    const confirmed = window.confirm('Remove this uploaded progress picture? This uses your one correction and then locks this upload record.');
+    if (!confirmed) return;
+    setDeletingPhotoId(photo.id);
+    try {
+      await api.delete(`/projects/${projectId}/photos/${photo.id}`);
+      toast.success('Progress picture removed. Correction is now locked.');
+      await load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to delete progress picture');
+    } finally {
+      setDeletingPhotoId('');
+    }
   };
 
   return (
@@ -3395,6 +3456,21 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
                       )}
                       {photo.note_id && (
                         <span className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-black text-white">Note</span>
+                      )}
+                      {photo.can_delete_correction && (
+                        <button
+                          type="button"
+                          onClick={event => {
+                            event.stopPropagation();
+                            void deleteProgressPhoto(photo);
+                          }}
+                          disabled={deletingPhotoId === photo.id}
+                          className="absolute right-2 top-2 inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-white/95 px-2 text-[11px] font-black text-red-700 shadow-sm transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          aria-label="Delete this progress picture as your one correction"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          {deletingPhotoId === photo.id ? 'Deleting' : 'Delete once'}
+                        </button>
                       )}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent opacity-100 transition-opacity" />
                       <div className="absolute bottom-0 left-0 right-0 p-2">

@@ -15,7 +15,29 @@ const MANAGEMENT_ROLES = ['super_admin', 'operations_manager', 'project_manager'
 const PROJECT_STATUS_ADMIN_ROLES = ['super_admin', 'operations_manager'];
 const PROJECT_STATUSES = ['not_started', 'active_rehab', 'rehab_completed', 'long_term_holding', 'commercial'];
 
-function attachPhotosToNotes(db, notes) {
+function activePhotoSql(alias = 'ph') {
+  return `COALESCE(${alias}.upload_status, 'uploaded') != 'correction_deleted' AND ${alias}.correction_deleted_at IS NULL`;
+}
+
+const SELF_CORRECTION_DELETE_PHOTO_TYPES = new Set(['progress', 'note', 'construction_plan']);
+
+function canUseCorrectionDelete(photo, user) {
+  if (!photo || !user) return false;
+  if (photo.uploaded_by !== user.id) return false;
+  if (!SELF_CORRECTION_DELETE_PHOTO_TYPES.has(String(photo.photo_type || 'general'))) return false;
+  if (photo.correction_deleted_at || String(photo.upload_status || 'uploaded') === 'correction_deleted') return false;
+  return Number(photo.correction_delete_count || 0) < 1;
+}
+
+function withCorrectionDeletePermission(photo, user) {
+  return {
+    ...photo,
+    can_delete_correction: canUseCorrectionDelete(photo, user),
+    correction_locked: Number(photo.correction_delete_count || 0) >= 1 || Boolean(photo.correction_deleted_at),
+  };
+}
+
+function attachPhotosToNotes(db, notes, user) {
   if (!notes.length) return notes;
   const noteIds = notes.map(note => note.id);
   const placeholders = noteIds.map(() => '?').join(',');
@@ -26,13 +48,14 @@ function attachPhotosToNotes(db, notes) {
     FROM photos ph
     LEFT JOIN users u ON u.id = ph.uploaded_by
     WHERE ph.note_id IN (${placeholders})
+      AND ${activePhotoSql('ph')}
     ORDER BY datetime(COALESCE(ph.taken_at, ph.created_at)) DESC, ph.created_at DESC
   `).all(...noteIds);
 
   const photosByNote = new Map();
   for (const photo of photos) {
     const bucket = photosByNote.get(photo.note_id) || [];
-    bucket.push(photo);
+    bucket.push(withCorrectionDeletePermission(photo, user));
     photosByNote.set(photo.note_id, bucket);
   }
 
@@ -65,6 +88,7 @@ function getConstructionPlan(db, projectId) {
       SELECT id, filename, original_name, caption, created_at
       FROM photos
       WHERE construction_plan_item_id = ?
+        AND ${activePhotoSql('photos')}
       ORDER BY datetime(created_at) DESC
     `).all(item.id);
     const materials = db.prepare(`
@@ -193,6 +217,7 @@ const REVIEW_ACTIONS = [
   'note_added',
   'note_updated',
   'photos_uploaded',
+  'photo_correction_deleted',
   'photo_deleted',
   'construction_plan_item_created',
   'construction_plan_item_updated',
@@ -241,6 +266,8 @@ function summarizeActivity(row) {
       return `Edited a note${notePreview}`;
     case 'photos_uploaded':
       return `Uploaded ${details.count || 1} photo${Number(details.count) === 1 ? '' : 's'}`;
+    case 'photo_correction_deleted':
+      return 'Removed an uploaded progress picture as a correction';
     case 'photo_deleted':
       return 'Deleted a photo';
     case 'construction_plan_item_created':
@@ -420,7 +447,7 @@ router.get('/stats', authorize('super_admin', 'operations_manager', 'project_man
   // Operational stats
   const openPunch        = db.prepare("SELECT COUNT(*) as cnt FROM punch_list_items WHERE status != 'completed'").get();
   const pendingInvoices  = db.prepare("SELECT COUNT(*) as cnt FROM invoices WHERE status = 'submitted'").get();
-  const recentPhotos     = db.prepare("SELECT COUNT(*) as cnt FROM photos WHERE created_at > datetime('now', '-7 days')").get();
+  const recentPhotos     = db.prepare(`SELECT COUNT(*) as cnt FROM photos WHERE created_at > datetime('now', '-7 days') AND ${activePhotoSql('photos')}`).get();
 
   // Total invoice value this month
   const invoiceValue     = db.prepare("SELECT COALESCE(SUM(total),0) as total FROM invoices WHERE status IN ('submitted','approved') AND created_at > datetime('now', 'start of month')").get();
@@ -488,6 +515,7 @@ router.get('/:id', authorizeProjectAccess, (req, res) => {
     LEFT JOIN users u ON u.id = ph.uploaded_by
     LEFT JOIN photo_categories pc ON pc.id = ph.category_id
     WHERE ph.project_id = ?
+      AND ${activePhotoSql('ph')}
     ORDER BY datetime(COALESCE(ph.captured_at, ph.taken_at, ph.uploaded_at, ph.created_at)) DESC, ph.created_at DESC
     LIMIT 8
   `).all(req.params.id);
@@ -1217,7 +1245,7 @@ router.get('/:id/notes', authorizeProjectAccess, (req, res) => {
       )
     ORDER BY datetime(pn.created_at) DESC, pn.created_at DESC
   `).all(req.params.id, req.user.role, req.user.id);
-  res.json(attachPhotosToNotes(db, notes));
+  res.json(attachPhotosToNotes(db, notes, req.user));
 });
 
 // POST /api/projects/:id/notes - add note
@@ -1291,7 +1319,7 @@ router.put('/:id/notes/:noteId', authorizeProjectAccess, (req, res) => {
     WHERE pn.id = ? AND pn.project_id = ?
   `).get(req.params.noteId, req.params.id);
 
-  res.json(attachPhotosToNotes(db, updated ? [updated] : [])[0] || updated);
+  res.json(attachPhotosToNotes(db, updated ? [updated] : [], req.user)[0] || updated);
 });
 
 module.exports = router;

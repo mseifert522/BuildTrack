@@ -14,6 +14,8 @@ router.use(authorizeProjectAccess);
 
 const PHOTO_TYPES = new Set(['general', 'progress', 'note', 'construction_plan', 'material']);
 const CAPTURE_SOURCES = new Set(['batch_camera', 'device_camera', 'library', 'desktop', 'unknown']);
+const MANAGEMENT_ROLES = new Set(['super_admin', 'operations_manager', 'project_manager']);
+const SELF_CORRECTION_DELETE_PHOTO_TYPES = new Set(['progress', 'note', 'construction_plan']);
 const PHOTO_LABELS = new Set([
   'Before',
   'During',
@@ -66,6 +68,46 @@ const VIDEO_EXTENSIONS = new Set([
 const configuredMediaMaxMb = Number.parseInt(process.env.PROJECT_MEDIA_MAX_MB || '500', 10);
 const MEDIA_FILE_SIZE_LIMIT = (Number.isFinite(configuredMediaMaxMb) ? configuredMediaMaxMb : 500) * 1024 * 1024;
 const MAX_PROGRESS_UPLOAD_FILES = 100;
+
+function activePhotoSql(alias = 'ph') {
+  return `COALESCE(${alias}.upload_status, 'uploaded') != 'correction_deleted' AND ${alias}.correction_deleted_at IS NULL`;
+}
+
+function canUseCorrectionDelete(photo, user) {
+  if (!photo || !user) return false;
+  if (photo.uploaded_by !== user.id) return false;
+  if (!SELF_CORRECTION_DELETE_PHOTO_TYPES.has(String(photo.photo_type || 'general'))) return false;
+  if (photo.correction_deleted_at || String(photo.upload_status || 'uploaded') === 'correction_deleted') return false;
+  return Number(photo.correction_delete_count || 0) < 1;
+}
+
+function withCorrectionDeletePermission(photo, user) {
+  return {
+    ...photo,
+    can_delete_correction: canUseCorrectionDelete(photo, user),
+    correction_locked: Number(photo.correction_delete_count || 0) >= 1 || Boolean(photo.correction_deleted_at),
+  };
+}
+
+function removeStoredPhotoFiles(photo, projectId) {
+  const root = path.resolve(uploadRoot(), projectId);
+  const candidates = [
+    photo.filename,
+    photo.storage_path,
+    photo.stored_file_name,
+    photo.thumbnail_path,
+  ].filter(Boolean);
+
+  for (const candidate of new Set(candidates)) {
+    const filePath = path.resolve(root, String(candidate));
+    if (!filePath.startsWith(`${root}${path.sep}`) && filePath !== root) continue;
+    try {
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch (err) {
+      console.warn('Failed to remove corrected photo file:', err.message || err);
+    }
+  }
+}
 
 function sanitizePathSegment(value, fallback) {
   const cleaned = String(value || '')
@@ -287,6 +329,7 @@ router.get('/', (req, res) => {
     LEFT JOIN project_notes n ON n.id = ph.note_id
     LEFT JOIN users nu ON nu.id = n.user_id
     WHERE ph.project_id = ?
+      AND ${activePhotoSql('ph')}
   `;
   const params = [req.params.projectId];
   if (category_id) { query += ' AND ph.category_id = ?'; params.push(category_id); }
@@ -307,7 +350,7 @@ router.get('/', (req, res) => {
   }
   const sortDirection = String(sort || 'newest') === 'oldest' ? 'ASC' : 'DESC';
   query += ` ORDER BY datetime(COALESCE(ph.captured_at, ph.taken_at, ph.uploaded_at, ph.created_at)) ${sortDirection}, ph.created_at ${sortDirection}`;
-  res.json(db.prepare(query).all(...params));
+  res.json(db.prepare(query).all(...params).map(photo => withCorrectionDeletePermission(photo, req.user)));
 });
 
 // GET /api/projects/:projectId/photos/categories
@@ -315,7 +358,7 @@ router.get('/categories', (req, res) => {
   const db = getDb();
   const cats = db.prepare('SELECT * FROM photo_categories WHERE project_id = ? ORDER BY name').all(req.params.projectId);
   const enriched = cats.map(c => {
-    const cnt = db.prepare('SELECT COUNT(*) as cnt FROM photos WHERE category_id = ?').get(c.id);
+    const cnt = db.prepare(`SELECT COUNT(*) as cnt FROM photos WHERE category_id = ? AND ${activePhotoSql('photos')}`).get(c.id);
     return { ...c, photo_count: cnt.cnt };
   });
   res.json(enriched);
@@ -349,8 +392,9 @@ router.get('/progress', (req, res) => {
     LEFT JOIN project_notes n ON n.id = ph.note_id
     LEFT JOIN users nu ON nu.id = n.user_id
     WHERE ph.project_id = ? AND ph.photo_type = 'progress'
+      AND ${activePhotoSql('ph')}
     ORDER BY datetime(COALESCE(ph.captured_at, ph.taken_at, ph.uploaded_at, ph.created_at)) DESC, ph.created_at DESC
-  `).all(req.params.projectId);
+  `).all(req.params.projectId).map(photo => withCorrectionDeletePermission(photo, req.user));
   res.json(photos);
 });
 
@@ -553,20 +597,56 @@ router.post('/', uploadProjectPhotos, async (req, res) => {
 
 // DELETE /api/projects/:projectId/photos/:id
 router.delete('/:id', (req, res) => {
-  if (!['super_admin', 'operations_manager', 'project_manager'].includes(req.user.role)) {
-    return res.status(403).json({ error: 'Insufficient permissions' });
-  }
   const db = getDb();
-  const photo = db.prepare('SELECT * FROM photos WHERE id = ? AND project_id = ?').get(req.params.id, req.params.projectId);
+  const photo = db.prepare(`
+    SELECT *
+    FROM photos
+    WHERE id = ? AND project_id = ? AND ${activePhotoSql('photos')}
+  `).get(req.params.id, req.params.projectId);
   if (!photo) return res.status(404).json({ error: 'Photo not found' });
 
-  // Delete file from disk
-  const filePath = path.join(process.env.UPLOADS_PATH || './uploads', req.params.projectId, photo.filename);
-  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  const selfCorrectionAllowed = canUseCorrectionDelete(photo, req.user);
+  const managementOverrideAllowed = MANAGEMENT_ROLES.has(req.user.role) && photo.uploaded_by !== req.user.id;
+  if (!selfCorrectionAllowed && !managementOverrideAllowed) {
+    if (photo.uploaded_by === req.user.id && Number(photo.correction_delete_count || 0) >= 1) {
+      return res.status(403).json({ error: 'This progress picture is locked because the one correction has already been used.' });
+    }
+    return res.status(403).json({ error: 'You can only delete your own uploaded progress pictures once as a correction.' });
+  }
 
-  db.prepare('DELETE FROM photos WHERE id = ?').run(req.params.id);
-  logActivity({ userId: req.user.id, projectId: req.params.projectId, action: 'photo_deleted', entityType: 'photo', entityId: req.params.id });
-  res.json({ message: 'Photo deleted' });
+  removeStoredPhotoFiles(photo, req.params.projectId);
+
+  db.prepare(`
+    UPDATE photos
+    SET upload_status = 'correction_deleted',
+        correction_delete_count = COALESCE(correction_delete_count, 0) + 1,
+        correction_deleted_at = datetime('now'),
+        correction_deleted_by = ?,
+        correction_delete_reason = ?,
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(
+    req.user.id,
+    selfCorrectionAllowed ? 'user_one_correction' : 'management_override',
+    req.params.id
+  );
+  logActivity({
+    userId: req.user.id,
+    projectId: req.params.projectId,
+    action: selfCorrectionAllowed ? 'photo_correction_deleted' : 'photo_deleted',
+    entityType: 'photo',
+    entityId: req.params.id,
+    details: {
+      original_name: photo.original_name,
+      uploaded_by: photo.uploaded_by,
+      correction_locked: true,
+      reason: selfCorrectionAllowed ? 'user_one_correction' : 'management_override',
+    },
+  });
+  res.json({
+    message: selfCorrectionAllowed ? 'Progress picture removed. This correction is now locked.' : 'Photo removed by management.',
+    correction_locked: true,
+  });
 });
 
 module.exports = router;

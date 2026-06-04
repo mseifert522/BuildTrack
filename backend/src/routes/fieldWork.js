@@ -16,6 +16,10 @@ function isManagement(user) {
   return MANAGEMENT_ROLES.includes(user?.role);
 }
 
+function activePhotoSql(alias = 'ph') {
+  return `COALESCE(${alias}.upload_status, 'uploaded') != 'correction_deleted' AND ${alias}.correction_deleted_at IS NULL`;
+}
+
 function normalizeEnum(value, allowed, fallback) {
   const requested = String(value || '').trim();
   return allowed.has(requested) ? requested : fallback;
@@ -56,11 +60,12 @@ function taskSelectSql() {
       assignee.name as assigned_to_name,
       creator.name as created_by_name,
       approver.name as approved_by_name,
-      (SELECT COUNT(*) FROM photos ph WHERE ph.construction_plan_item_id = cpi.id) as photo_count,
+      (SELECT COUNT(*) FROM photos ph WHERE ph.construction_plan_item_id = cpi.id AND ${activePhotoSql('ph')}) as photo_count,
       (
         SELECT COALESCE(NULLIF(ph.individual_note, ''), NULLIF(ph.batch_note, ''), NULLIF(ph.caption, ''))
         FROM photos ph
         WHERE ph.construction_plan_item_id = cpi.id
+          AND ${activePhotoSql('ph')}
         ORDER BY datetime(COALESCE(ph.captured_at, ph.taken_at, ph.uploaded_at, ph.created_at)) DESC, ph.created_at DESC
         LIMIT 1
       ) as latest_photo_note,
@@ -68,6 +73,7 @@ function taskSelectSql() {
         SELECT COALESCE(ph.captured_at, ph.taken_at, ph.uploaded_at, ph.created_at)
         FROM photos ph
         WHERE ph.construction_plan_item_id = cpi.id
+          AND ${activePhotoSql('ph')}
         ORDER BY datetime(COALESCE(ph.captured_at, ph.taken_at, ph.uploaded_at, ph.created_at)) DESC, ph.created_at DESC
         LIMIT 1
       ) as latest_photo_at,
@@ -114,7 +120,7 @@ function getWatchlist(req) {
       u.name as user_name,
       p.address as project_address,
       p.job_name as project_job_name,
-      (SELECT COUNT(*) FROM photos ph WHERE ph.note_id = pn.id) as photo_count
+      (SELECT COUNT(*) FROM photos ph WHERE ph.note_id = pn.id AND ${activePhotoSql('ph')}) as photo_count
     FROM project_notes pn
     JOIN projects p ON p.id = pn.project_id
     JOIN users u ON u.id = pn.user_id
@@ -152,6 +158,7 @@ function getWatchlist(req) {
     LEFT JOIN project_review_state prs ON prs.user_id = ? AND prs.project_id = ph.project_id
     WHERE ph.uploaded_by != ?
       AND ph.photo_type IN ('progress','construction_plan','note')
+      AND ${activePhotoSql('ph')}
       AND datetime(COALESCE(ph.captured_at, ph.taken_at, ph.uploaded_at, ph.created_at)) > datetime(COALESCE(prs.last_reviewed_at, '1970-01-01 00:00:00'))
       AND datetime(COALESCE(ph.captured_at, ph.taken_at, ph.uploaded_at, ph.created_at)) > datetime('now', '-14 days')
     ORDER BY datetime(COALESCE(ph.captured_at, ph.taken_at, ph.uploaded_at, ph.created_at)) DESC
@@ -224,7 +231,7 @@ router.get('/projects/:projectId', authorizeProjectAccess, (req, res) => {
 
   const fieldNotes = db.prepare(`
     SELECT pn.*, u.name as user_name, u.avatar_url as user_avatar_url,
-      (SELECT COUNT(*) FROM photos ph WHERE ph.note_id = pn.id) as photo_count
+      (SELECT COUNT(*) FROM photos ph WHERE ph.note_id = pn.id AND ${activePhotoSql('ph')}) as photo_count
     FROM project_notes pn
     JOIN users u ON u.id = pn.user_id
     WHERE pn.project_id = ? AND pn.note_type = 'field'
@@ -238,6 +245,7 @@ router.get('/projects/:projectId', authorizeProjectAccess, (req, res) => {
     JOIN users u ON u.id = ph.uploaded_by
     WHERE ph.project_id = ?
       AND ph.photo_type IN ('progress','construction_plan','note')
+      AND ${activePhotoSql('ph')}
     ORDER BY datetime(COALESCE(ph.captured_at, ph.taken_at, ph.uploaded_at, ph.created_at)) DESC
     LIMIT 30
   `).all(projectId);
