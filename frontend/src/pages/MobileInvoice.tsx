@@ -6,6 +6,7 @@ import { useAuthStore } from '../store/authStore';
 import {
   ArrowLeft, Plus, Trash2, Mic, MicOff, Send, Save,
   FileText, ChevronRight, DollarSign, MapPin, User, Calendar,
+  ClipboardList, CheckCircle2, AlertTriangle,
 } from 'lucide-react';
 
 interface LineItem {
@@ -21,6 +22,18 @@ interface SavedInvoice {
   total: number;
   notes?: string;
   created_at: string;
+  linked_work_count?: number;
+  payment_hold_count?: number;
+}
+
+interface FieldWorkTask {
+  id: string;
+  title: string;
+  category?: string;
+  status?: string;
+  verification_status?: string;
+  invoice_status?: string;
+  target_date?: string;
 }
 
 declare global {
@@ -49,6 +62,8 @@ export default function MobileInvoice() {
   const [projectAddress, setProjectAddress] = useState('');
   const [projectJobName, setProjectJobName] = useState('');
   const [savedInvoices, setSavedInvoices] = useState<SavedInvoice[]>([]);
+  const [fieldWorkTasks, setFieldWorkTasks] = useState<FieldWorkTask[]>([]);
+  const [selectedWorkItemIds, setSelectedWorkItemIds] = useState<string[]>([]);
   const [view, setView] = useState<'list' | 'builder'>('list');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -75,11 +90,13 @@ export default function MobileInvoice() {
     Promise.all([
       api.get(`/projects/${projectId}`),
       api.get(`/projects/${projectId}/invoices`).catch(() => ({ data: [] })),
-    ]).then(([projRes, invRes]) => {
+      api.get(`/field-work/projects/${projectId}`).catch(() => ({ data: { tasks: [] } })),
+    ]).then(([projRes, invRes, fieldRes]) => {
       setProjectAddress(projRes.data.address || '');
       setProjectJobName(projRes.data.job_name || '');
       const invs = Array.isArray(invRes.data) ? invRes.data : [];
       setSavedInvoices(invs);
+      setFieldWorkTasks(Array.isArray(fieldRes.data?.tasks) ? fieldRes.data.tasks : []);
       if (invs.length === 0) setView('builder');
     }).catch(() => toast.error('Failed to load project'))
       .finally(() => setLoading(false));
@@ -92,6 +109,15 @@ export default function MobileInvoice() {
   }, 0);
 
   const filledItems = lineItems.filter(i => i.description.trim());
+  const selectedWorkItems = fieldWorkTasks.filter(task => selectedWorkItemIds.includes(task.id));
+
+  const toggleWorkItem = (taskId: string) => {
+    setSelectedWorkItemIds(current =>
+      current.includes(taskId)
+        ? current.filter(id => id !== taskId)
+        : [...current, taskId]
+    );
+  };
 
   // Line item helpers
   const updateLine = (localId: string, field: 'description' | 'amount', val: string) => {
@@ -142,6 +168,7 @@ export default function MobileInvoice() {
       while (items.length < 5) items.push(emptyLine());
       setLineItems(items);
       setNotes(data.notes || '');
+      setSelectedWorkItemIds((data.linked_work_items || []).map((item: any) => item.id).filter(Boolean));
       setEditingId(inv.id);
       setView('builder');
     } catch {
@@ -163,6 +190,7 @@ export default function MobileInvoice() {
         })),
         notes,
         status: 'draft',
+        work_item_ids: selectedWorkItemIds,
       };
       if (editingId) {
         await api.put(`/projects/${projectId}/invoices/${editingId}`, payload);
@@ -195,6 +223,7 @@ export default function MobileInvoice() {
         })),
         notes,
         status: 'submitted',
+        work_item_ids: selectedWorkItemIds,
       };
       let invoiceId = editingId;
       if (invoiceId) {
@@ -212,6 +241,7 @@ export default function MobileInvoice() {
       setEditingId(null);
       setLineItems([emptyLine(), emptyLine(), emptyLine(), emptyLine(), emptyLine()]);
       setNotes('');
+      setSelectedWorkItemIds([]);
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to submit invoice');
     } finally {
@@ -223,6 +253,7 @@ export default function MobileInvoice() {
     setEditingId(null);
     setLineItems([emptyLine(), emptyLine(), emptyLine(), emptyLine(), emptyLine()]);
     setNotes('');
+    setSelectedWorkItemIds([]);
     setView('builder');
   };
 
@@ -308,6 +339,10 @@ export default function MobileInvoice() {
                           <p className="text-xs text-gray-400 mt-0.5">
                             {new Date(inv.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                           </p>
+                          <p className="mt-1 text-xs font-bold" style={{ color: Number(inv.payment_hold_count || 0) > 0 ? '#B45309' : '#6B7280' }}>
+                            {Number(inv.linked_work_count || 0)} linked field item{Number(inv.linked_work_count || 0) === 1 ? '' : 's'}
+                            {Number(inv.payment_hold_count || 0) > 0 ? ` - ${inv.payment_hold_count} awaiting approval` : ''}
+                          </p>
                         </div>
                       </div>
                       <div className="text-right flex-shrink-0">
@@ -365,6 +400,76 @@ export default function MobileInvoice() {
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Linked Field Work */}
+          <div className="mx-4 mt-4 rounded-2xl overflow-hidden" style={{ background: 'white', boxShadow: '0 2px 12px rgba(0,0,0,0.07)' }}>
+            <div className="px-5 py-4 border-b" style={{ borderColor: '#F3F4F6' }}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(37,99,235,0.1)' }}>
+                    <ClipboardList className="w-5 h-5" style={{ color: '#2563EB' }} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-black text-gray-900">Field Work This Invoice Covers</p>
+                    <p className="text-xs font-semibold text-gray-500 mt-0.5">Select the job tasks tied to this invoice before submitting.</p>
+                  </div>
+                </div>
+                <span className="rounded-full px-2.5 py-1 text-xs font-black flex-shrink-0" style={{ background: selectedWorkItems.length ? '#DCFCE7' : '#F3F4F6', color: selectedWorkItems.length ? '#15803D' : '#6B7280' }}>
+                  {selectedWorkItems.length} selected
+                </span>
+              </div>
+            </div>
+
+            {fieldWorkTasks.length === 0 ? (
+              <div className="px-5 py-5 text-sm font-semibold text-gray-500">
+                No field-work tasks are scheduled yet. You can still submit the invoice, but office review will not have a direct task link.
+              </div>
+            ) : (
+              <div className="divide-y" style={{ borderColor: '#F3F4F6' }}>
+                {fieldWorkTasks.slice(0, 12).map(task => {
+                  const selected = selectedWorkItemIds.includes(task.id);
+                  const approved = task.verification_status === 'approved';
+                  const needsReview = task.verification_status === 'pending_review' || task.status === 'needs_review';
+                  return (
+                    <button
+                      key={task.id}
+                      type="button"
+                      onClick={() => toggleWorkItem(task.id)}
+                      className="w-full min-h-[66px] px-5 py-3 text-left transition-all active:scale-[0.99]"
+                      style={{ background: selected ? '#EFF6FF' : 'white' }}
+                    >
+                      <div className="flex items-start gap-3">
+                        <span
+                          className="mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl border"
+                          style={{
+                            background: selected ? '#DBEAFE' : '#F9FAFB',
+                            borderColor: selected ? '#93C5FD' : '#E5E7EB',
+                            color: selected ? '#2563EB' : '#9CA3AF',
+                          }}
+                        >
+                          {selected ? <CheckCircle2 className="h-5 w-5" /> : <ClipboardList className="h-5 w-5" />}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm font-black text-gray-900">{task.title}</span>
+                          <span className="mt-1 flex flex-wrap items-center gap-1.5">
+                            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-gray-600">
+                              {String(task.status || 'not_started').replace(/_/g, ' ')}
+                            </span>
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-wide ${approved ? 'bg-green-100 text-green-700' : needsReview ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
+                              {String(task.verification_status || 'not requested').replace(/_/g, ' ')}
+                            </span>
+                          </span>
+                        </span>
+                        {!approved && (
+                          <AlertTriangle className="mt-2 h-4 w-4 flex-shrink-0" style={{ color: needsReview ? '#D97706' : '#9CA3AF' }} />
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Line Items */}

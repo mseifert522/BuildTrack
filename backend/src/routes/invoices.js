@@ -5,6 +5,7 @@ const fs = require('fs');
 const { getDb } = require('../db/schema');
 const { authenticate, authorize, authorizeProjectAccess } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
+const { recordWorkItemEvent } = require('../utils/workItemEvents');
 const { sendInvoiceEmail } = require('../utils/email');
 const { generateInvoicePDF } = require('../utils/pdf');
 
@@ -21,9 +22,59 @@ function buildDesktopInvoicesUrl() {
   return `${appUrl}/invoices`;
 }
 
-function getFieldWorkPaymentHolds(db, projectId) {
+function parseWorkItemIds(value) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map(item => String(item || '').trim()).filter(Boolean))];
+}
+
+function getInvoiceWorkItems(db, invoiceId) {
   return db.prepare(`
-    SELECT id, title, status, verification_status, invoice_status, target_date
+    SELECT
+      cpi.id,
+      cpi.title,
+      cpi.category,
+      cpi.status,
+      cpi.verification_status,
+      cpi.invoice_status,
+      cpi.target_date,
+      cpi.approved_at,
+      u.name as approved_by_name,
+      iwi.linked_at
+    FROM invoice_work_items iwi
+    JOIN construction_plan_items cpi ON cpi.id = iwi.construction_plan_item_id
+    LEFT JOIN users u ON u.id = cpi.approved_by
+    WHERE iwi.invoice_id = ?
+    ORDER BY datetime(iwi.linked_at) ASC
+  `).all(invoiceId);
+}
+
+function getFieldWorkPaymentHolds(db, projectId, invoiceId = null) {
+  const linkedCount = invoiceId
+    ? db.prepare('SELECT COUNT(*) as count FROM invoice_work_items WHERE invoice_id = ?').get(invoiceId).count
+    : 0;
+
+  if (linkedCount > 0) {
+    return db.prepare(`
+      SELECT
+        cpi.id,
+        cpi.title,
+        cpi.status,
+        cpi.verification_status,
+        cpi.invoice_status,
+        cpi.target_date,
+        1 as invoice_linked
+      FROM invoice_work_items iwi
+      JOIN construction_plan_items cpi ON cpi.id = iwi.construction_plan_item_id
+      WHERE iwi.invoice_id = ?
+        AND iwi.project_id = ?
+        AND cpi.verification_status != 'approved'
+      ORDER BY datetime(COALESCE(cpi.target_date, cpi.updated_at, cpi.created_at)) ASC
+      LIMIT 25
+    `).all(invoiceId, projectId);
+  }
+
+  return db.prepare(`
+    SELECT id, title, status, verification_status, invoice_status, target_date, 0 as invoice_linked
     FROM construction_plan_items
     WHERE project_id = ?
       AND invoice_status IN ('received','approval_needed')
@@ -31,6 +82,80 @@ function getFieldWorkPaymentHolds(db, projectId) {
     ORDER BY datetime(COALESCE(target_date, updated_at, created_at)) ASC
     LIMIT 25
   `).all(projectId);
+}
+
+function syncInvoiceWorkItems(db, { invoiceId, projectId, user, workItemIds, markReceived = false }) {
+  if (!Array.isArray(workItemIds)) return;
+  const nextIds = parseWorkItemIds(workItemIds);
+  db.prepare('DELETE FROM invoice_work_items WHERE invoice_id = ?').run(invoiceId);
+  if (nextIds.length === 0) return;
+
+  const placeholders = nextIds.map(() => '?').join(',');
+  const rows = db.prepare(`
+    SELECT id, status, verification_status, invoice_status
+    FROM construction_plan_items
+    WHERE project_id = ?
+      AND id IN (${placeholders})
+  `).all(projectId, ...nextIds);
+
+  if (rows.length !== nextIds.length) {
+    const found = new Set(rows.map(row => row.id));
+    const missing = nextIds.filter(id => !found.has(id));
+    throw Object.assign(new Error(`Invalid field work item selected: ${missing.join(', ')}`), { statusCode: 400 });
+  }
+
+  const insert = db.prepare(`
+    INSERT OR IGNORE INTO invoice_work_items (id, invoice_id, project_id, construction_plan_item_id, linked_by)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  const updateReceived = db.prepare(`
+    UPDATE construction_plan_items
+    SET invoice_status = CASE
+          WHEN verification_status = 'approved' THEN 'approved_for_payment'
+          ELSE 'received'
+        END,
+        verification_status = CASE
+          WHEN verification_status = 'approved' THEN verification_status
+          WHEN verification_status = 'not_requested' THEN 'pending_review'
+          ELSE verification_status
+        END,
+        updated_at = datetime('now')
+    WHERE id = ? AND project_id = ?
+  `);
+
+  rows.forEach(row => {
+    insert.run(uuidv4(), invoiceId, projectId, row.id, user.id);
+    if (markReceived) {
+      const after = {
+        ...row,
+        invoice_status: row.verification_status === 'approved' ? 'approved_for_payment' : 'received',
+        verification_status: row.verification_status === 'approved'
+          ? row.verification_status
+          : (row.verification_status === 'not_requested' ? 'pending_review' : row.verification_status),
+      };
+      updateReceived.run(row.id, projectId);
+      recordWorkItemEvent(db, {
+        projectId,
+        itemId: row.id,
+        invoiceId,
+        actor: user,
+        eventType: 'invoice_linked',
+        before: row,
+        after,
+        comment: 'Contractor invoice linked to field work from the mobile invoice flow.',
+      });
+    } else {
+      recordWorkItemEvent(db, {
+        projectId,
+        itemId: row.id,
+        invoiceId,
+        actor: user,
+        eventType: 'invoice_linked',
+        before: row,
+        after: row,
+      });
+    }
+  });
 }
 
 // GET /api/projects/:projectId/invoices
@@ -50,14 +175,40 @@ router.get('/', authorizeProjectAccess, (req, res) => {
   }
 
   query += ' ORDER BY i.created_at DESC';
-  res.json(db.prepare(query).all(...params));
+  const invoices = db.prepare(query).all(...params).map(invoice => {
+    const linkedWorkCount = db.prepare('SELECT COUNT(*) as count FROM invoice_work_items WHERE invoice_id = ?').get(invoice.id).count;
+    const holds = getFieldWorkPaymentHolds(db, invoice.project_id, invoice.id);
+    return { ...invoice, linked_work_count: linkedWorkCount, payment_hold_count: holds.length };
+  });
+  res.json(invoices);
 });
 
 // GET /api/invoices - all invoices (admin view)
 router.get('/all', authorize('super_admin', 'operations_manager', 'project_manager', 'admin_assistant'), (req, res) => {
   const db = getDb();
   const invoices = db.prepare(`
-    SELECT i.*, u.name as contractor_name, p.address, p.job_name
+    SELECT
+      i.*,
+      u.name as contractor_name,
+      p.address,
+      p.job_name,
+      (SELECT COUNT(*) FROM invoice_work_items iwi WHERE iwi.invoice_id = i.id) as linked_work_count,
+      CASE
+        WHEN (SELECT COUNT(*) FROM invoice_work_items iwi WHERE iwi.invoice_id = i.id) > 0 THEN (
+          SELECT COUNT(*)
+          FROM invoice_work_items iwi
+          JOIN construction_plan_items cpi ON cpi.id = iwi.construction_plan_item_id
+          WHERE iwi.invoice_id = i.id
+            AND cpi.verification_status != 'approved'
+        )
+        ELSE (
+          SELECT COUNT(*)
+          FROM construction_plan_items cpi
+          WHERE cpi.project_id = i.project_id
+            AND cpi.invoice_status IN ('received','approval_needed')
+            AND cpi.verification_status != 'approved'
+        )
+      END as payment_hold_count
     FROM invoices i
     JOIN users u ON u.id = i.contractor_id
     JOIN projects p ON p.id = i.project_id
@@ -95,13 +246,16 @@ router.get('/:id', authorizeProjectAccess, (req, res) => {
   }
 
   const lineItems = db.prepare('SELECT * FROM invoice_line_items WHERE invoice_id = ? ORDER BY sort_order').all(req.params.id);
-  res.json({ ...invoice, line_items: lineItems });
+  const linkedWorkItems = getInvoiceWorkItems(db, req.params.id);
+  const paymentHolds = getFieldWorkPaymentHolds(db, req.params.projectId, req.params.id);
+  res.json({ ...invoice, line_items: lineItems, linked_work_items: linkedWorkItems, payment_holds: paymentHolds });
 });
 
 // POST /api/projects/:projectId/invoices - create invoice
 router.post('/', authorizeProjectAccess, async (req, res) => {
   try {
     const { notes, line_items, send_email } = req.body;
+    const workItemIds = req.body.work_item_ids;
     const db = getDb();
 
     // Generate invoice number starting at 1023
@@ -116,20 +270,30 @@ router.post('/', authorizeProjectAccess, async (req, res) => {
     const total = (line_items || []).reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
     const id = uuidv4();
 
-    db.prepare(`
-      INSERT INTO invoices (id, invoice_number, project_id, contractor_id, status, notes, total)
-      VALUES (?, ?, ?, ?, 'draft', ?, ?)
-    `).run(id, invoiceNumber, req.params.projectId, req.user.id, notes || null, total);
+    const createInvoice = db.transaction(() => {
+      db.prepare(`
+        INSERT INTO invoices (id, invoice_number, project_id, contractor_id, status, notes, total)
+        VALUES (?, ?, ?, ?, 'draft', ?, ?)
+      `).run(id, invoiceNumber, req.params.projectId, req.user.id, notes || null, total);
 
-    // Insert line items
-    if (line_items && line_items.length > 0) {
-      const insertLine = db.prepare('INSERT INTO invoice_line_items (id, invoice_id, description, amount, sort_order) VALUES (?, ?, ?, ?, ?)');
-      line_items.forEach((item, idx) => {
-        insertLine.run(uuidv4(), id, item.description, parseFloat(item.amount) || 0, idx);
+      if (line_items && line_items.length > 0) {
+        const insertLine = db.prepare('INSERT INTO invoice_line_items (id, invoice_id, description, amount, sort_order) VALUES (?, ?, ?, ?, ?)');
+        line_items.forEach((item, idx) => {
+          insertLine.run(uuidv4(), id, item.description, parseFloat(item.amount) || 0, idx);
+        });
+      }
+
+      syncInvoiceWorkItems(db, {
+        invoiceId: id,
+        projectId: req.params.projectId,
+        user: req.user,
+        workItemIds,
+        markReceived: Boolean(send_email),
       });
-    }
 
-    logActivity({ userId: req.user.id, projectId: req.params.projectId, action: 'invoice_created', entityType: 'invoice', entityId: id });
+      logActivity({ userId: req.user.id, projectId: req.params.projectId, action: 'invoice_created', entityType: 'invoice', entityId: id, details: { linked_work_items: parseWorkItemIds(workItemIds).length } });
+    });
+    createInvoice();
 
     const desktopUrl = buildDesktopInvoiceUrl(req.params.projectId, id);
     const desktopInvoicesUrl = buildDesktopInvoicesUrl();
@@ -178,7 +342,7 @@ router.post('/', authorizeProjectAccess, async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to create invoice' });
+    res.status(err.statusCode || 500).json({ error: err.message || 'Failed to create invoice' });
   }
 });
 
@@ -193,23 +357,36 @@ router.put('/:id', authorizeProjectAccess, (req, res) => {
     if (req.user.role === 'contractor' && invoice.contractor_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
 
     const { notes, line_items, send_email } = req.body;
+    const workItemIds = req.body.work_item_ids;
     const total = (line_items || []).reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
 
-    db.prepare("UPDATE invoices SET notes = ?, total = ?, updated_at = datetime('now') WHERE id = ?")
-      .run(notes ?? invoice.notes, total, req.params.id);
+    const updateInvoice = db.transaction(() => {
+      db.prepare("UPDATE invoices SET notes = ?, total = ?, updated_at = datetime('now') WHERE id = ?")
+        .run(notes ?? invoice.notes, total, req.params.id);
 
-    // Replace line items
-    if (line_items !== undefined) {
-      db.prepare('DELETE FROM invoice_line_items WHERE invoice_id = ?').run(req.params.id);
-      const insertLine = db.prepare('INSERT INTO invoice_line_items (id, invoice_id, description, amount, sort_order) VALUES (?, ?, ?, ?, ?)');
-      line_items.forEach((item, idx) => {
-        insertLine.run(uuidv4(), req.params.id, item.description, parseFloat(item.amount) || 0, idx);
+      if (line_items !== undefined) {
+        db.prepare('DELETE FROM invoice_line_items WHERE invoice_id = ?').run(req.params.id);
+        const insertLine = db.prepare('INSERT INTO invoice_line_items (id, invoice_id, description, amount, sort_order) VALUES (?, ?, ?, ?, ?)');
+        line_items.forEach((item, idx) => {
+          insertLine.run(uuidv4(), req.params.id, item.description, parseFloat(item.amount) || 0, idx);
+        });
+      }
+
+      syncInvoiceWorkItems(db, {
+        invoiceId: req.params.id,
+        projectId: req.params.projectId,
+        user: req.user,
+        workItemIds,
+        markReceived: Boolean(send_email || invoice.status === 'submitted'),
       });
-    }
+
+      logActivity({ userId: req.user.id, projectId: req.params.projectId, action: 'invoice_updated', entityType: 'invoice', entityId: req.params.id, details: { linked_work_items: Array.isArray(workItemIds) ? parseWorkItemIds(workItemIds).length : undefined } });
+    });
+    updateInvoice();
 
     res.json({ message: 'Invoice updated', total });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to update invoice' });
+    res.status(err.statusCode || 500).json({ error: err.message || 'Failed to update invoice' });
   }
 });
 
@@ -239,9 +416,19 @@ router.post('/:id/submit', authorizeProjectAccess, async (req, res) => {
       console.error('PDF generation error:', pdfErr.message);
     }
 
-    // Update status
-    db.prepare("UPDATE invoices SET status = 'submitted', submitted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?")
-      .run(req.params.id);
+    const linkedWorkIds = db.prepare('SELECT construction_plan_item_id FROM invoice_work_items WHERE invoice_id = ?').all(req.params.id).map(row => row.construction_plan_item_id);
+    const submitInvoice = db.transaction(() => {
+      db.prepare("UPDATE invoices SET status = 'submitted', submitted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?")
+        .run(req.params.id);
+      syncInvoiceWorkItems(db, {
+        invoiceId: req.params.id,
+        projectId: req.params.projectId,
+        user: req.user,
+        workItemIds: linkedWorkIds,
+        markReceived: true,
+      });
+    });
+    submitInvoice();
 
     // Send email
     try {
@@ -267,7 +454,7 @@ router.put('/:id/status', authorize('super_admin', 'operations_manager', 'projec
   const invoice = db.prepare('SELECT id, project_id FROM invoices WHERE id = ? AND project_id = ?').get(req.params.id, req.params.projectId);
   if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
   if (['approved', 'paid'].includes(status)) {
-    const holds = getFieldWorkPaymentHolds(db, req.params.projectId);
+    const holds = getFieldWorkPaymentHolds(db, req.params.projectId, req.params.id);
     if (holds.length) {
       return res.status(409).json({
         error: 'Field work must be completed and approved before this invoice can be approved for payment.',
@@ -276,21 +463,14 @@ router.put('/:id/status', authorize('super_admin', 'operations_manager', 'projec
       });
     }
   }
-  db.prepare("UPDATE invoices SET status = ?, updated_at = datetime('now') WHERE id = ?").run(status, req.params.id);
-  logActivity({ userId: req.user.id, projectId: req.params.projectId, action: 'invoice_status_updated', entityType: 'invoice', entityId: req.params.id, details: { status } });
-  res.json({ message: 'Status updated' });
-});
-
-// GET /api/projects/:projectId/invoices/next-number
-router.get('/next-number', (req, res) => {
-  const db = getDb();
-  const maxNum = db.prepare("SELECT invoice_number FROM invoices ORDER BY CAST(REPLACE(invoice_number, 'NUD-', '') AS INTEGER) DESC LIMIT 1").get();
-  let nextNum = 1023;
-  if (maxNum && maxNum.invoice_number) {
-    const num = parseInt(maxNum.invoice_number.replace('NUD-', ''));
-    if (!isNaN(num) && num >= 1023) nextNum = num + 1;
+  const quickbooksStatus = status === 'paid' ? 'queued' : undefined;
+  if (quickbooksStatus) {
+    db.prepare("UPDATE invoices SET status = ?, quickbooks_status = ?, quickbooks_error = NULL, updated_at = datetime('now') WHERE id = ?").run(status, quickbooksStatus, req.params.id);
+  } else {
+    db.prepare("UPDATE invoices SET status = ?, updated_at = datetime('now') WHERE id = ?").run(status, req.params.id);
   }
-  res.json({ invoice_number: `NUD-${nextNum}` });
+  logActivity({ userId: req.user.id, projectId: req.params.projectId, action: 'invoice_status_updated', entityType: 'invoice', entityId: req.params.id, details: { status } });
+  res.json({ message: 'Status updated', quickbooks_status: quickbooksStatus || undefined });
 });
 
 // GET /api/projects/:projectId/invoices/:id/pdf - download PDF

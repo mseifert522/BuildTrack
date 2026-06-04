@@ -33,6 +33,9 @@ interface Invoice {
   created_at: string;
   submitted_at: string;
   updated_at?: string;
+  linked_work_count?: number;
+  payment_hold_count?: number;
+  quickbooks_status?: string;
 }
 
 interface ProjectOption {
@@ -739,7 +742,11 @@ export default function Invoices() {
                           />
                           <span className="min-w-0">
                             <span className="block text-sm font-black text-gray-900">#{invoice.invoice_number}</span>
-                            <span className="block text-xs font-semibold text-gray-500">Notes and attachments in detail view</span>
+                            <span className="block text-xs font-semibold text-gray-500">
+                              {Number(invoice.linked_work_count || 0)} linked field item{Number(invoice.linked_work_count || 0) === 1 ? '' : 's'}
+                              {Number(invoice.payment_hold_count || 0) > 0 ? ` - ${invoice.payment_hold_count} approval hold${Number(invoice.payment_hold_count || 0) === 1 ? '' : 's'}` : ''}
+                              {invoice.quickbooks_status && invoice.quickbooks_status !== 'not_ready' ? ` - QBO ${invoice.quickbooks_status.replace(/_/g, ' ')}` : ''}
+                            </span>
                           </span>
                         </label>
                         {visibleInvoiceColumns.contractor && (
@@ -766,12 +773,13 @@ export default function Invoices() {
                           {isAdminRole(user?.role || '') && invoice.status !== 'paid' && (
                             <button
                               type="button"
-                              disabled={updatingInvoiceId === invoice.id}
+                              disabled={updatingInvoiceId === invoice.id || Number(invoice.payment_hold_count || 0) > 0}
                               onClick={() => updateStatus(invoice, 'paid')}
-                              className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-green-100 bg-green-50 px-3 py-2 text-xs font-black text-green-700 hover:bg-green-100 disabled:opacity-50 cursor-pointer"
+                              className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-green-100 bg-green-50 px-3 py-2 text-xs font-black text-green-700 hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+                              title={Number(invoice.payment_hold_count || 0) > 0 ? 'Field work must be approved before payment' : 'Mark paid'}
                             >
                               <CheckCircle2 className="w-3.5 h-3.5" />
-                              Mark Paid
+                              {Number(invoice.payment_hold_count || 0) > 0 ? 'Held' : 'Mark Paid'}
                             </button>
                           )}
                           {isAdminRole(user?.role || '') && invoice.status !== 'paid' && (

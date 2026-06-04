@@ -479,6 +479,25 @@ export default function ProjectDetail() {
     }
   };
 
+  const reviewFieldWorkTask = async (taskId: string, decision: string) => {
+    const decisionLabel = decision.replace(/_/g, ' ');
+    const comment = decision === 'approved'
+      ? ''
+      : window.prompt(`Add a note for "${decisionLabel}" so the field team knows what to do next:`);
+    if (comment === null) return;
+    if (decision !== 'approved' && !comment.trim()) {
+      toast.error('A note is required when field work is not approved');
+      return;
+    }
+    try {
+      await api.post(`/field-work/projects/${id}/tasks/${taskId}/review`, { decision, comment: comment.trim() });
+      toast.success('Field work review saved');
+      await load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to save field work review');
+    }
+  };
+
   const notesPanel = (compact = false) => (
     <div className="bt-project-notes-panel h-full rounded-xl border border-slate-400 bg-[#D8E0EA] p-3 shadow-[0_10px_24px_rgba(15,23,42,0.12)] sm:p-4">
       <input
@@ -861,10 +880,11 @@ export default function ProjectDetail() {
                 tasks={Array.isArray(fieldWork.tasks) ? fieldWork.tasks : []}
                 counts={fieldWork.counts || {}}
                 canManage={!!canEdit}
-                onStatusChange={updateFieldWorkTask}
-                onApprove={approveFieldWorkTask}
-                onOpenScope={() => setTab('construction-plan')}
-              />
+                      onStatusChange={updateFieldWorkTask}
+                      onApprove={approveFieldWorkTask}
+                      onReview={reviewFieldWorkTask}
+                      onOpenScope={() => setTab('construction-plan')}
+                    />
 
               <RecentFieldPhotosCard
                 projectId={id!}
@@ -1364,6 +1384,7 @@ function FieldWorkStatusPanel({
   canManage,
   onStatusChange,
   onApprove,
+  onReview,
   onOpenScope,
 }: {
   tasks: any[];
@@ -1371,6 +1392,7 @@ function FieldWorkStatusPanel({
   canManage: boolean;
   onStatusChange: (taskId: string, patch: Record<string, any>) => void;
   onApprove: (taskId: string) => void;
+  onReview: (taskId: string, decision: string) => void;
   onOpenScope: () => void;
 }) {
   const visibleTasks = tasks
@@ -1450,13 +1472,36 @@ function FieldWorkStatusPanel({
                         </select>
                       </label>
                       {task.verification_status !== 'approved' && (
-                        <button
-                          type="button"
-                          onClick={() => onApprove(task.id)}
-                          className="inline-flex min-h-10 items-center justify-center rounded-md bg-emerald-600 px-3 text-sm font-black text-white hover:bg-emerald-700"
-                        >
-                          Approve Field Work
-                        </button>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <button
+                            type="button"
+                            onClick={() => onApprove(task.id)}
+                            className="inline-flex min-h-10 items-center justify-center rounded-md bg-emerald-600 px-3 text-sm font-black text-white hover:bg-emerald-700"
+                          >
+                            Approve Field Work
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onReview(task.id, 'needs_correction')}
+                            className="inline-flex min-h-10 items-center justify-center rounded-md bg-amber-600 px-3 text-sm font-black text-white hover:bg-amber-700"
+                          >
+                            Needs Correction
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onReview(task.id, 'needs_work')}
+                            className="inline-flex min-h-10 items-center justify-center rounded-md border border-amber-200 bg-white px-3 text-sm font-black text-amber-700 hover:bg-amber-50"
+                          >
+                            Needs Work
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onReview(task.id, 'disapproved')}
+                            className="inline-flex min-h-10 items-center justify-center rounded-md border border-red-200 bg-white px-3 text-sm font-black text-red-700 hover:bg-red-50"
+                          >
+                            Disapprove
+                          </button>
+                        </div>
                       )}
                     </>
                   ) : (

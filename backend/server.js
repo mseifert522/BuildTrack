@@ -196,14 +196,56 @@ app.get('/api/invoices', authenticate, (req, res) => {
   if (!['super_admin', 'operations_manager', 'project_manager', 'admin_assistant'].includes(req.user.role)) {
     // Contractors see their own
     const invoices = db.prepare(`
-      SELECT i.*, u.name as contractor_name, p.address, p.job_name
+      SELECT
+        i.*,
+        u.name as contractor_name,
+        p.address,
+        p.job_name,
+        (SELECT COUNT(*) FROM invoice_work_items iwi WHERE iwi.invoice_id = i.id) as linked_work_count,
+        CASE
+          WHEN (SELECT COUNT(*) FROM invoice_work_items iwi WHERE iwi.invoice_id = i.id) > 0 THEN (
+            SELECT COUNT(*)
+            FROM invoice_work_items iwi
+            JOIN construction_plan_items cpi ON cpi.id = iwi.construction_plan_item_id
+            WHERE iwi.invoice_id = i.id
+              AND cpi.verification_status != 'approved'
+          )
+          ELSE (
+            SELECT COUNT(*)
+            FROM construction_plan_items cpi
+            WHERE cpi.project_id = i.project_id
+              AND cpi.invoice_status IN ('received','approval_needed')
+              AND cpi.verification_status != 'approved'
+          )
+        END as payment_hold_count
       FROM invoices i JOIN users u ON u.id = i.contractor_id JOIN projects p ON p.id = i.project_id
       WHERE i.contractor_id = ? ORDER BY i.created_at DESC
     `).all(req.user.id);
     return res.json(invoices);
   }
   const invoices = db.prepare(`
-    SELECT i.*, u.name as contractor_name, p.address, p.job_name
+    SELECT
+      i.*,
+      u.name as contractor_name,
+      p.address,
+      p.job_name,
+      (SELECT COUNT(*) FROM invoice_work_items iwi WHERE iwi.invoice_id = i.id) as linked_work_count,
+      CASE
+        WHEN (SELECT COUNT(*) FROM invoice_work_items iwi WHERE iwi.invoice_id = i.id) > 0 THEN (
+          SELECT COUNT(*)
+          FROM invoice_work_items iwi
+          JOIN construction_plan_items cpi ON cpi.id = iwi.construction_plan_item_id
+          WHERE iwi.invoice_id = i.id
+            AND cpi.verification_status != 'approved'
+        )
+        ELSE (
+          SELECT COUNT(*)
+          FROM construction_plan_items cpi
+          WHERE cpi.project_id = i.project_id
+            AND cpi.invoice_status IN ('received','approval_needed')
+            AND cpi.verification_status != 'approved'
+        )
+      END as payment_hold_count
     FROM invoices i JOIN users u ON u.id = i.contractor_id JOIN projects p ON p.id = i.project_id
     ORDER BY i.created_at DESC LIMIT 200
   `).all();

@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import api from '../lib/api';
 import { Loading } from '../components/ui';
-import { Plus, Trash2, ArrowLeft, Send, Save, Download, Paperclip } from 'lucide-react';
+import { Plus, Trash2, ArrowLeft, Send, Save, Download, Paperclip, ClipboardList, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface LineItem {
@@ -127,6 +127,8 @@ export default function InvoiceBuilder() {
 
   const displayInvoiceNum = invoice?.invoice_number || nextInvoiceNumber;
   const attachments = Array.isArray(invoice?.attachments) ? invoice.attachments : [];
+  const linkedWorkItems = Array.isArray(invoice?.linked_work_items) ? invoice.linked_work_items : [];
+  const paymentHolds = Array.isArray(invoice?.payment_holds) ? invoice.payment_holds : [];
 
   return (
     <div className="min-h-full bg-gray-50">
@@ -184,6 +186,61 @@ export default function InvoiceBuilder() {
             </div>
           </div>
         </div>
+
+        {invoiceId && (
+          <section className="bg-white rounded-xl border border-gray-200 p-5" aria-labelledby="linked-field-work-heading">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
+                  <ClipboardList className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 id="linked-field-work-heading" className="text-sm font-black text-gray-900">Field Work Payment Check</h2>
+                  <p className="mt-1 text-xs font-semibold text-gray-500">Work linked from the mobile contractor invoice flow.</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-black ${paymentHolds.length > 0 ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-200' : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'}`}>
+                  {paymentHolds.length > 0 ? <AlertTriangle className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                  {paymentHolds.length > 0 ? `${paymentHolds.length} hold${paymentHolds.length === 1 ? '' : 's'}` : 'Payment clear'}
+                </span>
+                <span className="inline-flex rounded-full bg-gray-100 px-2.5 py-1 text-xs font-black text-gray-600">
+                  QBO: {String(invoice?.quickbooks_status || 'not_ready').replace(/_/g, ' ')}
+                </span>
+              </div>
+            </div>
+
+            {linkedWorkItems.length > 0 ? (
+              <div className="space-y-2">
+                {linkedWorkItems.map((item: any) => {
+                  const approved = item.verification_status === 'approved';
+                  return (
+                    <div key={item.id} className={`rounded-xl border px-3 py-3 ${approved ? 'border-emerald-100 bg-emerald-50' : 'border-amber-100 bg-amber-50'}`}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-black text-gray-900">{item.title}</p>
+                          <p className="mt-1 text-xs font-semibold text-gray-600">
+                            {String(item.status || 'not_started').replace(/_/g, ' ')} - {String(item.verification_status || 'not_requested').replace(/_/g, ' ')} - {String(item.invoice_status || 'not_received').replace(/_/g, ' ')}
+                          </p>
+                        </div>
+                        <span className={`flex-shrink-0 rounded-full px-2 py-1 text-[10px] font-black uppercase tracking-wide ${approved ? 'bg-white text-emerald-700 ring-1 ring-emerald-200' : 'bg-white text-amber-700 ring-1 ring-amber-200'}`}>
+                          {approved ? 'Approved' : 'Needs review'}
+                        </span>
+                      </div>
+                      {item.approved_by_name && (
+                        <p className="mt-2 text-xs font-semibold text-gray-500">Approved by {item.approved_by_name}</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-4 text-sm font-semibold text-gray-500">
+                No field work is linked to this invoice. If this is a field-work invoice, ask the contractor or office team to link the matching scope tasks before payment approval.
+              </div>
+            )}
+          </section>
+        )}
 
         {/* Line Items */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">

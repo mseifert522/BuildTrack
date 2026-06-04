@@ -395,17 +395,41 @@ export default function Dashboard() {
     },
   ];
 
+  const heroStatusCards = [
+    {
+      label: 'Active Work',
+      value: activeRehabs,
+      icon: FolderOpen,
+      accent: '#60A5FA',
+      bg: 'rgba(96,165,250,0.14)',
+      border: 'rgba(96,165,250,0.34)',
+    },
+    {
+      label: 'Field Checks',
+      value: fieldWatchTotal,
+      icon: ClipboardList,
+      accent: '#F59E0B',
+      bg: 'rgba(245,158,11,0.14)',
+      border: 'rgba(245,158,11,0.36)',
+    },
+    {
+      label: 'Completed',
+      value: completedProjects,
+      icon: CheckCircle2,
+      accent: '#34D399',
+      bg: 'rgba(52,211,153,0.14)',
+      border: 'rgba(52,211,153,0.32)',
+    },
+  ];
+
   return (
     <div className="bt-desktop-page bt-dashboard-page" style={{ minHeight: '100%' }}>
       {/* Hero header bar */}
       <div
-        className="border-b border-slate-800 bg-white px-6 py-5 md:px-8"
-        style={{
-          boxShadow: '0 1px 2px rgba(15,23,42,0.04)',
-        }}
+        className="bt-dashboard-hero border-b px-6 py-5 md:px-8"
       >
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div>
+        <div className="relative z-10 mx-auto grid max-w-7xl gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+          <div className="min-w-0">
             <div className="flex items-center gap-3 mb-1">
               <span
                 className="inline-flex items-center gap-1.5 rounded-sm border border-orange-400/70 bg-orange-950/30 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-orange-300"
@@ -421,7 +445,28 @@ export default function Dashboard() {
               {formatEasternDate(now.toISOString(), { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} - {roleLabels[user?.role || '']}
             </p>
           </div>
-          <div className="hidden md:flex items-center gap-3">
+          <div className="hidden items-center gap-3 md:flex">
+            <div className="hidden grid-cols-3 gap-2 xl:grid">
+              {heroStatusCards.map(card => (
+                <div
+                  key={card.label}
+                  className="bt-dashboard-hero-chip"
+                  style={{
+                    '--bt-hero-chip-accent': card.accent,
+                    '--bt-hero-chip-panel': card.bg,
+                    '--bt-hero-chip-border': card.border,
+                  } as CSSProperties}
+                >
+                  <span className="bt-dashboard-hero-chip-icon">
+                    <card.icon className="h-3.5 w-3.5" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-[10px] font-black uppercase tracking-wide">{card.label}</span>
+                    <span className="block text-sm font-black tabular-nums">{card.value}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
             <Link
               to="/projects"
               className="bt-btn bt-btn-primary"

@@ -531,6 +531,10 @@ function initializeSchema() {
       status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','submitted','reviewed','approved','paid')),
       notes TEXT,
       total REAL NOT NULL DEFAULT 0,
+      quickbooks_status TEXT NOT NULL DEFAULT 'not_ready' CHECK(quickbooks_status IN ('not_ready','queued','synced','failed')),
+      quickbooks_bill_id TEXT,
+      quickbooks_error TEXT,
+      quickbooks_synced_at TEXT,
       submitted_at TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -547,6 +551,60 @@ function initializeSchema() {
       sort_order INTEGER DEFAULT 0,
       FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
     );
+
+    -- Field work items linked to a contractor invoice. This lets mobile field
+    -- invoices and desktop payment review use the same source of truth.
+    CREATE TABLE IF NOT EXISTS invoice_work_items (
+      id TEXT PRIMARY KEY,
+      invoice_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      construction_plan_item_id TEXT NOT NULL,
+      linked_by TEXT NOT NULL,
+      linked_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(invoice_id, construction_plan_item_id),
+      FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (construction_plan_item_id) REFERENCES construction_plan_items(id) ON DELETE CASCADE,
+      FOREIGN KEY (linked_by) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_invoice_work_items_invoice
+      ON invoice_work_items(invoice_id);
+
+    CREATE INDEX IF NOT EXISTS idx_invoice_work_items_project_item
+      ON invoice_work_items(project_id, construction_plan_item_id);
+
+    -- Durable workflow ledger for field-work status, evidence, review, and
+    -- payment-readiness events.
+    CREATE TABLE IF NOT EXISTS work_item_status_events (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      construction_plan_item_id TEXT NOT NULL,
+      invoice_id TEXT,
+      actor_user_id TEXT NOT NULL,
+      actor_role TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      decision TEXT,
+      previous_status TEXT,
+      next_status TEXT,
+      previous_verification_status TEXT,
+      next_verification_status TEXT,
+      previous_invoice_status TEXT,
+      next_invoice_status TEXT,
+      comment TEXT,
+      evidence_summary TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (construction_plan_item_id) REFERENCES construction_plan_items(id) ON DELETE CASCADE,
+      FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE SET NULL,
+      FOREIGN KEY (actor_user_id) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_work_item_status_events_item_created
+      ON work_item_status_events(construction_plan_item_id, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_work_item_status_events_project_created
+      ON work_item_status_events(project_id, created_at);
 
     -- Emailed invoice intake. These records are intentionally separate from
     -- project-bound invoices until office staff files them to the right job.
@@ -1261,6 +1319,64 @@ function initializeSchema() {
     `);
   } catch (_) { /* best-effort */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_construction_plan_watch_status ON construction_plan_items(project_id, status, verification_status, invoice_status, target_date)`); } catch (_) { /* best-effort */ }
+  try { db.exec(`ALTER TABLE invoices ADD COLUMN quickbooks_status TEXT NOT NULL DEFAULT 'not_ready'`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE invoices ADD COLUMN quickbooks_bill_id TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE invoices ADD COLUMN quickbooks_error TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE invoices ADD COLUMN quickbooks_synced_at TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`UPDATE invoices SET quickbooks_status = 'not_ready' WHERE quickbooks_status IS NULL OR quickbooks_status NOT IN ('not_ready','queued','synced','failed')`); } catch (_) { /* best-effort */ }
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS invoice_work_items (
+        id TEXT PRIMARY KEY,
+        invoice_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        construction_plan_item_id TEXT NOT NULL,
+        linked_by TEXT NOT NULL,
+        linked_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(invoice_id, construction_plan_item_id),
+        FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+        FOREIGN KEY (construction_plan_item_id) REFERENCES construction_plan_items(id) ON DELETE CASCADE,
+        FOREIGN KEY (linked_by) REFERENCES users(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_invoice_work_items_invoice
+        ON invoice_work_items(invoice_id);
+
+      CREATE INDEX IF NOT EXISTS idx_invoice_work_items_project_item
+        ON invoice_work_items(project_id, construction_plan_item_id);
+
+      CREATE TABLE IF NOT EXISTS work_item_status_events (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        construction_plan_item_id TEXT NOT NULL,
+        invoice_id TEXT,
+        actor_user_id TEXT NOT NULL,
+        actor_role TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        decision TEXT,
+        previous_status TEXT,
+        next_status TEXT,
+        previous_verification_status TEXT,
+        next_verification_status TEXT,
+        previous_invoice_status TEXT,
+        next_invoice_status TEXT,
+        comment TEXT,
+        evidence_summary TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+        FOREIGN KEY (construction_plan_item_id) REFERENCES construction_plan_items(id) ON DELETE CASCADE,
+        FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE SET NULL,
+        FOREIGN KEY (actor_user_id) REFERENCES users(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_work_item_status_events_item_created
+        ON work_item_status_events(construction_plan_item_id, created_at);
+
+      CREATE INDEX IF NOT EXISTS idx_work_item_status_events_project_created
+        ON work_item_status_events(project_id, created_at);
+    `);
+  } catch (_) { /* workflow tables already exist */ }
   try { db.exec(`ALTER TABLE users ADD COLUMN pin TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE users ADD COLUMN contractor_category TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE users ADD COLUMN contractor_secondary_category TEXT`); } catch (_) { /* already exists */ }

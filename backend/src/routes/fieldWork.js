@@ -3,6 +3,7 @@ const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/schema');
 const { authenticate, authorize, authorizeProjectAccess } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
+const { recordWorkItemEvent } = require('../utils/workItemEvents');
 
 const router = express.Router();
 router.use(authenticate);
@@ -11,6 +12,7 @@ const MANAGEMENT_ROLES = ['super_admin', 'operations_manager', 'project_manager'
 const TASK_STATUSES = new Set(['not_started', 'in_progress', 'waiting_materials', 'needs_review', 'completed']);
 const VERIFICATION_STATUSES = new Set(['not_requested', 'pending_review', 'approved', 'rejected']);
 const INVOICE_STATUSES = new Set(['not_received', 'received', 'approval_needed', 'approved_for_payment', 'paid']);
+const REVIEW_DECISIONS = new Set(['approved', 'disapproved', 'needs_work', 'needs_correction']);
 
 function isManagement(user) {
   return MANAGEMENT_ROLES.includes(user?.role);
@@ -23,6 +25,43 @@ function activePhotoSql(alias = 'ph') {
 function normalizeEnum(value, allowed, fallback) {
   const requested = String(value || '').trim();
   return allowed.has(requested) ? requested : fallback;
+}
+
+function buildReviewState(item, decision) {
+  if (decision === 'approved') {
+    return {
+      status: 'completed',
+      verification_status: 'approved',
+      invoice_status: ['received', 'approval_needed'].includes(item.invoice_status)
+        ? 'approved_for_payment'
+        : (item.invoice_status || 'not_received'),
+    };
+  }
+  if (decision === 'disapproved') {
+    return {
+      status: 'needs_review',
+      verification_status: 'rejected',
+      invoice_status: ['received', 'approved_for_payment'].includes(item.invoice_status)
+        ? 'approval_needed'
+        : (item.invoice_status || 'not_received'),
+    };
+  }
+  if (decision === 'needs_work') {
+    return {
+      status: 'in_progress',
+      verification_status: 'rejected',
+      invoice_status: ['received', 'approved_for_payment'].includes(item.invoice_status)
+        ? 'approval_needed'
+        : (item.invoice_status || 'not_received'),
+    };
+  }
+  return {
+    status: 'in_progress',
+    verification_status: 'rejected',
+    invoice_status: ['received', 'approved_for_payment'].includes(item.invoice_status)
+      ? 'approval_needed'
+      : (item.invoice_status || 'not_received'),
+  };
 }
 
 function accessJoin(req, projectAlias = 'p') {
@@ -301,36 +340,49 @@ router.post('/projects/:projectId/tasks', authorize(...MANAGEMENT_ROLES), author
     const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) as max FROM construction_plan_items WHERE project_id = ?').get(req.params.projectId);
     const taskId = uuidv4();
 
-    db.prepare(`
-      INSERT INTO construction_plan_items (
-        id, project_id, title, description, category, status, verification_status, invoice_status,
-        sort_order, assigned_to, start_date, target_date, approval_notes, last_field_update_at, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
-    `).run(
-      taskId,
-      req.params.projectId,
-      title,
-      req.body.description || null,
-      String(req.body.category || 'Field Work').trim() || 'Field Work',
-      status,
-      verificationStatus,
-      invoiceStatus,
-      maxOrder.max + 1,
-      req.body.assigned_to || null,
-      req.body.start_date || null,
-      req.body.target_date || null,
-      req.body.approval_notes || null,
-      req.user.id
-    );
+    const createTask = db.transaction(() => {
+      db.prepare(`
+        INSERT INTO construction_plan_items (
+          id, project_id, title, description, category, status, verification_status, invoice_status,
+          sort_order, assigned_to, start_date, target_date, approval_notes, last_field_update_at, created_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
+      `).run(
+        taskId,
+        req.params.projectId,
+        title,
+        req.body.description || null,
+        String(req.body.category || 'Field Work').trim() || 'Field Work',
+        status,
+        verificationStatus,
+        invoiceStatus,
+        maxOrder.max + 1,
+        req.body.assigned_to || null,
+        req.body.start_date || null,
+        req.body.target_date || null,
+        req.body.approval_notes || null,
+        req.user.id
+      );
 
-    logActivity({
-      userId: req.user.id,
-      projectId: req.params.projectId,
-      action: 'field_work_task_created',
-      entityType: 'construction_plan_item',
-      entityId: taskId,
-      details: { title, status, verification_status: verificationStatus, invoice_status: invoiceStatus },
+      recordWorkItemEvent(db, {
+        projectId: req.params.projectId,
+        itemId: taskId,
+        actor: req.user,
+        eventType: 'created',
+        before: {},
+        after: { status, verification_status: verificationStatus, invoice_status: invoiceStatus },
+        comment: req.body.approval_notes || null,
+      });
+
+      logActivity({
+        userId: req.user.id,
+        projectId: req.params.projectId,
+        action: 'field_work_task_created',
+        entityType: 'construction_plan_item',
+        entityId: taskId,
+        details: { title, status, verification_status: verificationStatus, invoice_status: invoiceStatus },
+      });
     });
+    createTask();
     res.status(201).json({ id: taskId });
   } catch (err) {
     console.error(err);
@@ -367,38 +419,51 @@ router.put('/projects/:projectId/tasks/:itemId', authorize(...MANAGEMENT_ROLES),
       ? new Date().toISOString()
       : (status !== 'completed' ? null : item.completed_at);
 
-    db.prepare(`
-      UPDATE construction_plan_items
-      SET title = ?, description = ?, category = ?, status = ?, verification_status = ?, invoice_status = ?,
-          assigned_to = ?, start_date = ?, target_date = ?, approved_by = ?, approved_at = ?,
-          approval_notes = ?, last_field_update_at = datetime('now'), completed_at = ?, updated_at = datetime('now')
-      WHERE id = ? AND project_id = ?
-    `).run(
-      req.body.title !== undefined ? String(req.body.title || '').trim() || item.title : item.title,
-      req.body.description !== undefined ? req.body.description || null : item.description,
-      req.body.category !== undefined ? String(req.body.category || '').trim() || 'Field Work' : item.category,
-      status,
-      verificationStatus,
-      invoiceStatus,
-      req.body.assigned_to !== undefined ? req.body.assigned_to || null : item.assigned_to,
-      req.body.start_date !== undefined ? req.body.start_date || null : item.start_date,
-      req.body.target_date !== undefined ? req.body.target_date || null : item.target_date,
-      approvedBy,
-      approvedAt,
-      req.body.approval_notes !== undefined ? req.body.approval_notes || null : item.approval_notes,
-      completedAt,
-      req.params.itemId,
-      req.params.projectId
-    );
+    const updateTask = db.transaction(() => {
+      db.prepare(`
+        UPDATE construction_plan_items
+        SET title = ?, description = ?, category = ?, status = ?, verification_status = ?, invoice_status = ?,
+            assigned_to = ?, start_date = ?, target_date = ?, approved_by = ?, approved_at = ?,
+            approval_notes = ?, last_field_update_at = datetime('now'), completed_at = ?, updated_at = datetime('now')
+        WHERE id = ? AND project_id = ?
+      `).run(
+        req.body.title !== undefined ? String(req.body.title || '').trim() || item.title : item.title,
+        req.body.description !== undefined ? req.body.description || null : item.description,
+        req.body.category !== undefined ? String(req.body.category || '').trim() || 'Field Work' : item.category,
+        status,
+        verificationStatus,
+        invoiceStatus,
+        req.body.assigned_to !== undefined ? req.body.assigned_to || null : item.assigned_to,
+        req.body.start_date !== undefined ? req.body.start_date || null : item.start_date,
+        req.body.target_date !== undefined ? req.body.target_date || null : item.target_date,
+        approvedBy,
+        approvedAt,
+        req.body.approval_notes !== undefined ? req.body.approval_notes || null : item.approval_notes,
+        completedAt,
+        req.params.itemId,
+        req.params.projectId
+      );
 
-    logActivity({
-      userId: req.user.id,
-      projectId: req.params.projectId,
-      action: 'field_work_task_updated',
-      entityType: 'construction_plan_item',
-      entityId: req.params.itemId,
-      details: { status, verification_status: verificationStatus, invoice_status: invoiceStatus },
+      recordWorkItemEvent(db, {
+        projectId: req.params.projectId,
+        itemId: req.params.itemId,
+        actor: req.user,
+        eventType: 'status_updated',
+        before: item,
+        after: { status, verification_status: verificationStatus, invoice_status: invoiceStatus },
+        comment: req.body.approval_notes || req.body.comment || null,
+      });
+
+      logActivity({
+        userId: req.user.id,
+        projectId: req.params.projectId,
+        action: 'field_work_task_updated',
+        entityType: 'construction_plan_item',
+        entityId: req.params.itemId,
+        details: { status, verification_status: verificationStatus, invoice_status: invoiceStatus },
+      });
     });
+    updateTask();
     res.json({ message: 'Field work task updated' });
   } catch (err) {
     console.error(err);
@@ -417,32 +482,123 @@ router.post('/projects/:projectId/tasks/:itemId/approve', authorize(...MANAGEMEN
       ? 'approved_for_payment'
       : (item.invoice_status || 'not_received');
 
-    db.prepare(`
-      UPDATE construction_plan_items
-      SET status = 'completed',
-          verification_status = 'approved',
-          invoice_status = ?,
-          approved_by = ?,
-          approved_at = ?,
-          approval_notes = ?,
-          completed_at = COALESCE(completed_at, ?),
-          last_field_update_at = datetime('now'),
-          updated_at = datetime('now')
-      WHERE id = ? AND project_id = ?
-    `).run(nextInvoiceStatus, req.user.id, approvedAt, req.body.approval_notes || item.approval_notes || null, approvedAt, req.params.itemId, req.params.projectId);
+    const approveTask = db.transaction(() => {
+      db.prepare(`
+        UPDATE construction_plan_items
+        SET status = 'completed',
+            verification_status = 'approved',
+            invoice_status = ?,
+            approved_by = ?,
+            approved_at = ?,
+            approval_notes = ?,
+            completed_at = COALESCE(completed_at, ?),
+            last_field_update_at = datetime('now'),
+            updated_at = datetime('now')
+        WHERE id = ? AND project_id = ?
+      `).run(nextInvoiceStatus, req.user.id, approvedAt, req.body.approval_notes || item.approval_notes || null, approvedAt, req.params.itemId, req.params.projectId);
 
-    logActivity({
-      userId: req.user.id,
-      projectId: req.params.projectId,
-      action: 'field_work_task_approved',
-      entityType: 'construction_plan_item',
-      entityId: req.params.itemId,
-      details: { title: item.title, invoice_status: nextInvoiceStatus },
+      recordWorkItemEvent(db, {
+        projectId: req.params.projectId,
+        itemId: req.params.itemId,
+        actor: req.user,
+        eventType: 'review_decision',
+        decision: 'approved',
+        before: item,
+        after: { status: 'completed', verification_status: 'approved', invoice_status: nextInvoiceStatus },
+        comment: req.body.approval_notes || item.approval_notes || null,
+      });
+
+      logActivity({
+        userId: req.user.id,
+        projectId: req.params.projectId,
+        action: 'field_work_task_approved',
+        entityType: 'construction_plan_item',
+        entityId: req.params.itemId,
+        details: { title: item.title, invoice_status: nextInvoiceStatus },
+      });
     });
+    approveTask();
     res.json({ message: 'Field work task approved', approved_at: approvedAt });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to approve field work task' });
+  }
+});
+
+router.post('/projects/:projectId/tasks/:itemId/review', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, (req, res) => {
+  try {
+    const db = getDb();
+    const item = db.prepare('SELECT * FROM construction_plan_items WHERE id = ? AND project_id = ?').get(req.params.itemId, req.params.projectId);
+    if (!item) return res.status(404).json({ error: 'Field work task not found' });
+
+    const decision = normalizeEnum(req.body.decision, REVIEW_DECISIONS, '');
+    if (!decision) {
+      return res.status(400).json({ error: 'Review decision must be approved, disapproved, needs_work, or needs_correction' });
+    }
+
+    const comment = String(req.body.comment || req.body.approval_notes || '').trim();
+    if (decision !== 'approved' && !comment) {
+      return res.status(400).json({ error: 'A comment is required when field work is not approved' });
+    }
+
+    const next = buildReviewState(item, decision);
+    const reviewedAt = new Date().toISOString();
+    const approvalNotes = comment || item.approval_notes || null;
+    const approvedBy = decision === 'approved' ? req.user.id : null;
+    const approvedAt = decision === 'approved' ? reviewedAt : null;
+    const completedAt = decision === 'approved' ? (item.completed_at || reviewedAt) : null;
+
+    const reviewTask = db.transaction(() => {
+      db.prepare(`
+        UPDATE construction_plan_items
+        SET status = ?,
+            verification_status = ?,
+            invoice_status = ?,
+            approved_by = ?,
+            approved_at = ?,
+            approval_notes = ?,
+            completed_at = ?,
+            last_field_update_at = datetime('now'),
+            updated_at = datetime('now')
+        WHERE id = ? AND project_id = ?
+      `).run(
+        next.status,
+        next.verification_status,
+        next.invoice_status,
+        approvedBy,
+        approvedAt,
+        approvalNotes,
+        completedAt,
+        req.params.itemId,
+        req.params.projectId
+      );
+
+      recordWorkItemEvent(db, {
+        projectId: req.params.projectId,
+        itemId: req.params.itemId,
+        actor: req.user,
+        eventType: 'review_decision',
+        decision,
+        before: item,
+        after: next,
+        comment: approvalNotes,
+      });
+
+      logActivity({
+        userId: req.user.id,
+        projectId: req.params.projectId,
+        action: 'field_work_review_decision',
+        entityType: 'construction_plan_item',
+        entityId: req.params.itemId,
+        details: { title: item.title, decision, status: next.status, verification_status: next.verification_status, invoice_status: next.invoice_status },
+      });
+    });
+    reviewTask();
+
+    res.json({ message: 'Field work review saved', decision, ...next });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to save field work review' });
   }
 });
 

@@ -6,6 +6,7 @@ const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/schema');
 const { authenticate, authorizeProjectAccess } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
+const { recordWorkItemEvent } = require('../utils/workItemEvents');
 const { convertHeicUploadToJpeg } = require('../utils/mediaConversion');
 
 const router = express.Router({ mergeParams: true });
@@ -544,6 +545,7 @@ router.post('/', uploadProjectPhotos, async (req, res) => {
     }
 
     if (construction_plan_item_id) {
+      const beforeItem = db.prepare('SELECT * FROM construction_plan_items WHERE id = ? AND project_id = ?').get(construction_plan_item_id, req.params.projectId);
       db.prepare(`
         UPDATE construction_plan_items
         SET last_field_update_at = datetime('now'),
@@ -558,6 +560,22 @@ router.post('/', uploadProjectPhotos, async (req, res) => {
             updated_at = datetime('now')
         WHERE id = ? AND project_id = ?
       `).run(construction_plan_item_id, req.params.projectId);
+      const afterItem = db.prepare('SELECT * FROM construction_plan_items WHERE id = ? AND project_id = ?').get(construction_plan_item_id, req.params.projectId);
+      if (beforeItem && afterItem) {
+        recordWorkItemEvent(db, {
+          projectId: req.params.projectId,
+          itemId: construction_plan_item_id,
+          actor: req.user,
+          eventType: 'evidence_uploaded',
+          before: beforeItem,
+          after: afterItem,
+          comment: sharedBatchNote || inserted.find(photo => photo.individual_note)?.individual_note || caption || null,
+          evidenceSummary: {
+            photo_count: inserted.length,
+            photo_ids: inserted.map(photo => photo.id),
+          },
+        });
+      }
       logActivity({
         userId: req.user.id,
         projectId: req.params.projectId,
