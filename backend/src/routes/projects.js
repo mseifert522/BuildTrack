@@ -78,13 +78,41 @@ function getConstructionPlan(db, projectId) {
 }
 
 function getProjectScopes(db, projectId) {
-  return db.prepare(`
+  const scopes = db.prepare(`
     SELECT ps.*, u.name as created_by_name
     FROM project_scopes ps
     LEFT JOIN users u ON u.id = ps.created_by
     WHERE ps.project_id = ?
     ORDER BY ps.sort_order ASC, datetime(ps.created_at) ASC
   `).all(projectId);
+
+  if (!scopes.length) return scopes;
+
+  const estimateDocuments = db.prepare(`
+    SELECT
+      psd.id as scope_document_id,
+      psd.scope_id,
+      psd.attached_at,
+      d.*,
+      u.name as uploaded_by_name
+    FROM project_scope_documents psd
+    JOIN project_documents d ON d.id = psd.document_id
+    LEFT JOIN users u ON u.id = d.uploaded_by
+    WHERE psd.project_id = ?
+    ORDER BY datetime(psd.attached_at) DESC, datetime(d.created_at) DESC
+  `).all(projectId);
+
+  const documentsByScope = new Map();
+  for (const doc of estimateDocuments) {
+    const rows = documentsByScope.get(doc.scope_id) || [];
+    rows.push(doc);
+    documentsByScope.set(doc.scope_id, rows);
+  }
+
+  return scopes.map(scope => ({
+    ...scope,
+    estimate_documents: documentsByScope.get(scope.id) || [],
+  }));
 }
 
 function lifecycleFromStatus(status, fallback = 'under_construction') {
@@ -123,6 +151,28 @@ const mainPhotoUpload = multer({
     if (!file.mimetype.startsWith('image/')) return cb(new Error('Only image files allowed'));
     cb(null, true);
   },
+});
+
+function projectDocumentUploadRoot(projectId) {
+  return path.join(process.env.UPLOADS_PATH || './uploads', 'documents', projectId);
+}
+
+const scopeEstimateStorage = multer.diskStorage({
+  destination: (req, _file, cb) => {
+    const uploadDir = projectDocumentUploadRoot(req.params.id);
+    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+    cb(null, uploadDir);
+  },
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    cb(null, `${ts}_${uuidv4()}${ext}`);
+  },
+});
+
+const scopeEstimateUpload = multer({
+  storage: scopeEstimateStorage,
+  limits: { fileSize: Math.max(Number.parseInt(process.env.MAX_FILE_SIZE_MB || '20', 10), 1) * 1024 * 1024 },
 });
 
 function removeOldMainPhoto(url) {
@@ -546,6 +596,81 @@ router.put('/:id/scopes/:scopeId', authorize(...MANAGEMENT_ROLES), authorizeProj
     res.status(500).json({ error: 'Failed to update scope of work' });
   }
 });
+
+// POST /api/projects/:id/scopes/:scopeId/estimate-documents
+router.post(
+  '/:id/scopes/:scopeId/estimate-documents',
+  authorize(...MANAGEMENT_ROLES),
+  authorizeProjectAccess,
+  (req, res, next) => {
+    const db = getDb();
+    const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const scope = db.prepare('SELECT id, scope_title FROM project_scopes WHERE id = ? AND project_id = ?').get(req.params.scopeId, req.params.id);
+    if (!scope) return res.status(404).json({ error: 'Scope of work not found' });
+
+    req.project = project;
+    req.scope = scope;
+    next();
+  },
+  scopeEstimateUpload.array('documents', 10),
+  (req, res) => {
+    if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No estimate document uploaded' });
+
+    const db = getDb();
+    const inserted = [];
+    try {
+      const insertDocuments = db.transaction(files => {
+        for (const file of files) {
+          const documentId = uuidv4();
+          const scopeDocumentId = uuidv4();
+          db.prepare(`
+            INSERT INTO project_documents (id, project_id, filename, original_name, mime_type, size, document_type, uploaded_by)
+            VALUES (?, ?, ?, ?, ?, ?, 'quotes', ?)
+          `).run(documentId, req.project.id, file.filename, file.originalname, file.mimetype, file.size, req.user.id);
+
+          db.prepare(`
+            INSERT INTO project_scope_documents (id, project_id, scope_id, document_id, attached_by)
+            VALUES (?, ?, ?, ?, ?)
+          `).run(scopeDocumentId, req.project.id, req.scope.id, documentId, req.user.id);
+
+          inserted.push({
+            id: documentId,
+            scope_document_id: scopeDocumentId,
+            project_id: req.project.id,
+            scope_id: req.scope.id,
+            filename: file.filename,
+            original_name: file.originalname,
+            mime_type: file.mimetype,
+            size: file.size,
+            document_type: 'quotes',
+          });
+        }
+      });
+
+      insertDocuments(req.files);
+      db.prepare("UPDATE projects SET updated_at = datetime('now') WHERE id = ?").run(req.project.id);
+      db.prepare("UPDATE project_scopes SET updated_at = datetime('now') WHERE id = ?").run(req.scope.id);
+      logActivity({
+        userId: req.user.id,
+        projectId: req.project.id,
+        action: 'project_scope_estimate_attached',
+        entityType: 'project_scope',
+        entityId: req.scope.id,
+        details: { scope_title: req.scope.scope_title, count: inserted.length },
+      });
+      res.status(201).json({ uploaded: inserted.length, documents: inserted });
+    } catch (err) {
+      for (const file of req.files) {
+        const filePath = path.join(projectDocumentUploadRoot(req.project.id), file.filename);
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      }
+      console.error(err);
+      res.status(500).json({ error: 'Failed to attach estimate document' });
+    }
+  }
+);
 
 // POST /api/projects/:id/scopes/:scopeId/move
 router.post('/:id/scopes/:scopeId/move', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, (req, res) => {

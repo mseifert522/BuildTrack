@@ -983,6 +983,26 @@ function initializeSchema() {
     CREATE INDEX IF NOT EXISTS idx_project_documents_project_created
       ON project_documents(project_id, created_at);
 
+    -- Estimate or agreed-scope documents attached to a specific scope-of-work section.
+    CREATE TABLE IF NOT EXISTS project_scope_documents (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      scope_id TEXT NOT NULL,
+      document_id TEXT NOT NULL,
+      attached_by TEXT NOT NULL,
+      attached_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (scope_id) REFERENCES project_scopes(id) ON DELETE CASCADE,
+      FOREIGN KEY (document_id) REFERENCES project_documents(id) ON DELETE CASCADE,
+      FOREIGN KEY (attached_by) REFERENCES users(id)
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_project_scope_documents_scope_doc
+      ON project_scope_documents(scope_id, document_id);
+
+    CREATE INDEX IF NOT EXISTS idx_project_scope_documents_scope
+      ON project_scope_documents(project_id, scope_id, attached_at);
+
     -- Standardized quote categories used for company-wide pricing intelligence.
     CREATE TABLE IF NOT EXISTS quote_categories (
       id TEXT PRIMARY KEY,

@@ -5,7 +5,7 @@ import { useAuthStore, canChangeProjectStatus, canManageProjects, isAdminRole } 
 import api from '../lib/api';
 import { Loading, StatusBadge, Modal } from '../components/ui';
 import Avatar from '../components/Avatar';
-import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, ClipboardList, Activity, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle, Send, Phone, Building2, AlertTriangle, Check } from 'lucide-react';
+import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, ClipboardList, Activity, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle, Send, Phone, Building2, AlertTriangle, Check, Paperclip } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useForm } from 'react-hook-form';
 import { format } from 'date-fns';
@@ -1504,6 +1504,9 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
   const [showEditor, setShowEditor] = useState(false);
   const [editingScope, setEditingScope] = useState<any | null>(null);
   const [scopeForm, setScopeForm] = useState<ProjectScopeForm>(blankProjectScopeForm);
+  const [savingScope, setSavingScope] = useState(false);
+  const [scopeAttachments, setScopeAttachments] = useState<File[]>([]);
+  const scopeAttachmentInputRef = useRef<HTMLInputElement | null>(null);
   const scopeEditorFieldClass = 'bt-scope-editor-field w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500';
 
   const updateScopeFormField = (field: keyof ProjectScopeForm) => (event: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
@@ -1541,9 +1544,22 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
     loadScopes();
   }, [projectId]);
 
+  const clearScopeAttachmentInput = () => {
+    setScopeAttachments([]);
+    if (scopeAttachmentInputRef.current) scopeAttachmentInputRef.current.value = '';
+  };
+
+  const closeScopeEditor = () => {
+    setShowEditor(false);
+    setEditingScope(null);
+    setScopeForm(blankProjectScopeForm);
+    clearScopeAttachmentInput();
+  };
+
   const openAddScope = () => {
     setEditingScope(null);
     setScopeForm(blankProjectScopeForm);
+    clearScopeAttachmentInput();
     setShowEditor(true);
   };
 
@@ -1556,7 +1572,21 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
       scope_of_work: scope.scope_of_work || '',
       status: scope.status || 'active',
     });
+    clearScopeAttachmentInput();
     setShowEditor(true);
+  };
+
+  const handleScopeAttachmentChange = (event: ChangeEvent<HTMLInputElement>) => {
+    setScopeAttachments(Array.from(event.currentTarget.files || []));
+  };
+
+  const uploadScopeAttachments = async (scopeId: string) => {
+    if (!scopeAttachments.length) return;
+    const formData = new FormData();
+    scopeAttachments.forEach(file => formData.append('documents', file));
+    await api.post(`/projects/${projectId}/scopes/${scopeId}/estimate-documents`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
   };
 
   const saveScope = async () => {
@@ -1569,20 +1599,27 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
     if (!payload.scope_title) return toast.error('Enter a scope title');
     if (!payload.scope_of_work) return toast.error('Enter the scope of work');
 
+    setSavingScope(true);
     try {
+      let scopeId = editingScope?.id;
       if (editingScope) {
         await api.put(`/projects/${projectId}/scopes/${editingScope.id}`, payload);
-        toast.success('Scope of work updated');
       } else {
-        await api.post(`/projects/${projectId}/scopes`, payload);
-        toast.success('Scope of work added');
+        const res = await api.post(`/projects/${projectId}/scopes`, payload);
+        scopeId = res.data?.id;
       }
-      setShowEditor(false);
-      setEditingScope(null);
-      setScopeForm(blankProjectScopeForm);
+      if (!scopeId) throw new Error('Scope was saved but no scope ID was returned');
+      await uploadScopeAttachments(scopeId);
+      toast.success(scopeAttachments.length
+        ? `Scope of work saved with ${scopeAttachments.length === 1 ? 'estimate doc' : `${scopeAttachments.length} estimate docs`}`
+        : editingScope ? 'Scope of work updated' : 'Scope of work added'
+      );
+      closeScopeEditor();
       loadScopes();
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Failed to save scope of work');
+      toast.error(err.response?.data?.error || err.message || 'Failed to save scope of work');
+    } finally {
+      setSavingScope(false);
     }
   };
 
@@ -1591,9 +1628,7 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
     if (!window.confirm('Delete this scope of work?')) return;
     try {
       await api.delete(`/projects/${projectId}/scopes/${editingScope.id}`);
-      setShowEditor(false);
-      setEditingScope(null);
-      setScopeForm(blankProjectScopeForm);
+      closeScopeEditor();
       loadScopes();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to delete scope of work');
@@ -1611,6 +1646,11 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
 
   const completedCount = scopes.filter(scope => scope.status === 'completed').length;
   const activeCount = scopes.filter(scope => scope.status === 'active').length;
+  const scopeAttachmentSummary = useMemo(() => {
+    if (!scopeAttachments.length) return 'Attach agreed estimate, bid, or approval file';
+    const names = scopeAttachments.slice(0, 2).map(file => file.name).join(', ');
+    return scopeAttachments.length > 2 ? `${names}, +${scopeAttachments.length - 2} more` : names;
+  }, [scopeAttachments]);
 
   return (
     <div className="space-y-5">
@@ -1666,7 +1706,9 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
             </div>
           ) : (
             <div className="grid lg:grid-cols-2 gap-3">
-              {scopes.map((scope, index) => (
+              {scopes.map((scope, index) => {
+                const estimateDocuments = Array.isArray(scope.estimate_documents) ? scope.estimate_documents : [];
+                return (
                 <div key={scope.id} className="bg-white rounded-2xl border border-gray-200 p-4" style={{ boxShadow: '0 8px 24px rgba(17,24,39,0.06)' }}>
                   <div className="flex items-start justify-between gap-3">
                     <button type="button" onClick={() => openEditScope(scope)} className="text-left flex-1 min-w-0">
@@ -1692,8 +1734,28 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                       </div>
                     )}
                   </div>
+                  {estimateDocuments.length > 0 && (
+                    <div className="mt-4 border-t border-gray-200 pt-3">
+                      <p className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-wide text-gray-500">
+                        <Paperclip className="w-3.5 h-3.5" /> Attached estimate docs
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {estimateDocuments.map((doc: any) => (
+                          <a
+                            key={doc.scope_document_id || doc.id}
+                            href={`/api/documents/${projectId}/${doc.id}/download`}
+                            className="inline-flex max-w-full items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100"
+                          >
+                            <FileText className="h-3.5 w-3.5 flex-shrink-0" />
+                            <span className="truncate">{doc.original_name || 'Estimate document'}</span>
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -1701,7 +1763,7 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
 
       <ConstructionPlanBoard projectId={projectId} canManage={canManage} />
 
-      <Modal isOpen={showEditor} onClose={() => setShowEditor(false)} title={editingScope ? 'Edit Scope of Work' : 'Add Scope of Work'} size="lg">
+      <Modal isOpen={showEditor} onClose={closeScopeEditor} title={editingScope ? 'Edit Scope of Work' : 'Add Scope of Work'} size="lg">
         <div className="space-y-4 bt-scope-editor" onKeyDown={keepScopeEditorTypingLocal}>
           <div className="grid md:grid-cols-2 gap-3">
             <div>
@@ -1723,10 +1785,37 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
               <textarea value={scopeForm.scope_of_work} onChange={updateScopeFormField('scope_of_work')} rows={8} placeholder="Enter the full scope for this section..." className={`${scopeEditorFieldClass} resize-none`} />
             </div>
           </div>
-          <div className="flex gap-3">
-            {editingScope && <button type="button" onClick={deleteScope} className="px-4 py-2.5 rounded-xl border border-red-200 text-red-700 text-sm font-black hover:bg-red-50">Delete</button>}
-            <button type="button" onClick={() => setShowEditor(false)} className="ml-auto px-4 py-2.5 rounded-xl border border-gray-300 text-sm font-black text-gray-700 hover:bg-gray-50">Cancel</button>
-            <button type="button" onClick={saveScope} className="px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-black hover:bg-blue-700">Save Scope</button>
+          <div className="flex flex-col gap-3 border-t border-gray-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <input
+                ref={scopeAttachmentInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={handleScopeAttachmentChange}
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.webp,.heic,image/*,application/pdf"
+              />
+              <button
+                type="button"
+                onClick={() => scopeAttachmentInputRef.current?.click()}
+                className="inline-flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm font-black text-amber-800 hover:bg-amber-100"
+              >
+                <Paperclip className="h-4 w-4" /> Attach Doc
+              </button>
+              <span className="max-w-lg truncate text-xs font-semibold text-gray-500">{scopeAttachmentSummary}</span>
+              {scopeAttachments.length > 0 && (
+                <button type="button" onClick={clearScopeAttachmentInput} className="rounded-lg px-2 py-1 text-xs font-bold text-gray-500 hover:bg-gray-100">
+                  Clear
+                </button>
+              )}
+              {editingScope && <button type="button" onClick={deleteScope} className="px-4 py-2.5 rounded-xl border border-red-200 text-red-700 text-sm font-black hover:bg-red-50">Delete</button>}
+            </div>
+            <div className="flex justify-end gap-3">
+              <button type="button" disabled={savingScope} onClick={closeScopeEditor} className="px-4 py-2.5 rounded-xl border border-gray-300 text-sm font-black text-gray-700 hover:bg-gray-50 disabled:opacity-60">Cancel</button>
+              <button type="button" disabled={savingScope} onClick={saveScope} className="px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-black hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70">
+                {savingScope ? 'Saving...' : 'Save Scope'}
+              </button>
+            </div>
           </div>
         </div>
       </Modal>
