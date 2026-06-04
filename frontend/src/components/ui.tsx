@@ -121,6 +121,11 @@ export function Modal({ isOpen, onClose, title, children, size = 'md', descripti
   const titleId = React.useId();
   const descriptionId = React.useId();
   const dialogRef = React.useRef<HTMLDivElement>(null);
+  const onCloseRef = React.useRef(onClose);
+
+  React.useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   React.useEffect(() => {
     if (!isOpen) return;
@@ -137,7 +142,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md', descripti
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== 'Tab') return;
@@ -163,7 +168,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md', descripti
       document.removeEventListener('keydown', handleKeyDown);
       previousFocus?.focus?.();
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
   const sizeClass = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-5xl' }[size];
