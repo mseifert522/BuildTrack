@@ -6,9 +6,9 @@ import { Loading, Modal, StatusBadge } from '../components/ui';
 import Avatar from '../components/Avatar';
 import RecentActivityModal from '../components/RecentActivityModal';
 import {
-  FolderOpen, ClipboardList, FileText, Image,
+  FolderOpen, ClipboardList, Image,
   TrendingUp, AlertTriangle, CheckCircle2, Clock,
-  ArrowUpRight, Plus, ChevronRight, MapPin, MessageSquare,
+  Plus, ChevronRight, MapPin, MessageSquare,
   X, Bell
 } from 'lucide-react';
 import { EASTERN_TIME_ZONE, formatEasternDate, formatEasternDateTime, formatEasternRelative, formatEasternTime, parseBuildTrackTimestamp } from '../lib/time';
@@ -37,16 +37,6 @@ interface Project {
   updated_at: string;
   budget: number;
   lifecycle_status?: string;
-}
-
-interface Invoice {
-  id: string;
-  invoice_number: string;
-  address: string;
-  contractor_name: string;
-  total: number;
-  status: string;
-  created_at: string;
 }
 
 interface RecentNote {
@@ -189,9 +179,7 @@ export default function Dashboard() {
   const { user } = useAuthStore();
   const navigate = useNavigate();
   const [stats, setStats] = useState<Stats | null>(null);
-  const [projects, setProjects] = useState<Project[]>([]);
   const [allProjects, setAllProjects] = useState<Project[]>([]);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [recentNotes, setRecentNotes] = useState<RecentNote[]>([]);
   const [reviewSummaries, setReviewSummaries] = useState<ProjectReviewSummary[]>([]);
   const [fieldWatch, setFieldWatch] = useState<FieldWorkWatchlist | null>(null);
@@ -207,10 +195,8 @@ export default function Dashboard() {
         const canShowReview = !!user && isAdminRole(user.role);
         const loginSummaryKey = user?.id ? `buildtrack-login-review-summary:${user.id}` : '';
         const forceLoginSummary = canShowReview && !!loginSummaryKey && sessionStorage.getItem(loginSummaryKey) === '1';
-        const [projRes, allProjRes, invRes, notesRes, reviewRes, fieldWatchRes] = await Promise.all([
-          api.get('/projects?status=active_rehab'),
+        const [allProjRes, notesRes, reviewRes, fieldWatchRes] = await Promise.all([
           api.get('/projects'),
-          api.get('/invoices'),
           api.get('/notes/recent?limit=50').catch(() => ({ data: [] })),
           canShowReview
             ? api.get(`/projects/unreviewed-summary${forceLoginSummary ? '?scope=recent' : ''}`).catch(() => ({ data: { projects: [] } }))
@@ -219,10 +205,8 @@ export default function Dashboard() {
             ? api.get('/field-work/watchlist').catch(() => ({ data: null }))
             : Promise.resolve({ data: null }),
         ]);
-        setProjects(projRes.data.slice(0, 6));
         setRecentNotes(notesRes.data.slice(0, 50));
         setAllProjects(allProjRes.data);
-        setInvoices(Array.isArray(invRes.data) ? invRes.data : []);
         const nextFieldWatch = fieldWatchRes.data && typeof fieldWatchRes.data === 'object'
           ? fieldWatchRes.data as FieldWorkWatchlist
           : null;
@@ -303,52 +287,25 @@ export default function Dashboard() {
   ).length;
   const longTermHoldings = stats?.long_term_holdings ?? allProjects.filter(p => p.status === 'long_term_holding').length;
   const commercialProjects = stats?.commercial_projects ?? allProjects.filter(p => p.status === 'commercial').length;
-  const openInvoices = invoices.filter(invoice => invoice.status !== 'paid');
-  const paidInvoices = invoices.filter(invoice => invoice.status === 'paid');
-  const openInvoiceAmount = openInvoices.reduce((sum, invoice) => sum + Number(invoice.total || 0), 0);
-  const paidInvoiceAmount = paidInvoices.reduce((sum, invoice) => sum + Number(invoice.total || 0), 0);
-  const totalBudget = allProjects.reduce((sum, project) => sum + Number(project.budget || 0), 0);
-  const activeBudget = allProjects.filter(project => project.status === 'active_rehab').reduce((sum, project) => sum + Number(project.budget || 0), 0);
-  const openPunchItems = stats?.open_punch_items ?? allProjects.reduce((sum, project) => sum + Number(project.open_punch_items || 0), 0);
-  const pendingInvoices = stats?.pending_invoices ?? openInvoices.length;
-  const recentPhotoCount = stats?.recent_photos ?? 0;
-  const completionRate = totalProjects ? Math.round((completedProjects / totalProjects) * 100) : 0;
-  const budgetExposureRate = totalBudget ? Math.min(100, Math.round((openInvoiceAmount / totalBudget) * 100)) : 0;
-  const priorityCards = [
-    {
-      label: 'Projects',
-      value: `${activeRehabs} active`,
-      detail: `${completionRate}% completion across ${totalProjects} tracked projects`,
-      trend: notStarted > 0 ? `${notStarted} queued` : 'No queued rehabs',
-      icon: FolderOpen,
-      to: '/projects?status=active_rehab',
-      accent: '#E78B4A',
-      progress: completionRate,
-    },
-    {
-      label: 'Financials',
-      value: formatMoney(openInvoiceAmount),
-      detail: `${pendingInvoices} open invoices against ${formatMoney(activeBudget)} active rehab budget`,
-      trend: `${formatMoney(paidInvoiceAmount)} paid to date`,
-      icon: FileText,
-      to: '/invoices',
-      accent: '#5DA271',
-      progress: budgetExposureRate,
-    },
-    {
-      label: 'Tasks',
-      value: `${openPunchItems} open`,
-      detail: `${fieldWatchTotal} field alert${fieldWatchTotal === 1 ? '' : 's'}, ${reviewSummaryTotal} review update${reviewSummaryTotal === 1 ? '' : 's'}, ${recentPhotoCount} recent photos`,
-      trend: fieldWatchTotal > 0 ? 'Field check required' : openPunchItems > 0 ? 'Needs field follow-up' : 'No open punch exposure',
-      icon: ClipboardList,
-      to: '/projects',
-      accent: fieldWatchTotal > 0 || openPunchItems > 0 ? '#D46A4C' : '#5DA271',
-      progress: fieldWatchTotal > 0 ? Math.min(100, fieldWatchTotal * 10) : openPunchItems > 0 ? Math.min(100, openPunchItems * 8) : 100,
-    },
-  ];
   const operationsModules = [
-    { label: 'Project Work Status', detail: 'Review active project progress', to: '/projects', icon: FolderOpen },
-    { label: 'Final Punch Lists', detail: 'Track closeout work items', to: '/punch-list', icon: ClipboardList },
+    {
+      label: 'Project Work Status',
+      detail: 'Review active project progress',
+      to: '/projects',
+      icon: FolderOpen,
+      accent: '#60A5FA',
+      bg: 'rgba(96,165,250,0.14)',
+      border: 'rgba(96,165,250,0.34)',
+    },
+    {
+      label: 'Final Punch Lists',
+      detail: 'Track closeout work items',
+      to: '/punch-list',
+      icon: ClipboardList,
+      accent: '#F59E0B',
+      bg: 'rgba(245,158,11,0.14)',
+      border: 'rgba(245,158,11,0.36)',
+    },
   ];
 
   const kpiCards = [
@@ -359,6 +316,9 @@ export default function Dashboard() {
       icon: FolderOpen,
       gradient: 'linear-gradient(135deg, #1A1D21 0%, #E78B4A 100%)',
       iconBg: 'rgba(255,255,255,0.15)',
+      iconColor: '#60A5FA',
+      iconPanel: 'rgba(96,165,250,0.14)',
+      iconBorder: 'rgba(96,165,250,0.32)',
       trend: 'Project total',
       trendUp: true,
       filter: 'all_projects',
@@ -370,6 +330,9 @@ export default function Dashboard() {
       icon: TrendingUp,
       gradient: 'linear-gradient(135deg, #231811 0%, #D46A4C 100%)',
       iconBg: 'rgba(255,255,255,0.15)',
+      iconColor: '#F59E0B',
+      iconPanel: 'rgba(245,158,11,0.14)',
+      iconBorder: 'rgba(245,158,11,0.34)',
       trend: activeRehabs > 0 ? 'In progress' : 'None active',
       trendUp: activeRehabs > 0,
       filter: 'active_rehab',
@@ -381,6 +344,9 @@ export default function Dashboard() {
       icon: Clock,
       gradient: 'linear-gradient(135deg, #374151 0%, #6B7280 100%)',
       iconBg: 'rgba(255,255,255,0.15)',
+      iconColor: '#CBD5E1',
+      iconPanel: 'rgba(148,163,184,0.16)',
+      iconBorder: 'rgba(148,163,184,0.32)',
       trend: notStarted > 0 ? 'Queued' : 'None waiting',
       trendUp: notStarted > 0,
       filter: 'not_started',
@@ -392,6 +358,9 @@ export default function Dashboard() {
       icon: CheckCircle2,
       gradient: 'linear-gradient(135deg, #102018 0%, #5DA271 100%)',
       iconBg: 'rgba(255,255,255,0.15)',
+      iconColor: '#34D399',
+      iconPanel: 'rgba(52,211,153,0.14)',
+      iconBorder: 'rgba(52,211,153,0.32)',
       trend: completedProjects > 0 ? 'Completed' : 'None complete',
       trendUp: completedProjects > 0,
       filter: 'rehab_completed',
@@ -403,6 +372,9 @@ export default function Dashboard() {
       icon: FolderOpen,
       gradient: 'linear-gradient(135deg, #25180C 0%, #B7793C 100%)',
       iconBg: 'rgba(255,255,255,0.15)',
+      iconColor: '#FB923C',
+      iconPanel: 'rgba(251,146,60,0.14)',
+      iconBorder: 'rgba(251,146,60,0.34)',
       trend: longTermHoldings > 0 ? 'Holding' : 'None held',
       trendUp: longTermHoldings > 0,
       filter: 'long_term_holding',
@@ -414,6 +386,9 @@ export default function Dashboard() {
       icon: FolderOpen,
       gradient: 'linear-gradient(135deg, #102027 0%, #4E879A 100%)',
       iconBg: 'rgba(255,255,255,0.15)',
+      iconColor: '#22D3EE',
+      iconPanel: 'rgba(34,211,238,0.14)',
+      iconBorder: 'rgba(34,211,238,0.32)',
       trend: commercialProjects > 0 ? 'Commercial' : 'None listed',
       trendUp: commercialProjects > 0,
       filter: 'commercial',
@@ -459,75 +434,59 @@ export default function Dashboard() {
       </div>
 
       <div className="px-6 py-6 md:px-8 max-w-7xl mx-auto space-y-4">
-        {/* Desktop command center */}
-        <section className="grid gap-4 xl:grid-cols-[1.18fr_0.82fr]" aria-label="BuildTrack command center">
-          <div className="bt-card p-4">
-            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <p className="bt-section-kicker">Today&apos;s priorities</p>
-                <h2 className="bt-section-title">Projects, money, and field work</h2>
-              </div>
-              <span className="inline-flex w-fit items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-800">
-                <Bell className="h-3.5 w-3.5" />
-                {reviewSummaryTotal} updates
-              </span>
+        {/* Construction command center */}
+        <section className="bt-card p-4 md:p-5" aria-label="Construction modules and field payment checks">
+          <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="bt-section-kicker">Construction modules</p>
+              <h2 className="bt-section-title">Project tasks, punch lists, and field checks before payment approval</h2>
+              <p className="mt-1 max-w-3xl text-xs font-semibold" style={{ color: 'var(--bt-text-muted)' }}>
+                Use this first: review active work, close out punch items, verify field notes and pictures, then release invoices only after management approval.
+              </p>
             </div>
-            <div className="grid gap-3 md:grid-cols-3">
-              {priorityCards.map(card => (
-                <button
-                  key={card.label}
-                  type="button"
-                  onClick={() => navigate(card.to)}
-                  className="min-h-[138px] rounded-sm border border-slate-700 bg-slate-50 p-3 text-left transition-colors hover:border-orange-400 hover:bg-white focus:outline-none focus:ring-2 focus:ring-orange-500"
-                >
-                  <div className="mb-3 flex items-start justify-between gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl text-white" style={{ background: card.accent }}>
-                      <card.icon className="h-5 w-5" />
-                    </div>
-                    <span className="inline-flex items-center gap-1 rounded-sm bg-white px-2 py-1 text-[11px] font-bold text-slate-600 ring-1 ring-slate-700">
-                      {card.progress >= 65 ? <TrendingUp className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
-                      {card.trend}
-                    </span>
-                  </div>
-                  <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{card.label}</p>
-                  <p className="mt-1 text-xl font-bold text-slate-950">{card.value}</p>
-                  <p className="mt-1 min-h-10 text-sm font-medium leading-5 text-slate-600">{card.detail}</p>
-                  <div className="mt-4 h-2 overflow-hidden rounded-full bg-white ring-1 ring-slate-200" aria-hidden="true">
-                    <div className="h-full rounded-full" style={{ width: `${card.progress}%`, background: card.accent }} />
-                  </div>
-                </button>
-              ))}
-            </div>
+            <span className="inline-flex w-fit items-center gap-1.5 rounded-sm border px-2.5 py-1 text-xs font-bold"
+              style={{ background: '#1E1610', borderColor: '#E78B4A', color: '#FFD0A8' }}
+            >
+              <Bell className="h-3.5 w-3.5" />
+              {reviewSummaryTotal} review update{reviewSummaryTotal === 1 ? '' : 's'}
+            </span>
           </div>
 
-          <div className="bt-card p-4">
-            <div className="mb-4">
-              <p className="bt-section-kicker">Construction modules</p>
-              <h2 className="bt-section-title">Operational entry points</h2>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+          <div className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
+            <div>
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <h3 className="text-sm font-black" style={{ color: 'var(--bt-text)' }}>Operational entry points</h3>
+                <span className="text-[11px] font-black uppercase tracking-wide" style={{ color: 'var(--bt-text-soft)' }}>Start here</span>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
               {operationsModules.map(module => (
                 <Link
                   key={module.label}
                   to={module.to}
-                  className="flex min-h-14 items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 transition-colors hover:border-slate-300 hover:bg-white"
+                  className="flex min-h-20 items-center gap-3 rounded-sm border px-3 py-3 transition-colors hover:border-orange-400"
+                  style={{ background: '#0E1012', borderColor: module.border }}
                 >
-                  <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md bg-slate-800 text-white">
+                  <span
+                    className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-md border"
+                    style={{ background: module.bg, borderColor: module.border, color: module.accent }}
+                  >
                     <module.icon className="h-4 w-4" />
                   </span>
                   <span className="min-w-0">
-                    <span className="block text-sm font-bold text-slate-900">{module.label}</span>
-                    <span className="block truncate text-xs font-medium text-slate-500">{module.detail}</span>
+                    <span className="block text-sm font-black" style={{ color: 'var(--bt-text)' }}>{module.label}</span>
+                    <span className="block truncate text-xs font-semibold" style={{ color: 'var(--bt-text-muted)' }}>{module.detail}</span>
                   </span>
-                  <ChevronRight className="ml-auto h-4 w-4 flex-shrink-0 text-slate-400" />
+                  <ChevronRight className="ml-auto h-4 w-4 flex-shrink-0" style={{ color: 'var(--bt-text-soft)' }} />
                 </Link>
               ))}
+              </div>
             </div>
-            <div className="mt-4 border-t border-slate-700 pt-4">
-              <div className="mb-3 flex items-center justify-between gap-3">
+
+            <div className="border-t pt-4 xl:border-l xl:border-t-0 xl:pl-4 xl:pt-0" style={{ borderColor: 'var(--bt-border)' }}>
+              <div className="mb-3 flex items-start justify-between gap-3">
                 <div>
                   <p className="bt-section-kicker">Final watch list</p>
-                  <h3 className="text-sm font-bold text-slate-950">Field checks before payment</h3>
+                  <h3 className="text-sm font-black" style={{ color: 'var(--bt-text)' }}>Field checks before payment</h3>
                 </div>
                 <span className={`rounded-sm px-2 py-1 text-xs font-black ${fieldWatchTotal > 0 ? 'bg-red-50 text-red-700 ring-1 ring-red-200' : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'}`}>
                   {fieldWatchTotal > 0 ? `${fieldWatchTotal} alerts` : 'Clear'}
@@ -566,16 +525,17 @@ export default function Dashboard() {
                       const firstNoteProject = fieldWatch?.field_notes?.[0]?.project_id;
                       navigate(`/projects/${firstTaskProject || firstHoldProject || firstNoteProject || ''}`.replace(/\/$/, ''));
                     }}
-                    className="flex min-h-12 items-center gap-3 rounded-sm border border-slate-700 bg-white px-3 py-2 text-left transition-colors hover:border-orange-400 hover:bg-slate-50"
+                    className="flex min-h-14 items-center gap-3 rounded-sm border px-3 py-2 text-left transition-colors hover:border-orange-400"
+                    style={{ background: '#0E1012', borderColor: '#343A42' }}
                   >
-                    <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-slate-100" style={{ color: item.tone }}>
+                    <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md border" style={{ background: `${item.tone}22`, borderColor: `${item.tone}66`, color: item.tone }}>
                       <item.icon className="h-4 w-4" />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block text-xs font-black uppercase tracking-wide text-slate-700">{item.label}</span>
-                      <span className="block truncate text-xs font-medium text-slate-500">{item.detail}</span>
+                      <span className="block text-xs font-black uppercase tracking-wide" style={{ color: 'var(--bt-text)' }}>{item.label}</span>
+                      <span className="block truncate text-xs font-semibold" style={{ color: 'var(--bt-text-muted)' }}>{item.detail}</span>
                     </span>
-                    <span className="text-lg font-black text-slate-950">{item.value}</span>
+                    <span className="text-lg font-black" style={{ color: 'var(--bt-text)' }}>{item.value}</span>
                   </button>
                 ))}
               </div>
@@ -604,7 +564,12 @@ export default function Dashboard() {
                 <div className="relative z-10">
                   <div className="mb-2 flex items-start justify-between">
                     <div
-                      className="flex h-8 w-8 items-center justify-center rounded-md bg-slate-100 text-slate-700"
+                      className="flex h-8 w-8 items-center justify-center rounded-md border"
+                      style={{
+                        background: card.iconPanel,
+                        borderColor: card.iconBorder,
+                        color: card.iconColor,
+                      }}
                     >
                       <card.icon className="h-3.5 w-3.5" />
                     </div>
