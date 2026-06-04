@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ChangeEvent, type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useDropzone, type FileRejection } from 'react-dropzone';
 import { useAuthStore, canChangeProjectStatus, canManageProjects, isAdminRole } from '../store/authStore';
@@ -1504,6 +1504,18 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
   const [showEditor, setShowEditor] = useState(false);
   const [editingScope, setEditingScope] = useState<any | null>(null);
   const [scopeForm, setScopeForm] = useState<ProjectScopeForm>(blankProjectScopeForm);
+  const scopeEditorFieldClass = 'bt-scope-editor-field w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500';
+
+  const updateScopeFormField = (field: keyof ProjectScopeForm) => (event: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    const value = event.currentTarget.value;
+    setScopeForm(current => ({ ...current, [field]: value }));
+  };
+
+  const keepScopeEditorTypingLocal = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key !== 'Escape' && event.key !== 'Tab') {
+      event.stopPropagation();
+    }
+  };
 
   const scopeStatusColors: Record<string, string> = {
     draft: 'bg-gray-100 text-gray-700',
@@ -1690,25 +1702,25 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
       <ConstructionPlanBoard projectId={projectId} canManage={canManage} />
 
       <Modal isOpen={showEditor} onClose={() => setShowEditor(false)} title={editingScope ? 'Edit Scope of Work' : 'Add Scope of Work'} size="lg">
-        <div className="space-y-4">
+        <div className="space-y-4 bt-scope-editor" onKeyDown={keepScopeEditorTypingLocal}>
           <div className="grid md:grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">House / Project Section</label>
-              <input value={scopeForm.section_name} onChange={e => setScopeForm(current => ({ ...current, section_name: e.target.value }))} placeholder="Kitchen, exterior, roof, site work..." className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <label className="bt-scope-editor-label block text-sm font-medium text-gray-700 mb-1">House / Project Section</label>
+              <input type="text" autoComplete="off" value={scopeForm.section_name} onChange={updateScopeFormField('section_name')} placeholder="Kitchen, exterior, roof, site work..." className={scopeEditorFieldClass} />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-              <select value={scopeForm.status} onChange={e => setScopeForm(current => ({ ...current, status: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <label className="bt-scope-editor-label block text-sm font-medium text-gray-700 mb-1">Status</label>
+              <select value={scopeForm.status} onChange={updateScopeFormField('status')} className={`${scopeEditorFieldClass} bg-white`}>
                 {['draft', 'active', 'on_hold', 'completed'].map(status => <option key={status} value={status}>{status.replace(/_/g, ' ')}</option>)}
               </select>
             </div>
             <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Scope Title *</label>
-              <input value={scopeForm.scope_title} onChange={e => setScopeForm(current => ({ ...current, scope_title: e.target.value }))} placeholder="Kitchen cabinet and countertop replacement" className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <label className="bt-scope-editor-label block text-sm font-medium text-gray-700 mb-1">Scope Title *</label>
+              <input type="text" autoComplete="off" value={scopeForm.scope_title} onChange={updateScopeFormField('scope_title')} placeholder="Kitchen cabinet and countertop replacement" className={scopeEditorFieldClass} />
             </div>
             <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Scope of Work *</label>
-              <textarea value={scopeForm.scope_of_work} onChange={e => setScopeForm(current => ({ ...current, scope_of_work: e.target.value }))} rows={8} placeholder="Enter the full scope for this section..." className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+              <label className="bt-scope-editor-label block text-sm font-medium text-gray-700 mb-1">Scope of Work *</label>
+              <textarea value={scopeForm.scope_of_work} onChange={updateScopeFormField('scope_of_work')} rows={8} placeholder="Enter the full scope for this section..." className={`${scopeEditorFieldClass} resize-none`} />
             </div>
           </div>
           <div className="flex gap-3">
