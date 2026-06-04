@@ -652,16 +652,10 @@ export default function Dashboard() {
           {/* Latest Notes Activity */}
           <div
             id="recent-activity"
-            className="bt-card overflow-hidden"
-            style={{
-              boxShadow: '0 1px 2px rgba(15,23,42,0.04)',
-            }}
+            className="bt-card bt-dashboard-notes-panel overflow-hidden"
           >
             <div
-              className="flex items-center justify-between gap-4 border-b border-slate-700 px-4 py-3"
-              style={{
-                background: 'var(--bt-panel-2)',
-              }}
+              className="bt-dashboard-notes-panel-header flex items-center justify-between gap-4 px-4 py-3"
             >
               <div className="flex items-center gap-3">
                 <div
