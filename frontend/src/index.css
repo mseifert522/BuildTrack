@@ -210,6 +210,43 @@ textarea,
   box-shadow: inset 0 0 0 1px rgba(255,255,255,0.015), 0 1px 0 rgba(0,0,0,0.55);
 }
 
+.bt-dashboard-stat-card {
+  position: relative;
+  border: 1px solid #56606D;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0) 38%),
+    #101214;
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,0.055),
+    inset 0 -1px 0 rgba(0,0,0,0.8),
+    0 0 0 1px rgba(0,0,0,0.72),
+    0 8px 18px rgba(0,0,0,0.22);
+}
+
+.bt-dashboard-stat-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-top: 1px solid rgba(231,139,74,0.28);
+  pointer-events: none;
+}
+
+.bt-dashboard-stat-card:hover {
+  border-color: #E78B4A;
+  background:
+    linear-gradient(180deg, rgba(231,139,74,0.08), rgba(255,255,255,0.012) 42%),
+    #13171B;
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,0.075),
+    0 0 0 1px rgba(231,139,74,0.32),
+    0 10px 22px rgba(0,0,0,0.28);
+}
+
+.bt-dashboard-stat-card:focus-visible {
+  outline: 2px solid var(--bt-ring);
+  outline-offset: 2px;
+}
+
 .bt-section-kicker {
   color: var(--bt-accent);
   font-size: 0.68rem;

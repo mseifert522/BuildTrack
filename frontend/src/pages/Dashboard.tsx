@@ -585,41 +585,49 @@ export default function Dashboard() {
 
         {/* KPI Cards */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
-          {kpiCards.map(card => (
-            <div
-              key={card.label}
-              className="relative min-h-[78px] cursor-pointer overflow-hidden rounded-sm border border-slate-700 bg-white p-3 transition-colors hover:border-orange-400 hover:bg-slate-50 active:scale-[0.99]"
-              style={{
-                boxShadow: '0 1px 2px rgba(15,23,42,0.04)',
-              }}
-              onClick={() => navigate(card.filter === 'all_projects' ? '/projects' : `/projects?status=${card.filter}`)}
-            >
-              <div className="relative z-10">
-                <div className="mb-2 flex items-start justify-between">
-                  <div
-                    className="flex h-8 w-8 items-center justify-center rounded-md bg-slate-100 text-slate-700"
-                  >
-                    <card.icon className="h-3.5 w-3.5" />
+          {kpiCards.map(card => {
+            const target = card.filter === 'all_projects' ? '/projects' : `/projects?status=${card.filter}`;
+            return (
+              <div
+                key={card.label}
+                role="button"
+                tabIndex={0}
+                className="bt-dashboard-stat-card relative min-h-[78px] cursor-pointer overflow-hidden rounded-sm p-3 transition-colors active:scale-[0.99]"
+                onClick={() => navigate(target)}
+                onKeyDown={event => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    navigate(target);
+                  }
+                }}
+              >
+                <div className="relative z-10">
+                  <div className="mb-2 flex items-start justify-between">
+                    <div
+                      className="flex h-8 w-8 items-center justify-center rounded-md bg-slate-100 text-slate-700"
+                    >
+                      <card.icon className="h-3.5 w-3.5" />
+                    </div>
+                    <span
+                      className="hidden items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600 md:flex"
+                    >
+                      {card.trendUp ? (
+                        <TrendingUp className="w-3 h-3" />
+                      ) : (
+                        <AlertTriangle className="w-3 h-3" />
+                      )}
+                      {card.trend}
+                    </span>
                   </div>
-                  <span
-                    className="hidden items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600 md:flex"
-                  >
-                    {card.trendUp ? (
-                      <TrendingUp className="w-3 h-3" />
-                    ) : (
-                      <AlertTriangle className="w-3 h-3" />
-                    )}
-                    {card.trend}
-                  </span>
+                  <div className="flex items-end gap-2">
+                    <p className="text-2xl font-bold leading-none text-slate-950">{card.value}</p>
+                    <p className="pb-0.5 text-xs font-bold leading-tight text-slate-800">{card.label}</p>
+                  </div>
+                  <p className="mt-1 hidden truncate text-[10px] font-medium text-slate-500 sm:block">{card.sub}</p>
                 </div>
-                <div className="flex items-end gap-2">
-                  <p className="text-2xl font-bold leading-none text-slate-950">{card.value}</p>
-                  <p className="pb-0.5 text-xs font-bold leading-tight text-slate-800">{card.label}</p>
-                </div>
-                <p className="mt-1 hidden truncate text-[10px] font-medium text-slate-500 sm:block">{card.sub}</p>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Main content grid */}
