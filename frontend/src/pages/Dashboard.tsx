@@ -37,7 +37,47 @@ const calendarWeekRangeFormatter = new Intl.DateTimeFormat('en-US', {
   day: 'numeric',
 });
 
+const calendarMonthLabelFormatter = new Intl.DateTimeFormat('en-US', {
+  timeZone: EASTERN_TIME_ZONE,
+  month: 'long',
+  year: 'numeric',
+});
+
 const calendarWeekdayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const CALENDAR_SCHEDULE_START_HOUR = 7;
+const CALENDAR_SCHEDULE_END_HOUR = 19;
+const calendarScheduleHours = Array.from(
+  { length: CALENDAR_SCHEDULE_END_HOUR - CALENDAR_SCHEDULE_START_HOUR + 1 },
+  (_, index) => CALENDAR_SCHEDULE_START_HOUR + index
+);
+
+const formatCalendarHourLabel = (hour: number) => {
+  const normalized = hour % 24;
+  const hour12 = normalized % 12 || 12;
+  const suffix = normalized >= 12 ? 'PM' : 'AM';
+  return `${hour12} ${suffix}`;
+};
+
+const parseCalendarDueTimeMinutes = (value?: string | null) => {
+  if (!value) return null;
+  const match = String(value).match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return hour * 60 + minute;
+};
+
+const formatCalendarDueTimeLabel = (value?: string | null) => {
+  const minutes = parseCalendarDueTimeMinutes(value);
+  if (minutes === null) return 'No time set';
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  const hour12 = hour % 12 || 12;
+  const suffix = hour >= 12 ? 'PM' : 'AM';
+  return `${hour12}:${String(minute).padStart(2, '0')} ${suffix}`;
+};
 
 function formatCalendarBadgeDate(value?: string | null) {
   const parsed = parseBuildTrackTimestamp(value ? `${value}T12:00:00` : null);
@@ -99,6 +139,7 @@ interface OperationsCalendarEvent {
 }
 
 type CalendarQueueFilter = 'upcoming' | 'completed';
+type CalendarViewMode = 'today' | 'week' | 'month';
 
 type CalendarEditForm = {
   title: string;
@@ -134,8 +175,42 @@ type CalendarWeekDayCell = {
   date: Date;
   dayNumber: number;
   isToday: boolean;
+  isCurrentMonth?: boolean;
   label: string;
   weekday: string;
+};
+
+type CalendarScheduleDayBucket = {
+  untimed: OperationsCalendarEvent[];
+  byHour: Record<number, OperationsCalendarEvent[]>;
+};
+
+const calendarHourForEvent = (event: OperationsCalendarEvent) => {
+  const minutes = parseCalendarDueTimeMinutes(event.due_time);
+  if (minutes === null) return null;
+  return Math.min(
+    Math.max(Math.floor(minutes / 60), CALENDAR_SCHEDULE_START_HOUR),
+    CALENDAR_SCHEDULE_END_HOUR
+  );
+};
+
+const buildCalendarDayScheduleBucket = (events: OperationsCalendarEvent[]): CalendarScheduleDayBucket => {
+  const byHour = calendarScheduleHours.reduce<Record<number, OperationsCalendarEvent[]>>((groups, hour) => {
+    groups[hour] = [];
+    return groups;
+  }, {});
+  const untimed: OperationsCalendarEvent[] = [];
+
+  sortCalendarEventsForDay(events).forEach(event => {
+    const hour = calendarHourForEvent(event);
+    if (hour === null) {
+      untimed.push(event);
+      return;
+    }
+    byHour[hour].push(event);
+  });
+
+  return { untimed, byHour };
 };
 
 const greeting = () => {
@@ -300,6 +375,49 @@ const startOfCalendarWeek = (anchorDate: Date) => {
   return date;
 };
 
+const startOfCalendarMonth = (anchorDate: Date) => {
+  const date = new Date(anchorDate);
+  date.setHours(12, 0, 0, 0);
+  date.setDate(1);
+  return date;
+};
+
+const endOfCalendarMonth = (anchorDate: Date) => {
+  const date = startOfCalendarMonth(anchorDate);
+  date.setMonth(date.getMonth() + 1, 0);
+  return date;
+};
+
+const addCalendarMonths = (date: Date, months: number) => {
+  const next = new Date(date);
+  next.setDate(1);
+  next.setMonth(next.getMonth() + months);
+  next.setHours(12, 0, 0, 0);
+  return next;
+};
+
+const calendarRangeForView = (viewMode: CalendarViewMode, anchorDateKey: string) => {
+  const anchorDate = localDateInputToNoonDate(anchorDateKey);
+
+  if (viewMode === 'today') {
+    const key = formatLocalDateInput(anchorDate);
+    return { start: key, end: key };
+  }
+
+  if (viewMode === 'week') {
+    return calendarRangeFromWeekStartKey(formatLocalDateInput(startOfCalendarWeek(anchorDate)));
+  }
+
+  const monthStart = startOfCalendarMonth(anchorDate);
+  const monthEnd = endOfCalendarMonth(anchorDate);
+  const visibleStart = startOfCalendarWeek(monthStart);
+  const visibleEnd = addCalendarDays(startOfCalendarWeek(monthEnd), 6);
+  return {
+    start: formatLocalDateInput(visibleStart),
+    end: formatLocalDateInput(visibleEnd),
+  };
+};
+
 const buildCalendarWeekDays = (weekStartDate: Date, todayKey: string): CalendarWeekDayCell[] =>
   Array.from({ length: 7 }, (_, index) => {
     const date = addCalendarDays(weekStartDate, index);
@@ -313,6 +431,26 @@ const buildCalendarWeekDays = (weekStartDate: Date, todayKey: string): CalendarW
       weekday: calendarWeekdayLabels[index],
     };
   });
+
+const buildCalendarMonthDays = (anchorDate: Date, todayKey: string): CalendarWeekDayCell[] => {
+  const monthStart = startOfCalendarMonth(anchorDate);
+  const visibleStart = startOfCalendarWeek(monthStart);
+  const activeMonth = monthStart.getMonth();
+
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = addCalendarDays(visibleStart, index);
+    const key = formatLocalDateInput(date);
+    return {
+      key,
+      date,
+      dayNumber: date.getDate(),
+      isToday: key === todayKey,
+      isCurrentMonth: date.getMonth() === activeMonth,
+      label: formatCalendarBadgeDate(key).label,
+      weekday: calendarWeekdayLabels[date.getDay()],
+    };
+  });
+};
 
 const formatCalendarWeekRange = (weekStartDate: Date, weekEndDate: Date) =>
   `${calendarWeekRangeFormatter.format(weekStartDate)} - ${calendarWeekRangeFormatter.format(weekEndDate)}`;
@@ -370,12 +508,13 @@ export default function Dashboard() {
   const [savingCalendarEventId, setSavingCalendarEventId] = useState('');
   const [expandedCalendarNoteId, setExpandedCalendarNoteId] = useState<string | null>(null);
   const [calendarQueueFilter, setCalendarQueueFilter] = useState<CalendarQueueFilter>('upcoming');
-  const [calendarWeekStartKey, setCalendarWeekStartKey] = useState(() => formatLocalDateInput(startOfCalendarWeek(new Date())));
+  const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>('today');
+  const [calendarAnchorDateKey, setCalendarAnchorDateKey] = useState(() => formatLocalDateInput());
   const [editingCalendarEvent, setEditingCalendarEvent] = useState<OperationsCalendarEvent | null>(null);
   const [calendarEditForm, setCalendarEditForm] = useState<CalendarEditForm>(blankCalendarEditForm);
   const [savingCalendarEdit, setSavingCalendarEdit] = useState(false);
   const [loading, setLoading] = useState(true);
-  const calendarQueryRange = calendarRangeFromWeekStartKey(calendarWeekStartKey);
+  const calendarQueryRange = calendarRangeForView(calendarViewMode, calendarAnchorDateKey);
 
   useEffect(() => {
     const load = async () => {
@@ -417,8 +556,8 @@ export default function Dashboard() {
     setShowCalendarReminderComposer(true);
   };
 
-  const refreshCalendarEvents = async (weekStartKey = calendarWeekStartKey) => {
-    const range = calendarRangeFromWeekStartKey(weekStartKey);
+  const refreshCalendarEvents = async (anchorDateKey = calendarAnchorDateKey, viewMode = calendarViewMode) => {
+    const range = calendarRangeForView(viewMode, anchorDateKey);
     const res = await api.get(`/calendar/events?start=${encodeURIComponent(range.start)}&end=${encodeURIComponent(range.end)}`);
     setCalendarEvents(Array.isArray(res.data?.events) ? res.data.events : []);
   };
@@ -491,9 +630,8 @@ export default function Dashboard() {
       }));
       setEditingCalendarEvent(null);
       setCalendarEditForm(blankCalendarEditForm);
-      const updatedWeekStartKey = formatLocalDateInput(startOfCalendarWeek(localDateInputToNoonDate(calendarEditForm.scheduled_for)));
-      setCalendarWeekStartKey(updatedWeekStartKey);
-      await refreshCalendarEvents(updatedWeekStartKey);
+      setCalendarAnchorDateKey(calendarEditForm.scheduled_for);
+      await refreshCalendarEvents(calendarEditForm.scheduled_for, calendarViewMode);
       toast.success('Calendar entry updated');
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to update calendar entry');
@@ -563,9 +701,8 @@ export default function Dashboard() {
         toast.success(reminderScheduleType === 'now' ? 'Reminder email sent' : 'Email reminder scheduled');
       }
       setShowCalendarReminderComposer(false);
-      const reminderWeekStartKey = formatLocalDateInput(startOfCalendarWeek(localDateInputToNoonDate(scheduledFor)));
-      setCalendarWeekStartKey(reminderWeekStartKey);
-      await refreshCalendarEvents(reminderWeekStartKey);
+      setCalendarAnchorDateKey(scheduledFor);
+      await refreshCalendarEvents(scheduledFor, calendarViewMode);
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to save email reminder');
     } finally {
@@ -574,42 +711,58 @@ export default function Dashboard() {
   };
 
   const todayKey = formatLocalDateInput(now);
-  const actualCurrentWeekStartKey = formatLocalDateInput(startOfCalendarWeek(now));
-  const currentWeekStartDate = localDateInputToNoonDate(calendarWeekStartKey);
+  const calendarAnchorDate = localDateInputToNoonDate(calendarAnchorDateKey);
+  const currentWeekStartDate = startOfCalendarWeek(calendarAnchorDate);
   const currentWeekEndDate = addCalendarDays(currentWeekStartDate, 6);
-  const currentWeekStartKey = formatLocalDateInput(currentWeekStartDate);
-  const currentWeekEndKey = formatLocalDateInput(currentWeekEndDate);
-  const calendarWeekPositionLabel = currentWeekStartKey === actualCurrentWeekStartKey
-    ? 'Current week'
-    : currentWeekStartKey > actualCurrentWeekStartKey
-      ? 'Future week'
-      : 'Past week';
-  const jumpToCalendarWeek = (dateKey: string) => {
+  const calendarMonthStartDate = startOfCalendarMonth(calendarAnchorDate);
+  const calendarVisibleWeekDays = buildCalendarWeekDays(currentWeekStartDate, todayKey);
+  const calendarVisibleMonthDays = buildCalendarMonthDays(calendarAnchorDate, todayKey);
+  const calendarViewRangeStartKey = calendarQueryRange.start;
+  const calendarViewRangeEndKey = calendarQueryRange.end;
+  const calendarViewTitle = calendarViewMode === 'today'
+    ? formatEasternDate(`${calendarAnchorDateKey}T12:00:00`, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+    : calendarViewMode === 'week'
+      ? `Week of ${formatCalendarWeekRange(currentWeekStartDate, currentWeekEndDate)}`
+      : calendarMonthLabelFormatter.format(calendarMonthStartDate);
+  const calendarViewKicker = calendarViewMode === 'today'
+    ? (calendarAnchorDateKey === todayKey ? "Today's schedule" : 'Daily schedule')
+    : calendarViewMode === 'week'
+      ? 'Weekly schedule'
+      : 'Monthly schedule';
+  const jumpToCalendarDate = (dateKey: string) => {
     if (!dateKey) return;
-    const weekStartKey = formatLocalDateInput(startOfCalendarWeek(localDateInputToNoonDate(dateKey)));
-    setCalendarWeekStartKey(weekStartKey);
+    setCalendarAnchorDateKey(dateKey);
     setExpandedCalendarNoteId(null);
   };
-  const moveCalendarWeek = (weekOffset: number) => {
-    setCalendarWeekStartKey(current => formatLocalDateInput(addCalendarDays(localDateInputToNoonDate(current), weekOffset * 7)));
+  const changeCalendarViewMode = (viewMode: CalendarViewMode) => {
+    setCalendarViewMode(viewMode);
+    if (viewMode === 'today') setCalendarAnchorDateKey(todayKey);
     setExpandedCalendarNoteId(null);
   };
-  const jumpToCurrentCalendarWeek = () => {
-    setCalendarWeekStartKey(actualCurrentWeekStartKey);
+  const moveCalendarPeriod = (offset: number) => {
+    setCalendarAnchorDateKey(current => {
+      const anchor = localDateInputToNoonDate(current);
+      if (calendarViewMode === 'today') return formatLocalDateInput(addCalendarDays(anchor, offset));
+      if (calendarViewMode === 'week') return formatLocalDateInput(addCalendarDays(anchor, offset * 7));
+      return formatLocalDateInput(addCalendarMonths(anchor, offset));
+    });
     setExpandedCalendarNoteId(null);
   };
-  const isCurrentWeekEvent = (event: OperationsCalendarEvent) => {
+  const jumpToTodayCalendarView = () => {
+    setCalendarViewMode('today');
+    setCalendarAnchorDateKey(todayKey);
+    setExpandedCalendarNoteId(null);
+  };
+  const isCurrentViewEvent = (event: OperationsCalendarEvent) => {
     const eventDateKey = calendarDateKeyForEvent(event);
-    return Boolean(eventDateKey && eventDateKey >= currentWeekStartKey && eventDateKey <= currentWeekEndKey);
+    return Boolean(eventDateKey && eventDateKey >= calendarViewRangeStartKey && eventDateKey <= calendarViewRangeEndKey);
   };
   const upcomingCalendarEvents = calendarEvents.filter(event =>
-    event.status !== 'completed' && isCurrentWeekEvent(event)
+    event.status !== 'completed' && isCurrentViewEvent(event)
   );
-  const completedCalendarEvents = calendarEvents.filter(event => event.status === 'completed' && isCurrentWeekEvent(event));
+  const completedCalendarEvents = calendarEvents.filter(event => event.status === 'completed' && isCurrentViewEvent(event));
   const displayedCalendarEvents = calendarQueueFilter === 'completed' ? completedCalendarEvents : upcomingCalendarEvents;
-  const calendarWeekLabel = formatCalendarWeekRange(currentWeekStartDate, currentWeekEndDate);
-  const calendarVisibleDays = buildCalendarWeekDays(currentWeekStartDate, todayKey);
-  const calendarWeekEventCount = displayedCalendarEvents.length;
+  const calendarViewEventCount = displayedCalendarEvents.length;
   const canCreateCalendarReminders = Boolean(user && isAdminRole(user.role));
   const calendarTypeLabel = (type?: string) => {
     const labels: Record<string, string> = {
@@ -674,55 +827,6 @@ export default function Dashboard() {
     };
 
     return tones[event.event_type || 'other'] || tones.other;
-  };
-  const calendarProjectTone = (index: number) => {
-    const tones = [
-      {
-        header: 'bg-gradient-to-r from-cyan-700 to-sky-800 text-cyan-50',
-        body: 'border-cyan-300/20 bg-cyan-950/25',
-        count: 'bg-cyan-200/20 text-cyan-50',
-      },
-      {
-        header: 'bg-gradient-to-r from-violet-700 to-indigo-800 text-violet-50',
-        body: 'border-violet-300/20 bg-violet-950/25',
-        count: 'bg-violet-200/20 text-violet-50',
-      },
-      {
-        header: 'bg-gradient-to-r from-slate-700 to-blue-900 text-blue-50',
-        body: 'border-blue-300/20 bg-blue-950/20',
-        count: 'bg-blue-200/20 text-blue-50',
-      },
-      {
-        header: 'bg-gradient-to-r from-amber-700 to-orange-800 text-amber-50',
-        body: 'border-amber-300/20 bg-amber-950/20',
-        count: 'bg-amber-200/20 text-amber-50',
-      },
-    ];
-
-    return tones[index % tones.length];
-  };
-  const buildCalendarProjectGroups = (events: OperationsCalendarEvent[]) => {
-    const groups: { key: string; label: string; events: OperationsCalendarEvent[] }[] = [];
-    const groupIndexes = new Map<string, number>();
-
-    sortCalendarEventsForDay(events).forEach(event => {
-      const label = getCalendarProjectLabel(event);
-      const key = label.toLowerCase();
-      let index = groupIndexes.get(key);
-
-      if (index === undefined) {
-        index = groups.length;
-        groupIndexes.set(key, index);
-        groups.push({ key, label, events: [] });
-      }
-
-      groups[index].events.push(event);
-    });
-
-    return groups.map((group, index) => ({
-      ...group,
-      tone: calendarProjectTone(index),
-    }));
   };
   const calendarEventsByDate = displayedCalendarEvents.reduce<Record<string, OperationsCalendarEvent[]>>((groups, event) => {
     const dateKey = calendarDateKeyForEvent(event) || todayKey;
@@ -852,6 +956,307 @@ export default function Dashboard() {
         )}
       </article>
     );
+  };
+
+  const renderCalendarMonthEventPill = (event: OperationsCalendarEvent) => {
+    const complete = event.status === 'completed';
+    const noteDraft = calendarNoteDraft(event);
+    const projectLabel = getCalendarProjectLabel(event);
+    const saving = savingCalendarEventId === event.id;
+    const tone = calendarEventTone(event);
+
+    return (
+      <div
+        key={event.id}
+        className={`group relative flex min-w-0 items-start gap-1.5 overflow-hidden rounded-md border px-1.5 py-1.5 shadow-[0_6px_14px_rgba(2,6,23,0.18)] ${tone.card}`}
+      >
+        <span className={`absolute bottom-1.5 left-0 top-1.5 w-0.5 rounded-r-full ${tone.rail}`} />
+        <input
+          type="checkbox"
+          checked={complete}
+          disabled={saving}
+          onChange={inputEvent => {
+            void saveCalendarEventUpdate(event, {
+              status: inputEvent.currentTarget.checked ? 'completed' : 'scheduled',
+              completion_note: noteDraft,
+            });
+          }}
+          className="ml-1 mt-0.5 h-3.5 w-3.5 flex-shrink-0 rounded border-slate-500 bg-slate-950 accent-emerald-500"
+          aria-label={`${complete ? 'Mark incomplete' : 'Mark complete'}: ${projectLabel} - ${event.title}`}
+        />
+        <button
+          type="button"
+          onClick={() => openCalendarEntryEditor(event)}
+          className="min-w-0 flex-1 rounded text-left focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
+          title={`${formatCalendarDueTimeLabel(event.due_time)} - ${event.title}`}
+        >
+          <span className={`block text-[10px] font-black leading-3 ${complete ? 'text-emerald-100 line-through decoration-emerald-200/70' : 'text-slate-50'}`}>
+            {event.title}
+          </span>
+          <span className="mt-0.5 block truncate text-[9px] font-bold text-slate-300">
+            {formatCalendarDueTimeLabel(event.due_time)}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => openCalendarEntryEditor(event)}
+          disabled={saving}
+          className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border border-slate-600 bg-slate-950/80 text-slate-300 opacity-0 transition hover:border-cyan-300 hover:text-cyan-100 group-hover:opacity-100 group-focus-within:opacity-100 disabled:opacity-50"
+          aria-label={`Edit calendar entry: ${projectLabel} - ${event.title}`}
+          title="Edit"
+        >
+          <Edit2 className="h-3 w-3" />
+        </button>
+      </div>
+    );
+  };
+
+  const renderCalendarEmptyState = (dateKey: string, label: string) => (
+    <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/45 px-4 py-6 text-center">
+      <CalendarDays className="mx-auto h-7 w-7 text-slate-500" />
+      <p className="mt-2 text-sm font-black text-slate-200">No calendar items scheduled</p>
+      <p className="mt-1 text-xs font-semibold text-slate-500">{label}</p>
+      <div className="mt-4 flex justify-center">
+        <AddToCalendarButton
+          label="Add calendar item"
+          ariaLabel={`Add task or event on ${label}`}
+          icon="plus"
+          defaultTitle="BuildTrack task"
+          defaultDescription={`Created directly from the ${label} calendar space.`}
+          defaultDate={dateKey}
+          defaultEventType="task"
+          sourceType="dashboard_day"
+          contextLabel={`Calendar space: ${label}`}
+          modalTitle={`Add Item - ${label}`}
+          buttonClassName="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-cyan-300/50 bg-cyan-500/15 px-3 text-xs font-black text-cyan-50 transition hover:border-cyan-200 hover:bg-cyan-500/25 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
+          onSaved={() => refreshCalendarEvents(calendarAnchorDateKey, calendarViewMode)}
+        />
+      </div>
+    </div>
+  );
+
+  const renderCalendarTodayView = () => {
+    const todayEvents = sortCalendarEventsForDay(calendarEventsByDate[calendarAnchorDateKey] || []);
+    const schedule = buildCalendarDayScheduleBucket(todayEvents);
+
+    return (
+      <div className="grid gap-4 p-4 xl:grid-cols-[280px_minmax(0,1fr)]">
+        <aside className="rounded-2xl border border-slate-700/70 bg-slate-950/70 p-4 shadow-[0_16px_34px_rgba(2,6,23,0.24)]">
+          <p className="text-[11px] font-black uppercase tracking-wide text-cyan-200">Selected day</p>
+          <h3 className="mt-2 text-3xl font-black leading-none text-white">
+            {formatCalendarBadgeDate(calendarAnchorDateKey).day}
+          </h3>
+          <p className="mt-2 text-sm font-black text-slate-200">
+            {formatEasternDate(`${calendarAnchorDateKey}T12:00:00`, { weekday: 'long', month: 'long', day: 'numeric' })}
+          </p>
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <div className="rounded-xl border border-sky-300/20 bg-sky-500/10 px-3 py-2">
+              <p className="text-[10px] font-black uppercase tracking-wide text-sky-200">Items</p>
+              <p className="mt-1 text-xl font-black text-white">{todayEvents.length}</p>
+            </div>
+            <div className="rounded-xl border border-emerald-300/20 bg-emerald-500/10 px-3 py-2">
+              <p className="text-[10px] font-black uppercase tracking-wide text-emerald-200">Done</p>
+              <p className="mt-1 text-xl font-black text-white">{todayEvents.filter(event => event.status === 'completed').length}</p>
+            </div>
+          </div>
+          <div className="mt-4">
+            <AddToCalendarButton
+              label="Add item today"
+              ariaLabel={`Add task or event on ${formatCalendarBadgeDate(calendarAnchorDateKey).label}`}
+              icon="plus"
+              defaultTitle="BuildTrack task"
+              defaultDescription={`Created directly from the ${formatCalendarBadgeDate(calendarAnchorDateKey).label} calendar space.`}
+              defaultDate={calendarAnchorDateKey}
+              defaultEventType="task"
+              sourceType="dashboard_day"
+              contextLabel={`Calendar space: ${formatCalendarBadgeDate(calendarAnchorDateKey).label}`}
+              modalTitle={`Add Item - ${formatCalendarBadgeDate(calendarAnchorDateKey).label}`}
+              buttonClassName="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-cyan-300/50 bg-gradient-to-r from-cyan-500/22 via-blue-500/18 to-orange-500/18 px-3 text-sm font-black text-white transition hover:border-cyan-200 hover:from-cyan-400/28 hover:via-blue-500/22 hover:to-orange-400/22 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
+              onSaved={() => refreshCalendarEvents(calendarAnchorDateKey, calendarViewMode)}
+            />
+          </div>
+        </aside>
+
+        <div className="min-w-0 rounded-2xl border border-slate-700/70 bg-slate-950/45">
+          {todayEvents.length === 0 ? (
+            <div className="p-4">{renderCalendarEmptyState(calendarAnchorDateKey, formatCalendarBadgeDate(calendarAnchorDateKey).label)}</div>
+          ) : (
+            <div>
+              {schedule.untimed.length > 0 ? (
+                <div className="grid grid-cols-[90px_minmax(0,1fr)] border-b border-slate-800/90">
+                  <div className="border-r border-slate-800/90 px-3 py-3 text-right text-[11px] font-black uppercase tracking-wide text-slate-500">
+                    No time
+                  </div>
+                  <div className="space-y-2 p-3">
+                    {schedule.untimed.map(renderCalendarDayTask)}
+                  </div>
+                </div>
+              ) : null}
+              {calendarScheduleHours.map(hour => {
+                const hourEvents = schedule.byHour[hour] || [];
+                return (
+                  <div key={hour} className="grid min-h-[72px] grid-cols-[90px_minmax(0,1fr)] border-b border-slate-800/80 last:border-b-0">
+                    <div className="border-r border-slate-800/90 bg-slate-950/40 px-3 py-3 text-right text-[11px] font-black text-slate-400">
+                      {formatCalendarHourLabel(hour)}
+                    </div>
+                    <div className={`space-y-2 p-3 ${hourEvents.length ? 'bg-slate-900/25' : 'bg-slate-950/20'}`}>
+                      {hourEvents.length ? (
+                        hourEvents.map(renderCalendarDayTask)
+                      ) : (
+                        <div className="h-full min-h-[44px] rounded-lg border border-dashed border-slate-800/80 bg-slate-950/25" />
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderCalendarWeekView = () => (
+    <div className="overflow-x-auto bg-[#060A14]">
+      <div className="grid min-w-[1180px] grid-cols-7 items-start gap-3 p-4">
+        {calendarVisibleWeekDays.map(day => {
+          const dayEvents = sortCalendarEventsForDay(calendarEventsByDate[day.key] || []);
+          const badgeDate = formatCalendarBadgeDate(day.key);
+          const dayYear = day.key.slice(0, 4);
+
+          return (
+            <section key={day.key} className={`min-w-0 overflow-hidden rounded-2xl border shadow-[0_14px_30px_rgba(2,6,23,0.28)] ${day.isToday ? 'border-cyan-300/70 bg-[#0B213B] ring-1 ring-cyan-300/25' : 'border-slate-700/80 bg-[#111827]'}`}>
+              <header className={`border-b px-3 py-3 ${day.isToday ? 'border-cyan-300/40 bg-cyan-500/10' : 'border-slate-700/70 bg-[#182235]'}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className={`text-[10px] font-black uppercase tracking-[0.16em] ${day.isToday ? 'text-cyan-100' : 'text-slate-400'}`}>
+                      {day.weekday}
+                    </p>
+                    <p className="mt-1 text-2xl font-black leading-none text-white">
+                      {day.dayNumber}
+                    </p>
+                    <p className="mt-1 text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                      {badgeDate.month} {dayYear}
+                    </p>
+                  </div>
+                  <div className="flex items-start gap-1.5">
+                    <span className={`rounded-full px-2 py-1 text-[10px] font-black leading-none ${day.isToday ? 'bg-cyan-100 text-slate-950' : dayEvents.length > 0 ? 'bg-sky-400/20 text-sky-100 ring-1 ring-sky-300/35' : 'bg-slate-950/70 text-slate-300 ring-1 ring-slate-600/60'}`}>
+                      {dayEvents.length}
+                    </span>
+                    <AddToCalendarButton
+                      label={`Add calendar item on ${badgeDate.label}`}
+                      ariaLabel={`Add task or event on ${badgeDate.label}`}
+                      icon="plus"
+                      iconOnly
+                      defaultTitle="BuildTrack task"
+                      defaultDescription={`Created directly from the ${badgeDate.label} calendar space.`}
+                      defaultDate={day.key}
+                      defaultEventType="task"
+                      sourceType="dashboard_day"
+                      contextLabel={`Calendar space: ${badgeDate.label}`}
+                      modalTitle={`Add Item - ${badgeDate.label}`}
+                      buttonClassName={`inline-flex h-7 w-7 min-w-7 items-center justify-center rounded-md border text-xs font-black transition focus:outline-none focus:ring-2 focus:ring-cyan-300/50 ${day.isToday ? 'border-cyan-100/70 bg-cyan-200/20 text-cyan-50 hover:bg-cyan-200/30 hover:border-cyan-50' : 'border-slate-600 bg-slate-950/70 text-slate-300 hover:border-cyan-300 hover:bg-cyan-500/20 hover:text-cyan-50'}`}
+                      onSaved={() => refreshCalendarEvents(calendarAnchorDateKey, calendarViewMode)}
+                    />
+                  </div>
+                </div>
+              </header>
+              <div className="space-y-2.5 p-3">
+                {dayEvents.length ? dayEvents.map(renderCalendarDayTask) : renderCalendarEmptyState(day.key, badgeDate.label)}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const renderCalendarMonthView = () => (
+    <div className="overflow-x-auto bg-[#060A14]">
+      <div className="min-w-[1180px] p-4">
+        <div className="grid grid-cols-7 overflow-hidden rounded-t-2xl border border-b-0 border-slate-700/80 bg-[#182235]">
+          {calendarWeekdayLabels.map(dayLabel => (
+            <div key={dayLabel} className="border-r border-slate-700/70 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-slate-300 last:border-r-0">
+              {dayLabel}
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-7 overflow-hidden rounded-b-2xl border border-slate-700/80">
+          {calendarVisibleMonthDays.map(day => {
+            const dayEvents = sortCalendarEventsForDay(calendarEventsByDate[day.key] || []);
+            const badgeDate = formatCalendarBadgeDate(day.key);
+            const visibleEvents = dayEvents.slice(0, 3);
+            const hiddenCount = Math.max(dayEvents.length - visibleEvents.length, 0);
+
+            return (
+              <section
+                key={day.key}
+                className={`min-h-[154px] border-r border-b border-slate-800/85 p-2 last:border-r-0 ${day.isToday ? 'bg-cyan-950/35 ring-1 ring-inset ring-cyan-300/55' : day.isCurrentMonth ? 'bg-[#0D1424]' : 'bg-slate-950/55'}`}
+              >
+                <header className="mb-2 flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCalendarViewMode('today');
+                      setCalendarAnchorDateKey(day.key);
+                      setExpandedCalendarNoteId(null);
+                    }}
+                    className={`rounded-lg px-2 py-1 text-left text-xs font-black transition focus:outline-none focus:ring-2 focus:ring-cyan-300/50 ${day.isCurrentMonth ? 'text-slate-100 hover:bg-slate-800/80' : 'text-slate-500 hover:bg-slate-900/80'}`}
+                    title={`Open daily schedule for ${badgeDate.label}`}
+                  >
+                    {day.dayNumber}
+                  </button>
+                  <div className="flex items-center gap-1">
+                    {dayEvents.length ? (
+                      <span className="rounded-full bg-sky-400/20 px-1.5 py-0.5 text-[9px] font-black text-sky-100 ring-1 ring-sky-300/30">
+                        {dayEvents.length}
+                      </span>
+                    ) : null}
+                    <AddToCalendarButton
+                      label={`Add calendar item on ${badgeDate.label}`}
+                      ariaLabel={`Add task or event on ${badgeDate.label}`}
+                      icon="plus"
+                      iconOnly
+                      defaultTitle="BuildTrack task"
+                      defaultDescription={`Created directly from the ${badgeDate.label} calendar space.`}
+                      defaultDate={day.key}
+                      defaultEventType="task"
+                      sourceType="dashboard_day"
+                      contextLabel={`Calendar space: ${badgeDate.label}`}
+                      modalTitle={`Add Item - ${badgeDate.label}`}
+                      buttonClassName="inline-flex h-6 w-6 min-w-6 items-center justify-center rounded-md border border-slate-700 bg-slate-950/70 text-[10px] font-black text-slate-400 transition hover:border-cyan-300 hover:bg-cyan-500/20 hover:text-cyan-50 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
+                      onSaved={() => refreshCalendarEvents(calendarAnchorDateKey, calendarViewMode)}
+                    />
+                  </div>
+                </header>
+                <div className="space-y-1.5">
+                  {visibleEvents.map(renderCalendarMonthEventPill)}
+                  {hiddenCount > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCalendarViewMode('today');
+                        setCalendarAnchorDateKey(day.key);
+                        setExpandedCalendarNoteId(null);
+                      }}
+                      className="w-full rounded-md border border-slate-700/80 bg-slate-950/60 px-2 py-1 text-left text-[10px] font-black text-slate-300 transition hover:border-cyan-300/50 hover:text-cyan-100 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
+                    >
+                      + {hiddenCount} more
+                    </button>
+                  ) : null}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderSelectedCalendarView = () => {
+    if (calendarViewMode === 'today') return renderCalendarTodayView();
+    if (calendarViewMode === 'week') return renderCalendarWeekView();
+    return renderCalendarMonthView();
   };
 
   const renderActivityFeedPanel = () => (
@@ -1003,8 +1408,8 @@ export default function Dashboard() {
           <div className="hidden items-center gap-3 md:flex">
             <div className="grid grid-cols-3 gap-2">
               <div className="bt-dashboard-command-chip">
-                <span>This week</span>
-                <strong>{calendarWeekEventCount}</strong>
+                <span>Schedule</span>
+                <strong>{calendarViewEventCount}</strong>
               </div>
               <div className="bt-dashboard-command-chip">
                 <span>Upcoming</span>
@@ -1101,151 +1506,71 @@ export default function Dashboard() {
           <div className="mt-4 overflow-hidden rounded-[18px] border border-slate-700/70 bg-[#070B16] shadow-[0_24px_60px_rgba(2,6,23,0.38)]">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-700/70 px-4 py-3" style={{ background: 'linear-gradient(90deg, rgba(15,23,42,0.98), rgba(17,24,39,0.98) 55%, rgba(12,74,110,0.24))' }}>
               <div className="min-w-0">
-                <p className="text-[11px] font-black uppercase tracking-wide text-sky-200">{calendarWeekPositionLabel}</p>
-                <h3 className="mt-0.5 text-base font-black text-slate-50">Sunday - Saturday, {calendarWeekLabel}</h3>
+                <p className="text-[11px] font-black uppercase tracking-wide text-sky-200">{calendarViewKicker}</p>
+                <h3 className="mt-0.5 text-lg font-black text-slate-50">{calendarViewTitle}</h3>
               </div>
               <div className="flex flex-wrap items-center justify-end gap-1.5">
+                <div className="mr-1 inline-flex rounded-xl border border-slate-700 bg-slate-950/80 p-1">
+                  {([
+                    { key: 'today', label: 'Today' },
+                    { key: 'week', label: 'Week' },
+                    { key: 'month', label: 'Month' },
+                  ] as const).map(view => {
+                    const active = calendarViewMode === view.key;
+                    return (
+                      <button
+                        key={view.key}
+                        type="button"
+                        onClick={() => changeCalendarViewMode(view.key)}
+                        className={`min-h-8 rounded-lg px-3 text-xs font-black transition focus:outline-none focus:ring-2 focus:ring-cyan-300/50 ${active ? 'bg-sky-500/25 text-white ring-1 ring-sky-300/45' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'}`}
+                        aria-pressed={active}
+                      >
+                        {view.label}
+                      </button>
+                    );
+                  })}
+                </div>
                 <button
                   type="button"
-                  onClick={() => moveCalendarWeek(-1)}
+                  onClick={() => moveCalendarPeriod(-1)}
                   className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-600 bg-slate-800/90 text-slate-100 transition hover:border-sky-300 hover:bg-slate-700"
-                  title="Previous week"
-                  aria-label="Previous week"
+                  title={`Previous ${calendarViewMode}`}
+                  aria-label={`Previous ${calendarViewMode}`}
                 >
                   <ChevronLeft className="h-4 w-4" />
                 </button>
                 <button
                   type="button"
-                  onClick={jumpToCurrentCalendarWeek}
+                  onClick={jumpToTodayCalendarView}
                   className="inline-flex min-h-8 items-center rounded-lg border border-sky-300/40 bg-sky-500/20 px-2.5 text-xs font-black text-sky-50 transition hover:border-sky-200 hover:bg-sky-500/30"
                 >
                   Today
                 </button>
                 <label className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-800/90 px-2 text-xs font-black text-slate-100">
-                  <span>Week of</span>
+                  <span>Date</span>
                   <input
                     type="date"
-                    value={calendarWeekStartKey}
-                    onChange={event => jumpToCalendarWeek(event.target.value)}
+                    value={calendarAnchorDateKey}
+                    onChange={event => jumpToCalendarDate(event.target.value)}
                     className="h-6 rounded-md border border-slate-600 bg-slate-950 px-1.5 text-xs font-bold text-slate-100 outline-none focus:border-sky-300"
-                    aria-label="Jump to calendar week"
+                    aria-label="Choose calendar date"
                   />
                 </label>
                 <button
                   type="button"
-                  onClick={() => moveCalendarWeek(1)}
+                  onClick={() => moveCalendarPeriod(1)}
                   className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-600 bg-slate-800/90 text-slate-100 transition hover:border-sky-300 hover:bg-slate-700"
-                  title="Next week"
-                  aria-label="Next week"
+                  title={`Next ${calendarViewMode}`}
+                  aria-label={`Next ${calendarViewMode}`}
                 >
                   <ChevronRight className="h-4 w-4" />
                 </button>
                 <span className="rounded-lg border border-sky-300/40 bg-sky-500/20 px-2.5 py-1 text-xs font-black text-sky-50">
-                  {calendarWeekEventCount} {calendarWeekEventCount === 1 ? 'task' : 'tasks'}
+                  {calendarViewEventCount} {calendarViewEventCount === 1 ? 'item' : 'items'}
                 </span>
               </div>
             </div>
-
-            <div className="overflow-x-auto bg-[#060A14]">
-              <div className="grid min-w-[1400px] grid-cols-7 items-start gap-3 p-3">
-                {calendarVisibleDays.map(day => {
-                  const dayEvents = sortCalendarEventsForDay(calendarEventsByDate[day.key] || []);
-                  const dayGroups = buildCalendarProjectGroups(dayEvents);
-                  const badgeDate = formatCalendarBadgeDate(day.key);
-                  const dayYear = day.key.slice(0, 4);
-
-                  return (
-                    <section key={day.key} className={`flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border shadow-[0_14px_30px_rgba(2,6,23,0.30)] ${day.isToday ? 'border-cyan-300/70 bg-[#0B213B] ring-1 ring-cyan-300/25' : 'border-slate-700/80 bg-[#111827]'}`}>
-                      <header className={`border-b px-2.5 py-2 ${day.isToday ? 'border-cyan-300/40 bg-cyan-500/10' : 'border-slate-700/70 bg-[#182235]'}`}>
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className={`text-[8px] font-black uppercase tracking-[0.16em] ${day.isToday ? 'text-cyan-100' : 'text-slate-400'}`}>
-                              {day.weekday}
-                            </p>
-                            <p className="mt-0.5 text-xl font-black leading-none text-white">
-                              {day.dayNumber}
-                            </p>
-                            <p className="mt-1 text-[8px] font-bold uppercase tracking-wide text-slate-500">
-                              {badgeDate.month} {dayYear}
-                            </p>
-                          </div>
-                          <div className="flex items-start gap-1">
-                            <span className={`rounded px-1.5 py-0.5 text-[8px] font-black uppercase leading-none ${day.isToday ? 'bg-cyan-100 text-slate-950' : dayEvents.length > 0 ? 'bg-sky-400/20 text-sky-100 ring-1 ring-sky-300/35' : 'bg-slate-950/70 text-slate-300 ring-1 ring-slate-600/60'}`}>
-                              {dayEvents.length}
-                            </span>
-                            <AddToCalendarButton
-                              label={`Add calendar item on ${badgeDate.label}`}
-                              ariaLabel={`Add task or event on ${badgeDate.label}`}
-                              icon="plus"
-                              iconOnly
-                              defaultTitle="BuildTrack task"
-                              defaultDescription={`Created directly from the ${badgeDate.label} calendar space.`}
-                              defaultDate={day.key}
-                              defaultEventType="task"
-                              sourceType="dashboard_day"
-                              contextLabel={`Calendar space: ${badgeDate.label}`}
-                              modalTitle={`Add Item - ${badgeDate.label}`}
-                              buttonClassName={`inline-flex h-6 w-6 min-w-6 items-center justify-center rounded-md border text-xs font-black transition focus:outline-none focus:ring-2 focus:ring-cyan-300/50 ${day.isToday ? 'border-cyan-100/70 bg-cyan-200/20 text-cyan-50 hover:bg-cyan-200/30 hover:border-cyan-50' : 'border-slate-600 bg-slate-950/70 text-slate-300 hover:border-cyan-300 hover:bg-cyan-500/20 hover:text-cyan-50'}`}
-                              onSaved={() => refreshCalendarEvents(calendarWeekStartKey)}
-                            />
-                          </div>
-                        </div>
-                      </header>
-                      <div className="space-y-3 p-2.5">
-                        {dayGroups.length > 0 ? (
-                          <>
-                            {dayGroups.map(group => (
-                              <div key={group.key} className={`overflow-hidden rounded-lg border ${group.tone.body}`}>
-                                <div className={`flex min-h-8 items-center justify-between gap-2 px-2.5 py-1.5 ${group.tone.header}`}>
-                                  <span className="min-w-0 truncate text-[9px] font-black uppercase tracking-[0.14em]" title={group.label}>
-                                    {group.label}
-                                  </span>
-                                  <span className={`flex-shrink-0 rounded px-1.5 py-0.5 text-[8px] font-black leading-none ${group.tone.count}`}>
-                                    {group.events.length}
-                                  </span>
-                                </div>
-                                <div className="space-y-2.5 p-2">
-                                  {group.events.map(renderCalendarDayTask)}
-                                </div>
-                              </div>
-                            ))}
-                            <AddToCalendarButton
-                              label="Add task"
-                              ariaLabel={`Add task or event on ${badgeDate.label}`}
-                              icon="plus"
-                              defaultTitle="BuildTrack task"
-                              defaultDescription={`Created directly from the ${badgeDate.label} calendar space.`}
-                              defaultDate={day.key}
-                              defaultEventType="task"
-                              sourceType="dashboard_day"
-                              contextLabel={`Calendar space: ${badgeDate.label}`}
-                              modalTitle={`Add Item - ${badgeDate.label}`}
-                              buttonClassName="flex min-h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-700 bg-slate-950/40 text-[11px] font-black text-slate-400 transition hover:border-cyan-300 hover:bg-cyan-500/10 hover:text-cyan-50 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
-                              onSaved={() => refreshCalendarEvents(calendarWeekStartKey)}
-                            />
-                          </>
-                        ) : (
-                          <AddToCalendarButton
-                            label="Add task"
-                            ariaLabel={`Add task or event on ${badgeDate.label}`}
-                            icon="plus"
-                            defaultTitle="BuildTrack task"
-                            defaultDescription={`Created directly from the ${badgeDate.label} calendar space.`}
-                            defaultDate={day.key}
-                            defaultEventType="task"
-                            sourceType="dashboard_day"
-                            contextLabel={`Calendar space: ${badgeDate.label}`}
-                            modalTitle={`Add Item - ${badgeDate.label}`}
-                            buttonClassName="flex min-h-[112px] w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-slate-700 bg-slate-950/40 px-2 text-[11px] font-black text-slate-500 transition hover:border-cyan-300 hover:bg-cyan-500/10 hover:text-cyan-50 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
-                            onSaved={() => refreshCalendarEvents(calendarWeekStartKey)}
-                          />
-                        )}
-                      </div>
-                    </section>
-                  );
-                })}
-              </div>
-            </div>
+            {renderSelectedCalendarView()}
           </div>
         </section>
 
