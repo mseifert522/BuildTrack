@@ -12,6 +12,7 @@ import {
   mobileExternalUrl,
   mobilePath,
 } from './lib/appUrls';
+import { BUILDTRACK_TRUTH_ICON_SRC } from './lib/branding';
 
 const Login = lazy(() => import('./pages/Login'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -76,8 +77,8 @@ function RootErrorFallback({ error }: { error?: Error | null }) {
     <div className="min-h-screen bg-slate-950 px-4 py-10 text-white">
       <div className="mx-auto flex min-h-[70vh] max-w-lg flex-col justify-center">
         <div className="mb-5 flex items-center gap-3">
-          <div className="h-12 w-12 overflow-hidden rounded-lg border-2 border-amber-500 bg-amber-500/10">
-            <img src="/buildtrack-logo-mark.png" alt="BuildTrack" className="h-full w-full object-cover" />
+          <div className="h-12 w-12 overflow-hidden rounded-lg bg-slate-950" style={{ boxShadow: '0 0 0 1px rgba(245,183,49,0.38)' }}>
+            <img src={BUILDTRACK_TRUTH_ICON_SRC} alt="BuildTrack" className="h-full w-full object-contain" />
           </div>
           <div>
             <p className="text-lg font-black">BuildTrack</p>

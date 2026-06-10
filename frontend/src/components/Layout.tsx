@@ -10,11 +10,10 @@ import {
 import api from '../lib/api';
 import toast from 'react-hot-toast';
 import Avatar from './Avatar';
+import { BUILDTRACK_TRUTH_ICON_SRC } from '../lib/branding';
 import { formatEasternRelative, parseBuildTrackTimestamp } from '../lib/time';
 
 interface LayoutProps { children: React.ReactNode; }
-
-const BUILDTRACK_TRUTH_ICON_SRC = '/favicon.svg?v=20260610-blue-frame';
 
 interface SearchResult {
   type: string;

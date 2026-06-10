@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useSearchParams, Link, useNavigate } from 'react-router-dom';
 import api from '../lib/api';
+import { BUILDTRACK_TRUTH_ICON_SRC } from '../lib/branding';
 import toast from 'react-hot-toast';
 
 export default function ResetPassword() {
@@ -45,8 +46,8 @@ export default function ResetPassword() {
     <div className="min-h-screen flex items-center justify-center p-6" style={{ background: '#F8F9FC' }}>
       <div className="w-full max-w-[420px]">
         <div className="text-center mb-8">
-          <div className="w-16 h-16 rounded-2xl overflow-hidden border-3 shadow-xl mx-auto mb-4" style={{ borderColor: '#D99D26' }}>
-            <img src="/buildtrack-logo-mark.png" alt="BuildTrack" className="h-full w-full object-cover" />
+          <div className="w-16 h-16 rounded-2xl overflow-hidden bg-slate-950 shadow-xl mx-auto mb-4" style={{ boxShadow: '0 14px 32px rgba(15, 23, 42, 0.18), 0 0 0 1px rgba(217,157,38,0.46)' }}>
+            <img src={BUILDTRACK_TRUTH_ICON_SRC} alt="BuildTrack" className="h-full w-full object-contain" />
           </div>
           <h2 className="text-2xl font-black text-gray-900">Set New Password</h2>
           <p className="text-gray-500 mt-2 text-sm">Choose a strong password for your account</p>

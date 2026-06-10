@@ -16,6 +16,7 @@ import {
 import { useAuthStore } from '../store/authStore';
 import api from '../lib/api';
 import { isMobileAppHost, mobilePath } from '../lib/appUrls';
+import { BUILDTRACK_TRUTH_ICON_SRC } from '../lib/branding';
 import toast from 'react-hot-toast';
 
 const DEVICE_TOKEN_KEY = 'bt_device_token';
@@ -482,10 +483,10 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
 
         <div className="relative z-10 flex items-center gap-4">
           <div
-            className="w-12 h-12 rounded-lg flex items-center justify-center overflow-hidden border-2"
-            style={{ borderColor: 'rgba(217,157,38,0.5)', background: 'rgba(217,157,38,0.1)' }}
+            className="w-12 h-12 rounded-lg flex items-center justify-center overflow-hidden bg-slate-950"
+            style={{ boxShadow: '0 0 0 1px rgba(245,183,49,0.38)' }}
           >
-            <img src="/buildtrack-logo-mark.png" alt="BuildTrack" className="h-full w-full object-cover" />
+            <img src={BUILDTRACK_TRUTH_ICON_SRC} alt="BuildTrack" className="h-full w-full object-contain" />
           </div>
           <div>
             <p className="text-white font-bold text-lg leading-tight">BuildTrack</p>
@@ -552,10 +553,10 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
       >
         <div className="lg:hidden flex items-center gap-3 mb-6 w-full max-w-[460px]">
           <div
-            className="w-12 h-12 rounded-lg overflow-hidden border-2 shadow-sm"
-            style={{ borderColor: '#D99D26' }}
+            className="w-12 h-12 rounded-lg overflow-hidden bg-slate-950 shadow-sm"
+            style={{ boxShadow: '0 0 0 1px rgba(217,157,38,0.46)' }}
           >
-            <img src="/buildtrack-logo-mark.png" alt="BuildTrack" className="h-full w-full object-cover" />
+            <img src={BUILDTRACK_TRUTH_ICON_SRC} alt="BuildTrack" className="h-full w-full object-contain" />
           </div>
           <div>
             <h1 className="text-xl font-black text-gray-900">BuildTrack</h1>
