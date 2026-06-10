@@ -6,7 +6,7 @@ import { Loading, Modal } from '../components/ui';
 import Avatar from '../components/Avatar';
 import {
   Activity,
-  Plus, MapPin, MessageSquare, CalendarDays,
+  Plus, MapPin, CalendarDays,
   Mail, Send, Edit2, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -734,7 +734,6 @@ export default function Dashboard() {
     const complete = event.status === 'completed';
     const noteDraft = calendarNoteDraft(event);
     const noteExpanded = expandedCalendarNoteId === event.id;
-    const hasCompletionNote = Boolean(noteDraft.trim());
     const projectLabel = getCalendarProjectLabel(event);
     const saving = savingCalendarEventId === event.id;
     const tone = calendarEventTone(event);
@@ -742,7 +741,7 @@ export default function Dashboard() {
     return (
       <article
         key={event.id}
-        className={`group relative overflow-hidden rounded-md border px-1.5 py-1.5 text-left shadow-[0_6px_14px_rgba(2,6,23,0.20)] transition-colors ${
+        className={`group relative overflow-hidden rounded-lg border px-3 py-3 text-left shadow-[0_10px_22px_rgba(2,6,23,0.24)] transition-colors ${
           complete
             ? tone.card
             : noteExpanded
@@ -750,8 +749,8 @@ export default function Dashboard() {
               : tone.card
         }`}
       >
-        <span className={`absolute bottom-1.5 left-0 top-1.5 w-0.5 rounded-r-full ${tone.rail}`} />
-        <div className="flex items-center gap-1.5 pl-1">
+        <span className={`absolute bottom-3 left-0 top-3 w-1 rounded-r-full ${tone.rail}`} />
+        <div className="flex items-start gap-2 pl-1.5">
           <input
             type="checkbox"
             checked={complete}
@@ -762,75 +761,66 @@ export default function Dashboard() {
                 completion_note: noteDraft,
               });
             }}
-            className="h-3.5 w-3.5 flex-shrink-0 rounded border-slate-500 bg-slate-950 accent-emerald-500"
+            className="mt-1 h-4 w-4 flex-shrink-0 rounded border-slate-500 bg-slate-950 accent-emerald-500"
             aria-label={`${complete ? 'Mark incomplete' : 'Mark complete'}: ${projectLabel} - ${event.title}`}
           />
-          <button
-            type="button"
-            onClick={() => setExpandedCalendarNoteId(noteExpanded ? null : event.id)}
-            className="min-w-0 flex-1 text-left"
-            aria-expanded={noteExpanded}
-          >
-            <div className="flex min-w-0 items-center gap-1">
-              <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${tone.rail}`} />
-              <p className={`min-w-0 truncate text-[10px] font-black leading-4 ${complete ? 'text-emerald-100 line-through decoration-emerald-200/70' : 'text-slate-50'}`} title={event.title}>
-                {event.title}
-              </p>
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-start justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setExpandedCalendarNoteId(noteExpanded ? null : event.id)}
+                className="min-w-0 flex-1 rounded-md text-left focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
+                aria-expanded={noteExpanded}
+              >
+                <p className={`whitespace-normal break-words text-sm font-black leading-5 ${complete ? 'text-emerald-100 line-through decoration-emerald-200/70' : 'text-slate-50'}`} title={event.title}>
+                  {event.title}
+                </p>
+              </button>
+              <button
+                type="button"
+                onClick={() => openCalendarEntryEditor(event)}
+                disabled={saving}
+                className="inline-flex h-8 flex-shrink-0 items-center gap-1 rounded-md border border-slate-600 bg-slate-950/90 px-2 text-[10px] font-black uppercase tracking-wide text-slate-100 transition hover:border-cyan-300 hover:bg-cyan-500/15 hover:text-cyan-100 disabled:opacity-60"
+                title="Edit calendar entry"
+                aria-label={`Edit calendar entry: ${projectLabel} - ${event.title}`}
+              >
+                <Edit2 className="h-3 w-3" />
+                Edit
+              </button>
             </div>
-            <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
+            <p className="mt-1 whitespace-normal break-words text-[12px] font-bold leading-4 text-slate-200" title={projectLabel}>
+              {projectLabel}
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
               {event.due_time ? (
-                <span className={`flex-shrink-0 rounded px-1 py-0.5 text-[8px] font-black leading-none ring-1 ${tone.time}`}>
+                <span className={`flex-shrink-0 rounded-md px-2 py-1 text-[10px] font-black leading-none ring-1 ${tone.time}`}>
                   {event.due_time}
                 </span>
               ) : (
-                <span className="flex-shrink-0 rounded bg-slate-950/60 px-1 py-0.5 text-[8px] font-black leading-none text-slate-300 ring-1 ring-slate-600/60">
+                <span className="flex-shrink-0 rounded-md bg-slate-950/60 px-2 py-1 text-[10px] font-black leading-none text-slate-300 ring-1 ring-slate-600/60">
                   Anytime
                 </span>
               )}
-              <span className={`min-w-0 truncate rounded border px-1 py-0.5 text-[8px] font-black uppercase leading-none ${tone.chip}`}>
+              <span className={`rounded-md border px-2 py-1 text-[10px] font-black uppercase leading-none ${tone.chip}`}>
                 {calendarTypeLabel(event.event_type)}
-                {Number(event.email_reminder_count || 0) > 0 ? ' / Email' : ''}
               </span>
+              {Number(event.email_reminder_count || 0) > 0 ? (
+                <span className="rounded-md border border-blue-300/40 bg-blue-400/15 px-2 py-1 text-[10px] font-black uppercase leading-none text-blue-50">
+                  Email
+                </span>
+              ) : null}
             </div>
-          </button>
-          <span className="inline-flex flex-shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-            <button
-              type="button"
-              onClick={() => openCalendarEntryEditor(event)}
-              disabled={saving}
-              className="inline-flex h-6 w-6 items-center justify-center rounded border border-slate-600 bg-slate-950 text-slate-200 transition hover:border-cyan-300 hover:bg-cyan-500/15 hover:text-cyan-100 disabled:opacity-60"
-              title="Edit calendar entry"
-              aria-label={`Edit calendar entry: ${projectLabel} - ${event.title}`}
-            >
-              <Edit2 className="h-3 w-3" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setExpandedCalendarNoteId(noteExpanded ? null : event.id)}
-              disabled={saving}
-              className={`inline-flex h-6 w-6 items-center justify-center rounded border transition disabled:opacity-60 ${
-                hasCompletionNote
-                  ? 'border-amber-300/45 bg-amber-500/10 text-amber-100 hover:bg-amber-500/15'
-                  : noteExpanded
-                    ? 'border-cyan-300/50 bg-cyan-500/15 text-cyan-100'
-                    : 'border-slate-600 bg-slate-900 text-slate-300 hover:border-slate-400 hover:bg-slate-800'
-              }`}
-              title={hasCompletionNote ? 'Edit note' : 'Expand calendar item'}
-              aria-label={`${hasCompletionNote ? 'Edit note for' : 'Expand'} ${projectLabel} - ${event.title}`}
-            >
-              <MessageSquare className="h-3 w-3" />
-            </button>
-          </span>
+          </div>
         </div>
         {noteExpanded && (
-          <div className="mt-1.5 grid gap-1.5 border-t border-slate-800 pt-1.5">
+          <div className="mt-3 grid gap-2 border-t border-slate-800 pt-3">
             {event.description ? (
-              <p className="line-clamp-3 whitespace-pre-wrap rounded border border-slate-700/70 bg-slate-950/55 px-2 py-1.5 text-[10px] font-semibold leading-4 text-slate-300">
+              <p className="whitespace-pre-wrap rounded-md border border-slate-700/70 bg-slate-950/55 px-3 py-2 text-[12px] font-semibold leading-5 text-slate-300">
                 {event.description}
               </p>
             ) : null}
             {event.vendor_name ? (
-              <p className="truncate text-[10px] font-semibold leading-4 text-slate-500">
+              <p className="break-words text-[12px] font-semibold leading-4 text-slate-400">
                 Vendor: {event.vendor_name}
               </p>
             ) : null}
@@ -838,7 +828,7 @@ export default function Dashboard() {
               value={noteDraft}
               onChange={inputEvent => updateCalendarCompletionNote(event.id, inputEvent.target.value)}
               rows={2}
-              className="w-full resize-y rounded-md border border-slate-600 bg-slate-950 px-2 py-1.5 text-[11px] font-semibold leading-5 text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400"
+              className="w-full resize-y rounded-md border border-slate-600 bg-slate-950 px-3 py-2 text-sm font-semibold leading-5 text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400"
               placeholder="Add note..."
             />
             <span className="flex justify-end gap-1.5">
@@ -1157,7 +1147,7 @@ export default function Dashboard() {
             </div>
 
             <div className="overflow-x-auto bg-[#060A14]">
-              <div className="grid min-w-[1220px] grid-cols-7 gap-2 p-2.5">
+              <div className="grid min-w-[1400px] grid-cols-7 items-start gap-3 p-3">
                 {calendarVisibleDays.map(day => {
                   const dayEvents = sortCalendarEventsForDay(calendarEventsByDate[day.key] || []);
                   const dayGroups = buildCalendarProjectGroups(dayEvents);
@@ -1165,7 +1155,7 @@ export default function Dashboard() {
                   const dayYear = day.key.slice(0, 4);
 
                   return (
-                    <section key={day.key} className={`flex min-h-[520px] min-w-0 flex-col overflow-hidden rounded-lg border shadow-[0_14px_30px_rgba(2,6,23,0.30)] ${day.isToday ? 'border-cyan-300/70 bg-[#0B213B] ring-1 ring-cyan-300/25' : 'border-slate-700/80 bg-[#111827]'}`}>
+                    <section key={day.key} className={`flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border shadow-[0_14px_30px_rgba(2,6,23,0.30)] ${day.isToday ? 'border-cyan-300/70 bg-[#0B213B] ring-1 ring-cyan-300/25' : 'border-slate-700/80 bg-[#111827]'}`}>
                       <header className={`border-b px-2.5 py-2 ${day.isToday ? 'border-cyan-300/40 bg-cyan-500/10' : 'border-slate-700/70 bg-[#182235]'}`}>
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
@@ -1201,20 +1191,20 @@ export default function Dashboard() {
                           </div>
                         </div>
                       </header>
-                      <div className="flex-1 space-y-2 overflow-hidden p-1.5">
+                      <div className="space-y-3 p-2.5">
                         {dayGroups.length > 0 ? (
                           <>
                             {dayGroups.map(group => (
-                              <div key={group.key} className={`overflow-hidden rounded-md border ${group.tone.body}`}>
-                                <div className={`flex min-h-7 items-center justify-between gap-2 px-2 py-1 ${group.tone.header}`}>
-                                  <span className="min-w-0 truncate text-[8px] font-black uppercase tracking-[0.14em]" title={group.label}>
+                              <div key={group.key} className={`overflow-hidden rounded-lg border ${group.tone.body}`}>
+                                <div className={`flex min-h-8 items-center justify-between gap-2 px-2.5 py-1.5 ${group.tone.header}`}>
+                                  <span className="min-w-0 truncate text-[9px] font-black uppercase tracking-[0.14em]" title={group.label}>
                                     {group.label}
                                   </span>
                                   <span className={`flex-shrink-0 rounded px-1.5 py-0.5 text-[8px] font-black leading-none ${group.tone.count}`}>
                                     {group.events.length}
                                   </span>
                                 </div>
-                                <div className="space-y-1 p-1.5">
+                                <div className="space-y-2.5 p-2">
                                   {group.events.map(renderCalendarDayTask)}
                                 </div>
                               </div>
@@ -1230,7 +1220,7 @@ export default function Dashboard() {
                               sourceType="dashboard_day"
                               contextLabel={`Calendar space: ${badgeDate.label}`}
                               modalTitle={`Add Item - ${badgeDate.label}`}
-                              buttonClassName="flex min-h-7 w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-slate-700 bg-slate-950/40 text-[10px] font-black text-slate-400 transition hover:border-cyan-300 hover:bg-cyan-500/10 hover:text-cyan-50 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
+                              buttonClassName="flex min-h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-700 bg-slate-950/40 text-[11px] font-black text-slate-400 transition hover:border-cyan-300 hover:bg-cyan-500/10 hover:text-cyan-50 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
                               onSaved={() => refreshCalendarEvents(calendarWeekStartKey)}
                             />
                           </>
@@ -1246,7 +1236,7 @@ export default function Dashboard() {
                             sourceType="dashboard_day"
                             contextLabel={`Calendar space: ${badgeDate.label}`}
                             modalTitle={`Add Item - ${badgeDate.label}`}
-                            buttonClassName="flex min-h-[118px] w-full flex-col items-center justify-center gap-2 rounded-md border border-dashed border-slate-700 bg-slate-950/40 px-2 text-[10px] font-black text-slate-500 transition hover:border-cyan-300 hover:bg-cyan-500/10 hover:text-cyan-50 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
+                            buttonClassName="flex min-h-[112px] w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-slate-700 bg-slate-950/40 px-2 text-[11px] font-black text-slate-500 transition hover:border-cyan-300 hover:bg-cyan-500/10 hover:text-cyan-50 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
                             onSaved={() => refreshCalendarEvents(calendarWeekStartKey)}
                           />
                         )}
