@@ -41,6 +41,21 @@ export function formatEasternDate(value?: string | null, options: DateTimeOption
   }).format(parsed);
 }
 
+export function formatDateOnly(value?: string | null, options: DateTimeOptions = {}) {
+  const trimmed = String(value || '').trim();
+  const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return formatEasternDate(value, options);
+  const parsed = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  if (!Number.isFinite(parsed.getTime())) return '-';
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    ...options,
+  }).format(parsed);
+}
+
 export function formatEasternTime(value?: string | null, options: DateTimeOptions = {}) {
   const parsed = parseBuildTrackTimestamp(value);
   if (!parsed) return '-';

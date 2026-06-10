@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, type ReactNode } from 'react';
+import { Component, lazy, Suspense, useEffect, useRef, type ErrorInfo, type ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { useAuthStore, canManageUsers, canAccessSettings, canAccessSecurity } from './store/authStore';
@@ -30,17 +30,16 @@ const ChangePassword = lazy(() => import('./pages/ChangePassword'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const ContractorSetup = lazy(() => import('./pages/ContractorSetup'));
-const Documents = lazy(() => import('./pages/Documents'));
 const MobileHome = lazy(() => import('./pages/MobileHome'));
 const MobileProjects = lazy(() => import('./pages/MobileProjects'));
 const MobileProjectHub = lazy(() => import('./pages/MobileProjectHub'));
 const MobilePunchList = lazy(() => import('./pages/MobilePunchList'));
 const MobileInvoice = lazy(() => import('./pages/MobileInvoice'));
-const MobileAddProject = lazy(() => import('./pages/MobileAddProject'));
 const MobileNotes = lazy(() => import('./pages/MobileNotes'));
 const MobileProgress = lazy(() => import('./pages/MobileProgress'));
 const MobilePhotos = lazy(() => import('./pages/MobilePhotos'));
 const MobileFieldWork = lazy(() => import('./pages/MobileFieldWork'));
+const MobileContractorPreview = lazy(() => import('./pages/MobileContractorPreview'));
 
 const DESKTOP_SESSION_TIMEOUT_MS = 45 * 60 * 1000;
 const ACTIVITY_WRITE_INTERVAL_MS = 15 * 1000;
@@ -51,6 +50,79 @@ const AUTH_LAST_REFRESH_KEY = 'auth_last_refresh_at';
 const CONTRACTOR_LAST_ACTIVITY_KEY = 'contractor_last_activity_at';
 const CONTRACTOR_LAST_REFRESH_KEY = 'contractor_last_refresh_at';
 const MOBILE_USER_AGENT_PATTERN = /android|iphone|ipad|ipod|mobile|tablet|silk|kindle|webos|blackberry|windows phone/i;
+const ASSET_RELOAD_ATTEMPT_KEY = 'bt_asset_reload_attempted_at';
+
+function isAssetLoadError(value: unknown) {
+  const text = String(
+    value instanceof Error
+      ? `${value.name} ${value.message} ${value.stack || ''}`
+      : value || ''
+  );
+  return /ChunkLoadError|Loading chunk|Failed to fetch dynamically imported module|Importing a module script failed|modulepreload|Unable to preload CSS|error loading dynamically imported module/i.test(text);
+}
+
+function reloadForFreshAssets() {
+  if (typeof window === 'undefined') return;
+  const now = Date.now();
+  const lastAttempt = Number(sessionStorage.getItem(ASSET_RELOAD_ATTEMPT_KEY) || 0);
+  if (now - lastAttempt < 30000) return;
+  sessionStorage.setItem(ASSET_RELOAD_ATTEMPT_KEY, String(now));
+  window.location.reload();
+}
+
+function RootErrorFallback({ error }: { error?: Error | null }) {
+  const isAssetError = isAssetLoadError(error);
+  return (
+    <div className="min-h-screen bg-slate-950 px-4 py-10 text-white">
+      <div className="mx-auto flex min-h-[70vh] max-w-lg flex-col justify-center">
+        <div className="mb-5 flex items-center gap-3">
+          <div className="h-12 w-12 overflow-hidden rounded-lg border-2 border-amber-500 bg-amber-500/10">
+            <img src="/buildtrack-logo-mark.png" alt="BuildTrack" className="h-full w-full object-cover" />
+          </div>
+          <div>
+            <p className="text-lg font-black">BuildTrack</p>
+            <p className="text-xs font-bold uppercase tracking-wide text-amber-300">Session recovery</p>
+          </div>
+        </div>
+        <div className="rounded-xl border border-slate-700 bg-slate-900 p-5 shadow-2xl">
+          <h1 className="text-xl font-black">{isAssetError ? 'Refreshing BuildTrack' : 'BuildTrack needs a refresh'}</h1>
+          <p className="mt-2 text-sm leading-6 text-slate-300">
+            {isAssetError
+              ? 'A newer BuildTrack version is available. Refreshing loads the latest dashboard files.'
+              : 'The dashboard hit a loading issue. Refreshing usually restores the session without logging you out.'}
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="mt-5 inline-flex min-h-11 items-center justify-center rounded-lg bg-amber-500 px-4 text-sm font-black text-slate-950 hover:bg-amber-400"
+          >
+            Refresh BuildTrack
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+class BuildTrackErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('[BuildTrack] Root render error:', error, info.componentStack);
+    if (isAssetLoadError(error)) {
+      window.setTimeout(reloadForFreshAssets, 100);
+    }
+  }
+
+  render() {
+    if (this.state.error) return <RootErrorFallback error={this.state.error} />;
+    return this.props.children;
+  }
+}
 
 function isMobileDeviceSession() {
   if (typeof window === 'undefined') return false;
@@ -90,6 +162,28 @@ function MobileRoute({ children }: { children: ReactNode }) {
   if (!token || !user) return <Navigate to="/login" replace />;
   const isPinSession = user.role === 'contractor' && localStorage.getItem('contractor_token') === token;
   if (user.force_password_reset && !isPinSession) return <Navigate to="/change-password" replace />;
+  return <>{children}</>;
+}
+
+function ManagementMobileRoute({ children }: { children: ReactNode }) {
+  const { user, token } = useAuthStore();
+  if (!token || !user) return <Navigate to="/login" replace />;
+  if (user.force_password_reset) return <Navigate to="/change-password" replace />;
+  if (user.role === 'contractor') return <Navigate to={mobilePath()} replace />;
+  return <>{children}</>;
+}
+
+function UpperManagementMobileRoute({
+  children,
+  allowed,
+}: {
+  children: ReactNode;
+  allowed: (role: string) => boolean;
+}) {
+  const { user, token } = useAuthStore();
+  if (!token || !user) return <Navigate to="/login" replace />;
+  if (user.force_password_reset) return <Navigate to="/change-password" replace />;
+  if (!allowed(user.role)) return <Navigate to={mobilePath()} replace />;
   return <>{children}</>;
 }
 
@@ -356,6 +450,8 @@ function MobileGestureShortcuts() {
 function MobileHostRoutes() {
   return (
     <Routes>
+      <Route path="/approval/mobile-contractor-preview" element={<MobileContractorPreview />} />
+
       {/* Auth */}
       <Route path="/login" element={<AuthRoute><Login initialMode="pin" /></AuthRoute>} />
       <Route path="/change-password" element={<ChangePassword />} />
@@ -365,7 +461,6 @@ function MobileHostRoutes() {
 
       {/* Mobile-first BuildTrack app on the dedicated mobile host */}
       <Route path="/" element={<MobileRoute><MobileHome /></MobileRoute>} />
-      <Route path="/projects" element={<MobileRoute><MobileProjects /></MobileRoute>} />
       <Route path="/photos" element={<MobileRoute><MobilePhotos /></MobileRoute>} />
       <Route path="/project/:id" element={<MobileRoute><MobileProjectHub /></MobileRoute>} />
       <Route path="/project/:id/punch-list" element={<MobileRoute><MobilePunchList /></MobileRoute>} />
@@ -373,22 +468,29 @@ function MobileHostRoutes() {
       <Route path="/project/:id/notes" element={<MobileRoute><MobileNotes /></MobileRoute>} />
       <Route path="/project/:id/progress" element={<MobileRoute><MobileProgress /></MobileRoute>} />
       <Route path="/project/:id/field-work" element={<MobileRoute><MobileFieldWork /></MobileRoute>} />
-      <Route path="/add-project" element={<MobileRoute><MobileAddProject /></MobileRoute>} />
+      <Route path="/add-project" element={<MobileRoute><Navigate to="/" replace /></MobileRoute>} />
 
       {/* Legacy mobile paths are normalized on the mobile host. */}
       <Route path="/mobile/*" element={<MobileRoute><LegacyMobilePathRedirect /></MobileRoute>} />
       <Route path="/app" element={<AuthRoute><Login initialMode="pin" /></AuthRoute>} />
       <Route path="/app/*" element={<MobileRoute><LegacyMobilePathRedirect /></MobileRoute>} />
 
-      {/* Keep the desktop app out of the mobile host. */}
-      <Route path="/dashboard" element={<Navigate to="/" replace />} />
-      <Route path="/contractors" element={<Navigate to="/" replace />} />
-      <Route path="/suppliers" element={<Navigate to="/" replace />} />
-      <Route path="/invoices" element={<Navigate to="/" replace />} />
+      {/* Management users can reach the full management surface from the mobile host. */}
+      <Route path="/dashboard" element={<ManagementMobileRoute><Layout><Dashboard /></Layout></ManagementMobileRoute>} />
+      <Route path="/projects" element={<ManagementMobileRoute><Layout><Projects /></Layout></ManagementMobileRoute>} />
+      <Route path="/projects/:id" element={<ManagementMobileRoute><Layout><ProjectDetail /></Layout></ManagementMobileRoute>} />
+      <Route path="/projects/:projectId/invoices/new" element={<ManagementMobileRoute><Layout><InvoiceBuilder /></Layout></ManagementMobileRoute>} />
+      <Route path="/projects/:projectId/invoices/:invoiceId" element={<ManagementMobileRoute><Layout><InvoiceBuilder /></Layout></ManagementMobileRoute>} />
+      <Route path="/punch-list" element={<ManagementMobileRoute><Layout><PunchList /></Layout></ManagementMobileRoute>} />
+      <Route path="/desktop/photos" element={<ManagementMobileRoute><Layout><Photos /></Layout></ManagementMobileRoute>} />
+      <Route path="/contractors" element={<ManagementMobileRoute><Layout><Contractors /></Layout></ManagementMobileRoute>} />
+      <Route path="/suppliers" element={<ManagementMobileRoute><Layout><Suppliers /></Layout></ManagementMobileRoute>} />
+      <Route path="/invoices" element={<ManagementMobileRoute><Layout><Invoices /></Layout></ManagementMobileRoute>} />
+      <Route path="/users" element={<UpperManagementMobileRoute allowed={canManageUsers}><Layout><Users /></Layout></UpperManagementMobileRoute>} />
+      <Route path="/settings" element={<UpperManagementMobileRoute allowed={canAccessSettings}><Layout><Settings /></Layout></UpperManagementMobileRoute>} />
+      <Route path="/security" element={<UpperManagementMobileRoute allowed={canAccessSecurity}><Layout><Security /></Layout></UpperManagementMobileRoute>} />
+
       <Route path="/documents" element={<Navigate to="/" replace />} />
-      <Route path="/security" element={<Navigate to="/" replace />} />
-      <Route path="/settings" element={<Navigate to="/" replace />} />
-      <Route path="/users" element={<Navigate to="/" replace />} />
 
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
@@ -396,31 +498,56 @@ function MobileHostRoutes() {
 }
 
 export default function App() {
+  useEffect(() => {
+    const handleWindowError = (event: ErrorEvent) => {
+      const errorLike = event.error || event.message;
+      if (!isAssetLoadError(errorLike)) return;
+      event.preventDefault();
+      reloadForFreshAssets();
+    };
+
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      if (!isAssetLoadError(event.reason)) return;
+      event.preventDefault();
+      reloadForFreshAssets();
+    };
+
+    window.addEventListener('error', handleWindowError);
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+    return () => {
+      window.removeEventListener('error', handleWindowError);
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+    };
+  }, []);
+
   return (
     <BrowserRouter>
-      <SessionTimeout />
-      <MobileGestureShortcuts />
-      <Toaster
-        position="top-center"
-        toastOptions={{
-          duration: 3000,
-          style: {
-            background: '#181D25',
-            color: '#fff',
-            borderRadius: '12px',
-            fontSize: '14px',
-            padding: '12px 16px',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
-          },
-          success: { iconTheme: { primary: '#D99D26', secondary: '#fff' } },
-          error: { iconTheme: { primary: '#ef4444', secondary: '#fff' } },
-        }}
-      />
-      <Suspense fallback={<Loading message="Loading BuildTrack..." />}>
-      {isMobileAppHost() ? (
-        <MobileHostRoutes />
-      ) : (
-      <Routes>
+      <BuildTrackErrorBoundary>
+        <SessionTimeout />
+        <MobileGestureShortcuts />
+        <Toaster
+          position="top-center"
+          toastOptions={{
+            duration: 3000,
+            style: {
+              background: '#181D25',
+              color: '#fff',
+              borderRadius: '12px',
+              fontSize: '14px',
+              padding: '12px 16px',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+            },
+            success: { iconTheme: { primary: '#D99D26', secondary: '#fff' } },
+            error: { iconTheme: { primary: '#ef4444', secondary: '#fff' } },
+          }}
+        />
+        <Suspense fallback={<Loading message="Loading BuildTrack..." />}>
+        {isMobileAppHost() ? (
+          <MobileHostRoutes />
+        ) : (
+        <Routes>
+        <Route path="/approval/mobile-contractor-preview" element={<MobileContractorPreview />} />
+
         {/* Auth */}
         <Route path="/login" element={<AuthRoute><Login /></AuthRoute>} />
         <Route path="/change-password" element={<ChangePassword />} />
@@ -441,7 +568,7 @@ export default function App() {
         <Route path="/mobile/project/:id/notes" element={<MobileRoute><MobileNotes /></MobileRoute>} />
         <Route path="/mobile/project/:id/progress" element={<MobileRoute><MobileProgress /></MobileRoute>} />
         <Route path="/mobile/project/:id/field-work" element={<MobileRoute><MobileFieldWork /></MobileRoute>} />
-        <Route path="/mobile/add-project" element={<MobileRoute><MobileAddProject /></MobileRoute>} />
+        <Route path="/mobile/add-project" element={<MobileRoute><Navigate to="/mobile" replace /></MobileRoute>} />
         <Route path="/mobile/*" element={<MobileRoute><Navigate to="/mobile" replace /></MobileRoute>} />
 
         {/* ── Desktop Routes (contractors are redirected to /mobile) ── */}
@@ -486,11 +613,7 @@ export default function App() {
           </DesktopRoute>
         } />
         <Route path="/invoice-agent" element={<Navigate to="/invoices" replace />} />
-        <Route path="/documents" element={
-          <DesktopRoute>
-            <Layout><Documents /></Layout>
-          </DesktopRoute>
-        } />
+        <Route path="/documents" element={<Navigate to="/dashboard" replace />} />
         <Route path="/contractors" element={
           <DesktopRoute>
             <Layout><Contractors /></Layout>
@@ -525,9 +648,10 @@ export default function App() {
 
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/login" replace />} />
-      </Routes>
-      )}
-      </Suspense>
+        </Routes>
+        )}
+        </Suspense>
+      </BuildTrackErrorBoundary>
     </BrowserRouter>
   );
 }

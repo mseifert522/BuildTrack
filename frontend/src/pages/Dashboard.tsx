@@ -1,140 +1,142 @@
-import { type CSSProperties, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore, isAdminRole, roleLabels } from '../store/authStore';
 import api from '../lib/api';
-import { Loading, Modal, StatusBadge } from '../components/ui';
+import { Loading, Modal } from '../components/ui';
 import Avatar from '../components/Avatar';
-import RecentActivityModal from '../components/RecentActivityModal';
 import {
-  FolderOpen, ClipboardList, Image,
-  TrendingUp, AlertTriangle, CheckCircle2, Clock,
-  Plus, ChevronRight, MapPin, MessageSquare,
-  X, Bell
+  Activity,
+  Plus, MapPin, MessageSquare, CalendarDays,
+  Mail, Send, Edit2, ChevronLeft, ChevronRight
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { EASTERN_TIME_ZONE, formatEasternDate, formatEasternDateTime, formatEasternRelative, formatEasternTime, parseBuildTrackTimestamp } from '../lib/time';
+import VoiceTextarea from '../components/VoiceTextarea';
+import AddToCalendarButton from '../components/AddToCalendarButton';
 
-interface Stats {
-  total_projects: number;
-  under_construction: number;
-  completed_projects: number;
-  long_term_holdings?: number;
-  commercial_projects?: number;
-  sold_projects: number;
-  active_projects: number;
-  in_progress_projects: number;
-  open_punch_items: number;
-  pending_invoices: number;
-  recent_photos: number;
+const calendarBadgeMonthFormatter = new Intl.DateTimeFormat('en-US', {
+  timeZone: EASTERN_TIME_ZONE,
+  month: 'short',
+});
+
+const calendarBadgeDayFormatter = new Intl.DateTimeFormat('en-US', {
+  timeZone: EASTERN_TIME_ZONE,
+  day: 'numeric',
+});
+
+const calendarBadgeLabelFormatter = new Intl.DateTimeFormat('en-US', {
+  timeZone: EASTERN_TIME_ZONE,
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+});
+
+const calendarWeekRangeFormatter = new Intl.DateTimeFormat('en-US', {
+  timeZone: EASTERN_TIME_ZONE,
+  month: 'short',
+  day: 'numeric',
+});
+
+const calendarWeekdayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function formatCalendarBadgeDate(value?: string | null) {
+  const parsed = parseBuildTrackTimestamp(value ? `${value}T12:00:00` : null);
+  if (!parsed) {
+    return {
+      month: '--',
+      day: '--',
+      label: 'Date unavailable',
+    };
+  }
+
+  return {
+    month: calendarBadgeMonthFormatter.format(parsed).toUpperCase(),
+    day: calendarBadgeDayFormatter.format(parsed),
+    label: calendarBadgeLabelFormatter.format(parsed),
+  };
 }
 
-interface Project {
+interface DashboardActivityFeedItem {
   id: string;
-  address: string;
-  job_name: string;
-  status: string;
-  open_punch_items: number;
-  assigned_count: number;
-  updated_at: string;
-  budget: number;
-  lifecycle_status?: string;
-}
-
-interface RecentNote {
-  id: string;
-  project_id: string;
+  feed_type: 'note' | 'activity';
+  project_id?: string | null;
   user_id: string;
   user_name: string;
-  user_role: string;
+  user_role?: string | null;
   user_avatar_url?: string | null;
-  note: string;
-  note_type: string;
+  note?: string | null;
+  note_type?: string | null;
+  action?: string | null;
+  entity_type?: string | null;
+  entity_id?: string | null;
+  details?: Record<string, any> | null;
   created_at: string;
-  project_address: string;
-  project_job_name: string;
-  project_status: string;
+  project_address?: string | null;
+  project_job_name?: string | null;
+  project_status?: string | null;
 }
 
-interface ReviewChange {
+interface OperationsCalendarEvent {
   id: string;
-  action: string;
-  user_name: string;
-  created_at: string;
-  summary: string;
-}
-
-interface ProjectReviewSummary {
-  project_id: string;
-  project_address: string;
-  project_job_name: string;
-  project_status: string;
-  change_count: number;
-  latest_at: string;
-  latest_by: string;
-  changes: ReviewChange[];
-}
-
-interface FieldWorkTask {
-  id: string;
-  project_id: string;
+  source: string;
+  source_id: string;
+  event_type: string;
   title: string;
-  category?: string;
+  description?: string;
+  scheduled_for: string;
+  due_time?: string | null;
   status: string;
-  verification_status: string;
-  invoice_status: string;
-  target_date?: string | null;
-  project_address: string;
-  project_job_name?: string;
-  alert_level: 'normal' | 'attention' | 'critical';
-  invoice_blocks_payment?: number;
-  latest_photo_note?: string | null;
+  priority: string;
+  amount?: number;
+  vendor_name?: string | null;
+  project_id?: string | null;
+  project_address?: string | null;
+  project_job_name?: string | null;
+  email_reminder_count?: number;
+  next_email_reminder_at?: string | null;
+  completion_note?: string | null;
+  completed_at?: string | null;
 }
 
-interface FieldWorkNote {
-  id: string;
-  project_id: string;
-  note?: string;
-  created_at: string;
-  user_name: string;
-  project_address: string;
-  photo_count?: number;
-}
+type CalendarQueueFilter = 'upcoming' | 'completed';
 
-interface FieldWorkPhoto {
-  id: string;
-  project_id: string;
-  original_name?: string;
-  label?: string;
-  captured_at?: string;
-  user_name: string;
-  project_address: string;
-  photo_note?: string | null;
-}
-
-interface FieldWorkInvoiceHold {
-  id: string;
-  invoice_number: string;
-  project_id: string;
+type CalendarEditForm = {
+  title: string;
+  description: string;
+  scheduled_for: string;
+  due_time: string;
+  event_type: string;
+  priority: string;
   status: string;
-  total: number;
-  contractor_name: string;
-  project_address: string;
-  blocking_item_count: number;
-}
+  completion_note: string;
+};
 
-interface FieldWorkWatchlist {
-  counts: {
-    field_notes: number;
-    field_photos: number;
-    scheduled_tasks: number;
-    approvals_needed: number;
-    invoice_holds: number;
-    total_alerts: number;
-  };
-  tasks: FieldWorkTask[];
-  field_notes: FieldWorkNote[];
-  field_photos: FieldWorkPhoto[];
-  invoice_holds: FieldWorkInvoiceHold[];
-}
+const blankCalendarEditForm: CalendarEditForm = {
+  title: '',
+  description: '',
+  scheduled_for: '',
+  due_time: '',
+  event_type: 'other',
+  priority: 'normal',
+  status: 'scheduled',
+  completion_note: '',
+};
+
+const editableCalendarStatus = (status?: string | null) => {
+  if (status === 'completed') return 'completed';
+  if (status === 'in_progress') return 'in_progress';
+  if (status === 'cancelled') return 'cancelled';
+  return 'scheduled';
+};
+
+type CalendarWeekDayCell = {
+  key: string;
+  date: Date;
+  dayNumber: number;
+  isToday: boolean;
+  label: string;
+  weekday: string;
+};
 
 const greeting = () => {
   const h = Number(new Intl.DateTimeFormat('en-US', {
@@ -145,10 +147,6 @@ const greeting = () => {
   if (h < 12) return 'Good morning';
   if (h < 17) return 'Good afternoon';
   return 'Good evening';
-};
-
-const parseDate = (value: string) => {
-  return parseBuildTrackTimestamp(value) || new Date();
 };
 
 const noteTypeStyles: Record<string, { label: string; bg: string; color: string; border: string; accent: string }> = {
@@ -171,76 +169,228 @@ const getProjectStatusStyle = (status?: string) => (
   projectStatusStyles[status || ''] || { label: 'Project', bg: 'rgba(217,157,38,0.12)', color: '#FDE68A', border: 'rgba(217,157,38,0.35)' }
 );
 
-const formatMoney = (value: number) =>
-  Number(value || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+const formatCompactLabel = (value?: string | null) =>
+  (value || 'not set')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, letter => letter.toUpperCase());
+
+const activityTypeStyles: Record<string, { label: string; bg: string; color: string; border: string; accent: string }> = {
+  invoice: { label: 'Invoice', bg: 'rgba(245,158,11,0.14)', color: '#FDE68A', border: 'rgba(245,158,11,0.40)', accent: '#F59E0B' },
+  calendar: { label: 'Calendar', bg: 'rgba(167,139,250,0.14)', color: '#DDD6FE', border: 'rgba(167,139,250,0.40)', accent: '#A78BFA' },
+  photo: { label: 'Photo', bg: 'rgba(34,211,238,0.13)', color: '#A5F3FC', border: 'rgba(34,211,238,0.38)', accent: '#22D3EE' },
+  user: { label: 'User', bg: 'rgba(16,185,129,0.13)', color: '#A7F3D0', border: 'rgba(16,185,129,0.36)', accent: '#10B981' },
+  project: { label: 'Project', bg: 'rgba(96,165,250,0.14)', color: '#BFDBFE', border: 'rgba(96,165,250,0.40)', accent: '#60A5FA' },
+  activity: { label: 'Activity', bg: 'rgba(148,163,184,0.14)', color: '#E2E8F0', border: 'rgba(148,163,184,0.34)', accent: '#94A3B8' },
+};
+
+const activityActionLabels: Record<string, string> = {
+  calendar_event_created: 'Created calendar item',
+  calendar_event_updated: 'Updated calendar item',
+  calendar_event_completed: 'Completed calendar item',
+  invoice_submitted: 'Submitted invoice',
+  invoice_approved: 'Approved invoice',
+  invoice_rejected: 'Rejected invoice',
+  invoice_paid: 'Invoice marked paid',
+  quickbooks_bill_approved_for_pay: 'Approved bill for payment',
+  quickbooks_payment_queue_notified: 'Sent payment queue email',
+  photo_uploaded: 'Uploaded progress photo',
+  project_media_uploaded: 'Uploaded project media',
+  progress_picture_group_note_saved: 'Saved progress picture note',
+  photo_correction_deleted: 'Removed correction photo',
+  project_created: 'Created project',
+  project_updated: 'Updated project',
+  project_status_updated: 'Updated project status',
+  project_scope_created: 'Created project scope',
+  contractor_note_added: 'Added contractor note',
+  user_assigned: 'Assigned user',
+  user_unassigned: 'Removed user assignment',
+};
+
+const getActivityTypeStyle = (item: DashboardActivityFeedItem) => {
+  if (item.feed_type === 'note') return getNoteTypeStyle(item.note_type || 'general');
+  const key = `${item.action || ''} ${item.entity_type || ''}`.toLowerCase();
+  if (key.includes('invoice')) return activityTypeStyles.invoice;
+  if (key.includes('calendar')) return activityTypeStyles.calendar;
+  if (key.includes('photo')) return activityTypeStyles.photo;
+  if (key.includes('user')) return activityTypeStyles.user;
+  if (key.includes('project')) return activityTypeStyles.project;
+  return activityTypeStyles.activity;
+};
+
+const getActivityVerb = (item: DashboardActivityFeedItem) => {
+  if (item.feed_type === 'note') return 'added a note';
+  return 'recorded activity';
+};
+
+const getActivitySummary = (item: DashboardActivityFeedItem) => {
+  if (item.feed_type === 'note') return item.note || '';
+  const action = item.action || item.entity_type || 'activity';
+  const label = activityActionLabels[action] || formatCompactLabel(action);
+  const details = item.details || {};
+  const detailTitle = [details.title, details.address, details.vendor_name, details.status]
+    .map(value => (typeof value === 'string' ? value.trim() : ''))
+    .find(Boolean);
+  return detailTitle ? `${label} - ${detailTitle}` : label;
+};
+
+const collapsedMediaActivityActions = new Set([
+  'photo_uploaded',
+  'project_media_uploaded',
+  'progress_picture_group_note_saved',
+]);
+
+const activityMinuteBucket = (value?: string | null) =>
+  String(value || '').replace('T', ' ').slice(0, 16);
+
+const getActivityFeedDedupeKey = (item: DashboardActivityFeedItem) => {
+  if (item.feed_type !== 'activity' || !collapsedMediaActivityActions.has(item.action || '')) {
+    return `${item.feed_type}:${item.id}`;
+  }
+
+  const details = item.details || {};
+  const mediaType = typeof details.type === 'string' ? details.type : '';
+  const contexts = Array.isArray(details.contexts) ? details.contexts.join(',') : '';
+  return [
+    'media-batch',
+    item.user_id,
+    item.project_id || '',
+    item.action || '',
+    mediaType,
+    contexts,
+    activityMinuteBucket(item.created_at),
+  ].join('|');
+};
+
+const dedupeActivityFeedItems = (items: DashboardActivityFeedItem[]) => {
+  const seen = new Set<string>();
+  return items.filter(item => {
+    const key = getActivityFeedDedupeKey(item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const formatLocalDateInput = (date = new Date()) => {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+};
+
+const localDateInputToNoonDate = (value: string) =>
+  parseBuildTrackTimestamp(value ? `${value}T12:00:00` : null) || new Date(`${value}T12:00:00`);
+
+const addCalendarDays = (date: Date, days: number) => {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+};
+
+const calendarRangeFromWeekStartKey = (weekStartKey: string) => {
+  const startDate = localDateInputToNoonDate(weekStartKey);
+  return {
+    start: formatLocalDateInput(startDate),
+    end: formatLocalDateInput(addCalendarDays(startDate, 6)),
+  };
+};
+
+const startOfCalendarWeek = (anchorDate: Date) => {
+  const date = new Date(anchorDate);
+  date.setHours(12, 0, 0, 0);
+  date.setDate(date.getDate() - date.getDay());
+  return date;
+};
+
+const buildCalendarWeekDays = (weekStartDate: Date, todayKey: string): CalendarWeekDayCell[] =>
+  Array.from({ length: 7 }, (_, index) => {
+    const date = addCalendarDays(weekStartDate, index);
+    const key = formatLocalDateInput(date);
+    return {
+      key,
+      date,
+      dayNumber: date.getDate(),
+      isToday: key === todayKey,
+      label: formatCalendarBadgeDate(key).label,
+      weekday: calendarWeekdayLabels[index],
+    };
+  });
+
+const formatCalendarWeekRange = (weekStartDate: Date, weekEndDate: Date) =>
+  `${calendarWeekRangeFormatter.format(weekStartDate)} - ${calendarWeekRangeFormatter.format(weekEndDate)}`;
+
+const calendarDateKeyForEvent = (event: OperationsCalendarEvent) =>
+  event.scheduled_for || (event.completed_at ? String(event.completed_at).slice(0, 10) : '');
+
+const sortCalendarEventsForDay = (events: OperationsCalendarEvent[]) =>
+  [...events].sort((a, b) => {
+    const timeCompare = String(a.due_time || '99:99').localeCompare(String(b.due_time || '99:99'));
+    if (timeCompare !== 0) return timeCompare;
+    return String(a.title || '').localeCompare(String(b.title || ''));
+  });
+
+const getCalendarProjectLabel = (event: OperationsCalendarEvent) =>
+  event.project_address || event.project_job_name || event.project_id || 'BuildTrack';
+
+const defaultReminderTime = () => {
+  const date = new Date(Date.now() + 30 * 60 * 1000);
+  const roundedMinutes = Math.ceil(date.getMinutes() / 15) * 15;
+  if (roundedMinutes >= 60) {
+    date.setHours(date.getHours() + 1);
+    date.setMinutes(0, 0, 0);
+  } else {
+    date.setMinutes(roundedMinutes, 0, 0);
+  }
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+};
+
+const splitReminderEmails = (value: string) =>
+  value
+    .split(/[\s,;]+/)
+    .map(item => item.trim())
+    .filter(Boolean);
+
+const localDateTimeToIso = (date: string, time: string) => new Date(`${date}T${time || '09:00'}`).toISOString();
 
 
 export default function Dashboard() {
   const { user } = useAuthStore();
   const navigate = useNavigate();
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [allProjects, setAllProjects] = useState<Project[]>([]);
-  const [recentNotes, setRecentNotes] = useState<RecentNote[]>([]);
-  const [reviewSummaries, setReviewSummaries] = useState<ProjectReviewSummary[]>([]);
-  const [fieldWatch, setFieldWatch] = useState<FieldWorkWatchlist | null>(null);
-  const [showReviewSummary, setShowReviewSummary] = useState(false);
-  const [showFieldWatchReminder, setShowFieldWatchReminder] = useState(false);
-  const [reviewDismissKey, setReviewDismissKey] = useState('');
-  const [reviewLoginKey, setReviewLoginKey] = useState('');
+  const [activityFeed, setActivityFeed] = useState<DashboardActivityFeedItem[]>([]);
+  const [calendarEvents, setCalendarEvents] = useState<OperationsCalendarEvent[]>([]);
+  const [showCalendarReminderComposer, setShowCalendarReminderComposer] = useState(false);
+  const [reminderTitle, setReminderTitle] = useState('');
+  const [reminderRecipients, setReminderRecipients] = useState('');
+  const [reminderMessage, setReminderMessage] = useState('');
+  const [reminderScheduleType, setReminderScheduleType] = useState<'now' | 'once' | 'weekly' | 'monthly'>('once');
+  const [reminderDate, setReminderDate] = useState(formatLocalDateInput());
+  const [reminderTime, setReminderTime] = useState(defaultReminderTime());
+  const [reminderEventType, setReminderEventType] = useState('other');
+  const [reminderPriority, setReminderPriority] = useState('normal');
+  const [savingCalendarReminder, setSavingCalendarReminder] = useState(false);
+  const [calendarCompletionNotes, setCalendarCompletionNotes] = useState<Record<string, string>>({});
+  const [savingCalendarEventId, setSavingCalendarEventId] = useState('');
+  const [expandedCalendarNoteId, setExpandedCalendarNoteId] = useState<string | null>(null);
+  const [calendarQueueFilter, setCalendarQueueFilter] = useState<CalendarQueueFilter>('upcoming');
+  const [calendarWeekStartKey, setCalendarWeekStartKey] = useState(() => formatLocalDateInput(startOfCalendarWeek(new Date())));
+  const [editingCalendarEvent, setEditingCalendarEvent] = useState<OperationsCalendarEvent | null>(null);
+  const [calendarEditForm, setCalendarEditForm] = useState<CalendarEditForm>(blankCalendarEditForm);
+  const [savingCalendarEdit, setSavingCalendarEdit] = useState(false);
   const [loading, setLoading] = useState(true);
+  const calendarQueryRange = calendarRangeFromWeekStartKey(calendarWeekStartKey);
 
   useEffect(() => {
     const load = async () => {
       try {
-        const canShowReview = !!user && isAdminRole(user.role);
-        const loginSummaryKey = user?.id ? `buildtrack-login-review-summary:${user.id}` : '';
-        const forceLoginSummary = canShowReview && !!loginSummaryKey && sessionStorage.getItem(loginSummaryKey) === '1';
-        const [allProjRes, notesRes, reviewRes, fieldWatchRes] = await Promise.all([
-          api.get('/projects'),
-          api.get('/notes/recent?limit=50').catch(() => ({ data: [] })),
-          canShowReview
-            ? api.get(`/projects/unreviewed-summary${forceLoginSummary ? '?scope=recent' : ''}`).catch(() => ({ data: { projects: [] } }))
-            : Promise.resolve({ data: { projects: [] } }),
-          canShowReview
-            ? api.get('/field-work/watchlist').catch(() => ({ data: null }))
-            : Promise.resolve({ data: null }),
+        const [feedRes, calendarRes] = await Promise.all([
+          api.get('/dashboard/activity-feed?limit=25').catch(() => ({ data: { items: [] } })),
+          api.get(`/calendar/events?start=${encodeURIComponent(calendarQueryRange.start)}&end=${encodeURIComponent(calendarQueryRange.end)}`).catch(() => ({ data: { events: [] } })),
         ]);
-        setRecentNotes(notesRes.data.slice(0, 50));
-        setAllProjects(allProjRes.data);
-        const nextFieldWatch = fieldWatchRes.data && typeof fieldWatchRes.data === 'object'
-          ? fieldWatchRes.data as FieldWorkWatchlist
-          : null;
-        setFieldWatch(nextFieldWatch);
-        if (canShowReview && nextFieldWatch?.counts?.total_alerts) {
-          const fieldWatchDismissKey = `buildtrack-field-watch:${user.id}:${nextFieldWatch.counts.total_alerts}`;
-          setShowFieldWatchReminder(!sessionStorage.getItem(fieldWatchDismissKey));
-        } else {
-          setShowFieldWatchReminder(false);
-        }
-
-        const summaries = Array.isArray(reviewRes.data?.projects) ? reviewRes.data.projects : [];
-        setReviewSummaries(summaries);
-        if (canShowReview && summaries.length > 0) {
-          const latestAt = summaries.reduce((latest: string, project: ProjectReviewSummary) =>
-            !latest || parseDate(project.latest_at) > parseDate(latest) ? project.latest_at : latest
-          , '');
-          const dismissKey = `buildtrack-review-summary:${user.id}:${latestAt}`;
-          setReviewDismissKey(dismissKey);
-          setReviewLoginKey(forceLoginSummary ? loginSummaryKey : '');
-          setShowReviewSummary(forceLoginSummary || !sessionStorage.getItem(dismissKey));
-        } else {
-          setShowReviewSummary(false);
-          setReviewDismissKey('');
-          setReviewLoginKey('');
-          if (forceLoginSummary && loginSummaryKey) sessionStorage.removeItem(loginSummaryKey);
-        }
-
-        if (user && isAdminRole(user.role)) {
-          try {
-            const statsRes = await api.get('/projects/stats');
-            setStats(statsRes.data);
-          } catch {}
-        }
+        const feedItems = Array.isArray(feedRes.data?.items)
+          ? feedRes.data.items
+          : Array.isArray(feedRes.data)
+            ? feedRes.data
+            : [];
+        setActivityFeed(dedupeActivityFeedItems(feedItems).slice(0, 25));
+        setCalendarEvents(Array.isArray(calendarRes.data?.events) ? calendarRes.data.events : []);
       } catch (err) {
         console.error(err);
       } finally {
@@ -248,224 +398,581 @@ export default function Dashboard() {
       }
     };
     load();
-  }, [user?.id, user?.role]);
+  }, [user?.id, user?.role, calendarQueryRange.start, calendarQueryRange.end]);
 
   if (loading) return <Loading />;
 
   const firstName = user?.name?.split(' ')[0] || 'there';
   const now = new Date();
-  const reviewSummaryTotal = reviewSummaries.reduce((sum, project) => sum + project.change_count, 0);
-  const fieldWatchTotal = fieldWatch?.counts?.total_alerts ?? 0;
 
-  const markReviewSummariesReviewed = () => {
-    const projectIds = Array.from(new Set(reviewSummaries.map(project => project.project_id).filter(Boolean)));
-    if (!projectIds.length) return;
-    Promise.allSettled(projectIds.map(projectId => api.post(`/projects/${projectId}/reviewed`)))
-      .catch(err => console.error('Failed to mark review summary read', err));
+  const openCalendarReminderComposer = () => {
+    setReminderTitle('BuildTrack reminder');
+    setReminderRecipients('');
+    setReminderMessage('');
+    setReminderScheduleType('once');
+    setReminderDate(formatLocalDateInput());
+    setReminderTime(defaultReminderTime());
+    setReminderEventType('other');
+    setReminderPriority('normal');
+    setShowCalendarReminderComposer(true);
   };
 
-  const closeReviewSummary = () => {
-    markReviewSummariesReviewed();
-    if (reviewDismissKey) sessionStorage.setItem(reviewDismissKey, '1');
-    if (reviewLoginKey) sessionStorage.removeItem(reviewLoginKey);
-    setShowReviewSummary(false);
+  const refreshCalendarEvents = async (weekStartKey = calendarWeekStartKey) => {
+    const range = calendarRangeFromWeekStartKey(weekStartKey);
+    const res = await api.get(`/calendar/events?start=${encodeURIComponent(range.start)}&end=${encodeURIComponent(range.end)}`);
+    setCalendarEvents(Array.isArray(res.data?.events) ? res.data.events : []);
   };
 
-  const closeFieldWatchReminder = () => {
-    if (user?.id && fieldWatch?.counts?.total_alerts) {
-      sessionStorage.setItem(`buildtrack-field-watch:${user.id}:${fieldWatch.counts.total_alerts}`, '1');
+  const calendarNoteDraft = (event: OperationsCalendarEvent) =>
+    calendarCompletionNotes[event.id] ?? event.completion_note ?? '';
+
+  const updateCalendarCompletionNote = (eventId: string, value: string) => {
+    setCalendarCompletionNotes(current => ({ ...current, [eventId]: value }));
+  };
+
+  const updateCalendarEditField = (field: keyof CalendarEditForm, value: string) => {
+    setCalendarEditForm(current => ({ ...current, [field]: value }));
+  };
+
+  const openCalendarEntryEditor = (event: OperationsCalendarEvent) => {
+    setEditingCalendarEvent(event);
+    setCalendarEditForm({
+      title: event.title || '',
+      description: event.description || '',
+      scheduled_for: event.scheduled_for || formatLocalDateInput(),
+      due_time: event.due_time || '',
+      event_type: event.event_type || 'other',
+      priority: event.priority || 'normal',
+      status: editableCalendarStatus(event.status),
+      completion_note: calendarNoteDraft(event),
+    });
+  };
+
+  const closeCalendarEntryEditor = () => {
+    if (savingCalendarEdit) return;
+    setEditingCalendarEvent(null);
+    setCalendarEditForm(blankCalendarEditForm);
+  };
+
+  const saveCalendarEntryEdit = async () => {
+    if (!editingCalendarEvent) return;
+    if (!calendarEditForm.title.trim()) {
+      toast.error('Calendar title is required');
+      return;
     }
-    setShowFieldWatchReminder(false);
+    if (!calendarEditForm.scheduled_for) {
+      toast.error('Calendar date is required');
+      return;
+    }
+
+    setSavingCalendarEdit(true);
+    setSavingCalendarEventId(editingCalendarEvent.id);
+    try {
+      const payload: Record<string, any> = {
+        title: calendarEditForm.title.trim(),
+        description: calendarEditForm.description.trim() || null,
+        scheduled_for: calendarEditForm.scheduled_for,
+        completion_note: calendarEditForm.completion_note,
+      };
+      if (editingCalendarEvent.source === 'construction_task') {
+        if (calendarEditForm.status !== editableCalendarStatus(editingCalendarEvent.status)) {
+          payload.status = calendarEditForm.status;
+        }
+      } else {
+        payload.due_time = calendarEditForm.due_time || null;
+        payload.event_type = calendarEditForm.event_type;
+        payload.priority = calendarEditForm.priority;
+        payload.status = calendarEditForm.status;
+      }
+      await api.put(`/calendar/events/${editingCalendarEvent.id}`, payload);
+      setCalendarCompletionNotes(current => ({
+        ...current,
+        [editingCalendarEvent.id]: calendarEditForm.completion_note,
+      }));
+      setEditingCalendarEvent(null);
+      setCalendarEditForm(blankCalendarEditForm);
+      const updatedWeekStartKey = formatLocalDateInput(startOfCalendarWeek(localDateInputToNoonDate(calendarEditForm.scheduled_for)));
+      setCalendarWeekStartKey(updatedWeekStartKey);
+      await refreshCalendarEvents(updatedWeekStartKey);
+      toast.success('Calendar entry updated');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to update calendar entry');
+    } finally {
+      setSavingCalendarEdit(false);
+      setSavingCalendarEventId('');
+    }
   };
 
-  // Lifecycle KPI counts
-  const totalProjects = allProjects.length;
-  const activeRehabs = allProjects.filter(p => p.status === 'active_rehab').length;
-  const notStarted = allProjects.filter(p => p.status === 'not_started').length;
-  const completedProjects = stats?.completed_projects ?? allProjects.filter(p =>
-    p.status === 'rehab_completed' || p.status === 'completed' || p.lifecycle_status === 'completed'
-  ).length;
-  const longTermHoldings = stats?.long_term_holdings ?? allProjects.filter(p => p.status === 'long_term_holding').length;
-  const commercialProjects = stats?.commercial_projects ?? allProjects.filter(p => p.status === 'commercial').length;
-  const operationsModules = [
-    {
-      label: 'Project Work Status',
-      detail: 'Review active project progress',
-      to: '/projects',
-      icon: FolderOpen,
-      accent: '#60A5FA',
-      bg: 'rgba(96,165,250,0.14)',
-      border: 'rgba(96,165,250,0.34)',
-    },
-    {
-      label: 'Final Punch Lists',
-      detail: 'Track closeout work items',
-      to: '/punch-list',
-      icon: ClipboardList,
-      accent: '#F59E0B',
-      bg: 'rgba(245,158,11,0.14)',
-      border: 'rgba(245,158,11,0.36)',
-    },
-  ];
+  const saveCalendarEventUpdate = async (event: OperationsCalendarEvent, patch: Record<string, any>) => {
+    setSavingCalendarEventId(event.id);
+    try {
+      const payload = {
+        status: patch.status ?? event.status,
+        completion_note: patch.completion_note !== undefined ? patch.completion_note : calendarNoteDraft(event),
+      };
+      await api.put(`/calendar/events/${event.id}`, payload);
+      await refreshCalendarEvents();
+      if (patch.completion_note !== undefined) setExpandedCalendarNoteId(null);
+      toast.success(payload.status === 'completed' ? 'Calendar task marked complete' : 'Calendar task updated');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to update calendar task');
+    } finally {
+      setSavingCalendarEventId('');
+    }
+  };
 
-  const kpiCards = [
-    {
-      label: 'Total Projects',
-      value: totalProjects,
-      sub: 'All tracked projects',
-      icon: FolderOpen,
-      gradient: 'linear-gradient(135deg, #1A1D21 0%, #E78B4A 100%)',
-      iconBg: 'rgba(255,255,255,0.15)',
-      iconColor: '#60A5FA',
-      iconPanel: 'rgba(96,165,250,0.14)',
-      iconBorder: 'rgba(96,165,250,0.32)',
-      trend: 'Project total',
-      trendUp: true,
-      filter: 'all_projects',
-    },
-    {
-      label: 'Active Rehabs',
-      value: activeRehabs,
-      sub: 'Currently under construction',
-      icon: TrendingUp,
-      gradient: 'linear-gradient(135deg, #231811 0%, #D46A4C 100%)',
-      iconBg: 'rgba(255,255,255,0.15)',
-      iconColor: '#F59E0B',
-      iconPanel: 'rgba(245,158,11,0.14)',
-      iconBorder: 'rgba(245,158,11,0.34)',
-      trend: activeRehabs > 0 ? 'In progress' : 'None active',
-      trendUp: activeRehabs > 0,
-      filter: 'active_rehab',
-    },
-    {
-      label: 'Not Started',
-      value: notStarted,
-      sub: 'Queued before rehab',
-      icon: Clock,
-      gradient: 'linear-gradient(135deg, #374151 0%, #6B7280 100%)',
-      iconBg: 'rgba(255,255,255,0.15)',
-      iconColor: '#CBD5E1',
-      iconPanel: 'rgba(148,163,184,0.16)',
-      iconBorder: 'rgba(148,163,184,0.32)',
-      trend: notStarted > 0 ? 'Queued' : 'None waiting',
-      trendUp: notStarted > 0,
-      filter: 'not_started',
-    },
-    {
-      label: 'Completed Projects',
-      value: completedProjects,
-      sub: 'Finished rehab projects',
-      icon: CheckCircle2,
-      gradient: 'linear-gradient(135deg, #102018 0%, #5DA271 100%)',
-      iconBg: 'rgba(255,255,255,0.15)',
-      iconColor: '#34D399',
-      iconPanel: 'rgba(52,211,153,0.14)',
-      iconBorder: 'rgba(52,211,153,0.32)',
-      trend: completedProjects > 0 ? 'Completed' : 'None complete',
-      trendUp: completedProjects > 0,
-      filter: 'rehab_completed',
-    },
-    {
-      label: 'Long-Term Holdings',
-      value: longTermHoldings,
-      sub: 'Held portfolio properties',
-      icon: FolderOpen,
-      gradient: 'linear-gradient(135deg, #25180C 0%, #B7793C 100%)',
-      iconBg: 'rgba(255,255,255,0.15)',
-      iconColor: '#FB923C',
-      iconPanel: 'rgba(251,146,60,0.14)',
-      iconBorder: 'rgba(251,146,60,0.34)',
-      trend: longTermHoldings > 0 ? 'Holding' : 'None held',
-      trendUp: longTermHoldings > 0,
-      filter: 'long_term_holding',
-    },
-    {
-      label: 'Commercial',
-      value: commercialProjects,
-      sub: 'Commercial project pipeline',
-      icon: FolderOpen,
-      gradient: 'linear-gradient(135deg, #102027 0%, #4E879A 100%)',
-      iconBg: 'rgba(255,255,255,0.15)',
-      iconColor: '#22D3EE',
-      iconPanel: 'rgba(34,211,238,0.14)',
-      iconBorder: 'rgba(34,211,238,0.32)',
-      trend: commercialProjects > 0 ? 'Commercial' : 'None listed',
-      trendUp: commercialProjects > 0,
-      filter: 'commercial',
-    },
-  ];
+  const saveCalendarEmailReminder = async () => {
+    const recipients = splitReminderEmails(reminderRecipients);
+    if (!reminderTitle.trim()) {
+      toast.error('Reminder title is required');
+      return;
+    }
+    if (!recipients.length) {
+      toast.error('Enter at least one reminder email');
+      return;
+    }
+    if (reminderScheduleType !== 'now' && (!reminderDate || !reminderTime)) {
+      toast.error('Choose the reminder date and time');
+      return;
+    }
 
-  const heroStatusCards = [
-    {
-      label: 'Active Work',
-      value: activeRehabs,
-      icon: FolderOpen,
-      accent: '#60A5FA',
-      bg: 'rgba(96,165,250,0.14)',
-      border: 'rgba(96,165,250,0.34)',
-    },
-    {
-      label: 'Field Checks',
-      value: fieldWatchTotal,
-      icon: ClipboardList,
-      accent: '#F59E0B',
-      bg: 'rgba(245,158,11,0.14)',
-      border: 'rgba(245,158,11,0.36)',
-    },
-    {
-      label: 'Completed',
-      value: completedProjects,
-      icon: CheckCircle2,
-      accent: '#34D399',
-      bg: 'rgba(52,211,153,0.14)',
-      border: 'rgba(52,211,153,0.32)',
-    },
-  ];
+    setSavingCalendarReminder(true);
+    try {
+      const scheduledFor = reminderDate || formatLocalDateInput();
+      const sendAt = reminderScheduleType === 'now' ? new Date().toISOString() : localDateTimeToIso(reminderDate, reminderTime);
+      const res = await api.post('/calendar/events', {
+        title: reminderTitle.trim(),
+        description: reminderMessage.trim() || null,
+        event_type: reminderEventType,
+        scheduled_for: scheduledFor,
+        due_time: reminderTime || null,
+        priority: reminderPriority,
+        source_type: 'manual',
+        email_reminder: {
+          enabled: true,
+          recipients,
+          subject: reminderTitle.trim(),
+          message: reminderMessage.trim() || reminderTitle.trim(),
+          schedule_type: reminderScheduleType,
+          send_at: sendAt,
+        },
+      });
+      if (res.data?.warning) {
+        toast.error(res.data.warning);
+      } else {
+        toast.success(reminderScheduleType === 'now' ? 'Reminder email sent' : 'Email reminder scheduled');
+      }
+      setShowCalendarReminderComposer(false);
+      const reminderWeekStartKey = formatLocalDateInput(startOfCalendarWeek(localDateInputToNoonDate(scheduledFor)));
+      setCalendarWeekStartKey(reminderWeekStartKey);
+      await refreshCalendarEvents(reminderWeekStartKey);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to save email reminder');
+    } finally {
+      setSavingCalendarReminder(false);
+    }
+  };
+
+  const todayKey = formatLocalDateInput(now);
+  const actualCurrentWeekStartKey = formatLocalDateInput(startOfCalendarWeek(now));
+  const currentWeekStartDate = localDateInputToNoonDate(calendarWeekStartKey);
+  const currentWeekEndDate = addCalendarDays(currentWeekStartDate, 6);
+  const currentWeekStartKey = formatLocalDateInput(currentWeekStartDate);
+  const currentWeekEndKey = formatLocalDateInput(currentWeekEndDate);
+  const calendarWeekPositionLabel = currentWeekStartKey === actualCurrentWeekStartKey
+    ? 'Current week'
+    : currentWeekStartKey > actualCurrentWeekStartKey
+      ? 'Future week'
+      : 'Past week';
+  const jumpToCalendarWeek = (dateKey: string) => {
+    if (!dateKey) return;
+    const weekStartKey = formatLocalDateInput(startOfCalendarWeek(localDateInputToNoonDate(dateKey)));
+    setCalendarWeekStartKey(weekStartKey);
+    setExpandedCalendarNoteId(null);
+  };
+  const moveCalendarWeek = (weekOffset: number) => {
+    setCalendarWeekStartKey(current => formatLocalDateInput(addCalendarDays(localDateInputToNoonDate(current), weekOffset * 7)));
+    setExpandedCalendarNoteId(null);
+  };
+  const jumpToCurrentCalendarWeek = () => {
+    setCalendarWeekStartKey(actualCurrentWeekStartKey);
+    setExpandedCalendarNoteId(null);
+  };
+  const isCurrentWeekEvent = (event: OperationsCalendarEvent) => {
+    const eventDateKey = calendarDateKeyForEvent(event);
+    return Boolean(eventDateKey && eventDateKey >= currentWeekStartKey && eventDateKey <= currentWeekEndKey);
+  };
+  const upcomingCalendarEvents = calendarEvents.filter(event =>
+    event.status !== 'completed' && isCurrentWeekEvent(event)
+  );
+  const completedCalendarEvents = calendarEvents.filter(event => event.status === 'completed' && isCurrentWeekEvent(event));
+  const displayedCalendarEvents = calendarQueueFilter === 'completed' ? completedCalendarEvents : upcomingCalendarEvents;
+  const calendarWeekLabel = formatCalendarWeekRange(currentWeekStartDate, currentWeekEndDate);
+  const calendarVisibleDays = buildCalendarWeekDays(currentWeekStartDate, todayKey);
+  const calendarWeekEventCount = displayedCalendarEvents.length;
+  const canCreateCalendarReminders = Boolean(user && isAdminRole(user.role));
+  const calendarTypeLabel = (type?: string) => {
+    const labels: Record<string, string> = {
+      task: 'Task',
+      maintenance: 'Maintenance',
+      inspection: 'Inspection',
+      note: 'Note',
+      other: 'Calendar',
+    };
+    return labels[type || 'other'] || 'Calendar';
+  };
+  const calendarEventTone = (event: OperationsCalendarEvent) => {
+    if (event.status === 'completed') {
+      return {
+        card: 'border-emerald-300/40 bg-emerald-950/40 hover:border-emerald-200/60',
+        rail: 'bg-emerald-400',
+        chip: 'border-emerald-300/50 bg-emerald-400/20 text-emerald-50',
+        time: 'bg-emerald-400/20 text-emerald-50 ring-emerald-300/40',
+      };
+    }
+
+    if (event.priority === 'critical' || event.priority === 'high') {
+      return {
+        card: 'border-rose-300/40 bg-rose-950/30 hover:border-rose-200/60',
+        rail: 'bg-rose-400',
+        chip: 'border-rose-300/50 bg-rose-400/20 text-rose-50',
+        time: 'bg-rose-400/20 text-rose-50 ring-rose-300/40',
+      };
+    }
+
+    const tones: Record<string, { card: string; rail: string; chip: string; time: string }> = {
+      task: {
+        card: 'border-sky-300/40 bg-sky-950/30 hover:border-sky-200/60',
+        rail: 'bg-sky-400',
+        chip: 'border-sky-300/50 bg-sky-400/20 text-sky-50',
+        time: 'bg-sky-400/20 text-sky-50 ring-sky-300/40',
+      },
+      maintenance: {
+        card: 'border-amber-300/40 bg-amber-950/30 hover:border-amber-200/60',
+        rail: 'bg-amber-400',
+        chip: 'border-amber-300/50 bg-amber-400/20 text-amber-50',
+        time: 'bg-amber-400/20 text-amber-50 ring-amber-300/40',
+      },
+      inspection: {
+        card: 'border-violet-300/40 bg-violet-950/30 hover:border-violet-200/60',
+        rail: 'bg-violet-400',
+        chip: 'border-violet-300/50 bg-violet-400/20 text-violet-50',
+        time: 'bg-violet-400/20 text-violet-50 ring-violet-300/40',
+      },
+      note: {
+        card: 'border-cyan-300/40 bg-cyan-950/30 hover:border-cyan-200/60',
+        rail: 'bg-cyan-300',
+        chip: 'border-cyan-300/50 bg-cyan-400/20 text-cyan-50',
+        time: 'bg-cyan-400/20 text-cyan-50 ring-cyan-300/40',
+      },
+      other: {
+        card: 'border-slate-500/50 bg-slate-900/75 hover:border-blue-300/50',
+        rail: 'bg-blue-400',
+        chip: 'border-blue-300/40 bg-blue-400/20 text-blue-50',
+        time: 'bg-blue-400/20 text-blue-50 ring-blue-300/40',
+      },
+    };
+
+    return tones[event.event_type || 'other'] || tones.other;
+  };
+  const calendarEventsByDate = displayedCalendarEvents.reduce<Record<string, OperationsCalendarEvent[]>>((groups, event) => {
+    const dateKey = calendarDateKeyForEvent(event) || todayKey;
+    if (!groups[dateKey]) groups[dateKey] = [];
+    groups[dateKey].push(event);
+    return groups;
+  }, {});
+  const renderCalendarDayTask = (event: OperationsCalendarEvent) => {
+    const complete = event.status === 'completed';
+    const noteDraft = calendarNoteDraft(event);
+    const noteExpanded = expandedCalendarNoteId === event.id;
+    const hasCompletionNote = Boolean(noteDraft.trim());
+    const projectLabel = getCalendarProjectLabel(event);
+    const saving = savingCalendarEventId === event.id;
+    const tone = calendarEventTone(event);
+
+    return (
+      <article
+        key={event.id}
+        className={`group relative overflow-hidden rounded-xl border px-2.5 py-2 text-left shadow-[0_10px_24px_rgba(2,6,23,0.20)] transition-colors ${
+          complete
+            ? tone.card
+            : noteExpanded
+              ? 'border-white/45 bg-slate-950/86'
+              : tone.card
+        }`}
+      >
+        <span className={`absolute bottom-2 left-0 top-2 w-1 rounded-r-full ${tone.rail}`} />
+        <div className="flex items-start gap-2 pl-1">
+          <input
+            type="checkbox"
+            checked={complete}
+            disabled={saving}
+            onChange={inputEvent => {
+              void saveCalendarEventUpdate(event, {
+                status: inputEvent.currentTarget.checked ? 'completed' : 'scheduled',
+                completion_note: noteDraft,
+              });
+            }}
+            className="mt-0.5 h-4 w-4 flex-shrink-0 rounded border-slate-500 bg-slate-950 accent-emerald-500"
+            aria-label={`${complete ? 'Mark incomplete' : 'Mark complete'}: ${projectLabel} - ${event.title}`}
+          />
+          <button
+            type="button"
+            onClick={() => setExpandedCalendarNoteId(noteExpanded ? null : event.id)}
+            className="min-w-0 flex-1 text-left"
+            aria-expanded={noteExpanded}
+          >
+            <div className="flex min-w-0 items-center gap-1.5">
+              {event.due_time ? (
+                <span className={`flex-shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-black leading-none ring-1 ${tone.time}`}>
+                  {event.due_time}
+                </span>
+              ) : null}
+              <p className={`min-w-0 truncate text-xs font-black leading-5 ${complete ? 'text-emerald-100 line-through decoration-emerald-200/70' : 'text-slate-50'}`} title={event.title}>
+                {event.title}
+              </p>
+            </div>
+            <div className="mt-1 flex min-w-0 items-center gap-1.5">
+              <span className="min-w-0 truncate text-[11px] font-bold leading-4 text-slate-200" title={projectLabel}>
+                {projectLabel}
+              </span>
+              <span className={`flex-shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-black uppercase leading-none ${tone.chip}`}>
+                {calendarTypeLabel(event.event_type)}
+                {Number(event.email_reminder_count || 0) > 0 ? ' / Email' : ''}
+              </span>
+            </div>
+          </button>
+          <span className="inline-flex flex-shrink-0 items-center gap-1 opacity-70 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+            <button
+              type="button"
+              onClick={() => openCalendarEntryEditor(event)}
+              disabled={saving}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-600 bg-slate-900 text-slate-200 transition hover:border-cyan-300 hover:bg-cyan-500/15 hover:text-cyan-100 disabled:opacity-60"
+              title="Edit calendar entry"
+              aria-label={`Edit calendar entry: ${projectLabel} - ${event.title}`}
+            >
+              <Edit2 className="h-3 w-3" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setExpandedCalendarNoteId(noteExpanded ? null : event.id)}
+              disabled={saving}
+              className={`inline-flex h-7 w-7 items-center justify-center rounded-md border transition disabled:opacity-60 ${
+                hasCompletionNote
+                  ? 'border-amber-300/45 bg-amber-500/10 text-amber-100 hover:bg-amber-500/15'
+                  : noteExpanded
+                    ? 'border-cyan-300/50 bg-cyan-500/15 text-cyan-100'
+                    : 'border-slate-600 bg-slate-900 text-slate-300 hover:border-slate-400 hover:bg-slate-800'
+              }`}
+              title={hasCompletionNote ? 'Edit note' : 'Expand calendar item'}
+              aria-label={`${hasCompletionNote ? 'Edit note for' : 'Expand'} ${projectLabel} - ${event.title}`}
+            >
+              <MessageSquare className="h-3 w-3" />
+            </button>
+          </span>
+        </div>
+        {noteExpanded && (
+          <div className="mt-2 grid gap-1.5 border-t border-slate-800 pt-2">
+            {event.description ? (
+              <p className="line-clamp-3 whitespace-pre-wrap rounded border border-slate-700/70 bg-slate-950/55 px-2 py-1.5 text-[10px] font-semibold leading-4 text-slate-300">
+                {event.description}
+              </p>
+            ) : null}
+            {event.vendor_name ? (
+              <p className="truncate text-[10px] font-semibold leading-4 text-slate-500">
+                Vendor: {event.vendor_name}
+              </p>
+            ) : null}
+            <VoiceTextarea
+              value={noteDraft}
+              onChange={inputEvent => updateCalendarCompletionNote(event.id, inputEvent.target.value)}
+              rows={2}
+              className="w-full resize-y rounded-md border border-slate-600 bg-slate-950 px-2 py-1.5 text-[11px] font-semibold leading-5 text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400"
+              placeholder="Add note..."
+            />
+            <span className="flex justify-end gap-1.5">
+              <button
+                type="button"
+                onClick={() => setExpandedCalendarNoteId(null)}
+                className="rounded border border-slate-600 bg-slate-900 px-2 py-1 text-[10px] font-black text-slate-200 hover:bg-slate-800"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => void saveCalendarEventUpdate(event, { status: complete ? 'completed' : event.status, completion_note: noteDraft })}
+                className="rounded border border-emerald-300/40 bg-emerald-500/15 px-2 py-1 text-[10px] font-black text-emerald-100 hover:bg-emerald-500/25 disabled:opacity-60"
+              >
+                {saving ? 'Saving' : 'Save'}
+              </button>
+            </span>
+          </div>
+        )}
+      </article>
+    );
+  };
+
+  const renderActivityFeedPanel = () => (
+    <div
+      id="recent-activity"
+      className="bt-dashboard-notes-panel bt-dashboard-activity-panel relative overflow-hidden rounded-2xl border border-slate-700/70 shadow-[0_16px_40px_rgba(2,6,23,0.24)]"
+      style={{
+        background: 'linear-gradient(180deg, rgba(17,31,52,0.92), rgba(12,22,38,0.92))',
+      }}
+    >
+      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-blue-500 via-cyan-300 to-amber-300" />
+      <div
+        className="bt-dashboard-notes-panel-header relative flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3"
+        style={{
+          background: 'linear-gradient(90deg, rgba(30,64,175,0.20) 0%, rgba(14,165,233,0.10) 52%, rgba(245,158,11,0.08) 100%)',
+        }}
+      >
+        <div className="flex items-center gap-2.5">
+          <div
+            className="flex h-9 w-9 items-center justify-center rounded-lg border shadow-[0_0_16px_rgba(96,165,250,0.14)]"
+            style={{ background: 'rgba(37,99,235,0.16)', borderColor: 'rgba(147,197,253,0.46)' }}
+          >
+            <Activity className="h-4 w-4" style={{ color: '#BFDBFE' }} />
+          </div>
+          <div>
+            <p className="bt-section-kicker">Latest company notes</p>
+            <h2 className="text-lg font-black text-white">Latest Field & Office Notes</h2>
+            <p className="text-xs font-semibold text-slate-300">{activityFeed.length} recent notes across all projects</p>
+          </div>
+        </div>
+        <span className="hidden rounded-full border border-cyan-300/30 bg-cyan-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-cyan-100 sm:inline-flex">
+          25 latest notes
+        </span>
+      </div>
+
+      {activityFeed.length === 0 ? (
+        <div className="relative flex min-h-[96px] flex-col items-center justify-center px-4 py-6">
+          <p className="text-sm font-bold text-white">No notes yet</p>
+          <p className="mt-1 text-xs text-blue-100">Recent field and office notes will appear here.</p>
+        </div>
+      ) : (
+        <div className="relative grid grid-cols-1 gap-2 p-3">
+          {activityFeed.map((item) => {
+            const activityStyle = getActivityTypeStyle(item);
+            const statusStyle = getProjectStatusStyle(item.project_status || undefined);
+            const summary = getActivitySummary(item);
+            const projectTarget = item.project_id ? `/projects/${item.project_id}` : '';
+            const projectLabel = item.project_address || item.project_job_name || 'BuildTrack';
+            return (
+              <div
+                key={`${item.feed_type}-${item.id}`}
+                role={projectTarget ? 'link' : undefined}
+                tabIndex={projectTarget ? 0 : -1}
+                onClick={() => {
+                  if (projectTarget) navigate(projectTarget);
+                }}
+                onKeyDown={event => {
+                  if (projectTarget && event.key === 'Enter') navigate(projectTarget);
+                }}
+                className={`group relative flex items-start gap-3 rounded-lg border border-white/10 p-3 transition-all hover:border-cyan-300/55 ${projectTarget ? 'cursor-pointer' : 'cursor-default'}`}
+                style={{
+                  background: 'linear-gradient(135deg, rgba(15,23,42,0.88) 0%, rgba(30,41,59,0.76) 58%, rgba(8,47,73,0.42) 100%)',
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
+                }}
+              >
+                <span
+                  className="absolute bottom-2 left-0 top-2 w-1 rounded-r-full"
+                  style={{ background: activityStyle.accent }}
+                />
+                <div className="relative mt-0.5 flex-shrink-0 pl-1">
+                  <Avatar
+                    src={item.user_avatar_url}
+                    name={item.user_name}
+                    size={46}
+                    className="border-2"
+                    style={{ borderColor: 'rgba(191,219,254,0.72)' }}
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+                    <span className="truncate text-sm font-black text-white">{item.user_name}</span>
+                    <span className="text-[11px] font-semibold text-slate-300">
+                      {formatEasternDateTime(item.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                    </span>
+                    <span
+                      className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-black uppercase"
+                      style={{ background: activityStyle.bg, color: activityStyle.color, borderColor: activityStyle.border }}
+                    >
+                      {activityStyle.label}
+                    </span>
+                    <span
+                      className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-black"
+                      style={{ background: statusStyle.bg, color: statusStyle.color, borderColor: statusStyle.border }}
+                    >
+                      {statusStyle.label}
+                    </span>
+                  </div>
+                  <p className="mt-1 line-clamp-1 whitespace-pre-wrap text-xs font-medium leading-5 text-slate-100">
+                    {summary}
+                  </p>
+                  {projectLabel && (
+                    <div className="mt-1 flex items-center gap-1.5">
+                      <MapPin className="h-3 w-3 flex-shrink-0 text-cyan-200" />
+                      <p className="truncate text-[10px] font-bold text-slate-200">{projectLabel}</p>
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-shrink-0 flex-col items-end gap-1 text-right">
+                  <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-[10px] font-black text-blue-100 ring-1 ring-blue-300/25">
+                    {formatEasternRelative(item.created_at)}
+                  </span>
+                  {projectTarget ? (
+                    <span className="hidden rounded-md border border-slate-600/70 bg-slate-900/80 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-slate-200 transition group-hover:border-cyan-300/60 group-hover:text-cyan-100 sm:inline">
+                      Open
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="bt-desktop-page bt-dashboard-page" style={{ minHeight: '100%' }}>
       {/* Hero header bar */}
       <div
-        className="bt-dashboard-hero border-b px-6 py-5 md:px-8"
+        className="bt-dashboard-hero border-b px-4 py-4 md:px-6"
       >
-        <div className="relative z-10 mx-auto grid max-w-7xl gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+        <div className="relative z-10 mx-auto grid max-w-none gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
           <div className="min-w-0">
-            <div className="flex items-center gap-3 mb-1">
+            <div className="mb-1 flex items-center gap-3">
               <span
-                className="inline-flex items-center gap-1.5 rounded-sm border border-orange-400/70 bg-orange-950/30 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-orange-300"
+                className="inline-flex items-center gap-1.5 rounded-full border border-orange-300/45 bg-orange-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-orange-200"
               >
                 <span className="w-1.5 h-1.5 rounded-full bg-current" />
                 Operations Dashboard
               </span>
             </div>
-            <h1 className="text-xl font-bold tracking-tight text-slate-950">
+            <h1 className="text-2xl font-black tracking-tight text-slate-50">
               {greeting()}, {firstName}
             </h1>
-            <p className="mt-1 text-sm font-medium text-slate-500">
+            <p className="mt-1 text-sm font-semibold text-slate-300">
               {formatEasternDate(now.toISOString(), { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} - {roleLabels[user?.role || '']}
             </p>
           </div>
           <div className="hidden items-center gap-3 md:flex">
-            <div className="hidden grid-cols-3 gap-2 xl:grid">
-              {heroStatusCards.map(card => (
-                <div
-                  key={card.label}
-                  className="bt-dashboard-hero-chip"
-                  style={{
-                    '--bt-hero-chip-accent': card.accent,
-                    '--bt-hero-chip-panel': card.bg,
-                    '--bt-hero-chip-border': card.border,
-                  } as CSSProperties}
-                >
-                  <span className="bt-dashboard-hero-chip-icon">
-                    <card.icon className="h-3.5 w-3.5" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-[10px] font-black uppercase tracking-wide">{card.label}</span>
-                    <span className="block text-sm font-black tabular-nums">{card.value}</span>
-                  </span>
-                </div>
-              ))}
+            <div className="grid grid-cols-3 gap-2">
+              <div className="bt-dashboard-command-chip">
+                <span>This week</span>
+                <strong>{calendarWeekEventCount}</strong>
+              </div>
+              <div className="bt-dashboard-command-chip">
+                <span>Upcoming</span>
+                <strong>{upcomingCalendarEvents.length}</strong>
+              </div>
+              <div className="bt-dashboard-command-chip">
+                <span>Notes</span>
+                <strong>{activityFeed.length}</strong>
+              </div>
             </div>
             <Link
               to="/projects"
@@ -478,286 +985,211 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="px-6 py-6 md:px-8 max-w-7xl mx-auto space-y-4">
-        {/* Construction command center */}
-        <section className="bt-card overflow-hidden" aria-label="Construction modules and field payment checks">
-          <div
-            className="grid gap-3 border-b px-4 py-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-start md:px-5"
-            style={{ borderColor: 'var(--bt-border)' }}
-          >
+      <div className="mx-auto max-w-none space-y-5 px-4 py-4 md:px-6">
+        {/* Operations schedule */}
+        <section
+          className="bt-dashboard-ops-panel relative overflow-hidden"
+          aria-label="Operations schedule"
+        >
+          <div className="bt-dashboard-ops-strip absolute inset-x-0 top-0 h-1" />
+          <div className="bt-dashboard-ops-header relative grid min-h-8 gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-end">
             <div className="min-w-0">
-              <p className="bt-section-kicker">Construction modules</p>
-              <h2 className="bt-section-title">Project tasks, punch lists, and field checks before payment approval</h2>
-              <p className="mt-1 max-w-3xl text-xs font-semibold" style={{ color: 'var(--bt-text-muted)' }}>
-                Use this first: review active work, close out punch items, verify field notes and pictures, then release invoices only after management approval.
+              <p className="bt-section-kicker">Operations schedule</p>
+              <h2 className="truncate text-2xl font-black tracking-tight" style={{ color: 'var(--bt-text)' }}>Jobsite Operations Calendar</h2>
+              <p className="mt-1 text-sm font-semibold text-slate-300">
+                Weekly field schedule, task completion, and operational reminders.
               </p>
             </div>
-            <span className="inline-flex min-h-8 w-fit items-center gap-1.5 justify-self-start rounded-sm border px-2.5 py-1 text-xs font-bold md:justify-self-end"
-              style={{ background: '#1E1610', borderColor: '#E78B4A', color: '#FFD0A8' }}
-            >
-              <Bell className="h-3.5 w-3.5" />
-              {reviewSummaryTotal} review update{reviewSummaryTotal === 1 ? '' : 's'}
-            </span>
-          </div>
-
-          <div className="grid xl:grid-cols-[minmax(0,0.98fr)_minmax(0,1.02fr)]">
-            <div className="p-4 md:p-5">
-              <div className="mb-3 grid min-h-8 grid-cols-[minmax(0,1fr)_auto] items-end gap-3">
-                <h3 className="truncate text-sm font-black" style={{ color: 'var(--bt-text)' }}>Operational entry points</h3>
-                <span className="rounded-sm border px-2 py-1 text-[10px] font-black uppercase tracking-wide" style={{ borderColor: '#263241', color: 'var(--bt-text-soft)' }}>Start here</span>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-              {operationsModules.map(module => (
-                <Link
-                  key={module.label}
-                  to={module.to}
-                  className="grid min-h-[72px] grid-cols-[44px_minmax(0,1fr)_18px] items-center gap-3 rounded-sm border px-3 py-3 transition-colors hover:border-orange-400"
-                  style={{ background: '#0E1012', borderColor: module.border }}
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <AddToCalendarButton
+                label="Add to Calendar"
+                defaultTitle="BuildTrack operations reminder"
+                defaultDescription="Created from the dashboard."
+                sourceType="dashboard"
+                contextLabel="Dashboard operations calendar"
+                onSaved={refreshCalendarEvents}
+              />
+              {canCreateCalendarReminders && (
+                <button
+                  type="button"
+                  onClick={openCalendarReminderComposer}
+                  className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-600/80 bg-slate-900/80 px-3 py-2 text-sm font-black text-slate-100 transition-colors hover:border-cyan-300/70 hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
                 >
+                  <Mail className="h-3.5 w-3.5" />
+                  Email Reminder
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {([
+              { key: 'upcoming', label: 'Upcoming', count: upcomingCalendarEvents.length },
+              { key: 'completed', label: 'Completed', count: completedCalendarEvents.length },
+            ] as const).map(filter => {
+              const active = calendarQueueFilter === filter.key;
+              return (
+                <button
+                  key={filter.key}
+                  type="button"
+                  onClick={() => {
+                    setCalendarQueueFilter(filter.key);
+                    setExpandedCalendarNoteId(null);
+                  }}
+                    className="inline-flex min-h-10 items-center gap-2 rounded-full border px-4 py-2 text-sm font-black shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-300/60"
+                    style={{
+                    background: active ? 'linear-gradient(135deg, #1D4ED8, #0E7490)' : 'rgba(30,41,59,0.92)',
+                    borderColor: active ? 'rgba(191,219,254,0.82)' : 'rgba(100,116,139,0.70)',
+                    color: active ? '#FFFFFF' : '#E5E7EB',
+                  }}
+                  aria-pressed={active}
+                >
+                  {filter.label}
                   <span
-                    className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-md border"
-                    style={{ background: module.bg, borderColor: module.border, color: module.accent }}
+                    className="rounded-full px-2 py-0.5 text-[11px] font-black"
+                    style={{
+                      background: active ? '#F8FAFC' : 'rgba(226,232,240,0.16)',
+                      color: active ? '#0F172A' : '#F8FAFC',
+                    }}
                   >
-                    <module.icon className="h-4 w-4" />
+                    {filter.count}
                   </span>
-                  <span className="min-w-0">
-                    <span className="block text-sm font-black" style={{ color: 'var(--bt-text)' }}>{module.label}</span>
-                    <span className="block truncate text-xs font-semibold" style={{ color: 'var(--bt-text-muted)' }}>{module.detail}</span>
-                  </span>
-                  <ChevronRight className="h-4 w-4 justify-self-end" style={{ color: 'var(--bt-text-soft)' }} />
-                </Link>
-              ))}
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-4 overflow-hidden rounded-[22px] border border-slate-600/60 bg-slate-950/70 shadow-[0_24px_60px_rgba(2,6,23,0.34)]">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-700/70 px-4 py-3" style={{ background: 'linear-gradient(90deg, rgba(30,41,59,0.98), rgba(15,23,42,0.98) 55%, rgba(12,74,110,0.32))' }}>
+              <div className="min-w-0">
+                <p className="text-[11px] font-black uppercase tracking-wide text-sky-200">{calendarWeekPositionLabel}</p>
+                <h3 className="mt-0.5 text-base font-black text-slate-50">Sunday - Saturday, {calendarWeekLabel}</h3>
+              </div>
+              <div className="flex flex-wrap items-center justify-end gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => moveCalendarWeek(-1)}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-600 bg-slate-800/90 text-slate-100 transition hover:border-sky-300 hover:bg-slate-700"
+                  title="Previous week"
+                  aria-label="Previous week"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={jumpToCurrentCalendarWeek}
+                  className="inline-flex min-h-8 items-center rounded-lg border border-sky-300/40 bg-sky-500/20 px-2.5 text-xs font-black text-sky-50 transition hover:border-sky-200 hover:bg-sky-500/30"
+                >
+                  Today
+                </button>
+                <label className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-800/90 px-2 text-xs font-black text-slate-100">
+                  <span>Week of</span>
+                  <input
+                    type="date"
+                    value={calendarWeekStartKey}
+                    onChange={event => jumpToCalendarWeek(event.target.value)}
+                    className="h-6 rounded-md border border-slate-600 bg-slate-950 px-1.5 text-xs font-bold text-slate-100 outline-none focus:border-sky-300"
+                    aria-label="Jump to calendar week"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => moveCalendarWeek(1)}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-600 bg-slate-800/90 text-slate-100 transition hover:border-sky-300 hover:bg-slate-700"
+                  title="Next week"
+                  aria-label="Next week"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+                <span className="rounded-lg border border-sky-300/40 bg-sky-500/20 px-2.5 py-1 text-xs font-black text-sky-50">
+                  {calendarWeekEventCount} {calendarWeekEventCount === 1 ? 'task' : 'tasks'}
+                </span>
               </div>
             </div>
 
-            <div className="border-t p-4 md:p-5 xl:border-l xl:border-t-0" style={{ borderColor: 'var(--bt-border)' }}>
-              <div className="mb-3 grid min-h-8 grid-cols-[minmax(0,1fr)_auto] items-end gap-3">
-                <div className="min-w-0">
-                  <p className="bt-section-kicker">Final watch list</p>
-                  <h3 className="truncate text-sm font-black" style={{ color: 'var(--bt-text)' }}>Field checks before payment</h3>
-                </div>
-                <span className={`inline-flex min-h-8 items-center rounded-sm px-2.5 py-1 text-xs font-black ${fieldWatchTotal > 0 ? 'bg-red-50 text-red-700 ring-1 ring-red-200' : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'}`}>
-                  {fieldWatchTotal > 0 ? `${fieldWatchTotal} alerts` : 'Clear'}
-                </span>
-              </div>
-              <div className="grid gap-2">
-                {[
-                  {
-                    label: 'Field notes & pictures',
-                    value: `${(fieldWatch?.counts?.field_notes || 0) + (fieldWatch?.counts?.field_photos || 0)}`,
-                    detail: 'New evidence to review from the field',
-                    icon: Image,
-                    tone: '#2563EB',
-                  },
-                  {
-                    label: 'Scheduled work status',
-                    value: `${fieldWatch?.counts?.scheduled_tasks || 0}`,
-                    detail: 'Upcoming or in-process scope tasks',
-                    icon: Clock,
-                    tone: '#D97706',
-                  },
-                  {
-                    label: 'Approval / invoice holds',
-                    value: `${(fieldWatch?.counts?.approvals_needed || 0) + (fieldWatch?.counts?.invoice_holds || 0)}`,
-                    detail: 'Must be approved before payment',
-                    icon: AlertTriangle,
-                    tone: '#DC2626',
-                  },
-                ].map(item => (
-                  <button
-                    key={item.label}
-                    type="button"
-                    onClick={() => {
-                      const firstTaskProject = fieldWatch?.tasks?.[0]?.project_id;
-                      const firstHoldProject = fieldWatch?.invoice_holds?.[0]?.project_id;
-                      const firstNoteProject = fieldWatch?.field_notes?.[0]?.project_id;
-                      navigate(`/projects/${firstTaskProject || firstHoldProject || firstNoteProject || ''}`.replace(/\/$/, ''));
-                    }}
-                    className="grid min-h-[58px] grid-cols-[44px_minmax(0,1fr)_40px] items-center gap-3 rounded-sm border px-3 py-2 text-left transition-colors hover:border-orange-400"
-                    style={{ background: '#0E1012', borderColor: '#343A42' }}
-                  >
-                    <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md border" style={{ background: `${item.tone}22`, borderColor: `${item.tone}66`, color: item.tone }}>
-                      <item.icon className="h-4 w-4" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-xs font-black uppercase tracking-wide" style={{ color: 'var(--bt-text)' }}>{item.label}</span>
-                      <span className="block truncate text-xs font-semibold" style={{ color: 'var(--bt-text-muted)' }}>{item.detail}</span>
-                    </span>
-                    <span className="justify-self-end text-right text-lg font-black tabular-nums" style={{ color: 'var(--bt-text)' }}>{item.value}</span>
-                  </button>
-                ))}
+            <div className="overflow-x-auto bg-slate-950/40">
+              <div className="grid min-w-[1120px] grid-cols-7 gap-2 p-3">
+                {calendarVisibleDays.map(day => {
+                  const dayEvents = sortCalendarEventsForDay(calendarEventsByDate[day.key] || []);
+                  const badgeDate = formatCalendarBadgeDate(day.key);
+
+                  return (
+                    <section key={day.key} className={`flex min-h-[390px] min-w-0 flex-col overflow-hidden rounded-2xl border shadow-[0_14px_32px_rgba(2,6,23,0.28)] ${day.isToday ? 'border-sky-300/70 bg-sky-950/50 ring-1 ring-sky-300/30' : 'border-slate-700/75 bg-slate-900/80'}`}>
+                      <header className={`border-b px-3 py-2.5 ${day.isToday ? 'border-sky-300/40 bg-sky-500/20' : 'border-slate-700/70 bg-slate-800/90'}`}>
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className={`text-xs font-black uppercase tracking-wide ${day.isToday ? 'text-sky-100' : 'text-slate-300'}`}>
+                              {day.weekday}
+                            </p>
+                            <p className="mt-1 text-sm font-black text-white">
+                              {badgeDate.month} {day.dayNumber}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <span className={`rounded-full px-2.5 py-1 text-[11px] font-black shadow-sm ${day.isToday ? 'bg-white text-slate-950 ring-1 ring-white/90' : dayEvents.length > 0 ? 'bg-blue-500/25 text-blue-50 ring-1 ring-blue-300/50' : 'bg-slate-950/70 text-slate-100 ring-1 ring-slate-600/80'}`}>
+                              {dayEvents.length} {dayEvents.length === 1 ? 'task' : 'tasks'}
+                            </span>
+                            <AddToCalendarButton
+                              label={`Add calendar item on ${badgeDate.label}`}
+                              ariaLabel={`Add task or event on ${badgeDate.label}`}
+                              icon="plus"
+                              iconOnly
+                              defaultTitle="BuildTrack task"
+                              defaultDescription={`Created directly from the ${badgeDate.label} calendar space.`}
+                              defaultDate={day.key}
+                              defaultEventType="task"
+                              sourceType="dashboard_day"
+                              contextLabel={`Calendar space: ${badgeDate.label}`}
+                              modalTitle={`Add Item - ${badgeDate.label}`}
+                              buttonClassName={`inline-flex h-7 w-7 min-w-7 items-center justify-center rounded-lg border text-xs font-black transition focus:outline-none focus:ring-2 focus:ring-sky-300/50 ${day.isToday ? 'border-white/70 bg-slate-950/50 text-white hover:bg-slate-900 hover:border-white' : 'border-slate-600 bg-slate-950/70 text-slate-100 hover:border-sky-300 hover:bg-sky-500/20 hover:text-sky-50'}`}
+                              onSaved={() => refreshCalendarEvents(calendarWeekStartKey)}
+                            />
+                          </div>
+                        </div>
+                      </header>
+                      <div className="flex-1 space-y-2 p-2.5">
+                        {dayEvents.length > 0 ? (
+                          <>
+                            <AddToCalendarButton
+                              label="Add task"
+                              ariaLabel={`Add task or event on ${badgeDate.label}`}
+                              icon="plus"
+                              defaultTitle="BuildTrack task"
+                              defaultDescription={`Created directly from the ${badgeDate.label} calendar space.`}
+                              defaultDate={day.key}
+                              defaultEventType="task"
+                              sourceType="dashboard_day"
+                              contextLabel={`Calendar space: ${badgeDate.label}`}
+                              modalTitle={`Add Item - ${badgeDate.label}`}
+                              buttonClassName="flex min-h-9 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-slate-600/80 bg-slate-950/40 text-xs font-black text-slate-200 transition hover:border-sky-300 hover:bg-sky-500/20 hover:text-sky-50 focus:outline-none focus:ring-2 focus:ring-sky-300/50"
+                              onSaved={() => refreshCalendarEvents(calendarWeekStartKey)}
+                            />
+                            {dayEvents.map(renderCalendarDayTask)}
+                          </>
+                        ) : (
+                          <AddToCalendarButton
+                            label="Add task"
+                            ariaLabel={`Add task or event on ${badgeDate.label}`}
+                            icon="plus"
+                            defaultTitle="BuildTrack task"
+                            defaultDescription={`Created directly from the ${badgeDate.label} calendar space.`}
+                            defaultDate={day.key}
+                            defaultEventType="task"
+                            sourceType="dashboard_day"
+                            contextLabel={`Calendar space: ${badgeDate.label}`}
+                            modalTitle={`Add Item - ${badgeDate.label}`}
+                            buttonClassName="flex min-h-[154px] w-full flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-600/80 bg-slate-950/30 px-2 text-xs font-black text-slate-300 transition hover:border-sky-300 hover:bg-sky-500/20 hover:text-sky-50 focus:outline-none focus:ring-2 focus:ring-sky-300/50"
+                            onSaved={() => refreshCalendarEvents(calendarWeekStartKey)}
+                          />
+                        )}
+                      </div>
+                    </section>
+                  );
+                })}
               </div>
             </div>
           </div>
         </section>
 
-        {/* KPI Cards */}
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
-          {kpiCards.map(card => {
-            const target = card.filter === 'all_projects' ? '/projects' : `/projects?status=${card.filter}`;
-            return (
-              <div
-                key={card.label}
-                role="button"
-                tabIndex={0}
-                className="bt-dashboard-stat-card relative min-h-[78px] cursor-pointer overflow-hidden rounded-sm p-3 active:scale-[0.99]"
-                style={{
-                  '--bt-dashboard-card-accent': card.iconColor,
-                  '--bt-dashboard-icon-panel': card.iconPanel,
-                } as CSSProperties}
-                onClick={() => navigate(target)}
-                onKeyDown={event => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    navigate(target);
-                  }
-                }}
-              >
-                <div className="relative z-10">
-                  <div className="mb-2 flex items-start justify-between">
-                    <div
-                      className="bt-dashboard-stat-icon flex h-8 w-8 items-center justify-center rounded-md border"
-                      style={{
-                        background: card.iconPanel,
-                        borderColor: card.iconBorder,
-                        color: card.iconColor,
-                      }}
-                    >
-                      <card.icon className="h-3.5 w-3.5" />
-                    </div>
-                    <span
-                      className="hidden items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600 md:flex"
-                    >
-                      {card.trendUp ? (
-                        <TrendingUp className="w-3 h-3" />
-                      ) : (
-                        <AlertTriangle className="w-3 h-3" />
-                      )}
-                      {card.trend}
-                    </span>
-                  </div>
-                  <div className="flex items-end gap-2">
-                    <p className="text-2xl font-bold leading-none text-slate-950">{card.value}</p>
-                    <p className="pb-0.5 text-xs font-bold leading-tight text-slate-800">{card.label}</p>
-                  </div>
-                  <p className="mt-1 hidden truncate text-[10px] font-medium text-slate-500 sm:block">{card.sub}</p>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Main content grid */}
-        <div className="grid gap-6">
-          {/* Latest Notes Activity */}
-          <div
-            id="recent-activity"
-            className="bt-card bt-dashboard-notes-panel overflow-hidden"
-          >
-            <div
-              className="bt-dashboard-notes-panel-header flex items-center justify-between gap-4 px-4 py-3"
-            >
-              <div className="flex items-center gap-3">
-                <div
-                  className="flex h-9 w-9 items-center justify-center rounded-xl border"
-                  style={{ background: '#EFF6FF', borderColor: '#BFDBFE' }}
-                >
-                  <MessageSquare className="h-4 w-4" style={{ color: '#2563EB' }} />
-                </div>
-                <div>
-                  <h2 className="text-sm font-bold text-slate-950">Latest Notes Activity</h2>
-                  <p className="text-xs font-medium text-slate-500">{recentNotes.length} notes across all projects</p>
-                </div>
-              </div>
-            </div>
-
-            {recentNotes.length === 0 ? (
-              <div className="flex min-h-[420px] flex-col items-center justify-center px-6 py-16">
-                <div
-                  className="mb-4 flex h-14 w-14 items-center justify-center rounded-lg border border-slate-200 bg-slate-50"
-                >
-                  <MessageSquare className="h-7 w-7 text-slate-500" />
-                </div>
-                <p className="text-sm font-bold text-slate-700">No notes yet</p>
-                <p className="mt-1 text-xs text-slate-500">Project notes will appear here as they are added</p>
-              </div>
-            ) : (
-              <div className="max-h-[640px] min-h-[460px] space-y-2 overflow-y-auto p-3">
-                {recentNotes.map((note) => {
-                  const noteStyle = getNoteTypeStyle(note.note_type);
-                  const statusStyle = getProjectStatusStyle(note.project_status);
-                  return (
-                    <div
-                      key={note.id}
-                      role="link"
-                      tabIndex={0}
-                      onClick={() => navigate(`/projects/${note.project_id}`)}
-                      onKeyDown={event => {
-                        if (event.key === 'Enter') navigate(`/projects/${note.project_id}`);
-                      }}
-                      className="group relative flex cursor-pointer items-start gap-3 rounded-sm border border-slate-700 bg-white p-3 transition-colors hover:border-orange-400 hover:bg-slate-50"
-                      style={{
-                        boxShadow: '0 1px 2px rgba(15,23,42,0.04)',
-                      }}
-                    >
-                      <span
-                        className="absolute bottom-3 left-0 top-3 w-1 rounded-r-full"
-                        style={{ background: noteStyle.accent }}
-                      />
-                      <div className="relative mt-0.5 flex-shrink-0 pl-1">
-                        <Avatar
-                          src={note.user_avatar_url}
-                          name={note.user_name}
-                          size={40}
-                          className="border"
-                          style={{ borderColor: '#E2E8F0' }}
-                        />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-sm font-bold text-slate-950">{note.user_name}</span>
-                          <span className="text-xs font-medium text-slate-500">
-                            Inserted {formatEasternDateTime(note.created_at, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time
-                          </span>
-                          <span className="text-xs font-medium text-slate-500">added a note</span>
-                          <span
-                            className="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-black uppercase tracking-wide"
-                            style={{ background: noteStyle.bg, color: noteStyle.color, borderColor: noteStyle.border }}
-                          >
-                            {noteStyle.label}
-                          </span>
-                          <span
-                            className="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-black"
-                            style={{ background: statusStyle.bg, color: statusStyle.color, borderColor: statusStyle.border }}
-                          >
-                            {statusStyle.label}
-                          </span>
-                        </div>
-                        <p className="mt-2 line-clamp-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">
-                          {note.note}
-                        </p>
-                        {note.project_address && (
-                          <div className="mt-3 flex items-center gap-2 border-t border-slate-100 pt-2">
-                            <MapPin className="h-3.5 w-3.5 flex-shrink-0 text-slate-400" />
-                            <p className="truncate text-xs font-semibold text-slate-500">{note.project_address}</p>
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex flex-shrink-0 flex-col items-end gap-1 text-right">
-                        <span className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600 ring-1 ring-slate-200">
-                          {formatEasternRelative(note.created_at)}
-                        </span>
-                        <span className="hidden text-[10px] font-semibold uppercase tracking-wide text-slate-400 sm:inline">
-                          Open project
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
+        {renderActivityFeedPanel()}
 
         {/* Footer */}
         <div className="flex items-center justify-between py-2">
@@ -767,177 +1199,268 @@ export default function Dashboard() {
       </div>
 
       <Modal
-        isOpen={showFieldWatchReminder && !!fieldWatch && fieldWatchTotal > 0}
-        onClose={closeFieldWatchReminder}
-        title="Field Work Needs Review"
-        description="Review field notes, pictures, scheduled tasks, and payment holds before invoices are approved."
-        size="xl"
+        isOpen={!!editingCalendarEvent}
+        onClose={closeCalendarEntryEditor}
+        title="Edit Calendar Entry"
+        size="lg"
       >
         <div className="space-y-4">
-          <div className="grid gap-3 md:grid-cols-4">
-            {[
-              { label: 'Field evidence', value: (fieldWatch?.counts.field_notes || 0) + (fieldWatch?.counts.field_photos || 0), tone: 'bg-blue-50 text-blue-700 ring-blue-200' },
-              { label: 'Scheduled tasks', value: fieldWatch?.counts.scheduled_tasks || 0, tone: 'bg-amber-50 text-amber-800 ring-amber-200' },
-              { label: 'Needs approval', value: fieldWatch?.counts.approvals_needed || 0, tone: 'bg-purple-50 text-purple-700 ring-purple-200' },
-              { label: 'Payment holds', value: fieldWatch?.counts.invoice_holds || 0, tone: 'bg-red-50 text-red-700 ring-red-200' },
-            ].map(card => (
-              <div key={card.label} className={`rounded-sm px-3 py-3 ring-1 ${card.tone}`}>
-                <p className="text-2xl font-black leading-none">{card.value}</p>
-                <p className="mt-1 text-xs font-black uppercase tracking-wide">{card.label}</p>
-              </div>
-            ))}
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_160px]">
+            <label className="block">
+              <span className="text-xs font-black uppercase tracking-wide text-slate-600">Title</span>
+              <input
+                value={calendarEditForm.title}
+                onChange={event => updateCalendarEditField('title', event.target.value)}
+                className="mt-1 min-h-[44px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-950 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                placeholder="Calendar title"
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs font-black uppercase tracking-wide text-slate-600">Status</span>
+              <select
+                value={calendarEditForm.status}
+                onChange={event => updateCalendarEditField('status', event.target.value)}
+                className="mt-1 min-h-[44px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-950 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+              >
+                <option value="scheduled">Scheduled</option>
+                <option value="in_progress">In Progress</option>
+                <option value="completed">Completed</option>
+                {editingCalendarEvent?.source !== 'construction_task' && <option value="cancelled">Cancelled</option>}
+              </select>
+            </label>
           </div>
 
-          {fieldWatch?.tasks?.length ? (
-            <div>
-              <h3 className="mb-2 text-sm font-black text-slate-950">Work status requiring attention</h3>
-              <div className="max-h-72 divide-y divide-slate-200 overflow-y-auto rounded-sm border border-slate-200">
-                {fieldWatch.tasks.slice(0, 12).map(task => (
-                  <button
-                    key={task.id}
-                    type="button"
-                    onClick={() => { closeFieldWatchReminder(); navigate(`/projects/${task.project_id}#construction-plan`); }}
-                    className="flex w-full items-start gap-3 bg-white px-3 py-3 text-left hover:bg-slate-50"
-                  >
-                    <span className={`mt-1 h-2.5 w-2.5 flex-shrink-0 rounded-full ${task.alert_level === 'critical' ? 'bg-red-500' : task.alert_level === 'attention' ? 'bg-amber-500' : 'bg-slate-400'}`} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-black text-slate-950">{task.title}</span>
-                      <span className="block truncate text-xs font-semibold text-slate-500">{task.project_address}</span>
-                            <span className="mt-1 block text-xs text-slate-600">
-                              Status: {task.status.replace(/_/g, ' ')} · Verification: {task.verification_status.replace(/_/g, ' ')} · Invoice: {task.invoice_status.replace(/_/g, ' ')}
-                            </span>
-                            {task.latest_photo_note && (
-                              <span className="mt-1 block line-clamp-2 text-xs font-semibold text-slate-700">
-                                Photo note: {task.latest_photo_note}
-                              </span>
-                            )}
-                          </span>
-                    <ChevronRight className="mt-2 h-4 w-4 text-slate-400" />
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="block">
+              <span className="text-xs font-black uppercase tracking-wide text-slate-600">Date</span>
+              <input
+                type="date"
+                value={calendarEditForm.scheduled_for}
+                onChange={event => updateCalendarEditField('scheduled_for', event.target.value)}
+                className="mt-1 min-h-[44px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-950 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+              />
+            </label>
+            {editingCalendarEvent?.source !== 'construction_task' && (
+              <label className="block">
+                <span className="text-xs font-black uppercase tracking-wide text-slate-600">Time</span>
+                <input
+                  type="time"
+                  value={calendarEditForm.due_time}
+                  onChange={event => updateCalendarEditField('due_time', event.target.value)}
+                  className="mt-1 min-h-[44px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-950 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                />
+              </label>
+            )}
+          </div>
 
-          {fieldWatch?.invoice_holds?.length ? (
-            <div className="rounded-sm border border-red-200 bg-red-50 px-4 py-3">
-              <h3 className="text-sm font-black text-red-800">Invoices blocked by unapproved field work</h3>
-              <div className="mt-2 space-y-2">
-                {fieldWatch.invoice_holds.slice(0, 5).map(invoice => (
-                  <button
-                    key={invoice.id}
-                    type="button"
-                    onClick={() => { closeFieldWatchReminder(); navigate(`/projects/${invoice.project_id}/invoices/${invoice.id}`); }}
-                    className="flex w-full items-center justify-between gap-3 rounded-sm bg-white px-3 py-2 text-left ring-1 ring-red-100 hover:ring-red-300"
-                  >
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm font-black text-slate-950">{invoice.invoice_number} · {invoice.contractor_name}</span>
-                      <span className="block truncate text-xs font-semibold text-slate-500">{invoice.project_address}</span>
-                    </span>
-                    <span className="text-sm font-black text-red-700">{formatMoney(invoice.total)}</span>
-                  </button>
-                ))}
-              </div>
+          {editingCalendarEvent?.source !== 'construction_task' && (
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="block">
+                <span className="text-xs font-black uppercase tracking-wide text-slate-600">Type</span>
+                <select
+                  value={calendarEditForm.event_type}
+                  onChange={event => updateCalendarEditField('event_type', event.target.value)}
+                  className="mt-1 min-h-[44px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-950 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                >
+                  <option value="task">Task</option>
+                  <option value="maintenance">Maintenance</option>
+                  <option value="inspection">Inspection</option>
+                  <option value="note">Note</option>
+                  <option value="other">Calendar</option>
+                </select>
+              </label>
+              <label className="block">
+                <span className="text-xs font-black uppercase tracking-wide text-slate-600">Priority</span>
+                <select
+                  value={calendarEditForm.priority}
+                  onChange={event => updateCalendarEditField('priority', event.target.value)}
+                  className="mt-1 min-h-[44px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-950 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                >
+                  <option value="low">Low</option>
+                  <option value="normal">Normal</option>
+                  <option value="high">High</option>
+                  <option value="critical">Critical</option>
+                </select>
+              </label>
             </div>
-          ) : null}
+          )}
 
-          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+          <label className="block">
+            <span className="text-xs font-black uppercase tracking-wide text-slate-600">Description</span>
+            <VoiceTextarea
+              value={calendarEditForm.description}
+              onChange={event => updateCalendarEditField('description', event.target.value)}
+              rows={3}
+              className="mt-1 w-full resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold leading-5 text-slate-950 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+              placeholder="Calendar details"
+            />
+          </label>
+
+          <label className="block">
+            <span className="text-xs font-black uppercase tracking-wide text-slate-600">Completion Note</span>
+            <VoiceTextarea
+              value={calendarEditForm.completion_note}
+              onChange={event => updateCalendarEditField('completion_note', event.target.value)}
+              rows={3}
+              className="mt-1 w-full resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold leading-5 text-slate-950 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+              placeholder="Completion note"
+            />
+          </label>
+
+          <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-3">
             <button
               type="button"
-              onClick={closeFieldWatchReminder}
-              className="bt-btn bt-btn-secondary"
+              onClick={closeCalendarEntryEditor}
+              disabled={savingCalendarEdit}
+              className="min-h-10 rounded-xl border border-slate-300 bg-white px-4 text-sm font-black text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
             >
-              Dismiss
+              Cancel
             </button>
             <button
               type="button"
-              onClick={() => {
-                const projectId = fieldWatch?.tasks?.[0]?.project_id || fieldWatch?.invoice_holds?.[0]?.project_id || fieldWatch?.field_notes?.[0]?.project_id;
-                closeFieldWatchReminder();
-                navigate(projectId ? `/projects/${projectId}#construction-plan` : '/projects');
-              }}
-              className="bt-btn bt-btn-primary"
+              onClick={saveCalendarEntryEdit}
+              disabled={savingCalendarEdit}
+              className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-blue-300 bg-blue-600 px-4 text-sm font-black text-white transition hover:bg-blue-500 disabled:opacity-60"
             >
-              Open first field item
+              <Edit2 className="h-4 w-4" />
+              {savingCalendarEdit ? 'Saving' : 'Save Entry'}
             </button>
           </div>
         </div>
       </Modal>
 
-      <RecentActivityModal userId={user?.id} />
+      <Modal
+        isOpen={showCalendarReminderComposer}
+        onClose={() => setShowCalendarReminderComposer(false)}
+        title="Calendar Email Reminder"
+        description="Send from info@newurbandev.com now or schedule a one-time, weekly, or monthly reminder."
+        size="xl"
+      >
+        <div className="space-y-4">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+            <p className="text-xs font-black uppercase tracking-wide text-amber-800">Sender</p>
+            <p className="mt-1 text-sm font-bold text-amber-900">info@newurbandev.com</p>
+          </div>
 
-      {showReviewSummary && reviewSummaries.length > 0 && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/45 backdrop-blur-sm" />
-          <div
-            className="relative w-full max-w-3xl max-h-[82vh] overflow-hidden rounded-2xl shadow-2xl"
-            style={{ background: 'var(--bt-surface)', border: '1px solid var(--bt-border-strong)' }}
-          >
-            <div className="flex items-start justify-between gap-4 px-6 py-5 border-b border-gray-100">
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: '#FEF3C7' }}>
-                  <Bell className="w-5 h-5" style={{ color: '#D97706' }} />
-                </div>
-                <div>
-                  <h2 className="text-lg font-black text-gray-900">New information to review</h2>
-                  <p className="text-sm text-gray-500 mt-0.5">
-                    {reviewSummaryTotal} update{reviewSummaryTotal !== 1 ? 's' : ''} across {reviewSummaries.length} project{reviewSummaries.length !== 1 ? 's' : ''} since your last review.
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={closeReviewSummary}
-                className="p-2 rounded-xl text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
-                aria-label="Close review summary"
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
+            <label className="block">
+              <span className="text-xs font-black uppercase tracking-wide text-slate-600">Reminder title</span>
+              <input
+                value={reminderTitle}
+                onChange={event => setReminderTitle(event.target.value)}
+                className="mt-1 min-h-[44px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-950 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
+                placeholder="Reminder title"
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs font-black uppercase tracking-wide text-slate-600">Calendar type</span>
+              <select
+                value={reminderEventType}
+                onChange={event => setReminderEventType(event.target.value)}
+                className="mt-1 min-h-[44px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-950 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
               >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+                <option value="other">Calendar</option>
+                <option value="task">Task</option>
+                <option value="inspection">Inspection</option>
+                <option value="maintenance">Maintenance</option>
+                <option value="note">Note</option>
+              </select>
+            </label>
+          </div>
 
-            <div className="overflow-y-auto max-h-[58vh] divide-y divide-gray-100">
-              {reviewSummaries.map((project) => (
-                <div key={project.project_id} className="p-5">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <p className="font-black text-gray-900 truncate">{project.project_address}</p>
-                      <p className="text-sm text-gray-500 truncate">{project.project_job_name}</p>
-                    </div>
-                    <span className="px-2.5 py-1 rounded-full text-xs font-black whitespace-nowrap" style={{ background: '#FEF3C7', color: '#92400E' }}>
-                      {project.change_count} new
-                    </span>
-                  </div>
+          <label className="block">
+            <span className="text-xs font-black uppercase tracking-wide text-slate-600">Recipients</span>
+            <textarea
+              value={reminderRecipients}
+              onChange={event => setReminderRecipients(event.target.value)}
+              rows={3}
+              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-950 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
+              placeholder="contractor@email.com, team@company.com"
+            />
+            <span className="mt-1 block text-xs font-semibold text-slate-500">Enter any email address. Separate multiple recipients with commas, spaces, or new lines.</span>
+          </label>
 
-                  <div className="mt-4 space-y-2.5">
-                    {project.changes.map((change) => (
-                      <div key={change.id} className="flex items-start gap-3">
-                        <span className="w-2 h-2 rounded-full mt-2 flex-shrink-0" style={{ background: '#D99D26' }} />
-                        <div className="min-w-0">
-                          <p className="text-sm text-gray-800">
-                            <span className="font-bold">{change.user_name}</span> {change.summary}
-                          </p>
-                          <p className="text-xs text-gray-400 mt-0.5">
-                            {formatEasternRelative(change.created_at)}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+          <label className="block">
+            <span className="text-xs font-black uppercase tracking-wide text-slate-600">Reminder message</span>
+            <VoiceTextarea
+              value={reminderMessage}
+              onChange={event => setReminderMessage(event.target.value)}
+              rows={4}
+              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-950 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
+              placeholder="Write the reminder message that should be emailed."
+            />
+          </label>
 
-                  <Link
-                    to={`/projects/${project.project_id}`}
-                    onClick={closeReviewSummary}
-                    className="inline-flex items-center gap-2 mt-4 text-sm font-bold"
-                    style={{ color: '#2563EB' }}
-                  >
-                    Open project
-                    <ChevronRight className="w-4 h-4" />
-                  </Link>
-                </div>
-              ))}
-            </div>
+          <div className="grid gap-3 md:grid-cols-4">
+            <label className="block">
+              <span className="text-xs font-black uppercase tracking-wide text-slate-600">Send schedule</span>
+              <select
+                value={reminderScheduleType}
+                onChange={event => setReminderScheduleType(event.target.value as 'now' | 'once' | 'weekly' | 'monthly')}
+                className="mt-1 min-h-[44px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-950 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
+              >
+                <option value="now">Send now</option>
+                <option value="once">One time</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-xs font-black uppercase tracking-wide text-slate-600">Date</span>
+              <input
+                type="date"
+                value={reminderDate}
+                onChange={event => setReminderDate(event.target.value)}
+                disabled={reminderScheduleType === 'now'}
+                className="mt-1 min-h-[44px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-950 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs font-black uppercase tracking-wide text-slate-600">Time</span>
+              <input
+                type="time"
+                value={reminderTime}
+                onChange={event => setReminderTime(event.target.value)}
+                disabled={reminderScheduleType === 'now'}
+                className="mt-1 min-h-[44px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-950 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs font-black uppercase tracking-wide text-slate-600">Priority</span>
+              <select
+                value={reminderPriority}
+                onChange={event => setReminderPriority(event.target.value)}
+                className="mt-1 min-h-[44px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-950 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
+              >
+                <option value="normal">Normal</option>
+                <option value="high">High</option>
+                <option value="critical">Critical</option>
+                <option value="low">Low</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="flex flex-col gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              onClick={() => setShowCalendarReminderComposer(false)}
+              className="bt-btn bt-btn-secondary"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={saveCalendarEmailReminder}
+              disabled={savingCalendarReminder}
+              className="bt-btn bt-btn-primary"
+            >
+              {reminderScheduleType === 'now' ? <Send className="h-4 w-4" /> : <CalendarDays className="h-4 w-4" />}
+              {savingCalendarReminder ? 'Saving' : reminderScheduleType === 'now' ? 'Send Now' : 'Schedule Reminder'}
+            </button>
           </div>
         </div>
-      )}
+      </Modal>
+
     </div>
   );
 }

@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { ArrowLeft, Camera, CheckCircle2, ClipboardList, ImagePlus, Plus, Send } from 'lucide-react';
+import { ArrowLeft, Camera, CheckCircle2, ClipboardList, FileText, ImagePlus, Plus, Send } from 'lucide-react';
 import api from '../lib/api';
+import { useAuthStore } from '../store/authStore';
 import { appendProgressUploadAudit, PROGRESS_MEDIA_ACCEPT } from '../lib/progressUpload';
+import { notifyMobileDataChanged } from '../lib/mobileEvents';
+import VoiceTextarea from '../components/VoiceTextarea';
 
 const workStatuses = [
   ['not_started', 'Not Started'],
@@ -24,9 +27,13 @@ const invoiceStatuses = [
 export default function MobileFieldWork() {
   const { id: projectId } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuthStore();
+  const managementUser = user?.role !== 'contractor';
+  const upperManagementUser = user?.role === 'super_admin' || user?.role === 'operations_manager';
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [projectAddress, setProjectAddress] = useState('');
   const [fieldWork, setFieldWork] = useState<any>({ tasks: [], counts: {} });
+  const [scopes, setScopes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingTask, setSavingTask] = useState(false);
   const [sendingNote, setSendingNote] = useState(false);
@@ -44,12 +51,14 @@ export default function MobileFieldWork() {
   const load = async () => {
     if (!projectId) return;
     try {
-      const [projectRes, fieldRes] = await Promise.all([
+      const [projectRes, fieldRes, scopeRes] = await Promise.all([
         api.get(`/projects/${projectId}`),
         api.get(`/field-work/projects/${projectId}`),
+        api.get(`/projects/${projectId}/scopes`).catch(() => ({ data: { scopes: [] } })),
       ]);
       setProjectAddress(projectRes.data?.address || '');
       setFieldWork(fieldRes.data || { tasks: [], counts: {} });
+      setScopes(Array.isArray(scopeRes.data?.scopes) ? scopeRes.data.scopes.filter((scope: any) => scope.status === 'active') : []);
     } catch {
       toast.error('Failed to load field work');
     } finally {
@@ -89,6 +98,7 @@ export default function MobileFieldWork() {
       toast.success('Field work task added');
       setTaskForm({ title: '', category: 'Field Work', description: '', target_date: '' });
       await load();
+      notifyMobileDataChanged({ entity: 'field_work', action: 'task_created', projectId });
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to add field task');
     } finally {
@@ -100,6 +110,7 @@ export default function MobileFieldWork() {
     try {
       await api.put(`/field-work/projects/${projectId}/tasks/${task.id}`, patch);
       await load();
+      notifyMobileDataChanged({ entity: 'field_work', action: 'task_updated', projectId });
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to update task');
     }
@@ -110,6 +121,7 @@ export default function MobileFieldWork() {
       await api.post(`/field-work/projects/${projectId}/tasks/${task.id}/approve`, {});
       toast.success('Approved for payment');
       await load();
+      notifyMobileDataChanged({ entity: 'field_work', action: 'task_approved', projectId });
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to approve task');
     }
@@ -129,10 +141,11 @@ export default function MobileFieldWork() {
         const formData = new FormData();
         files.forEach(file => formData.append('photos', file));
         formData.append('note_id', noteRes.data.id);
-        formData.append('photo_type', 'progress');
+        formData.append('photo_type', 'scope');
+        formData.append('photo_contexts', JSON.stringify(['general', 'scope']));
         formData.append('caption', 'Field work evidence attached to field note');
         await appendProgressUploadAudit(formData, files, files.map(() => 'device_camera'));
-        await api.post(`/projects/${projectId}/photos?type=progress`, formData, {
+        await api.post(`/projects/${projectId}/photos?type=scope`, formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
         });
       }
@@ -141,6 +154,7 @@ export default function MobileFieldWork() {
       setNoteFiles([]);
       if (fileInputRef.current) fileInputRef.current.value = '';
       await load();
+      notifyMobileDataChanged({ entity: 'field_note', action: 'sent', projectId });
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to send field note');
     } finally {
@@ -158,6 +172,7 @@ export default function MobileFieldWork() {
       const formData = new FormData();
       selected.forEach(file => formData.append('photos', file));
       formData.append('construction_plan_item_id', task.id);
+      formData.append('photo_contexts', JSON.stringify(['general', 'scope']));
       formData.append('caption', evidenceNote || `Field work evidence for ${task.title}`);
       if (evidenceNote) {
         formData.append('batch_note', evidenceNote);
@@ -171,6 +186,7 @@ export default function MobileFieldWork() {
       toast.success(evidenceNote ? 'Photo and note uploaded for review' : 'Evidence uploaded for review');
       clearTaskEvidenceDraft(task.id);
       await load();
+      notifyMobileDataChanged({ entity: 'field_evidence', action: 'uploaded', projectId });
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to upload evidence');
     } finally {
@@ -196,7 +212,7 @@ export default function MobileFieldWork() {
               <ArrowLeft size={22} />
             </button>
             <div className="btm-brand-text">
-              <p>Field Work</p>
+              <p>Scope of Work</p>
               <span>{projectAddress || 'Project field record'}</span>
             </div>
           </div>
@@ -204,7 +220,36 @@ export default function MobileFieldWork() {
       </header>
 
       <main className="btm-home-content">
-        <section className="btm-list-section" aria-label="Create field work task">
+        {scopes.length > 0 && (
+          <section className="btm-list-section" aria-label="Scope of work">
+            <div className="btm-section-header"><p>{scopes.length} Active Scope{scopes.length === 1 ? '' : 's'}</p></div>
+            {scopes.map(scope => (
+              <article key={scope.id} className="btm-project-card btm-scope-card" style={{ padding: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                  <span className="btm-project-pin" style={{ width: 48, height: 48, borderRadius: 14, flexShrink: 0 }} aria-hidden="true">
+                    <FileText size={22} />
+                  </span>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <p className="btm-scope-section" style={{ margin: 0, color: '#1D4ED8', fontSize: 11, fontWeight: 950, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                      {scope.section_name || 'General'}
+                    </p>
+                    <h2 className="btm-scope-title" style={{ margin: '5px 0 0', color: '#111827', fontSize: 17, fontWeight: 950, lineHeight: 1.2 }}>
+                      {scope.scope_title || 'Scope of Work'}
+                    </h2>
+                    {scope.scope_of_work && (
+                      <p className="btm-scope-body" style={{ margin: '8px 0 0', color: '#475569', fontSize: 14, fontWeight: 750, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>
+                        {scope.scope_of_work}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </article>
+            ))}
+          </section>
+        )}
+
+        {managementUser && (
+        <section className="btm-list-section" aria-label="Create field work task" style={{ marginTop: scopes.length > 0 ? 18 : 0 }}>
           <div className="btm-section-header"><p>Schedule work</p></div>
           <div className="btm-project-card" style={{ padding: 14 }}>
             <input
@@ -240,11 +285,12 @@ export default function MobileFieldWork() {
             </button>
           </div>
         </section>
+        )}
 
         <section className="btm-list-section" aria-label="Field note" style={{ marginTop: 18 }}>
           <div className="btm-section-header"><p>Field note and pictures</p></div>
           <div className="btm-project-card" style={{ padding: 14 }}>
-            <textarea
+            <VoiceTextarea
               value={noteText}
               onChange={event => setNoteText(event.target.value)}
               placeholder="Write what you saw in the field..."
@@ -289,14 +335,21 @@ export default function MobileFieldWork() {
                     {paymentHold ? 'Hold' : String(task.verification_status || 'review').replace(/_/g, ' ')}
                   </span>
                 </div>
-                <div style={{ display: 'grid', gap: 9, marginTop: 12 }}>
-                  <select value={task.status || 'not_started'} onChange={event => updateTask(task, { status: event.target.value })} style={{ minHeight: 52, borderRadius: 14, border: '1px solid #D7DEE8', padding: '0 12px', fontWeight: 900, color: '#111827', background: '#fff' }}>
-                    {workStatuses.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                  </select>
-                  <select value={task.invoice_status || 'not_received'} onChange={event => updateTask(task, { invoice_status: event.target.value })} style={{ minHeight: 52, borderRadius: 14, border: '1px solid #D7DEE8', padding: '0 12px', fontWeight: 900, color: '#111827', background: '#fff' }}>
-                    {invoiceStatuses.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                  </select>
-                </div>
+                {upperManagementUser ? (
+                  <div style={{ display: 'grid', gap: 9, marginTop: 12 }}>
+                    <select value={task.status || 'not_started'} onChange={event => updateTask(task, { status: event.target.value })} style={{ minHeight: 52, borderRadius: 14, border: '1px solid #D7DEE8', padding: '0 12px', fontWeight: 900, color: '#111827', background: '#fff' }}>
+                      {workStatuses.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </select>
+                    <select value={task.invoice_status || 'not_received'} onChange={event => updateTask(task, { invoice_status: event.target.value })} style={{ minHeight: 52, borderRadius: 14, border: '1px solid #D7DEE8', padding: '0 12px', fontWeight: 900, color: '#111827', background: '#fff' }}>
+                      {invoiceStatuses.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </select>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+                    <span className="btm-status-pill btm-status-info">{String(task.status || 'not_started').replace(/_/g, ' ')}</span>
+                    <span className="btm-status-pill btm-status-neutral">{String(task.invoice_status || 'not_received').replace(/_/g, ' ')}</span>
+                  </div>
+                )}
                 {task.latest_photo_note && (
                   <div style={{ marginTop: 12, border: '1px solid #DBEAFE', borderRadius: 14, background: '#EFF6FF', padding: 10 }}>
                     <p style={{ margin: 0, color: '#1E3A8A', fontSize: 11, fontWeight: 950, textTransform: 'uppercase' }}>Latest photo note</p>
@@ -306,7 +359,7 @@ export default function MobileFieldWork() {
                 <div style={{ marginTop: 12, border: '1px solid #D7DEE8', borderRadius: 16, background: '#F8FAFC', padding: 11 }}>
                   <label style={{ display: 'grid', gap: 6 }}>
                     <span style={{ color: '#4B5563', fontSize: 11, fontWeight: 950, textTransform: 'uppercase' }}>Note for these pictures</span>
-                    <textarea
+                    <VoiceTextarea
                       value={taskDraft.note}
                       onChange={event => updateTaskEvidenceDraft(task.id, { note: event.target.value })}
                       rows={3}
@@ -347,7 +400,7 @@ export default function MobileFieldWork() {
                     <Send size={21} />
                     <span>{uploadingTaskId === task.id ? 'Uploading...' : 'Send Photo + Note'}</span>
                   </button>
-                  {task.verification_status !== 'approved' && (
+                  {upperManagementUser && task.verification_status !== 'approved' && (
                     <button type="button" onClick={() => approveTask(task)} className="btm-action-button btm-action-punch">
                       <CheckCircle2 size={21} />
                       <span>Approve</span>

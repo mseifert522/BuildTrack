@@ -62,18 +62,6 @@ const landingPathFor = (user: { role?: string; force_password_reset?: boolean })
   return isMobileAppHost() || user.role === 'contractor' ? mobilePath() : '/dashboard';
 };
 
-const clearReviewSummaryDismissals = (user: { id?: string; role?: string }) => {
-  if (!user.id || user.role === 'contractor') return;
-  Object.keys(sessionStorage)
-    .filter(key => key.startsWith(`buildtrack-review-summary:${user.id}:`))
-    .forEach(key => sessionStorage.removeItem(key));
-};
-
-const queueLoginReviewSummary = (user: { id?: string; role?: string }) => {
-  if (!user.id || user.role === 'contractor') return;
-  sessionStorage.setItem(`buildtrack-login-review-summary:${user.id}`, '1');
-};
-
 const clearContractorSession = () => {
   localStorage.removeItem(CONTRACTOR_TOKEN_KEY);
   localStorage.removeItem(CONTRACTOR_USER_KEY);
@@ -275,8 +263,6 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
     setQuickAccessReady(quickAccess.available);
     setQuickAccessLabel(quickAccess.userLabel);
     setAuth(data.user as any, data.token);
-    clearReviewSummaryDismissals(data.user);
-    queueLoginReviewSummary(data.user);
     navigate(landingPathFor(data.user));
   };
 
@@ -524,12 +510,12 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
           </h1>
 
           <p className="text-lg leading-relaxed mb-10" style={{ color: 'rgba(255,255,255,0.62)' }}>
-            Unified project tracking, progress photos, field notes, invoices, contractors, and suppliers in one controlled construction platform.
+            Unified project tracking, photos, field notes, invoices, contractors, and suppliers in one controlled construction platform.
           </p>
 
           <div className="grid grid-cols-2 gap-3 max-w-xl">
             {[
-              'Progress Photos',
+              'Photos',
               'Project Notes',
               'Contractor Access',
               'Invoice Uploads',

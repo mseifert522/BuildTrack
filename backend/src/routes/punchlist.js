@@ -1,7 +1,7 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/schema');
-const { authenticate, authorizeProjectAccess } = require('../middleware/auth');
+const { authenticate, authorizeUpperManagement, blockProjectManagerMutation, authorizeProjectAccess } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
 
 const router = express.Router({ mergeParams: true });
@@ -35,9 +35,58 @@ router.get('/', (req, res) => {
 
   // Attach photo counts
   const enriched = items.map(item => {
-    const photoCount = db.prepare(`SELECT COUNT(*) as cnt FROM photos WHERE punch_list_item_id = ? AND ${activePhotoSql('photos')}`).get(item.id);
+    const directPhotos = db.prepare(`
+      SELECT
+        NULL as assignment_id,
+        ph.id,
+        ph.filename,
+        ph.original_name,
+        ph.mime_type,
+        ph.caption,
+        ph.taken_at,
+        ph.captured_at,
+        ph.created_at,
+        ph.individual_note,
+        ph.batch_note,
+        u.name as uploader_name
+      FROM photos ph
+      LEFT JOIN users u ON u.id = ph.uploaded_by
+      WHERE ph.punch_list_item_id = ?
+        AND ph.project_id = ?
+        AND ${activePhotoSql('ph')}
+      ORDER BY datetime(COALESCE(ph.captured_at, ph.taken_at, ph.uploaded_at, ph.created_at)) DESC
+    `).all(item.id, req.params.projectId);
+    const assignedPhotos = db.prepare(`
+      SELECT
+        pa.id as assignment_id,
+        ph.id,
+        ph.filename,
+        ph.original_name,
+        ph.mime_type,
+        ph.caption,
+        ph.taken_at,
+        ph.captured_at,
+        ph.created_at,
+        ph.individual_note,
+        ph.batch_note,
+        u.name as uploader_name
+      FROM photo_assignments pa
+      JOIN photos ph ON ph.id = pa.photo_id
+      LEFT JOIN users u ON u.id = ph.uploaded_by
+      WHERE pa.project_id = ?
+        AND pa.target_type = 'punch_list_item'
+        AND pa.target_id = ?
+        AND ph.project_id = pa.project_id
+        AND ${activePhotoSql('ph')}
+      ORDER BY datetime(pa.created_at) DESC, datetime(COALESCE(ph.captured_at, ph.taken_at, ph.uploaded_at, ph.created_at)) DESC
+    `).all(req.params.projectId, item.id);
+    const photosById = new Map();
+    [...assignedPhotos, ...directPhotos].forEach(photo => {
+      if (!photosById.has(photo.id)) photosById.set(photo.id, photo);
+    });
+    const photos = Array.from(photosById.values());
     const commentCount = db.prepare('SELECT COUNT(*) as cnt FROM punch_list_comments WHERE item_id = ?').get(item.id);
-    return { ...item, photo_count: photoCount.cnt, comment_count: commentCount.cnt };
+    return { ...item, photo_count: photos.length, photos, assigned_photos: photos, comment_count: commentCount.cnt };
   });
 
   res.json(enriched);
@@ -66,7 +115,7 @@ router.post('/', (req, res) => {
 });
 
 // PUT /api/projects/:projectId/punch-list/:id
-router.put('/:id', (req, res) => {
+router.put('/:id', blockProjectManagerMutation, (req, res) => {
   try {
     const db = getDb();
     const item = db.prepare('SELECT * FROM punch_list_items WHERE id = ? AND project_id = ?').get(req.params.id, req.params.projectId);
@@ -98,10 +147,7 @@ router.put('/:id', (req, res) => {
 });
 
 // DELETE /api/projects/:projectId/punch-list/:id
-router.delete('/:id', (req, res) => {
-  if (!['super_admin', 'operations_manager', 'project_manager'].includes(req.user.role)) {
-    return res.status(403).json({ error: 'Insufficient permissions' });
-  }
+router.delete('/:id', authorizeUpperManagement, (req, res) => {
   const db = getDb();
   db.prepare('DELETE FROM punch_list_items WHERE id = ? AND project_id = ?').run(req.params.id, req.params.projectId);
   logActivity({ userId: req.user.id, projectId: req.params.projectId, action: 'punch_item_deleted', entityType: 'punch_list_item', entityId: req.params.id });

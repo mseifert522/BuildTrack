@@ -5,8 +5,9 @@ const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 
 const { getDb } = require('../db/schema');
-const { authenticate, PROJECT_MANAGE_ROLES } = require('../middleware/auth');
+const { authenticate, PROJECT_MANAGE_ROLES, UPPER_MANAGEMENT_ROLES } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
+const { logDataAccess } = require('../utils/dataAccessAudit');
 
 const router = express.Router();
 router.use(authenticate);
@@ -90,6 +91,16 @@ router.get('/', (req, res) => {
     }
   }
 
+  const documentCount = Array.from(docsByProject.values()).reduce((sum, docs) => sum + docs.length, 0);
+  logDataAccess(req, {
+    action: 'documents_index_viewed',
+    accessType: 'view',
+    entityType: 'project_document',
+    recordCount: documentCount,
+    riskLevel: 'high',
+    details: { project_count: projectRows.length },
+  });
+
   res.json({
     projects: projectRows.map(project => ({
       ...project,
@@ -109,6 +120,15 @@ router.get('/:projectId', (req, res) => {
     WHERE d.project_id = ?
     ORDER BY datetime(d.created_at) DESC, d.created_at DESC
   `).all(project.id);
+  logDataAccess(req, {
+    action: 'project_documents_viewed',
+    accessType: 'view',
+    entityType: 'project_document',
+    projectId: project.id,
+    recordCount: docs.length,
+    riskLevel: 'high',
+    details: { address: project.address, job_name: project.job_name },
+  });
   res.json({ project, documents: docs });
 });
 
@@ -159,14 +179,30 @@ router.get('/:projectId/:documentId/download', (req, res) => {
   if (!filePath.startsWith(root) || !fs.existsSync(filePath)) {
     return res.status(404).json({ error: 'Document file not found' });
   }
+  logDataAccess(req, {
+    action: 'project_document_downloaded',
+    accessType: 'download',
+    entityType: 'project_document',
+    entityId: doc.id,
+    projectId: project.id,
+    riskLevel: 'high',
+    details: {
+      original_name: doc.original_name,
+      document_type: doc.document_type,
+      mime_type: doc.mime_type,
+      size: doc.size,
+      address: project.address,
+      job_name: project.job_name,
+    },
+  });
   res.download(filePath, doc.original_name);
 });
 
 router.delete('/:projectId/:documentId', (req, res) => {
   const project = requireProject(req, res);
   if (!project) return;
-  if (!PROJECT_MANAGE_ROLES.includes(req.user.role)) {
-    return res.status(403).json({ error: 'Only management can delete documents' });
+  if (!UPPER_MANAGEMENT_ROLES.includes(req.user.role)) {
+    return res.status(403).json({ error: 'Only operations managers and super admins can delete documents' });
   }
 
   const db = getDb();

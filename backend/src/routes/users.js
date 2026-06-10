@@ -6,8 +6,9 @@ const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const { getDb } = require('../db/schema');
-const { authenticate, authorize, authorizeOverUser, blacklistToken } = require('../middleware/auth');
+const { authenticate, authorize, blockProjectManagerMutation, authorizeOverUser, blacklistToken } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
+const { logDataAccess } = require('../utils/dataAccessAudit');
 const { sendInviteEmail } = require('../utils/email');
 const { decryptJson } = require('../utils/secureFields');
 const { ensureContractorMobileAccount, generatePin, syncContractorProjectAssignments } = require('../utils/contractorAccess');
@@ -424,6 +425,13 @@ router.get('/', authorize('super_admin', 'operations_manager'), (req, res) => {
      FROM users
      ORDER BY is_online DESC, name`
   ).all();
+  logDataAccess(req, {
+    action: 'user_directory_viewed',
+    accessType: 'view',
+    entityType: 'user',
+    recordCount: users.length,
+    riskLevel: 'high',
+  });
   res.json(users);
 });
 
@@ -433,6 +441,13 @@ router.get('/contractors', authorize('super_admin', 'operations_manager', 'proje
   const users = db.prepare(
     "SELECT id, name, email, phone, company, contractor_category, contractor_secondary_category, last_seen_at, CASE WHEN last_seen_at IS NOT NULL AND datetime(last_seen_at) >= datetime('now', '-2 minutes') THEN 1 ELSE 0 END as is_online FROM users WHERE role = 'contractor' AND is_active = 1 ORDER BY name"
   ).all();
+  logDataAccess(req, {
+    action: 'contractor_user_list_viewed',
+    accessType: 'view',
+    entityType: 'contractor',
+    recordCount: users.length,
+    riskLevel: 'high',
+  });
   res.json(users);
 });
 
@@ -482,7 +497,15 @@ router.get('/suppliers', authorize('super_admin', 'operations_manager', 'project
     ORDER BY datetime(COALESCE(supplier_marked_at, created_at)) DESC, vendor_name
   `).all();
 
-  res.json(suppliers.map(formatSupplierProfile));
+  const response = suppliers.map(formatSupplierProfile);
+  logDataAccess(req, {
+    action: 'supplier_list_viewed',
+    accessType: 'view',
+    entityType: 'supplier',
+    recordCount: response.length,
+    riskLevel: 'high',
+  });
+  res.json(response);
 });
 
 // POST /api/users/suppliers - add a supplier record with supply categories
@@ -534,7 +557,7 @@ router.post('/suppliers', authorize('super_admin', 'operations_manager', 'projec
 });
 
 // PUT /api/users/suppliers/:id - edit supplier details and categories
-router.put('/suppliers/:id', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
+router.put('/suppliers/:id', authorize('super_admin', 'operations_manager', 'project_manager'), blockProjectManagerMutation, (req, res) => {
   try {
     const payload = supplierPayload(req);
     const existing = payload.db.prepare('SELECT * FROM contractor_profiles WHERE id = ? AND COALESCE(is_supplier, 0) = 1').get(req.params.id);
@@ -786,6 +809,14 @@ router.get('/contractors/directory', authorize('super_admin', 'operations_manage
     };
   });
 
+  logDataAccess(req, {
+    action: 'contractor_directory_viewed',
+    accessType: 'view',
+    entityType: 'contractor_profile',
+    recordCount: result.length,
+    riskLevel: 'high',
+  });
+
   res.json({ categories: getContractorCategories(db), contractors: result });
 });
 
@@ -855,6 +886,18 @@ router.get('/contractors/:id/1099', authorize('super_admin', 'operations_manager
     action: 'contractor_1099_sensitive_viewed',
     entityType: 'contractor_profile',
     entityId: row.contractor_id,
+    details: {
+      contractor_name: row.vendor_name,
+      viewed_fields: ['tax_id', 'account_number', 'routing_number'],
+    },
+  });
+
+  logDataAccess(req, {
+    action: 'contractor_1099_sensitive_viewed',
+    accessType: 'sensitive_view',
+    entityType: 'contractor_profile',
+    entityId: row.contractor_id,
+    riskLevel: 'critical',
     details: {
       contractor_name: row.vendor_name,
       viewed_fields: ['tax_id', 'account_number', 'routing_number'],
@@ -964,7 +1007,7 @@ router.post('/contractors/profile', authorize('super_admin', 'operations_manager
 });
 
 // PUT /api/users/contractors/:id/profile - edit imported/vendor contractor details
-router.put('/contractors/:id/profile', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
+router.put('/contractors/:id/profile', authorize('super_admin', 'operations_manager', 'project_manager'), blockProjectManagerMutation, (req, res) => {
   try {
     const db = getDb();
     const contractor = requireContractor(db, req.params.id);
@@ -1052,7 +1095,7 @@ router.put('/contractors/:id/profile', authorize('super_admin', 'operations_mana
 });
 
 // PUT /api/users/contractors/:id/supplier - temporary supplier transfer checkbox
-router.put('/contractors/:id/supplier', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
+router.put('/contractors/:id/supplier', authorize('super_admin', 'operations_manager', 'project_manager'), blockProjectManagerMutation, (req, res) => {
   try {
     const db = getDb();
     const contractor = requireContractor(db, req.params.id);
@@ -1092,7 +1135,7 @@ router.put('/contractors/:id/supplier', authorize('super_admin', 'operations_man
 });
 
 // PUT /api/users/contractors/:id/projects - replace explicit project links for a contractor
-router.put('/contractors/:id/projects', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
+router.put('/contractors/:id/projects', authorize('super_admin', 'operations_manager', 'project_manager'), blockProjectManagerMutation, (req, res) => {
   try {
     const db = getDb();
     const contractor = requireContractor(db, req.params.id);
@@ -1198,6 +1241,16 @@ router.get('/contractors/:id/notes', authorize('super_admin', 'operations_manage
     ORDER BY datetime(cn.created_at) DESC, cn.created_at DESC
   `).all(req.params.id);
 
+  logDataAccess(req, {
+    action: 'contractor_notes_viewed',
+    accessType: 'view',
+    entityType: 'contractor_profile_note',
+    entityId: req.params.id,
+    recordCount: notes.length,
+    riskLevel: 'high',
+    details: { contractor_name: contractor.name },
+  });
+
   res.json(notes);
 });
 
@@ -1238,7 +1291,7 @@ router.post('/contractors/:id/notes', authorize('super_admin', 'operations_manag
 });
 
 // DELETE /api/users/contractors/:id/notes/:noteId - delete own note or admin note
-router.delete('/contractors/:id/notes/:noteId', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
+router.delete('/contractors/:id/notes/:noteId', authorize('super_admin', 'operations_manager'), (req, res) => {
   const db = getDb();
   const note = db.prepare('SELECT * FROM contractor_profile_notes WHERE id = ? AND contractor_id = ?').get(req.params.noteId, req.params.id);
   if (!note) return res.status(404).json({ error: 'Note not found' });

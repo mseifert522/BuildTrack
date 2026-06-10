@@ -6,8 +6,10 @@ import { useAuthStore } from '../store/authStore';
 import {
   ArrowLeft, Plus, Trash2, Mic, MicOff, Send, Save,
   FileText, ChevronRight, DollarSign, MapPin, User, Calendar,
-  ClipboardList, CheckCircle2, AlertTriangle,
+  ClipboardList, CheckCircle2, AlertTriangle, Paperclip,
 } from 'lucide-react';
+import VoiceTextarea from '../components/VoiceTextarea';
+import { notifyMobileDataChanged } from '../lib/mobileEvents';
 
 interface LineItem {
   localId: string;
@@ -58,6 +60,7 @@ export default function MobileInvoice() {
   const { id: projectId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuthStore();
+  const projectManagerUser = user?.role === 'project_manager';
 
   const [projectAddress, setProjectAddress] = useState('');
   const [projectJobName, setProjectJobName] = useState('');
@@ -75,6 +78,7 @@ export default function MobileInvoice() {
     emptyLine(), emptyLine(), emptyLine(), emptyLine(), emptyLine(),
   ]);
   const [notes, setNotes] = useState('');
+  const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
   const invoiceDate = new Date().toISOString().split('T')[0];
 
   // Voice recognition
@@ -110,6 +114,16 @@ export default function MobileInvoice() {
 
   const filledItems = lineItems.filter(i => i.description.trim());
   const selectedWorkItems = fieldWorkTasks.filter(task => selectedWorkItemIds.includes(task.id));
+  const attachmentTotalSize = attachmentFiles.reduce((sum, file) => sum + file.size, 0);
+
+  const uploadAttachments = async (invoiceId: string | null) => {
+    if (!invoiceId || attachmentFiles.length === 0) return;
+    const formData = new FormData();
+    attachmentFiles.forEach(file => formData.append('attachments', file));
+    await api.post(`/projects/${projectId}/invoices/${invoiceId}/attachments`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  };
 
   const toggleWorkItem = (taskId: string) => {
     setSelectedWorkItemIds(current =>
@@ -157,6 +171,10 @@ export default function MobileInvoice() {
 
   // Load existing invoice into builder
   const editInvoice = async (inv: SavedInvoice) => {
+    if (projectManagerUser) {
+      toast.error('Project managers can create new invoices, but cannot edit existing invoice records.');
+      return;
+    }
     try {
       const res = await api.get(`/projects/${projectId}/invoices/${inv.id}`);
       const data = res.data;
@@ -194,14 +212,18 @@ export default function MobileInvoice() {
       };
       if (editingId) {
         await api.put(`/projects/${projectId}/invoices/${editingId}`, payload);
+        await uploadAttachments(editingId);
         toast.success('Invoice updated');
       } else {
         const res = await api.post(`/projects/${projectId}/invoices`, payload);
         setEditingId(res.data.id);
+        await uploadAttachments(res.data.id);
         toast.success('Invoice saved as draft');
       }
+      setAttachmentFiles([]);
       const invRes = await api.get(`/projects/${projectId}/invoices`);
       setSavedInvoices(Array.isArray(invRes.data) ? invRes.data : []);
+      notifyMobileDataChanged({ entity: 'invoice', action: editingId ? 'updated' : 'draft_saved', projectId });
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to save invoice');
     } finally {
@@ -232,6 +254,7 @@ export default function MobileInvoice() {
         const res = await api.post(`/projects/${projectId}/invoices`, payload);
         invoiceId = res.data.id;
       }
+      await uploadAttachments(invoiceId);
       // Trigger email send
       await api.post(`/projects/${projectId}/invoices/${invoiceId}/submit`).catch(() => {});
       toast.success('Invoice submitted! Copies sent to office and your email.');
@@ -242,6 +265,8 @@ export default function MobileInvoice() {
       setLineItems([emptyLine(), emptyLine(), emptyLine(), emptyLine(), emptyLine()]);
       setNotes('');
       setSelectedWorkItemIds([]);
+      setAttachmentFiles([]);
+      notifyMobileDataChanged({ entity: 'invoice', action: 'submitted', projectId });
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to submit invoice');
     } finally {
@@ -254,6 +279,7 @@ export default function MobileInvoice() {
     setLineItems([emptyLine(), emptyLine(), emptyLine(), emptyLine(), emptyLine()]);
     setNotes('');
     setSelectedWorkItemIds([]);
+    setAttachmentFiles([]);
     setView('builder');
   };
 
@@ -354,7 +380,9 @@ export default function MobileInvoice() {
                     </div>
                   </div>
                   <div className="flex items-center justify-between px-4 py-2.5 border-t" style={{ borderColor: '#F3F4F6', background: '#FAFAFA' }}>
-                    <span className="text-xs text-gray-500 font-medium">Tap to view / edit</span>
+                    <span className="text-xs text-gray-500 font-medium">
+                      {projectManagerUser ? 'Existing invoice is locked for project manager' : 'Tap to view / edit'}
+                    </span>
                     <ChevronRight className="w-4 h-4 text-gray-400" />
                   </div>
                 </button>
@@ -590,10 +618,61 @@ export default function MobileInvoice() {
             </button>
           </div>
 
+          {/* Attachments */}
+          <div className="mx-4 mt-4 rounded-2xl overflow-hidden" style={{ background: 'white', boxShadow: '0 2px 12px rgba(0,0,0,0.07)' }}>
+            <div className="px-5 py-4 border-b" style={{ borderColor: '#F3F4F6' }}>
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(217,157,38,0.12)' }}>
+                  <Paperclip className="w-5 h-5" style={{ color: '#D99D26' }} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-black text-gray-900">Invoice Attachments</p>
+                  <p className="text-xs font-semibold text-gray-500 mt-0.5">Add photos, receipts, or PDF backup for office review.</p>
+                </div>
+              </div>
+            </div>
+            <div className="px-5 py-4">
+              <label className="flex min-h-[52px] cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed px-4 py-3 text-sm font-black transition-all active:scale-95" style={{ background: 'rgba(217,157,38,0.06)', borderColor: 'rgba(217,157,38,0.45)', color: '#B45309' }}>
+                <Paperclip className="w-4 h-4" />
+                Add Photos or PDFs
+                <input
+                  type="file"
+                  multiple
+                  accept="image/*,application/pdf"
+                  className="hidden"
+                  onChange={e => {
+                    setAttachmentFiles(current => [...current, ...Array.from(e.target.files || [])]);
+                    e.currentTarget.value = '';
+                  }}
+                />
+              </label>
+              {attachmentFiles.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  <div className="flex items-center justify-between gap-3 text-xs font-bold text-gray-500">
+                    <span>{attachmentFiles.length} file{attachmentFiles.length === 1 ? '' : 's'} selected</span>
+                    <span>{(attachmentTotalSize / 1024 / 1024).toFixed(1)} MB</span>
+                  </div>
+                  {attachmentFiles.map((file, index) => (
+                    <div key={`${file.name}-${index}`} className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
+                      <span className="min-w-0 truncate text-xs font-bold text-gray-700">{file.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => setAttachmentFiles(current => current.filter((_, fileIndex) => fileIndex !== index))}
+                        className="flex-shrink-0 rounded-lg px-2 py-1 text-xs font-black text-red-600"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Notes */}
           <div className="mx-4 mt-4">
             <p className="text-sm font-bold text-gray-900 mb-2">Notes (Optional)</p>
-            <textarea
+            <VoiceTextarea
               value={notes}
               onChange={e => setNotes(e.target.value)}
               placeholder="Any additional notes for this invoice..."

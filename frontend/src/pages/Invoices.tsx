@@ -3,23 +3,24 @@ import { Link } from 'react-router-dom';
 import api from '../lib/api';
 import { Loading } from '../components/ui';
 import {
-  ArrowLeft,
-  Building2,
+  AlertTriangle,
+  CalendarDays,
   CheckCircle2,
   ChevronRight,
-  Download,
+  ClipboardCheck,
+  Eye,
+  ExternalLink,
   FileText,
+  Image as ImageIcon,
   Mail,
   Paperclip,
   Receipt,
   RefreshCw,
-  Search,
-  TrendingUp,
-  WalletCards,
+  X,
 } from 'lucide-react';
 import { useAuthStore, isAdminRole } from '../store/authStore';
 import toast from 'react-hot-toast';
-import { formatEasternDate, formatEasternDateTime, parseBuildTrackTimestamp } from '../lib/time';
+import { formatDateOnly, formatEasternDate, formatEasternDateTime, parseBuildTrackTimestamp } from '../lib/time';
 
 interface Invoice {
   id: string;
@@ -36,7 +37,103 @@ interface Invoice {
   linked_work_count?: number;
   payment_hold_count?: number;
   quickbooks_status?: string;
+  quickbooks_bill_id?: string | null;
+  quickbooks_balance?: number | null;
+  quickbooks_payment_status?: string | null;
+  quickbooks_synced_at?: string | null;
+  quickbooks_vendor_name?: string | null;
+  quickbooks_doc_number?: string | null;
+  quickbooks_txn_date?: string | null;
+  quickbooks_due_date?: string | null;
+  quickbooks_last_seen_at?: string | null;
+  source?: string;
+  vendor_name?: string | null;
+  vendor_email?: string | null;
+  external_invoice_number?: string | null;
+  source_attachment_id?: string | null;
+  source_attachment_name?: string | null;
 }
+
+interface QuickBooksStatus {
+  configured: boolean;
+  connected: boolean;
+  missing?: string[];
+  environment?: string;
+  redirect_uri?: string;
+  webhook_configured?: boolean;
+  webhook_url?: string;
+  scope?: string;
+  connection?: {
+    realm_id?: string;
+    company_name?: string | null;
+    environment?: string;
+    connected_at?: string;
+    last_sync_at?: string | null;
+    last_sync_status?: string | null;
+    last_sync_error?: string | null;
+  } | null;
+  stats?: {
+    bill_count: number;
+    paid_count: number;
+    open_count: number;
+    open_balance: number;
+    unmatched_count: number;
+    approved_payment_count?: number;
+    approved_payment_balance?: number;
+  };
+}
+
+interface QuickBooksBill {
+  qbo_id: string;
+  doc_number?: string | null;
+  vendor_name?: string | null;
+  txn_date?: string | null;
+  due_date?: string | null;
+  total_amt: number;
+  balance: number;
+  payment_status: string;
+  payment_approval_status?: string | null;
+  payment_approved_at?: string | null;
+  payment_approved_by?: string | null;
+  payment_approved_by_name?: string | null;
+  payment_run_date?: string | null;
+  payment_approval_notified_at?: string | null;
+  payment_approval_notified_by?: string | null;
+  payment_approval_notified_by_name?: string | null;
+  private_note?: string | null;
+  qbo_class_id?: string | null;
+  qbo_class_name?: string | null;
+  matched_invoice_id?: string | null;
+  project_id?: string | null;
+  invoice_number?: string | null;
+  external_invoice_number?: string | null;
+  buildtrack_status?: string | null;
+  project_address?: string | null;
+  project_job_name?: string | null;
+  qbo_updated_at?: string | null;
+  last_seen_at?: string | null;
+  split_lines?: QuickBooksBillSplitLine[];
+  split_line_count?: number;
+  matched_split_line_count?: number;
+  unmatched_split_line_count?: number;
+}
+
+interface QuickBooksBillSplitLine {
+  id: string;
+  qbo_bill_id: string;
+  qbo_line_id?: string | null;
+  line_num?: number | null;
+  description?: string | null;
+  amount: number;
+  category_name?: string | null;
+  class_id?: string | null;
+  class_name?: string | null;
+  project_id?: string | null;
+  project_address?: string | null;
+  project_job_name?: string | null;
+}
+
+type QuickBooksBillFilter = 'open' | 'friday_queue' | 'paid' | 'all';
 
 interface ProjectOption {
   id: string;
@@ -49,7 +146,13 @@ interface ProjectOption {
 interface InvoiceEmailAttachment {
   id: string;
   original_name: string;
+  mime_type?: string;
   size: number;
+  filed_invoice_id?: string | null;
+  filed_invoice_number?: string | null;
+  filed_project_id?: string | null;
+  filed_project_address?: string | null;
+  filed_at?: string | null;
 }
 
 interface InvoiceEmailItem {
@@ -61,12 +164,123 @@ interface InvoiceEmailItem {
   received_at: string;
   attachment_count: number;
   attachments: InvoiceEmailAttachment[];
+  filed_attachment_count?: number;
+  unfiled_attachment_count?: number;
+  body_preview?: string | null;
+  text_body?: string | null;
+  html_body?: string | null;
+  agent_status?: string;
+  extracted_vendor?: string | null;
+  extracted_invoice_number?: string | null;
+  extracted_amount?: number | null;
+  extracted_summary?: string | null;
+  matched_project_id?: string | null;
+  match_confidence?: number | null;
   matched_project_address?: string | null;
   matched_project_job_name?: string | null;
 }
 
+interface AssignmentTask {
+  id: string;
+  title: string;
+  category?: string | null;
+  status: string;
+  verification_status: string;
+  invoice_status: string;
+  project_scope_id?: string | null;
+}
+
+interface AssignmentScope {
+  id: string;
+  section_name: string;
+  scope_title: string;
+  status: string;
+}
+
+interface AssignmentOptions {
+  tasks: AssignmentTask[];
+  scopes: AssignmentScope[];
+}
+
+interface AssignmentDraft {
+  projectId: string;
+  taskId: string;
+  scopeId: string;
+  newTaskTitle: string;
+  total: string;
+  vendorName: string;
+  externalInvoiceNumber: string;
+}
+
+interface AttachmentPreviewState {
+  emailId: string;
+  attachment: InvoiceEmailAttachment;
+}
+
 const money = (value: number) =>
   Number(value || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+
+const stripEmailMarkup = (value?: string | null) =>
+  String(value || '')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/\r/g, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+
+const formatBytes = (value?: number) => {
+  const size = Number(value || 0);
+  if (!size) return '';
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 102.4) / 10} KB`;
+  return `${Math.round(size / 1024 / 102.4) / 10} MB`;
+};
+
+const attachmentUrl = (emailId: string, attachmentId: string, inline = false) =>
+  `/api/invoices/email-intake/${emailId}/attachments/${attachmentId}${inline ? '?inline=1' : ''}`;
+
+const attachmentApiPath = (emailId: string, attachmentId: string, inline = false) =>
+  `/invoices/email-intake/${emailId}/attachments/${attachmentId}${inline ? '?inline=1' : ''}`;
+
+const isPdfAttachment = (attachment?: InvoiceEmailAttachment | null) =>
+  Boolean(attachment && (
+    String(attachment.mime_type || '').toLowerCase().includes('pdf') ||
+    String(attachment.original_name || '').toLowerCase().endsWith('.pdf')
+  ));
+
+const isImageAttachment = (attachment?: InvoiceEmailAttachment | null) =>
+  Boolean(attachment && (
+    String(attachment.mime_type || '').toLowerCase().startsWith('image/') ||
+    /\.(jpe?g|png|gif|webp|bmp)$/i.test(String(attachment.original_name || ''))
+  ));
+
+const attachmentKindLabel = (attachment?: InvoiceEmailAttachment | null) => {
+  if (isPdfAttachment(attachment)) return 'PDF';
+  if (isImageAttachment(attachment)) return 'IMG';
+  return 'FILE';
+};
+
+const PAYDAY_ANCHOR = new Date('2026-06-12T12:00:00');
+
+const nextPayday = (value?: string | null) => {
+  const start = parseBuildTrackTimestamp(value || '') || new Date();
+  const candidate = new Date(start);
+  candidate.setHours(12, 0, 0, 0);
+  const daysUntilFriday = (5 - candidate.getDay() + 7) % 7;
+  candidate.setDate(candidate.getDate() + daysUntilFriday);
+  if (candidate.getTime() < start.getTime()) candidate.setDate(candidate.getDate() + 7);
+  while (Math.round((candidate.getTime() - PAYDAY_ANCHOR.getTime()) / 86400000) % 14 !== 0) {
+    candidate.setDate(candidate.getDate() + 7);
+  }
+  return candidate.toISOString();
+};
 
 const statusLabel = (status: string) => {
   if (status === 'draft' || status === 'submitted') return 'New Invoice';
@@ -87,43 +301,97 @@ const emailStatusClass: Record<string, string> = {
   ignored: 'bg-gray-100 text-gray-600 border-gray-200',
 };
 
-const tabOptions = [
-  { value: '', label: 'All' },
-  { value: 'new', label: 'New' },
-  { value: 'reviewed', label: 'Reviewed' },
-  { value: 'approved', label: 'Approved' },
-  { value: 'paid', label: 'Paid' },
-];
+const QUICKBOOKS_PANEL_ROLES = ['super_admin', 'operations_manager'];
+const QUICKBOOKS_BILLS_PATH = '/quickbooks/bills?limit=1000';
+
+const qboStatusLabel = (status?: string | null) => {
+  const value = String(status || 'unpaid').toLowerCase();
+  if (value === 'paid') return 'Paid';
+  if (value === 'partial') return 'Partial';
+  return 'Unpaid';
+};
+
+const isQuickBooksBillPaid = (bill?: QuickBooksBill | null) => (
+  String(bill?.payment_status || '').toLowerCase() === 'paid'
+  || Number(bill?.balance || 0) <= 0
+);
+
+const quickBooksBillDateKey = (bill?: QuickBooksBill | null) => (
+  String(bill?.txn_date || bill?.due_date || bill?.qbo_updated_at || bill?.last_seen_at || '')
+);
+
+const sortQuickBooksBillsByBillDate = (bills: QuickBooksBill[]) => [...bills].sort((a, b) => {
+  const dateCompare = quickBooksBillDateKey(a).localeCompare(quickBooksBillDateKey(b));
+  if (dateCompare !== 0) return dateCompare;
+  const vendorCompare = String(a.vendor_name || '').localeCompare(String(b.vendor_name || ''));
+  if (vendorCompare !== 0) return vendorCompare;
+  return String(a.doc_number || a.qbo_id || '').localeCompare(String(b.doc_number || b.qbo_id || ''));
+});
+
+const quickBooksSplitLines = (bill: QuickBooksBill) => (
+  Array.isArray(bill.split_lines) ? bill.split_lines : []
+);
+
+const quickBooksSplitLineCount = (bill: QuickBooksBill) => Number(
+  bill.split_line_count ?? quickBooksSplitLines(bill).length ?? 0
+);
+
+const quickBooksUnmatchedSplitLineCount = (bill: QuickBooksBill) => Number(
+  bill.unmatched_split_line_count
+  ?? quickBooksSplitLines(bill).filter(line => !line.project_id).length
+  ?? 0
+);
+
+const quickBooksBillSplitMatched = (bill: QuickBooksBill) => (
+  quickBooksSplitLineCount(bill) > 0 && quickBooksUnmatchedSplitLineCount(bill) === 0
+);
+
+const quickBooksBillHasApprovalMatch = (bill: QuickBooksBill, invoice?: Invoice | null) => Boolean(
+  invoice?.project_id || bill.project_id || quickBooksBillSplitMatched(bill)
+);
 
 export default function Invoices() {
   const { user } = useAuthStore();
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState('');
-  const [projectSearch, setProjectSearch] = useState('');
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [updatingInvoiceId, setUpdatingInvoiceId] = useState<string | null>(null);
-  const [emailBoxOpen, setEmailBoxOpen] = useState(false);
   const [emailBoxLoading, setEmailBoxLoading] = useState(false);
-  const [emailBoxStatus, setEmailBoxStatus] = useState('');
+  const [emailBoxStatus, setEmailBoxStatus] = useState('new');
   const [emailBoxItems, setEmailBoxItems] = useState<InvoiceEmailItem[]>([]);
-  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<string[]>([]);
-  const [visibleInvoiceColumns, setVisibleInvoiceColumns] = useState({
-    contractor: true,
-    status: true,
-    submitted: true,
-  });
+  const [expandedEmailIds, setExpandedEmailIds] = useState<Record<string, boolean>>({});
+  const [assignmentDrafts, setAssignmentDrafts] = useState<Record<string, AssignmentDraft>>({});
+  const [assignmentOptions, setAssignmentOptions] = useState<Record<string, AssignmentOptions>>({});
+  const [filingEmailId, setFilingEmailId] = useState<string | null>(null);
+  const [ignoringEmailId, setIgnoringEmailId] = useState<string | null>(null);
+  const [attachmentPreview, setAttachmentPreview] = useState<AttachmentPreviewState | null>(null);
+  const [attachmentPreviewUrl, setAttachmentPreviewUrl] = useState('');
+  const [attachmentPreviewLoading, setAttachmentPreviewLoading] = useState(false);
+  const [attachmentPreviewError, setAttachmentPreviewError] = useState('');
+  const [quickBooksStatus, setQuickBooksStatus] = useState<QuickBooksStatus | null>(null);
+  const [quickBooksBills, setQuickBooksBills] = useState<QuickBooksBill[]>([]);
+  const [quickBooksBillFilter, setQuickBooksBillFilter] = useState<QuickBooksBillFilter>('open');
+  const [approvingQboBillId, setApprovingQboBillId] = useState<string | null>(null);
+  const [removingQboBillId, setRemovingQboBillId] = useState<string | null>(null);
+  const [notifyingPaymentQueue, setNotifyingPaymentQueue] = useState(false);
+  const canReadQuickBooksStatus = isAdminRole(user?.role || '');
+  const canManageQuickBooks = Boolean(user?.role && QUICKBOOKS_PANEL_ROLES.includes(user.role));
 
   const load = async () => {
     setLoading(true);
     try {
-      const [projectRes, invoiceRes] = await Promise.all([
+      const [projectRes, invoiceRes, qboStatusRes, qboBillsRes] = await Promise.all([
         api.get('/projects'),
         api.get('/invoices'),
+        canReadQuickBooksStatus ? api.get('/quickbooks/status').catch(() => ({ data: null })) : Promise.resolve({ data: null }),
+        canManageQuickBooks
+          ? api.get(QUICKBOOKS_BILLS_PATH).catch(() => ({ data: [] }))
+          : Promise.resolve({ data: [] }),
       ]);
       setProjects(Array.isArray(projectRes.data) ? projectRes.data : []);
       setInvoices(Array.isArray(invoiceRes.data) ? invoiceRes.data : []);
+      setQuickBooksStatus(qboStatusRes.data || null);
+      setQuickBooksBills(Array.isArray(qboBillsRes.data) ? qboBillsRes.data : []);
     } catch {
       toast.error('Failed to load invoices');
     } finally {
@@ -131,7 +399,57 @@ export default function Invoices() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  const connectQuickBooks = async () => {
+    try {
+      const res = await api.get('/quickbooks/connect-url');
+      if (!res.data?.auth_url) throw new Error('QuickBooks did not return a connection URL');
+      window.location.href = res.data.auth_url;
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || err.message || 'Failed to start QuickBooks connection');
+    }
+  };
+
+  const emailDraftKey = (id: string) => `email:${id}`;
+  const emailAttachmentDraftKey = (emailId: string, attachmentId: string) => `email:${emailId}:attachment:${attachmentId}`;
+
+  const toggleEmailExpanded = (id: string) => {
+    setExpandedEmailIds(current => ({ ...current, [id]: !current[id] }));
+  };
+
+  const defaultEmailTaskTitle = (item: InvoiceEmailItem, attachment?: InvoiceEmailAttachment) =>
+    String(attachment?.original_name || item.extracted_summary || item.subject || item.extracted_vendor || 'Invoice review').slice(0, 120);
+
+  const loadAssignmentOptions = async (projectId: string) => {
+    if (!projectId || assignmentOptions[projectId]) return;
+    try {
+      const res = await api.get(`/invoices/email-intake/assignment-options?project_id=${encodeURIComponent(projectId)}`);
+      setAssignmentOptions(current => ({
+        ...current,
+        [projectId]: {
+          tasks: Array.isArray(res.data?.tasks) ? res.data.tasks : [],
+          scopes: Array.isArray(res.data?.scopes) ? res.data.scopes : [],
+        },
+      }));
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to load project tasks');
+    }
+  };
+
+  const updateAssignmentDraft = (key: string, patch: Partial<AssignmentDraft>) => {
+    setAssignmentDrafts(current => {
+      const existing = current[key] || {
+        projectId: '',
+        taskId: '',
+        scopeId: '',
+        newTaskTitle: '',
+        total: '',
+        vendorName: '',
+        externalInvoiceNumber: '',
+      };
+      return { ...current, [key]: { ...existing, ...patch } };
+    });
+    if (patch.projectId) loadAssignmentOptions(patch.projectId);
+  };
 
   const loadEmailBox = async () => {
     setEmailBoxLoading(true);
@@ -139,7 +457,43 @@ export default function Invoices() {
       const params = new URLSearchParams({ limit: '200' });
       if (emailBoxStatus) params.set('status', emailBoxStatus);
       const res = await api.get(`/invoices/email-intake?${params}`);
-      setEmailBoxItems(Array.isArray(res.data) ? res.data : []);
+      const rows: InvoiceEmailItem[] = Array.isArray(res.data) ? res.data : [];
+      setEmailBoxItems(rows);
+      setAssignmentDrafts(current => {
+        const next = { ...current };
+        rows.forEach(item => {
+          const key = emailDraftKey(item.id);
+          if (!next[key]) {
+            next[key] = {
+              projectId: item.matched_project_id || '',
+              taskId: '',
+              scopeId: '',
+              newTaskTitle: defaultEmailTaskTitle(item),
+              total: item.extracted_amount ? String(item.extracted_amount) : '',
+              vendorName: item.extracted_vendor || item.from_name || item.from_email || '',
+              externalInvoiceNumber: item.extracted_invoice_number || '',
+            };
+          }
+          (item.attachments || []).forEach(attachment => {
+            const attachmentKey = emailAttachmentDraftKey(item.id, attachment.id);
+            if (!next[attachmentKey]) {
+              next[attachmentKey] = {
+                projectId: attachment.filed_project_id || item.matched_project_id || '',
+                taskId: '',
+                scopeId: '',
+                newTaskTitle: defaultEmailTaskTitle(item, attachment),
+                total: item.extracted_amount ? String(item.extracted_amount) : '',
+                vendorName: item.extracted_vendor || item.from_name || item.from_email || '',
+                externalInvoiceNumber: item.extracted_invoice_number || '',
+              };
+            }
+          });
+        });
+        return next;
+      });
+      rows.forEach(item => {
+        if (item.matched_project_id) loadAssignmentOptions(item.matched_project_id);
+      });
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to load live invoice email box');
     } finally {
@@ -147,176 +501,301 @@ export default function Invoices() {
     }
   };
 
-  useEffect(() => {
-    if (emailBoxOpen) loadEmailBox();
-  }, [emailBoxOpen, emailBoxStatus]);
+  const markEmailNotInvoice = async (item: InvoiceEmailItem) => {
+    if (item.status === 'ignored' || ignoringEmailId) return;
+    const confirmed = window.confirm(
+      'Mark this email as Not an invoice? It will be removed from the active BuildTrack invoice queue, but the original message will remain in Gmail.'
+    );
+    if (!confirmed) return;
+
+    setIgnoringEmailId(item.id);
+    try {
+      await api.put(`/invoices/email-intake/${item.id}/status`, { status: 'ignored' });
+      setEmailBoxItems(current => (
+        emailBoxStatus === 'ignored'
+          ? current.map(row => row.id === item.id ? { ...row, status: 'ignored', agent_status: 'ignored' } : row)
+          : current.filter(row => row.id !== item.id)
+      ));
+      toast.success('Removed from BuildTrack invoice queue');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to mark email as not an invoice');
+    } finally {
+      setIgnoringEmailId(null);
+    }
+  };
 
   useEffect(() => {
-    setSelectedInvoiceIds([]);
-  }, [selectedProjectId, statusFilter]);
+    load();
+  }, []);
 
-  const selectedProject = projects.find(project => project.id === selectedProjectId) || null;
-
-  const projectSummaries = useMemo(() => {
-    const byProject = new Map(projects.map(project => [project.id, {
-      ...project,
-      invoice_count: 0,
-      total: 0,
-      open_total: 0,
-      paid_total: 0,
-      new_count: 0,
-      paid_count: 0,
-      latest_at: project.updated_at || '',
-    }]));
-
-    invoices.forEach(invoice => {
-      const existing = byProject.get(invoice.project_id) || {
-        id: invoice.project_id,
-        address: invoice.address,
-        job_name: invoice.job_name,
-        status: '',
-        invoice_count: 0,
-        total: 0,
-        open_total: 0,
-        paid_total: 0,
-        new_count: 0,
-        paid_count: 0,
-        latest_at: '',
-      };
-      existing.invoice_count += 1;
-      existing.total += Number(invoice.total || 0);
-      if (invoice.status === 'paid') {
-        existing.paid_total += Number(invoice.total || 0);
-        existing.paid_count += 1;
-      } else {
-        existing.open_total += Number(invoice.total || 0);
+  useEffect(() => {
+    const interval = window.setInterval(async () => {
+      try {
+        const [invoiceRes, qboStatusRes, qboBillsRes] = await Promise.all([
+          api.get('/invoices'),
+          canReadQuickBooksStatus ? api.get('/quickbooks/status').catch(() => ({ data: null })) : Promise.resolve({ data: null }),
+          canManageQuickBooks
+            ? api.get(QUICKBOOKS_BILLS_PATH).catch(() => ({ data: [] }))
+            : Promise.resolve({ data: [] }),
+        ]);
+        setInvoices(Array.isArray(invoiceRes.data) ? invoiceRes.data : []);
+        setQuickBooksStatus(qboStatusRes.data || null);
+        setQuickBooksBills(Array.isArray(qboBillsRes.data) ? qboBillsRes.data : []);
+      } catch {
+        // Keep the current dashboard state if a background refresh is interrupted.
       }
-      if (invoice.status === 'draft' || invoice.status === 'submitted') existing.new_count += 1;
-      const invoiceDate = invoice.updated_at || invoice.submitted_at || invoice.created_at || '';
-      const invoiceTime = parseBuildTrackTimestamp(invoiceDate)?.getTime() || 0;
-      const existingTime = parseBuildTrackTimestamp(existing.latest_at)?.getTime() || 0;
-      if (!existing.latest_at || invoiceTime > existingTime) {
-        existing.latest_at = invoiceDate;
-      }
-      byProject.set(invoice.project_id, existing);
-    });
+    }, 60_000);
+    return () => window.clearInterval(interval);
+  }, [canManageQuickBooks, canReadQuickBooksStatus]);
 
-    const q = projectSearch.trim().toLowerCase();
-    return Array.from(byProject.values())
-      .filter(project => !q || `${project.address} ${project.job_name}`.toLowerCase().includes(q))
-      .sort((a, b) => {
-        if (b.invoice_count !== a.invoice_count) return b.invoice_count - a.invoice_count;
-        return String(a.address || '').localeCompare(String(b.address || ''));
+  useEffect(() => {
+    if (!attachmentPreview) {
+      setAttachmentPreviewUrl('');
+      setAttachmentPreviewError('');
+      setAttachmentPreviewLoading(false);
+      return;
+    }
+
+    let active = true;
+    let objectUrl = '';
+    setAttachmentPreviewUrl('');
+    setAttachmentPreviewError('');
+    setAttachmentPreviewLoading(true);
+
+    api.get(attachmentApiPath(attachmentPreview.emailId, attachmentPreview.attachment.id, true), { responseType: 'blob' })
+      .then(res => {
+        if (!active) return;
+        const responseContentType = res.headers?.['content-type'];
+        const blobType = typeof responseContentType === 'string' ? responseContentType : 'application/octet-stream';
+        const blob = new Blob([res.data], {
+          type: attachmentPreview.attachment.mime_type || blobType,
+        });
+        objectUrl = URL.createObjectURL(blob);
+        setAttachmentPreviewUrl(objectUrl);
+      })
+      .catch(() => {
+        if (active) setAttachmentPreviewError('Unable to load attachment preview. Use Open to view it in a separate tab.');
+      })
+      .finally(() => {
+        if (active) setAttachmentPreviewLoading(false);
       });
-  }, [projects, invoices, projectSearch]);
 
-  const selectedInvoices = useMemo(() => {
-    const rows = invoices.filter(invoice => invoice.project_id === selectedProjectId);
-    return rows.filter(invoice => {
-      if (!statusFilter) return true;
-      if (statusFilter === 'new') return invoice.status === 'draft' || invoice.status === 'submitted';
-      return invoice.status === statusFilter;
-    });
-  }, [invoices, selectedProjectId, statusFilter]);
-
-  const projectInvoiceTotals = useMemo(() => ({
-    all: invoices.filter(invoice => invoice.project_id === selectedProjectId).length,
-    new: invoices.filter(invoice => invoice.project_id === selectedProjectId && ['draft', 'submitted'].includes(invoice.status)).length,
-    reviewed: invoices.filter(invoice => invoice.project_id === selectedProjectId && invoice.status === 'reviewed').length,
-    approved: invoices.filter(invoice => invoice.project_id === selectedProjectId && invoice.status === 'approved').length,
-    paid: invoices.filter(invoice => invoice.project_id === selectedProjectId && invoice.status === 'paid').length,
-  }), [invoices, selectedProjectId]);
-
-  const visibleTotal = selectedInvoices.reduce((sum, invoice) => sum + Number(invoice.total || 0), 0);
-  const selectedInvoiceSet = useMemo(() => new Set(selectedInvoiceIds), [selectedInvoiceIds]);
-  const selectedInvoiceRows = selectedInvoices.filter(invoice => selectedInvoiceSet.has(invoice.id));
-  const selectedInvoiceTotal = selectedInvoiceRows.reduce((sum, invoice) => sum + Number(invoice.total || 0), 0);
-  const invoiceColumnTemplate = [
-    'minmax(210px, 1.25fr)',
-    visibleInvoiceColumns.contractor ? 'minmax(160px, 1fr)' : '',
-    visibleInvoiceColumns.status ? 'minmax(130px, 0.72fr)' : '',
-    visibleInvoiceColumns.submitted ? 'minmax(150px, 0.8fr)' : '',
-    'minmax(110px, 0.7fr)',
-    'minmax(250px, 1.15fr)',
-  ].filter(Boolean).join(' ');
-  const invoiceStats = useMemo(() => {
-    const openStatuses = new Set(['draft', 'submitted', 'reviewed', 'approved']);
-    const openInvoices = invoices.filter(invoice => openStatuses.has(invoice.status));
-    const paidInvoices = invoices.filter(invoice => invoice.status === 'paid');
-    const newInvoices = invoices.filter(invoice => invoice.status === 'draft' || invoice.status === 'submitted');
-    const approvedInvoices = invoices.filter(invoice => invoice.status === 'approved');
-    return {
-      openAmount: openInvoices.reduce((sum, invoice) => sum + Number(invoice.total || 0), 0),
-      paidAmount: paidInvoices.reduce((sum, invoice) => sum + Number(invoice.total || 0), 0),
-      newAmount: newInvoices.reduce((sum, invoice) => sum + Number(invoice.total || 0), 0),
-      approvedAmount: approvedInvoices.reduce((sum, invoice) => sum + Number(invoice.total || 0), 0),
-      invoiceCount: invoices.length,
-      openCount: openInvoices.length,
-      paidCount: paidInvoices.length,
-      newCount: newInvoices.length,
-      projectCount: new Set(invoices.map(invoice => invoice.project_id)).size,
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [invoices]);
+  }, [attachmentPreview?.emailId, attachmentPreview?.attachment.id]);
 
-  const updateStatus = async (invoice: Invoice, status: string) => {
-    if (!isAdminRole(user?.role || '') || invoice.status === status) return;
+  const approvedPaymentQueue = useMemo(
+    () => quickBooksBills
+      .filter(bill => !isQuickBooksBillPaid(bill) && bill.payment_approval_status === 'approved_for_payment')
+      .sort((a, b) => {
+        const dateCompare = String(a.payment_run_date || '').localeCompare(String(b.payment_run_date || ''));
+        if (dateCompare !== 0) return dateCompare;
+        return Number(b.balance || 0) - Number(a.balance || 0);
+      }),
+    [quickBooksBills]
+  );
+  const approvedPaymentTotal = approvedPaymentQueue.reduce((sum, bill) => sum + Number(bill.balance || 0), 0);
+  const paidQuickBooksBills = useMemo(
+    () => sortQuickBooksBillsByBillDate(quickBooksBills.filter(bill => isQuickBooksBillPaid(bill))),
+    [quickBooksBills]
+  );
+  const paidPaymentQueue = useMemo(
+    () => paidQuickBooksBills.filter(bill => bill.payment_approval_status === 'approved_for_payment'),
+    [paidQuickBooksBills]
+  );
+  const paidPaymentTotal = paidPaymentQueue.reduce((sum, bill) => sum + Number(bill.total_amt || 0), 0);
+  const invoiceById = useMemo(() => new Map(invoices.map(invoice => [invoice.id, invoice])), [invoices]);
+  const openQuickBooksBills = useMemo(
+    () => quickBooksBills.filter(bill => !isQuickBooksBillPaid(bill) && bill.payment_approval_status !== 'approved_for_payment'),
+    [quickBooksBills]
+  );
+  const allQuickBooksBills = useMemo(() => sortQuickBooksBillsByBillDate(quickBooksBills), [quickBooksBills]);
+  const filteredQuickBooksBills = useMemo(
+    () => {
+      if (quickBooksBillFilter === 'paid') return paidQuickBooksBills;
+      if (quickBooksBillFilter === 'friday_queue') return approvedPaymentQueue;
+      if (quickBooksBillFilter === 'all') return allQuickBooksBills;
+      return sortQuickBooksBillsByBillDate(openQuickBooksBills);
+    },
+    [allQuickBooksBills, approvedPaymentQueue, openQuickBooksBills, paidQuickBooksBills, quickBooksBillFilter]
+  );
+  const quickBooksBillFilterMeta: Record<QuickBooksBillFilter, { label: string; title: string; subtitle: string; count: number }> = {
+    open: {
+      label: 'Open bills',
+      title: 'QuickBooks open bills',
+      subtitle: 'Unpaid bills not yet approved for the Friday payment queue',
+      count: openQuickBooksBills.length,
+    },
+    friday_queue: {
+      label: 'Friday queue',
+      title: 'Friday payment queue',
+      subtitle: 'Approved unpaid bills waiting for QuickBooks payment',
+      count: approvedPaymentQueue.length,
+    },
+    paid: {
+      label: 'Paid in QBO',
+      title: 'Paid QuickBooks bills',
+      subtitle: 'All bills QuickBooks currently reports as paid',
+      count: paidQuickBooksBills.length,
+    },
+    all: {
+      label: 'All mirrored',
+      title: 'All mirrored QuickBooks bills',
+      subtitle: 'Every bill currently mirrored from QuickBooks',
+      count: allQuickBooksBills.length,
+    },
+  };
+  const selectedQuickBooksBillFilter = quickBooksBillFilterMeta[quickBooksBillFilter];
+  const quickBooksMirrorRows = useMemo(() => sortQuickBooksBillsByBillDate(filteredQuickBooksBills).map(bill => ({
+    bill,
+    invoice: bill.matched_invoice_id ? invoiceById.get(bill.matched_invoice_id) || null : null,
+  })), [filteredQuickBooksBills, invoiceById]);
+  const canApproveForPayment = (invoice?: Invoice | null) => Boolean(
+    invoice
+    && isAdminRole(user?.role || '')
+    && invoice.status !== 'approved'
+    && invoice.status !== 'paid'
+    && invoice.quickbooks_payment_status !== 'paid'
+    && Number(invoice.linked_work_count || 0) > 0
+    && Number(invoice.payment_hold_count || 0) === 0
+  );
+  const approvalBlockedReason = (invoice?: Invoice | null) => {
+    if (!invoice) return 'No BuildTrack invoice match yet';
+    if (invoice.status === 'approved') return 'Already approved for payment';
+    if (invoice.status === 'paid' || invoice.quickbooks_payment_status === 'paid') return 'Already paid';
+    if (Number(invoice.linked_work_count || 0) === 0) return 'Assign to project work before approval';
+    if (Number(invoice.payment_hold_count || 0) > 0) return 'Field work approval is still required';
+    return 'Ready for payment approval';
+  };
+  const paymentRunLabel = (invoice?: Invoice | null) =>
+    invoice ? formatEasternDate(nextPayday(invoice.updated_at || invoice.submitted_at || invoice.created_at), { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+
+  const refreshQuickBooksStatus = async () => {
+    if (!canReadQuickBooksStatus) return;
+    const res = await api.get('/quickbooks/status').catch(() => ({ data: null }));
+    if (res.data) setQuickBooksStatus(res.data);
+  };
+
+  const qboPaymentRunLabel = (bill?: QuickBooksBill | null) => {
+    if (!bill) return '';
+    if (bill.payment_run_date) return formatDateOnly(bill.payment_run_date, { month: 'short', day: 'numeric', year: 'numeric' });
+    return formatEasternDate(nextPayday(bill.due_date || bill.txn_date || bill.last_seen_at), { month: 'short', day: 'numeric', year: 'numeric' });
+  };
+
+  const updateQuickBooksBill = (updated?: QuickBooksBill | null) => {
+    if (!updated?.qbo_id) return;
+    setQuickBooksBills(prev => prev.map(item => item.qbo_id === updated.qbo_id ? { ...item, ...updated } : item));
+  };
+
+  const canApproveQuickBooksBill = (bill: QuickBooksBill, invoice?: Invoice | null) => {
+    if (!isAdminRole(user?.role || '')) return false;
+    if (isQuickBooksBillPaid(bill)) return false;
+    if (bill.payment_approval_status === 'approved_for_payment') return false;
+    return quickBooksBillHasApprovalMatch(bill, invoice);
+  };
+
+  const quickBooksApprovalBlockedReason = (bill: QuickBooksBill, invoice?: Invoice | null) => {
+    if (isQuickBooksBillPaid(bill)) return 'Already paid in QuickBooks';
+    if (bill.payment_approval_status === 'approved_for_payment') return 'Already in the Friday payment queue';
+    if (quickBooksSplitLineCount(bill) > 0 && quickBooksUnmatchedSplitLineCount(bill) > 0) return 'Assign every class split before approval';
+    if (!quickBooksBillHasApprovalMatch(bill, invoice)) return 'Assign before approval';
+    return 'Ready for Friday payment approval';
+  };
+
+  const approveQuickBooksBillForPay = async (bill: QuickBooksBill, invoice?: Invoice | null) => {
+    if (!canApproveQuickBooksBill(bill, invoice)) {
+      toast.error(quickBooksApprovalBlockedReason(bill, invoice));
+      return;
+    }
+    setApprovingQboBillId(bill.qbo_id);
+    try {
+      const res = await api.put(`/quickbooks/bills/${encodeURIComponent(bill.qbo_id)}/approve-for-pay`);
+      updateQuickBooksBill(res.data);
+      await refreshQuickBooksStatus();
+      toast.success('Invoice added to the Friday payment queue');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to approve this bill for pay');
+    } finally {
+      setApprovingQboBillId(null);
+    }
+  };
+
+  const removeQuickBooksBillFromPay = async (bill: QuickBooksBill) => {
+    setRemovingQboBillId(bill.qbo_id);
+    try {
+      const res = await api.put(`/quickbooks/bills/${encodeURIComponent(bill.qbo_id)}/remove-from-pay`);
+      updateQuickBooksBill(res.data);
+      await refreshQuickBooksStatus();
+      toast.success('Invoice removed from the Friday payment queue');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to remove this bill from the payment queue');
+    } finally {
+      setRemovingQboBillId(null);
+    }
+  };
+
+  const notifyApprovedPaymentQueue = async () => {
+    if (!approvedPaymentQueue.length) return toast.error('Approve at least one invoice before sending management the queue');
+    setNotifyingPaymentQueue(true);
+    try {
+      const res = await api.post('/quickbooks/payment-queue/notify');
+      const updatedRows: QuickBooksBill[] = Array.isArray(res.data?.rows) ? res.data.rows : [];
+      if (updatedRows.length) {
+        setQuickBooksBills(prev => prev.map(item => updatedRows.find(row => row.qbo_id === item.qbo_id) || item));
+      }
+      await refreshQuickBooksStatus();
+      toast.success('Management email sent for the Friday payment queue');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to email the approved payment queue');
+    } finally {
+      setNotifyingPaymentQueue(false);
+    }
+  };
+
+  const approveForPayment = async (invoice: Invoice) => {
+    if (!canApproveForPayment(invoice)) {
+      toast.error(approvalBlockedReason(invoice));
+      return;
+    }
     setUpdatingInvoiceId(invoice.id);
     try {
-      await api.put(`/projects/${invoice.project_id}/invoices/${invoice.id}/status`, { status });
-      setInvoices(prev => prev.map(item => item.id === invoice.id ? { ...item, status, updated_at: new Date().toISOString() } : item));
-      toast.success(status === 'paid' ? 'Invoice marked paid' : 'Invoice status updated');
+      await api.put(`/projects/${invoice.project_id}/invoices/${invoice.id}/status`, { status: 'approved' });
+      setInvoices(prev => prev.map(item => item.id === invoice.id ? { ...item, status: 'approved', updated_at: new Date().toISOString() } : item));
+      toast.success('Invoice approved for payment and management notified');
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Failed to update invoice status');
+      toast.error(err.response?.data?.error || 'Failed to approve invoice for payment');
     } finally {
       setUpdatingInvoiceId(null);
     }
   };
 
-  const toggleInvoiceSelection = (invoiceId: string, selected: boolean) => {
-    setSelectedInvoiceIds(current => {
-      if (selected) return Array.from(new Set([...current, invoiceId]));
-      return current.filter(id => id !== invoiceId);
-    });
-  };
+  const fileEmailInvoice = async (item: InvoiceEmailItem, attachment?: InvoiceEmailAttachment) => {
+    const key = attachment ? emailAttachmentDraftKey(item.id, attachment.id) : emailDraftKey(item.id);
+    const draft = assignmentDrafts[key];
+    if (!draft?.projectId) return toast.error('Select a project first');
+    if (!draft.taskId && !draft.newTaskTitle.trim()) return toast.error('Select an existing task or enter a new task name');
 
-  const toggleVisibleInvoiceSelection = (selected: boolean) => {
-    setSelectedInvoiceIds(selected ? selectedInvoices.map(invoice => invoice.id) : []);
-  };
-
-  const bulkUpdateStatus = async (status: string) => {
-    if (!isAdminRole(user?.role || '') || selectedInvoiceRows.length === 0) return;
-    const targets = selectedInvoiceRows.filter(invoice => invoice.status !== status);
-    if (targets.length === 0) return toast('Selected invoices already have that status');
-    setUpdatingInvoiceId('bulk');
+    const busyKey = attachment ? `${item.id}:${attachment.id}` : item.id;
+    setFilingEmailId(busyKey);
     try {
-      await Promise.all(targets.map(invoice =>
-        api.put(`/projects/${invoice.project_id}/invoices/${invoice.id}/status`, { status })
-      ));
-      setInvoices(prev => prev.map(item =>
-        targets.some(invoice => invoice.id === item.id)
-          ? { ...item, status, updated_at: new Date().toISOString() }
-          : item
-      ));
-      setSelectedInvoiceIds([]);
-      toast.success(status === 'paid' ? 'Selected invoices marked paid' : 'Selected invoices approved');
+      await api.post(`/invoices/email-intake/${item.id}/file`, {
+        attachment_id: attachment?.id || undefined,
+        project_id: draft.projectId,
+        work_item_ids: draft.taskId ? [draft.taskId] : [],
+        project_scope_id: draft.scopeId || null,
+        new_task_title: draft.newTaskTitle.trim(),
+        total: draft.total,
+        vendor_name: draft.vendorName,
+        external_invoice_number: draft.externalInvoiceNumber,
+      });
+      toast.success(attachment ? 'Attachment assigned to project invoice' : 'Invoice assigned to project');
+      await Promise.all([load(), loadEmailBox()]);
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Failed to update selected invoices');
+      toast.error(err.response?.data?.error || 'Failed to file invoice');
     } finally {
-      setUpdatingInvoiceId(null);
-    }
-  };
-
-  const downloadPDF = async (invoice: Invoice) => {
-    try {
-      const res = await api.get(`/projects/${invoice.project_id}/invoices/${invoice.id}/pdf`, { responseType: 'blob' });
-      const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `invoice-${invoice.invoice_number}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      toast.error('Failed to download PDF');
+      setFilingEmailId(null);
     }
   };
 
@@ -325,499 +804,818 @@ export default function Invoices() {
     return formatEasternDateTime(value, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
   };
 
+  const emailBodyPreview = (item: InvoiceEmailItem) =>
+    stripEmailMarkup(item.body_preview || item.text_body || item.html_body || item.extracted_summary || '');
+
+  const renderAssignmentControls = (
+    key: string,
+    onSave: () => void,
+    saveLabel: string,
+    busy: boolean,
+    includeInvoiceFields = false
+  ) => {
+    const draft = assignmentDrafts[key] || {
+      projectId: '',
+      taskId: '',
+      scopeId: '',
+      newTaskTitle: '',
+      total: '',
+      vendorName: '',
+      externalInvoiceNumber: '',
+    };
+    const options = draft.projectId ? assignmentOptions[draft.projectId] : null;
+    const selectedProject = projects.find(project => project.id === draft.projectId);
+    const canSave = Boolean(draft.projectId && (draft.taskId || draft.newTaskTitle.trim()));
+
+    return (
+      <div className="bt-invoice-assignment-grid">
+        <label className="bt-invoice-field">
+          <span>Project</span>
+          <select
+            value={draft.projectId}
+            onChange={event => updateAssignmentDraft(key, { projectId: event.target.value, taskId: '', scopeId: '' })}
+          >
+            <option value="">Select project</option>
+            {projects.map(project => (
+              <option key={project.id} value={project.id}>{project.address}</option>
+            ))}
+          </select>
+        </label>
+
+        <label className="bt-invoice-field">
+          <span>Existing scope task</span>
+          <select
+            value={draft.taskId}
+            disabled={!draft.projectId}
+            onChange={event => updateAssignmentDraft(key, { taskId: event.target.value })}
+          >
+            <option value="">Create or choose task</option>
+            {(options?.tasks || []).map(task => (
+              <option key={task.id} value={task.id}>
+                {task.title} - {task.status.replace(/_/g, ' ')} / {task.verification_status.replace(/_/g, ' ')}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="bt-invoice-field">
+          <span>Scope section</span>
+          <select
+            value={draft.scopeId}
+            disabled={!draft.projectId}
+            onChange={event => updateAssignmentDraft(key, { scopeId: event.target.value })}
+          >
+            <option value="">No scope selected</option>
+            {(options?.scopes || []).map(scope => (
+              <option key={scope.id} value={scope.id}>{scope.section_name} - {scope.scope_title}</option>
+            ))}
+          </select>
+        </label>
+
+        <label className="bt-invoice-field">
+          <span>New task if needed</span>
+          <input
+            value={draft.newTaskTitle}
+            onChange={event => updateAssignmentDraft(key, { newTaskTitle: event.target.value })}
+            placeholder={selectedProject ? `Task under ${selectedProject.job_name || selectedProject.address}` : 'Enter task name'}
+          />
+        </label>
+
+        {includeInvoiceFields && (
+          <>
+            <label className="bt-invoice-field">
+              <span>Vendor</span>
+              <input
+                value={draft.vendorName}
+                onChange={event => updateAssignmentDraft(key, { vendorName: event.target.value })}
+                placeholder="Vendor or sender"
+              />
+            </label>
+            <label className="bt-invoice-field">
+              <span>Invoice #</span>
+              <input
+                value={draft.externalInvoiceNumber}
+                onChange={event => updateAssignmentDraft(key, { externalInvoiceNumber: event.target.value })}
+                placeholder="Vendor invoice number"
+              />
+            </label>
+            <label className="bt-invoice-field">
+              <span>Amount</span>
+              <input
+                value={draft.total}
+                onChange={event => updateAssignmentDraft(key, { total: event.target.value })}
+                placeholder="0.00"
+                inputMode="decimal"
+              />
+            </label>
+          </>
+        )}
+
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={busy}
+          className={`bt-invoice-save-button ${canSave ? '' : 'needs-input'}`}
+          title={canSave ? saveLabel : 'Select a project and task, then assign this invoice'}
+        >
+          <ClipboardCheck className="h-4 w-4" />
+          {busy ? 'Saving...' : saveLabel}
+        </button>
+      </div>
+    );
+  };
+
   if (loading) return <Loading />;
 
   return (
-    <div className="bt-desktop-page min-h-full px-6 py-6 md:px-8">
+    <div className="bt-desktop-page bt-invoices-light min-h-full px-6 py-6 md:px-8">
       <div className="max-w-7xl mx-auto space-y-5">
-        <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-3">
-          {[
-            {
-              label: 'Open Invoice Exposure',
-              value: money(invoiceStats.openAmount),
-              sub: `${invoiceStats.openCount} invoice${invoiceStats.openCount !== 1 ? 's' : ''} not paid`,
-              trend: invoiceStats.openAmount > 0 ? 'Watch exposure' : 'No open exposure',
-              icon: WalletCards,
-              bg: '#EFF6FF',
-              color: '#1D4ED8',
-            },
-            {
-              label: 'New Invoices',
-              value: money(invoiceStats.newAmount),
-              sub: `${invoiceStats.newCount} awaiting review`,
-              trend: invoiceStats.newCount > 0 ? 'Review queue' : 'Queue clear',
-              icon: Receipt,
-              bg: '#FFF7ED',
-              color: '#C2410C',
-            },
-            {
-              label: 'Approved To Pay',
-              value: money(invoiceStats.approvedAmount),
-              sub: 'Ready for payment action',
-              trend: invoiceStats.approvedAmount > 0 ? 'Payment ready' : 'None approved',
-              icon: CheckCircle2,
-              bg: '#ECFDF5',
-              color: '#047857',
-            },
-            {
-              label: 'Paid To Date',
-              value: money(invoiceStats.paidAmount),
-              sub: `${invoiceStats.paidCount} paid invoices`,
-              trend: 'Paid trend',
-              icon: FileText,
-              bg: '#F5F3FF',
-              color: '#6D28D9',
-            },
-          ].map(card => (
-            <div key={card.label} className="rounded-2xl border border-gray-200 p-4" style={{ background: 'white', boxShadow: '0 8px 24px rgba(17,24,39,0.06)' }}>
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-xs font-black uppercase tracking-wide text-gray-500">{card.label}</p>
-                  <p className="mt-2 text-2xl font-black text-gray-900 truncate">{card.value}</p>
-                  <p className="mt-1 text-xs font-semibold text-gray-500">{card.sub}</p>
-                  <p className="mt-3 inline-flex items-center gap-1 rounded-full bg-gray-50 px-2 py-1 text-[11px] font-black text-gray-600">
-                    <TrendingUp className="h-3 w-3" />
-                    {card.trend}
-                  </p>
-                </div>
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: card.bg, color: card.color }}>
-                  <card.icon className="w-5 h-5" />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {isAdminRole(user?.role || '') && (
-          <div className="rounded-2xl border border-gray-200" style={{ background: 'white', boxShadow: '0 10px 30px rgba(17,24,39,0.08)' }}>
-            <div className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
+        {canManageQuickBooks && (
+          <section className="bt-invoice-section bt-qbo-mirror-section">
+            <div className="bt-invoice-section-header">
               <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center flex-shrink-0">
-                  <Mail className="w-5 h-5" />
+                <div className="bt-invoice-icon bg-blue-50 text-blue-700">
+                  <Receipt className="w-5 h-5" />
                 </div>
                 <div>
-                  <p className="text-xs font-black uppercase tracking-wide text-gray-500">Live invoice email box</p>
-                  <h2 className="text-lg font-black text-gray-900">Invoices received by email</h2>
-                  <p className="text-sm text-gray-500">
-                    Hidden until opened. Click to view the live email intake list and attachments.
+                  <p className="text-xs font-black uppercase tracking-wide text-orange-300">QuickBooks Online source of truth</p>
+                  <h2 className="text-lg font-black text-gray-900">QuickBooks Bills mirror</h2>
+                  <p className="text-sm text-gray-600">
+                    Bills entered in QuickBooks are mirrored here automatically. Accounting sync stays in the background.
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setEmailBoxOpen(open => !open)}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-black text-white transition-colors hover:bg-gray-800"
-              >
-                <Mail className="w-4 h-4" />
-                {emailBoxOpen ? 'Hide Live Email Box' : 'Open Live Email Box'}
-              </button>
-            </div>
-
-            {emailBoxOpen && (
-              <div className="border-t border-gray-100 p-5">
-                <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div className="flex flex-wrap gap-2">
-                    {[
-                      { value: '', label: 'All' },
-                      { value: 'new', label: 'New' },
-                      { value: 'filed', label: 'Filed' },
-                      { value: 'ignored', label: 'Ignored' },
-                    ].map(option => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        onClick={() => setEmailBoxStatus(option.value)}
-                        className={`rounded-xl px-3 py-2 text-xs font-black transition-colors ${
-                          emailBoxStatus === option.value
-                            ? 'bg-gray-900 text-white'
-                            : 'border border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
-                        }`}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <span className={`bt-invoice-filter ${quickBooksStatus?.connected ? 'is-active' : ''}`}>
+                  {quickBooksStatus?.connected ? `${quickBooksStatus.connection?.company_name || 'QBO'} connected` : 'QBO not connected'}
+                </span>
+                {!quickBooksStatus?.connected && (
                   <button
                     type="button"
-                    onClick={loadEmailBox}
-                    disabled={emailBoxLoading}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-black text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
+                    onClick={connectQuickBooks}
+                    disabled={!quickBooksStatus?.configured}
+                    className="bt-invoice-refresh"
                   >
-                    <RefreshCw className={`w-3.5 h-3.5 ${emailBoxLoading ? 'animate-spin' : ''}`} />
-                    Refresh
+                    <ExternalLink className="h-4 w-4" />
+                    Connect QuickBooks
                   </button>
-                </div>
-
-                {emailBoxLoading ? (
-                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-8 text-center text-sm font-bold text-gray-500">Loading live email box...</div>
-                ) : emailBoxItems.length === 0 ? (
-                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-8 text-center">
-                    <Mail className="mx-auto mb-3 h-8 w-8 text-gray-300" />
-                    <p className="text-sm font-bold text-gray-500">No email invoices found for this filter</p>
-                  </div>
-                ) : (
-                  <div className="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200">
-                    {emailBoxItems.map(item => (
-                      <div key={item.id} className="p-4">
-                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-black ${emailStatusClass[item.status] || emailStatusClass.new}`}>
-                                {item.status}
-                              </span>
-                              <span className="text-xs font-semibold text-gray-500">{formatEmailDate(item.received_at)}</span>
-                            </div>
-                            <p className="mt-2 truncate text-sm font-black text-gray-900">{item.subject || '(no subject)'}</p>
-                            <p className="mt-1 text-xs text-gray-500">
-                              From {item.from_name || item.from_email || 'unknown sender'}
-                              {item.from_email && item.from_name ? ` <${item.from_email}>` : ''}
-                            </p>
-                            {item.matched_project_address ? (
-                              <p className="mt-1 text-xs font-bold text-blue-700">
-                                Matched to {item.matched_project_address}{item.matched_project_job_name ? ` - ${item.matched_project_job_name}` : ''}
-                              </p>
-                            ) : null}
-                          </div>
-                          <div className="flex flex-wrap justify-start gap-2 lg:justify-end">
-                            {(item.attachments || []).map(attachment => (
-                              <a
-                                key={attachment.id}
-                                href={`/api/invoices/email-intake/${item.id}/attachments/${attachment.id}`}
-                                className="inline-flex items-center gap-1.5 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700 hover:bg-blue-100"
-                              >
-                                <Paperclip className="w-3.5 h-3.5" />
-                                {attachment.original_name || 'Attachment'}
-                              </a>
-                            ))}
-                            {(!item.attachments || item.attachments.length === 0) && (
-                              <span className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-500">
-                                <Paperclip className="w-3.5 h-3.5" />
-                                No attachments
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
                 )}
               </div>
-            )}
-          </div>
-        )}
+            </div>
 
-        {!selectedProject ? (
-          <>
-            <div className="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-4">
+            <div className="bt-qbo-status-row">
               <div>
-                <h1 className="text-2xl font-black text-gray-900 tracking-tight">Invoices</h1>
-                <p className="text-sm text-gray-500 mt-1">
-                  {invoiceStats.invoiceCount} invoices across {invoiceStats.projectCount} project{invoiceStats.projectCount !== 1 ? 's' : ''}. Select a project first, then review that project&apos;s invoice status and payment queue.
-                </p>
+                <span>Last sync</span>
+                <strong>{quickBooksStatus?.connection?.last_sync_at ? formatEasternDateTime(quickBooksStatus.connection.last_sync_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Not synced yet'}</strong>
               </div>
-              <div
-                className="flex items-center gap-2 px-3 py-2.5 rounded-xl w-full xl:w-[460px]"
-                style={{ background: 'white', border: '1px solid #D1D5DB', boxShadow: '0 8px 24px rgba(17,24,39,0.06)' }}
-              >
-                <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                <input
-                  value={projectSearch}
-                  onChange={e => setProjectSearch(e.target.value)}
-                  placeholder="Search projects by address or job name"
-                  className="w-full bg-transparent text-sm outline-none text-gray-900 placeholder:text-gray-500"
-                />
+              <div>
+                <span>Total mirrored bills</span>
+                <strong>{quickBooksStatus?.stats?.bill_count || quickBooksMirrorRows.length}</strong>
+              </div>
+              <div>
+                <span>Unmatched bills</span>
+                <strong>{quickBooksStatus?.stats?.unmatched_count || 0}</strong>
+              </div>
+              <div>
+                <span>Sync status</span>
+                <strong>{quickBooksStatus?.connection?.last_sync_status || 'Waiting'}</strong>
               </div>
             </div>
 
-            <div className="rounded-2xl overflow-hidden border border-gray-200" style={{ background: 'white', boxShadow: '0 10px 30px rgba(17,24,39,0.08)' }}>
-              <div className="sticky top-0 z-10 grid grid-cols-12 px-5 py-3 text-xs font-black uppercase tracking-wide text-gray-500 border-b border-gray-100 bg-gray-50">
-                <div className="col-span-5">Project Address</div>
-                <div className="col-span-2 text-right">Invoices</div>
-                <div className="col-span-2 text-right">Open Amount</div>
-                <div className="col-span-2 text-right">Paid Amount</div>
-                <div className="col-span-1" />
-              </div>
-
-              {projectSummaries.length === 0 ? (
-                <div className="text-center py-16">
-                  <Building2 className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-                  <p className="text-sm font-bold text-gray-500">No projects found</p>
-                </div>
-              ) : (
-                <div className="divide-y divide-gray-100">
-                  {projectSummaries.map((project, index) => (
-                    <button
-                      key={project.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedProjectId(project.id);
-                        setStatusFilter('');
-                      }}
-                      className={`grid grid-cols-12 w-full px-5 py-4 text-left transition-colors cursor-pointer hover:bg-blue-50/50 ${index % 2 === 1 ? 'bg-gray-50/55' : 'bg-white'}`}
-                    >
-                      <div className="col-span-5 min-w-0 flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center flex-shrink-0">
-                          <Building2 className="w-5 h-5" />
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-sm font-black text-gray-900 truncate">{project.address}</p>
-                          <p className="text-xs text-gray-500 truncate">{project.job_name || 'No job name'}</p>
-                        </div>
-                      </div>
-                      <div className="col-span-2 text-right self-center">
-                        <p className="text-sm font-black text-gray-900">{project.invoice_count}</p>
-                        <p className="text-xs text-blue-600 font-bold">{project.new_count} new</p>
-                      </div>
-                      <div className="col-span-2 text-right self-center text-sm font-black text-gray-900">{money(project.open_total)}</div>
-                      <div className="col-span-2 text-right self-center text-sm font-black text-green-700">{money(project.paid_total)}</div>
-                      <div className="col-span-1 self-center flex justify-end">
-                        <ChevronRight className="w-5 h-5 text-gray-400" />
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="rounded-2xl border border-gray-200 p-5" style={{ background: 'white', boxShadow: '0 10px 30px rgba(17,24,39,0.08)' }}>
-              <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-4">
-                <div className="flex items-start gap-3 min-w-0">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedProjectId(null);
-                      setStatusFilter('');
-                    }}
-                    className="p-2 rounded-xl border border-gray-200 text-gray-500 hover:bg-gray-50"
-                    title="Back to project list"
-                  >
-                    <ArrowLeft className="w-5 h-5" />
-                  </button>
-                  <div className="min-w-0">
-                    <p className="text-xs font-black uppercase tracking-wide text-gray-500">Project invoices</p>
-                    <h1 className="text-xl font-black text-gray-900 truncate">{selectedProject.address}</h1>
-                    <p className="text-sm text-gray-500 truncate">{selectedProject.job_name}</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-3 gap-3 min-w-[300px]">
-                  <div className="rounded-xl bg-blue-50 p-3 text-right">
-                    <p className="text-lg font-black text-blue-700">{projectInvoiceTotals.all}</p>
-                    <p className="text-xs font-bold text-blue-700">All</p>
-                  </div>
-                  <div className="rounded-xl bg-amber-50 p-3 text-right">
-                    <p className="text-lg font-black text-amber-700">{projectInvoiceTotals.new}</p>
-                    <p className="text-xs font-bold text-amber-700">New</p>
-                  </div>
-                  <div className="rounded-xl bg-green-50 p-3 text-right">
-                    <p className="text-lg font-black text-green-700">{money(visibleTotal)}</p>
-                    <p className="text-xs font-bold text-green-700">Visible Total</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {tabOptions.map(tab => {
-                const count = tab.value === ''
-                  ? projectInvoiceTotals.all
-                  : projectInvoiceTotals[tab.value as keyof typeof projectInvoiceTotals] || 0;
+            <div className="mx-4 mt-3 flex flex-wrap items-center gap-2">
+              {([
+                { key: 'open', tone: 'blue' },
+                { key: 'friday_queue', tone: 'amber' },
+                { key: 'paid', tone: 'emerald' },
+                { key: 'all', tone: 'slate' },
+              ] as const).map(option => {
+                const meta = quickBooksBillFilterMeta[option.key];
+                const active = quickBooksBillFilter === option.key;
                 return (
                   <button
-                    key={tab.value}
+                    key={option.key}
                     type="button"
-                    onClick={() => setStatusFilter(tab.value)}
-                    className={`px-4 py-2 rounded-xl text-sm font-black whitespace-nowrap transition-colors flex-shrink-0 cursor-pointer ${
-                      statusFilter === tab.value
-                        ? 'bg-gray-900 text-white shadow-sm'
-                        : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50'
-                    }`}
+                    onClick={() => setQuickBooksBillFilter(option.key)}
+                    className={`bt-invoice-filter ${active ? 'is-active' : ''}`}
+                    aria-pressed={active}
+                    data-tone={option.tone}
                   >
-                    {tab.label} <span className="opacity-70">({count})</span>
+                    {meta.label}
+                    <span className="ml-1 rounded-full bg-black/10 px-1.5 py-0.5 text-[10px] font-black">{meta.count}</span>
                   </button>
                 );
               })}
             </div>
 
-            {selectedInvoices.length === 0 ? (
-              <div className="text-center py-16 bg-white rounded-2xl border border-gray-200">
-                <FileText className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-                <p className="text-gray-500 font-bold">No invoices in this category</p>
+            {quickBooksStatus?.connection?.last_sync_error && (
+              <div className="mt-3 mx-4 flex items-start gap-2 rounded-md border border-red-500/40 bg-red-500/10 p-3 text-sm font-semibold text-red-100">
+                <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                <span>{quickBooksStatus.connection.last_sync_error}</span>
+              </div>
+            )}
+
+            {quickBooksMirrorRows.length === 0 ? (
+              <div className="bt-invoice-empty bt-qbo-table-empty">
+                <Receipt className="mx-auto mb-3 h-8 w-8 text-blue-300" />
+                <p className="text-sm font-bold text-gray-600">
+                  No {selectedQuickBooksBillFilter.label.toLowerCase()} are showing right now.
+                </p>
               </div>
             ) : (
-              <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
-                <div className="flex flex-col gap-3 border-b border-gray-100 p-4 xl:flex-row xl:items-center xl:justify-between">
+              <div className="bt-qbo-table-shell">
+                <div className="bt-qbo-table-title">
                   <div>
-                    <p className="text-sm font-black text-gray-900">Invoice review table</p>
-                    <p className="text-xs font-semibold text-gray-500">
-                      {selectedInvoiceRows.length} selected ({money(selectedInvoiceTotal)}) across {selectedInvoices.length} visible invoices.
-                    </p>
+                    <span>{selectedQuickBooksBillFilter.title}</span>
+                    <strong>{quickBooksMirrorRows.length} shown</strong>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    {(['contractor', 'status', 'submitted'] as const).map(column => (
-                      <label key={column} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-black text-gray-700">
-                        <input
-                          type="checkbox"
-                          checked={visibleInvoiceColumns[column]}
-                          onChange={event => setVisibleInvoiceColumns(current => ({ ...current, [column]: event.target.checked }))}
-                          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                        />
-                        {column === 'submitted' ? 'Date' : column[0].toUpperCase() + column.slice(1)}
-                      </label>
-                    ))}
-                  </div>
+                  <p>{selectedQuickBooksBillFilter.subtitle}</p>
                 </div>
-
-                {selectedInvoiceRows.length > 0 && (
-                  <div className="flex flex-col gap-3 border-b border-blue-100 bg-blue-50 px-4 py-3 md:flex-row md:items-center md:justify-between">
-                    <p className="text-sm font-black text-blue-900">
-                      Bulk actions for {selectedInvoiceRows.length} invoice{selectedInvoiceRows.length === 1 ? '' : 's'}
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => bulkUpdateStatus('approved')}
-                        disabled={!isAdminRole(user?.role || '') || updatingInvoiceId === 'bulk'}
-                        className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-emerald-200 bg-white px-3 py-2 text-xs font-black text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
-                      >
-                        <CheckCircle2 className="h-4 w-4" />
-                        Approve Selected
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => bulkUpdateStatus('paid')}
-                        disabled={!isAdminRole(user?.role || '') || updatingInvoiceId === 'bulk'}
-                        className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-gray-900 px-3 py-2 text-xs font-black text-white hover:bg-gray-800 disabled:opacity-50"
-                      >
-                        <CheckCircle2 className="h-4 w-4" />
-                        Mark Paid
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedInvoiceIds([])}
-                        className="min-h-10 rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-black text-gray-700 hover:bg-gray-50"
-                      >
-                        Clear Selection
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                <div className="max-h-[620px] overflow-auto">
-                  <div
-                    className="sticky top-0 z-10 grid min-w-[940px] gap-3 border-b border-gray-100 bg-gray-50 px-5 py-3 text-xs font-black uppercase tracking-wide text-gray-500"
-                    style={{ gridTemplateColumns: invoiceColumnTemplate }}
-                  >
-                    <label className="flex items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={selectedInvoices.length > 0 && selectedInvoiceIds.length === selectedInvoices.length}
-                        onChange={event => toggleVisibleInvoiceSelection(event.target.checked)}
-                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                        aria-label="Select all visible invoices"
-                      />
-                      Invoice
-                    </label>
-                    {visibleInvoiceColumns.contractor && <div>Contractor</div>}
-                    {visibleInvoiceColumns.status && <div>Status</div>}
-                    {visibleInvoiceColumns.submitted && <div>Submitted</div>}
-                    <div className="text-right">Amount</div>
-                    <div className="text-right">Actions</div>
-                  </div>
-                  <div className="divide-y divide-gray-100">
-                    {selectedInvoices.map((invoice, index) => (
-                      <div
-                        key={invoice.id}
-                        className={`grid min-w-[940px] items-center gap-3 px-5 py-4 ${index % 2 === 1 ? 'bg-gray-50/70' : 'bg-white'}`}
-                        style={{ gridTemplateColumns: invoiceColumnTemplate }}
-                      >
-                        <label className="flex min-w-0 items-center gap-3">
-                          <input
-                            type="checkbox"
-                            checked={selectedInvoiceSet.has(invoice.id)}
-                            onChange={event => toggleInvoiceSelection(invoice.id, event.target.checked)}
-                            className="h-4 w-4 flex-shrink-0 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                            aria-label={`Select invoice ${invoice.invoice_number}`}
-                          />
-                          <span className="min-w-0">
-                            <span className="block text-sm font-black text-gray-900">#{invoice.invoice_number}</span>
-                            <span className="block text-xs font-semibold text-gray-500">
-                              {Number(invoice.linked_work_count || 0)} linked field item{Number(invoice.linked_work_count || 0) === 1 ? '' : 's'}
-                              {Number(invoice.payment_hold_count || 0) > 0 ? ` - ${invoice.payment_hold_count} approval hold${Number(invoice.payment_hold_count || 0) === 1 ? '' : 's'}` : ''}
-                              {invoice.quickbooks_status && invoice.quickbooks_status !== 'not_ready' ? ` - QBO ${invoice.quickbooks_status.replace(/_/g, ' ')}` : ''}
-                            </span>
-                          </span>
-                        </label>
-                        {visibleInvoiceColumns.contractor && (
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-bold text-gray-900">{invoice.contractor_name || 'Unassigned contractor'}</p>
-                          </div>
-                        )}
-                        {visibleInvoiceColumns.status && (
-                          <div>
-                            <span className={`inline-flex px-2.5 py-1 rounded-full border text-xs font-black ${statusClass[invoice.status] || statusClass.draft}`}>
-                              {statusLabel(invoice.status)}
-                            </span>
-                          </div>
-                        )}
-                        {visibleInvoiceColumns.submitted && (
-                          <div className="text-xs font-semibold text-gray-500">
-                            {invoice.submitted_at
-                              ? formatEasternDate(invoice.submitted_at, { month: 'short', day: 'numeric', year: 'numeric' })
-                              : formatEasternDate(invoice.created_at, { month: 'short', day: 'numeric', year: 'numeric' })}
-                          </div>
-                        )}
-                        <div className="text-right text-sm font-black text-gray-900">{money(invoice.total)}</div>
-                        <div className="flex flex-wrap justify-end gap-2">
-                          {isAdminRole(user?.role || '') && invoice.status !== 'paid' && (
-                            <button
-                              type="button"
-                              disabled={updatingInvoiceId === invoice.id || Number(invoice.payment_hold_count || 0) > 0}
-                              onClick={() => updateStatus(invoice, 'paid')}
-                              className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-green-100 bg-green-50 px-3 py-2 text-xs font-black text-green-700 hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
-                              title={Number(invoice.payment_hold_count || 0) > 0 ? 'Field work must be approved before payment' : 'Mark paid'}
-                            >
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              {Number(invoice.payment_hold_count || 0) > 0 ? 'Held' : 'Mark Paid'}
-                            </button>
-                          )}
-                          {isAdminRole(user?.role || '') && invoice.status !== 'paid' && (
-                            <select
-                              value={invoice.status}
-                              onChange={e => updateStatus(invoice, e.target.value)}
-                              className="min-h-10 rounded-xl border border-gray-300 bg-white px-2 py-2 text-xs font-bold text-gray-700 cursor-pointer"
-                              aria-label={`Change status for invoice ${invoice.invoice_number}`}
-                            >
-                              <option value="submitted">New Invoice</option>
-                              <option value="reviewed">Reviewed</option>
-                              <option value="approved">Approved</option>
-                              <option value="paid">Paid</option>
-                            </select>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => downloadPDF(invoice)}
-                            className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-xl text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 cursor-pointer"
-                            title="Download PDF"
-                            aria-label={`Download invoice ${invoice.invoice_number} PDF`}
-                          >
-                            <Download className="w-4 h-4" />
-                          </button>
-                          <Link to={`/projects/${invoice.project_id}/invoices/${invoice.id}`} className="inline-flex min-h-10 items-center rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700 hover:bg-blue-100 cursor-pointer">
-                            View
-                          </Link>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                <div className="bt-qbo-table-wrap">
+                  <table className="bt-qbo-bill-table">
+                    <thead>
+                      <tr>
+                        <th>Status</th>
+                        <th>Vendor</th>
+                        <th>Bill date</th>
+                        <th>Due date</th>
+                        <th>Bill amount</th>
+                        <th>Open balance</th>
+                        <th>BuildTrack match</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {quickBooksMirrorRows.map(({ bill, invoice }) => {
+                        const isPaid = isQuickBooksBillPaid(bill);
+                        const isApprovedForPay = bill.payment_approval_status === 'approved_for_payment' && !isPaid;
+                        const localInvoiceMarkedPaid = Boolean(!isPaid && invoice && (invoice.status === 'paid' || invoice.quickbooks_payment_status === 'paid'));
+                        const splitLines = quickBooksSplitLines(bill);
+                        const splitLineCount = quickBooksSplitLineCount(bill);
+                        const unmatchedSplitCount = quickBooksUnmatchedSplitLineCount(bill);
+                        const splitMatched = quickBooksBillSplitMatched(bill);
+                        const projectMatched = quickBooksBillHasApprovalMatch(bill, invoice);
+                        const needsReview = !projectMatched && !isPaid;
+                        const matchAddress = invoice?.address || bill.project_address || '';
+                        const matchName = invoice?.job_name || bill.project_job_name || '';
+                        return (
+                          <tr key={bill.qbo_id} className={`${isPaid ? 'is-paid' : isApprovedForPay ? 'is-approved-for-pay' : 'is-unpaid'} ${needsReview ? 'needs-review' : ''}`}>
+                            <td>
+                              <span className={`bt-qbo-status-chip ${isPaid ? 'is-paid' : isApprovedForPay ? 'is-approved-for-pay' : 'is-unpaid'}`}>
+                                {isApprovedForPay ? 'Queued' : qboStatusLabel(bill.payment_status)}
+                              </span>
+                              <small>QBO #{bill.doc_number || bill.qbo_id}</small>
+                              {isApprovedForPay ? <small>Pay run: Friday {qboPaymentRunLabel(bill)}</small> : null}
+                              {localInvoiceMarkedPaid ? <small>BuildTrack marked paid; QBO still open</small> : null}
+                            </td>
+                            <td>
+                              <strong>{bill.vendor_name || 'Vendor missing'}</strong>
+                              {bill.private_note ? <small>{bill.private_note}</small> : null}
+                              {splitLineCount > 1 ? <small>{splitLineCount} QBO class split lines</small> : null}
+                            </td>
+                            <td>{bill.txn_date ? formatDateOnly(bill.txn_date, { month: 'short', day: 'numeric', year: 'numeric' }) : '-'}</td>
+                            <td>{bill.due_date ? formatDateOnly(bill.due_date, { month: 'short', day: 'numeric', year: 'numeric' }) : '-'}</td>
+                            <td className="bt-qbo-money">{money(bill.total_amt || 0)}</td>
+                            <td className="bt-qbo-money">{money(bill.balance || 0)}</td>
+                            <td>
+                              {splitLineCount > 0 ? (
+                                <>
+                                  <strong>{splitMatched ? `${splitLineCount} class splits matched` : `${unmatchedSplitCount} class split${unmatchedSplitCount === 1 ? '' : 's'} need match`}</strong>
+                                  <small>Approval stays on one QBO balance</small>
+                                  <div className="bt-qbo-split-list">
+                                    {splitLines.map(line => (
+                                      <div
+                                        key={line.id || `${bill.qbo_id}-${line.qbo_line_id || line.line_num || line.description}`}
+                                        className={`bt-qbo-split-line ${line.project_id ? 'is-matched' : 'needs-match'}`}
+                                      >
+                                        <div>
+                                          <span>{line.description || `Line ${line.line_num || ''}`.trim() || 'Split line'}</span>
+                                          <small>
+                                            {line.class_name ? `QBO class: ${line.class_name}` : 'No QBO class'}
+                                            {line.category_name ? ` | ${line.category_name}` : ''}
+                                          </small>
+                                          {line.project_id ? (
+                                            <Link to={`/projects/${line.project_id}`}>
+                                              {line.project_address || line.project_job_name || 'Open project'}
+                                            </Link>
+                                          ) : (
+                                            <small>Project match needed</small>
+                                          )}
+                                        </div>
+                                        <strong>{money(line.amount || 0)}</strong>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </>
+                              ) : invoice ? (
+                                <>
+                                  <strong>{invoice.external_invoice_number || invoice.invoice_number}</strong>
+                                  <small>{matchAddress || matchName || 'Project linked'}</small>
+                                  {bill.qbo_class_name ? <small>QBO class: {bill.qbo_class_name}</small> : null}
+                                </>
+                              ) : projectMatched ? (
+                                <>
+                                  <strong>Project matched</strong>
+                                  <small>{matchAddress || matchName || 'Project linked from QuickBooks class'}</small>
+                                  {bill.qbo_class_name ? <small>QBO class: {bill.qbo_class_name}</small> : null}
+                                </>
+                              ) : isPaid ? (
+                                <>
+                                  <strong>QuickBooks paid bill</strong>
+                                  <small>Paid in QBO; no payment approval needed</small>
+                                  {bill.qbo_class_name ? <small>QBO class: {bill.qbo_class_name}</small> : null}
+                                </>
+                              ) : (
+                                <>
+                                  <span className="bt-qbo-match-needed">Match needed</span>
+                                  {bill.qbo_class_name ? <small>QBO class: {bill.qbo_class_name}</small> : null}
+                                </>
+                              )}
+                            </td>
+                            <td>
+                              {projectMatched || isPaid ? (
+                                <div className="bt-qbo-row-actions">
+                                  {isPaid ? (
+                                    <span className="bt-payment-run-chip is-paid">
+                                      <CheckCircle2 className="h-3.5 w-3.5" />
+                                      Paid in QBO
+                                    </span>
+                                  ) : isApprovedForPay ? (
+                                    <span className="bt-payment-run-chip">
+                                      <CalendarDays className="h-3.5 w-3.5" />
+                                      Friday {qboPaymentRunLabel(bill)}
+                                    </span>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => approveQuickBooksBillForPay(bill, invoice)}
+                                      disabled={!canApproveQuickBooksBill(bill, invoice) || approvingQboBillId === bill.qbo_id}
+                                      title={quickBooksApprovalBlockedReason(bill, invoice)}
+                                      className="bt-approve-payment-button"
+                                    >
+                                      <CheckCircle2 className="h-4 w-4" />
+                                      {approvingQboBillId === bill.qbo_id ? 'Approving...' : 'Approve for Pay'}
+                                    </button>
+                                  )}
+                                  {invoice ? (
+                                    <Link to={`/projects/${invoice.project_id}/invoices/${invoice.id}`}>Open invoice</Link>
+                                  ) : bill.project_id ? (
+                                    <Link to={`/projects/${bill.project_id}`}>Open project</Link>
+                                  ) : splitLineCount > 0 ? (
+                                    <span className="bt-qbo-split-summary-chip">{splitLineCount} project splits</span>
+                                  ) : null}
+                                </div>
+                              ) : (
+                                <span className="bt-qbo-unmatched">
+                                  {splitLineCount > 0 ? 'Assign every class split' : 'Assign before approval'}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             )}
-          </>
+
+            <div className="bt-approved-pay-panel bt-approved-pay-panel--embedded">
+              <div className="bt-approved-pay-header">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-wide text-orange-300">Approved for payment</p>
+                  <h2 className="text-lg font-black text-gray-900">Friday payment queue</h2>
+                  <p className="text-sm text-gray-500">Approved invoices show here with the next biweekly Friday pay run.</p>
+                </div>
+                <div className="bt-approved-pay-actions">
+                  <button
+                    type="button"
+                    onClick={notifyApprovedPaymentQueue}
+                    disabled={!approvedPaymentQueue.length || notifyingPaymentQueue}
+                    className="bt-approved-pay-notify-button"
+                  >
+                    <Mail className="h-4 w-4" />
+                    {notifyingPaymentQueue ? 'Emailing...' : 'Done Approving - Email Management'}
+                  </button>
+                  <div className="bt-approved-pay-total">
+                    <span>Total balance due</span>
+                    <strong>{money(approvedPaymentTotal)}</strong>
+                  </div>
+                </div>
+              </div>
+              {approvedPaymentQueue.length === 0 ? (
+                <div className="bt-approved-pay-empty">
+                  <CheckCircle2 className="h-5 w-5" />
+                  No invoices are currently approved for the next payment run.
+                </div>
+              ) : (
+                <div className="bt-approved-pay-grid">
+                  {approvedPaymentQueue.map(bill => {
+                    const invoice = bill.matched_invoice_id ? invoiceById.get(bill.matched_invoice_id) || null : null;
+                    const projectHref = invoice?.project_id
+                      ? `/projects/${invoice.project_id}/invoices/${invoice.id}`
+                      : bill.project_id
+                        ? `/projects/${bill.project_id}`
+                        : '/invoices';
+                    return (
+                    <article key={bill.qbo_id} className="bt-approved-pay-card">
+                      <div className="bt-approved-pay-card-top">
+                        <span>Approved</span>
+                        <strong>{money(bill.balance || 0)}</strong>
+                      </div>
+                      <div className="bt-approved-pay-card-body">
+                        <p className="bt-approved-pay-contractor">{bill.vendor_name || 'Vendor missing'}</p>
+                        <p className="bt-approved-pay-meta">QBO #{bill.doc_number || bill.qbo_id}</p>
+                        <p className="bt-approved-pay-project">{invoice?.address || bill.project_address || bill.project_job_name || 'Project not listed'}</p>
+                        <p className="bt-approved-pay-meta">Pay run: Friday {qboPaymentRunLabel(bill)}</p>
+                        <p className="bt-approved-pay-meta">
+                          {bill.payment_approval_notified_at
+                            ? `Management emailed ${formatEasternDateTime(bill.payment_approval_notified_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`
+                            : 'Management email not sent yet'}
+                        </p>
+                      </div>
+                      <div className="bt-approved-pay-card-bottom">
+                        <button
+                          type="button"
+                          onClick={() => removeQuickBooksBillFromPay(bill)}
+                          disabled={removingQboBillId === bill.qbo_id}
+                        >
+                          {removingQboBillId === bill.qbo_id ? 'Removing...' : 'Remove from queue'}
+                        </button>
+                        <Link to={projectHref}>Review</Link>
+                      </div>
+                    </article>
+                    );
+                  })}
+                </div>
+              )}
+              {paidPaymentQueue.length > 0 ? (
+                <div className="bt-qbo-paid-tile" aria-label="Invoices paid in QuickBooks">
+                  <div className="bt-qbo-paid-tile-header">
+                    <div>
+                      <span>Paid</span>
+                      <strong>{paidPaymentQueue.length}</strong>
+                    </div>
+                    <p>{money(paidPaymentTotal)} confirmed by QuickBooks sync</p>
+                  </div>
+                  <div className="bt-approved-pay-grid bt-approved-pay-grid--paid">
+                    {paidPaymentQueue.map(bill => {
+                      const invoice = bill.matched_invoice_id ? invoiceById.get(bill.matched_invoice_id) || null : null;
+                      const projectHref = invoice?.project_id
+                        ? `/projects/${invoice.project_id}/invoices/${invoice.id}`
+                        : bill.project_id
+                          ? `/projects/${bill.project_id}`
+                          : '/invoices';
+                      return (
+                        <article key={bill.qbo_id} className="bt-approved-pay-card bt-approved-pay-card--paid">
+                          <div className="bt-approved-pay-card-top">
+                            <span>Paid</span>
+                            <strong>{money(bill.total_amt || 0)}</strong>
+                          </div>
+                          <div className="bt-approved-pay-card-body">
+                            <p className="bt-approved-pay-contractor">{bill.vendor_name || 'Vendor missing'}</p>
+                            <p className="bt-approved-pay-meta">QBO #{bill.doc_number || bill.qbo_id}</p>
+                            <p className="bt-approved-pay-project">{invoice?.address || bill.project_address || bill.project_job_name || 'Project not listed'}</p>
+                            <p className="bt-approved-pay-meta">Paid in QuickBooks</p>
+                          </div>
+                          <div className="bt-approved-pay-card-bottom">
+                            <span>Synced from QBO</span>
+                            <Link to={projectHref}>Review</Link>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </section>
         )}
+
+        {false && isAdminRole(user?.role || '') && (
+          <section className="bt-invoice-section">
+            <div className="bt-invoice-section-header">
+              <div className="flex items-start gap-3">
+                <div className="bt-invoice-icon bg-blue-50 text-blue-700">
+                  <Mail className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-xs font-black uppercase tracking-wide text-blue-700">Auto invoice intake</p>
+                  <h2 className="text-lg font-black text-gray-900">Incoming invoices from email</h2>
+                  <p className="text-sm text-gray-600">
+                    Auto-refreshes from invoices@newurbandev.com. File each invoice to a project and scope task before payment review.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {[
+                  { value: 'new', label: 'Needs Assignment' },
+                  { value: '', label: 'All' },
+                  { value: 'filed', label: 'Filed' },
+                  { value: 'ignored', label: 'Ignored' },
+                ].map(option => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setEmailBoxStatus(option.value)}
+                    className={`bt-invoice-filter ${emailBoxStatus === option.value ? 'is-active' : ''}`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={loadEmailBox}
+                  disabled={emailBoxLoading}
+                  className="bt-invoice-refresh"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${emailBoxLoading ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
+              </div>
+            </div>
+
+            {emailBoxLoading && emailBoxItems.length === 0 ? (
+              <div className="bt-invoice-empty">Loading live invoice email queue...</div>
+            ) : emailBoxItems.length === 0 ? (
+              <div className="bt-invoice-empty">
+                <Mail className="mx-auto mb-3 h-8 w-8 text-blue-300" />
+                <p className="text-sm font-bold text-gray-600">No email invoices found for this filter</p>
+              </div>
+            ) : (
+              <div className="bt-invoice-email-queue">
+                {emailBoxItems.map(item => {
+                  const itemAttachments = item.attachments || [];
+                  const senderName = item.extracted_vendor || item.from_name || 'Contractor / sender not assigned';
+                  const senderEmail = item.from_email || 'No origin email captured';
+                  const isExpanded = Boolean(expandedEmailIds[item.id]);
+                  const unfiledCount = item.unfiled_attachment_count ?? itemAttachments.filter(attachment => !attachment.filed_invoice_id).length;
+                  const previewText = emailBodyPreview(item);
+                  return (
+                  <article key={item.id} className={`bt-invoice-intake-card ${isExpanded ? 'is-expanded' : ''}`}>
+                    <div className={`bt-invoice-email-row ${isExpanded ? 'is-expanded' : ''}`}>
+                      <div className="bt-invoice-email-row-status">
+                        <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-black ${emailStatusClass[item.status] || emailStatusClass.new}`}>
+                          {item.status === 'new' ? 'needs assignment' : item.status}
+                        </span>
+                        {item.agent_status ? <span className="bt-invoice-soft-chip">{item.agent_status.replace(/_/g, ' ')}</span> : null}
+                      </div>
+                      <div className="bt-invoice-email-row-cell">
+                        <span>Sent from</span>
+                        <strong>{senderName}</strong>
+                        <small>{senderEmail}</small>
+                      </div>
+                      <div className="bt-invoice-email-row-cell bt-invoice-email-row-subject">
+                        <span>Email subject</span>
+                        <strong>{item.subject || '(no subject)'}</strong>
+                        <small>{previewText || 'No email message body captured'}</small>
+                      </div>
+                      <div className="bt-invoice-email-row-cell">
+                        <span>Received</span>
+                        <strong>{formatEmailDate(item.received_at)}</strong>
+                      </div>
+                      <div className="bt-invoice-email-row-cell">
+                        <span>Files</span>
+                        <strong>{item.attachment_count || 0} file{Number(item.attachment_count || 0) === 1 ? '' : 's'}</strong>
+                        <small>{unfiledCount > 0 ? `${unfiledCount} need assignment` : 'filed or no files'}</small>
+                      </div>
+                      <div className="bt-invoice-email-row-cell">
+                        <span>Amount</span>
+                        <strong>{item.extracted_amount ? money(item.extracted_amount) : '-'}</strong>
+                        <small>{item.extracted_invoice_number ? `Invoice #${item.extracted_invoice_number}` : 'No invoice # captured'}</small>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => toggleEmailExpanded(item.id)}
+                        className={`bt-invoice-expand-button ${isExpanded ? 'is-expanded' : ''}`}
+                        aria-expanded={isExpanded}
+                        aria-controls={`invoice-email-detail-${item.id}`}
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                        {isExpanded ? 'Collapse' : 'Expand'}
+                      </button>
+                    </div>
+
+                    {isExpanded && (
+                      <div id={`invoice-email-detail-${item.id}`} className="bt-invoice-intake-detail">
+                        <div className="bt-invoice-email-layout">
+                          <div className="bt-invoice-email-content min-w-0">
+                            <div className="bt-invoice-email-heading">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-black ${emailStatusClass[item.status] || emailStatusClass.new}`}>
+                                    {item.status === 'new' ? 'needs assignment' : item.status}
+                                  </span>
+                                  <span className="text-xs font-semibold text-slate-300">{formatEmailDate(item.received_at)}</span>
+                                  {item.agent_status ? <span className="bt-invoice-soft-chip">{item.agent_status.replace(/_/g, ' ')}</span> : null}
+                                </div>
+                                <p className="bt-invoice-origin-title">{item.subject || '(no subject)'}</p>
+                              </div>
+                              {item.status === 'ignored' ? (
+                                <span className="bt-invoice-not-invoice-badge">Ignored in BuildTrack</span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => void markEmailNotInvoice(item)}
+                                  disabled={ignoringEmailId === item.id}
+                                  className="bt-invoice-not-invoice-button"
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                  {ignoringEmailId === item.id ? 'Removing...' : 'Not an invoice'}
+                                </button>
+                              )}
+                            </div>
+                            <div className="bt-invoice-sender-panel">
+                              <div>
+                                <span>Contractor / sender</span>
+                                <strong>{senderName}</strong>
+                              </div>
+                              <div>
+                                <span>Email of origin</span>
+                                <strong>{senderEmail}</strong>
+                              </div>
+                              <div>
+                                <span>Received</span>
+                                <strong>{formatEmailDate(item.received_at)}</strong>
+                              </div>
+                            </div>
+                            <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-gray-600">
+                              {item.extracted_invoice_number ? <span className="bt-invoice-soft-chip">Invoice #{item.extracted_invoice_number}</span> : null}
+                              {item.extracted_amount ? <span className="bt-invoice-soft-chip">{money(item.extracted_amount)}</span> : null}
+                              {item.matched_project_address ? (
+                                <span className="bt-invoice-soft-chip text-blue-200">
+                                  Suggested: {item.matched_project_address}
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="bt-invoice-email-attachments">
+                              <span className="bt-invoice-attachments-label">Attachments</span>
+                              {itemAttachments.map(attachment => (
+                                <button
+                                  key={attachment.id}
+                                  type="button"
+                                  onClick={() => setAttachmentPreview({ emailId: item.id, attachment })}
+                                  className={`bt-invoice-attachment-button ${isPdfAttachment(attachment) ? 'is-pdf' : ''}`}
+                                  title={`Preview ${attachment.original_name || 'attachment'}`}
+                                >
+                                  <span className="bt-invoice-attachment-type">{attachmentKindLabel(attachment)}</span>
+                                  {isPdfAttachment(attachment) ? <FileText className="bt-invoice-attachment-file-icon w-3.5 h-3.5" /> : isImageAttachment(attachment) ? <ImageIcon className="w-3.5 h-3.5" /> : <Paperclip className="w-3.5 h-3.5" />}
+                                  <span className="truncate">{attachment.original_name || 'Attachment'}</span>
+                                  {formatBytes(attachment.size) ? <span className="bt-invoice-attachment-size">{formatBytes(attachment.size)}</span> : null}
+                                  <Eye className="w-3.5 h-3.5" />
+                                </button>
+                              ))}
+                              {itemAttachments.length === 0 && (
+                                <span className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-bold text-slate-300">
+                                  <Paperclip className="w-3.5 h-3.5" />
+                                  No attachments
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <aside className="bt-invoice-message-preview" aria-label="Email message preview">
+                            <div className="mb-2 flex items-center justify-between gap-3">
+                              <p className="text-[11px] font-black uppercase tracking-wide">Email preview</p>
+                              <span className="bt-invoice-soft-chip">{item.attachment_count || 0} file{Number(item.attachment_count || 0) === 1 ? '' : 's'}</span>
+                            </div>
+                            <div className="bt-invoice-message-scroll">
+                              {previewText ? (
+                                <p>{previewText}</p>
+                              ) : (
+                                <p className="opacity-70">No email message body was captured for this invoice email.</p>
+                              )}
+                            </div>
+                          </aside>
+                        </div>
+                        {item.status === 'new' ? (
+                          itemAttachments.length > 0 ? (
+                            <div className="bt-invoice-attachment-assignments">
+                              <div className="bt-invoice-attachment-assignments-header">
+                                <div>
+                                  <p>Project assignment</p>
+                                  <span>{unfiledCount} attachment{Number(unfiledCount) === 1 ? '' : 's'} still need project assignment</span>
+                                </div>
+                              </div>
+                              {itemAttachments.map(attachment => {
+                                const attachmentKey = emailAttachmentDraftKey(item.id, attachment.id);
+                                const projectName = attachment.filed_project_address || projects.find(project => project.id === attachment.filed_project_id)?.address || '';
+                                return (
+                                  <div key={attachment.id} className="bt-invoice-attachment-assignment-card">
+                                    <div className="bt-invoice-attachment-assignment-title">
+                                      <button
+                                        type="button"
+                                        onClick={() => setAttachmentPreview({ emailId: item.id, attachment })}
+                                        className={`bt-invoice-attachment-button ${isPdfAttachment(attachment) ? 'is-pdf' : ''}`}
+                                      >
+                                        <span className="bt-invoice-attachment-type">{attachmentKindLabel(attachment)}</span>
+                                        {isPdfAttachment(attachment) ? <FileText className="bt-invoice-attachment-file-icon w-3.5 h-3.5" /> : isImageAttachment(attachment) ? <ImageIcon className="w-3.5 h-3.5" /> : <Paperclip className="w-3.5 h-3.5" />}
+                                        <span className="truncate">{attachment.original_name || 'Attachment'}</span>
+                                        {formatBytes(attachment.size) ? <span className="bt-invoice-attachment-size">{formatBytes(attachment.size)}</span> : null}
+                                        <Eye className="w-3.5 h-3.5" />
+                                      </button>
+                                      {attachment.filed_invoice_id ? (
+                                        <span className="bt-invoice-assigned-chip">
+                                          Assigned{projectName ? ` to ${projectName}` : ''}
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                    {renderAssignmentControls(
+                                      attachmentKey,
+                                      () => fileEmailInvoice(item, attachment),
+                                      'Assign to a Project',
+                                      filingEmailId === `${item.id}:${attachment.id}`,
+                                      true
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div className="mt-4 rounded-md border border-blue-900/70 bg-blue-950/30 p-3">
+                              {renderAssignmentControls(emailDraftKey(item.id), () => fileEmailInvoice(item), 'Assign to a Project', filingEmailId === item.id, true)}
+                            </div>
+                          )
+                        ) : null}
+                      </div>
+                    )}
+                  </article>
+                );
+                })}
+              </div>
+            )}
+          </section>
+        )}
+
       </div>
 
+      {attachmentPreview && (
+        <div
+          className="bt-invoice-attachment-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Preview ${attachmentPreview.attachment.original_name || 'invoice attachment'}`}
+          onClick={() => setAttachmentPreview(null)}
+        >
+          <div className="bt-invoice-attachment-modal-panel" onClick={event => event.stopPropagation()}>
+            <div className="bt-invoice-attachment-modal-header">
+              <div className="min-w-0">
+                <p className="text-[11px] font-black uppercase tracking-wide text-orange-300">Attachment preview</p>
+                <h3 className="truncate text-base font-black text-gray-900">{attachmentPreview.attachment.original_name || 'Invoice attachment'}</h3>
+                <p className="text-xs font-semibold text-gray-500">
+                  {attachmentPreview.attachment.mime_type || 'Attachment'}
+                  {formatBytes(attachmentPreview.attachment.size) ? ` - ${formatBytes(attachmentPreview.attachment.size)}` : ''}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <a
+                  href={attachmentUrl(attachmentPreview.emailId, attachmentPreview.attachment.id)}
+                  className="bt-invoice-modal-action"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  Open
+                </a>
+                <button
+                  type="button"
+                  className="bt-invoice-modal-close"
+                  onClick={() => setAttachmentPreview(null)}
+                  aria-label="Close attachment preview"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+            <div className="bt-invoice-attachment-modal-body">
+              {attachmentPreviewLoading ? (
+                <div className="bt-invoice-attachment-fallback">
+                  <FileText className="h-10 w-10" />
+                  <p>Loading attachment preview...</p>
+                </div>
+              ) : attachmentPreviewError ? (
+                <div className="bt-invoice-attachment-fallback">
+                  <FileText className="h-10 w-10" />
+                  <p>{attachmentPreviewError}</p>
+                </div>
+              ) : isImageAttachment(attachmentPreview.attachment) && attachmentPreviewUrl ? (
+                <img
+                  src={attachmentPreviewUrl}
+                  alt={attachmentPreview.attachment.original_name || 'Invoice attachment'}
+                />
+              ) : isPdfAttachment(attachmentPreview.attachment) && attachmentPreviewUrl ? (
+                <iframe
+                  title={attachmentPreview.attachment.original_name || 'Invoice PDF attachment'}
+                  src={attachmentPreviewUrl}
+                />
+              ) : (
+                <div className="bt-invoice-attachment-fallback">
+                  <FileText className="h-10 w-10" />
+                  <p>This attachment type may not preview in the browser. Use Open to view or download it.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

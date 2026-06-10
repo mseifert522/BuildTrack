@@ -1,16 +1,26 @@
 const express = require('express');
+const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs');
 const { getDb } = require('../db/schema');
-const { authenticate, authorize, authorizeProjectAccess } = require('../middleware/auth');
+const { authenticate, authorize, authorizeUpperManagement, authorizeProjectAccess } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
+const { logDataAccess } = require('../utils/dataAccessAudit');
 const { recordWorkItemEvent } = require('../utils/workItemEvents');
-const { sendInvoiceEmail } = require('../utils/email');
+const { sendInvoiceEmail, sendApprovedPayNotificationEmail } = require('../utils/email');
 const { generateInvoicePDF } = require('../utils/pdf');
 
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
+
+const invoiceAttachmentUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    files: 10,
+    fileSize: Math.max(Number.parseInt(process.env.MAX_FILE_SIZE_MB || '20', 10), 1) * 1024 * 1024,
+  },
+});
 
 function buildDesktopInvoiceUrl(projectId, invoiceId) {
   const appUrl = (process.env.APP_URL || 'https://buildtrack.newurbandev.com').replace(/\/$/, '');
@@ -25,6 +35,57 @@ function buildDesktopInvoicesUrl() {
 function parseWorkItemIds(value) {
   if (!Array.isArray(value)) return [];
   return [...new Set(value.map(item => String(item || '').trim()).filter(Boolean))];
+}
+
+function sanitizeFilename(filename) {
+  const base = path.basename(String(filename || 'invoice-attachment'));
+  return base.replace(/[^a-zA-Z0-9._ -]/g, '_').slice(0, 180) || 'invoice-attachment';
+}
+
+function headerFilename(filename) {
+  return sanitizeFilename(filename).replace(/["\\\r\n]/g, '_');
+}
+
+function invoiceAttachmentRoot() {
+  return path.resolve(process.env.UPLOADS_PATH || './uploads', 'invoice-attachments');
+}
+
+function canAccessInvoice(invoice, user) {
+  return user.role !== 'contractor' || invoice.contractor_id === user.id;
+}
+
+function isUpperManagement(user) {
+  return ['super_admin', 'operations_manager'].includes(user?.role);
+}
+
+function canMutateOwnInvoice(invoice, user) {
+  return isUpperManagement(user) || invoice.contractor_id === user.id;
+}
+
+function formatInvoiceAttachment(row) {
+  return {
+    id: row.id,
+    invoice_id: row.invoice_id,
+    project_id: row.project_id,
+    original_name: row.original_name,
+    filename: row.filename,
+    mime_type: row.mime_type,
+    size: row.size,
+    uploaded_by: row.uploaded_by,
+    uploaded_by_name: row.uploaded_by_name || null,
+    created_at: row.created_at,
+    url: `/api/projects/${row.project_id}/invoices/${row.invoice_id}/attachments/${row.id}`,
+  };
+}
+
+function getInvoiceAttachments(db, invoiceId) {
+  return db.prepare(`
+    SELECT ia.*, u.name as uploaded_by_name
+    FROM invoice_attachments ia
+    LEFT JOIN users u ON u.id = ia.uploaded_by
+    WHERE ia.invoice_id = ?
+    ORDER BY datetime(ia.created_at) DESC, ia.created_at DESC
+  `).all(invoiceId).map(formatInvoiceAttachment);
 }
 
 function getInvoiceWorkItems(db, invoiceId) {
@@ -82,6 +143,35 @@ function getFieldWorkPaymentHolds(db, projectId, invoiceId = null) {
     ORDER BY datetime(COALESCE(target_date, updated_at, created_at)) ASC
     LIMIT 25
   `).all(projectId);
+}
+
+function getApprovedPaymentQueue(db) {
+  return db.prepare(`
+    SELECT
+      i.*,
+      u.name as contractor_name,
+      u.email as contractor_email,
+      p.address,
+      p.job_name
+    FROM invoices i
+    JOIN users u ON u.id = i.contractor_id
+    JOIN projects p ON p.id = i.project_id
+    WHERE i.status = 'approved'
+    ORDER BY datetime(i.updated_at) DESC, datetime(i.submitted_at) DESC
+    LIMIT 75
+  `).all();
+}
+
+async function notifyApprovedPaymentQueue(db, { approvedInvoice, approvedBy }) {
+  try {
+    await sendApprovedPayNotificationEmail({
+      approvedInvoices: getApprovedPaymentQueue(db),
+      approvedInvoice,
+      approvedBy,
+    });
+  } catch (emailErr) {
+    console.error('[INVOICE] Approved-to-pay notification failed:', emailErr.message);
+  }
 }
 
 function syncInvoiceWorkItems(db, { invoiceId, projectId, user, workItemIds, markReceived = false }) {
@@ -180,6 +270,14 @@ router.get('/', authorizeProjectAccess, (req, res) => {
     const holds = getFieldWorkPaymentHolds(db, invoice.project_id, invoice.id);
     return { ...invoice, linked_work_count: linkedWorkCount, payment_hold_count: holds.length };
   });
+  logDataAccess(req, {
+    action: 'project_invoice_list_viewed',
+    accessType: 'view',
+    entityType: 'invoice',
+    projectId: req.params.projectId,
+    recordCount: invoices.length,
+    riskLevel: 'high',
+  });
   res.json(invoices);
 });
 
@@ -215,6 +313,13 @@ router.get('/all', authorize('super_admin', 'operations_manager', 'project_manag
     ORDER BY i.created_at DESC
     LIMIT 100
   `).all();
+  logDataAccess(req, {
+    action: 'invoice_admin_list_viewed',
+    accessType: 'view',
+    entityType: 'invoice',
+    recordCount: invoices.length,
+    riskLevel: 'high',
+  });
   res.json(invoices);
 });
 
@@ -228,6 +333,16 @@ router.get('/next-number', (req, res) => {
     if (!isNaN(num) && num >= 1023) nextNum = num + 1;
   }
   res.json({ invoice_number: `NUD-${nextNum}` });
+});
+
+// POST /api/projects/:projectId/invoices/approved-pay-notification - send current approved payment queue
+router.post('/approved-pay-notification', authorizeUpperManagement, async (req, res) => {
+  const db = getDb();
+  await notifyApprovedPaymentQueue(db, {
+    approvedInvoice: null,
+    approvedBy: req.user.name || req.user.email || 'BuildTrack',
+  });
+  res.json({ message: 'Approved payment notification sent' });
 });
 
 // GET /api/projects/:projectId/invoices/:id
@@ -248,7 +363,76 @@ router.get('/:id', authorizeProjectAccess, (req, res) => {
   const lineItems = db.prepare('SELECT * FROM invoice_line_items WHERE invoice_id = ? ORDER BY sort_order').all(req.params.id);
   const linkedWorkItems = getInvoiceWorkItems(db, req.params.id);
   const paymentHolds = getFieldWorkPaymentHolds(db, req.params.projectId, req.params.id);
-  res.json({ ...invoice, line_items: lineItems, linked_work_items: linkedWorkItems, payment_holds: paymentHolds });
+  const attachments = getInvoiceAttachments(db, req.params.id);
+  logDataAccess(req, {
+    action: 'invoice_detail_viewed',
+    accessType: 'view',
+    entityType: 'invoice',
+    entityId: invoice.id,
+    projectId: req.params.projectId,
+    riskLevel: 'high',
+    details: {
+      invoice_number: invoice.invoice_number,
+      contractor_name: invoice.contractor_name,
+      total: invoice.total,
+      attachment_count: attachments.length,
+    },
+  });
+  res.json({ ...invoice, line_items: lineItems, linked_work_items: linkedWorkItems, payment_holds: paymentHolds, attachments });
+});
+
+router.post('/:id/attachments', authorizeProjectAccess, invoiceAttachmentUpload.array('attachments', 10), (req, res) => {
+  try {
+    const db = getDb();
+    const invoice = db.prepare('SELECT * FROM invoices WHERE id = ? AND project_id = ?').get(req.params.id, req.params.projectId);
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+    if (!canAccessInvoice(invoice, req.user)) return res.status(403).json({ error: 'Access denied' });
+    if (!canMutateOwnInvoice(invoice, req.user)) return res.status(403).json({ error: 'You can only add attachments to invoices you created' });
+    const files = Array.isArray(req.files) ? req.files : [];
+    if (!files.length) return res.status(400).json({ error: 'No invoice attachments uploaded' });
+
+    const dir = path.join(invoiceAttachmentRoot(), req.params.projectId, req.params.id);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+    const insert = db.prepare(`
+      INSERT INTO invoice_attachments (id, invoice_id, project_id, filename, original_name, mime_type, size, uploaded_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const saved = files.map(file => {
+      const id = uuidv4();
+      const originalName = sanitizeFilename(file.originalname);
+      const ext = path.extname(originalName);
+      const storedName = `${id}${ext || ''}`;
+      fs.writeFileSync(path.join(dir, storedName), file.buffer);
+      insert.run(id, req.params.id, req.params.projectId, storedName, originalName, file.mimetype || 'application/octet-stream', file.size || file.buffer.length, req.user.id);
+      return {
+        id,
+        invoice_id: req.params.id,
+        project_id: req.params.projectId,
+        original_name: originalName,
+        filename: storedName,
+        mime_type: file.mimetype || 'application/octet-stream',
+        size: file.size || file.buffer.length,
+        uploaded_by: req.user.id,
+        created_at: new Date().toISOString(),
+        url: `/api/projects/${req.params.projectId}/invoices/${req.params.id}/attachments/${id}`,
+      };
+    });
+
+    logActivity({
+      userId: req.user.id,
+      projectId: req.params.projectId,
+      action: 'invoice_attachment_uploaded',
+      entityType: 'invoice',
+      entityId: req.params.id,
+      details: { count: saved.length },
+    });
+
+    res.status(201).json({ attachments: saved });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to upload invoice attachments' });
+  }
 });
 
 // POST /api/projects/:projectId/invoices - create invoice
@@ -354,6 +538,7 @@ router.put('/:id', authorizeProjectAccess, (req, res) => {
     if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
     // Allow editing draft or submitted invoices from mobile
     if (!['draft', 'submitted'].includes(invoice.status)) return res.status(400).json({ error: 'Only draft or submitted invoices can be edited' });
+    if (req.user.role === 'project_manager') return res.status(403).json({ error: 'Project managers can create and submit invoices, but cannot edit existing invoices' });
     if (req.user.role === 'contractor' && invoice.contractor_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
 
     const { notes, line_items, send_email } = req.body;
@@ -398,7 +583,7 @@ router.post('/:id/submit', authorizeProjectAccess, async (req, res) => {
     if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
     // Allow re-submission from draft or submitted (mobile saves then immediately submits)
     if (!['draft', 'submitted'].includes(invoice.status)) return res.status(400).json({ error: 'Invoice cannot be re-submitted in its current status' });
-    if (req.user.role === 'contractor' && invoice.contractor_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+    if (!canMutateOwnInvoice(invoice, req.user)) return res.status(403).json({ error: 'Access denied' });
 
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.projectId);
     const contractor = db.prepare('SELECT * FROM users WHERE id = ?').get(invoice.contractor_id);
@@ -446,31 +631,133 @@ router.post('/:id/submit', authorizeProjectAccess, async (req, res) => {
 });
 
 // PUT /api/projects/:projectId/invoices/:id/status - update invoice status (admin)
-router.put('/:id/status', authorize('super_admin', 'operations_manager', 'project_manager', 'admin_assistant'), (req, res) => {
+router.put('/:id/status', authorizeUpperManagement, async (req, res) => {
   const { status } = req.body;
   const validStatuses = ['draft', 'submitted', 'reviewed', 'approved', 'paid'];
   if (!validStatuses.includes(status)) return res.status(400).json({ error: 'Invalid status' });
-  const db = getDb();
-  const invoice = db.prepare('SELECT id, project_id FROM invoices WHERE id = ? AND project_id = ?').get(req.params.id, req.params.projectId);
-  if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
-  if (['approved', 'paid'].includes(status)) {
-    const holds = getFieldWorkPaymentHolds(db, req.params.projectId, req.params.id);
-    if (holds.length) {
-      return res.status(409).json({
+	  const db = getDb();
+	  const invoice = db.prepare(`
+      SELECT
+        i.*,
+        u.name as contractor_name,
+        u.email as contractor_email,
+        p.address,
+        p.job_name
+      FROM invoices i
+      JOIN users u ON u.id = i.contractor_id
+      JOIN projects p ON p.id = i.project_id
+      WHERE i.id = ? AND i.project_id = ?
+    `).get(req.params.id, req.params.projectId);
+	  if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+	  if (['approved', 'paid'].includes(status)) {
+	    const linkedCount = db.prepare('SELECT COUNT(*) as count FROM invoice_work_items WHERE invoice_id = ?').get(req.params.id).count;
+	    if (linkedCount === 0) {
+	      return res.status(409).json({
+	        error: 'Assign this invoice to a project scope task before approving or paying it.',
+	        code: 'INVOICE_TASK_ASSIGNMENT_REQUIRED',
+	      });
+	    }
+	    const holds = getFieldWorkPaymentHolds(db, req.params.projectId, req.params.id);
+	    if (holds.length) {
+	      return res.status(409).json({
         error: 'Field work must be completed and approved before this invoice can be approved for payment.',
         code: 'FIELD_WORK_APPROVAL_REQUIRED',
         holds,
       });
     }
   }
-  const quickbooksStatus = status === 'paid' ? 'queued' : undefined;
+  if (status === 'paid') {
+    const qboPaymentStatus = String(invoice.quickbooks_payment_status || '').toLowerCase();
+    const qboBalance = Number(invoice.quickbooks_balance);
+    const qboHasKnownZeroBalance = Boolean(
+      invoice.quickbooks_bill_id
+      && invoice.quickbooks_balance !== null
+      && invoice.quickbooks_balance !== undefined
+      && invoice.quickbooks_balance !== ''
+      && Number.isFinite(qboBalance)
+      && qboBalance <= 0
+    );
+    if (qboPaymentStatus !== 'paid' && !qboHasKnownZeroBalance) {
+      return res.status(409).json({
+        error: 'QuickBooks has not marked this bill paid yet. BuildTrack can only mark invoices paid after the QuickBooks sync reports paid or a zero open balance.',
+        code: 'QUICKBOOKS_PAID_SYNC_REQUIRED',
+      });
+    }
+  }
+  const quickbooksStatus = status === 'paid' ? 'synced' : undefined;
   if (quickbooksStatus) {
     db.prepare("UPDATE invoices SET status = ?, quickbooks_status = ?, quickbooks_error = NULL, updated_at = datetime('now') WHERE id = ?").run(status, quickbooksStatus, req.params.id);
   } else {
     db.prepare("UPDATE invoices SET status = ?, updated_at = datetime('now') WHERE id = ?").run(status, req.params.id);
   }
   logActivity({ userId: req.user.id, projectId: req.params.projectId, action: 'invoice_status_updated', entityType: 'invoice', entityId: req.params.id, details: { status } });
+  if (status === 'approved' && invoice.status !== 'approved' && req.body?.notify !== false) {
+    await notifyApprovedPaymentQueue(db, {
+      approvedInvoice: { ...invoice, status: 'approved' },
+      approvedBy: req.user.name || req.user.email || 'BuildTrack',
+    });
+  }
   res.json({ message: 'Status updated', quickbooks_status: quickbooksStatus || undefined });
+});
+
+router.get('/:id/attachments/:attachmentId', authorizeProjectAccess, (req, res) => {
+  try {
+    const db = getDb();
+    const invoice = db.prepare('SELECT * FROM invoices WHERE id = ? AND project_id = ?').get(req.params.id, req.params.projectId);
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+    if (!canAccessInvoice(invoice, req.user)) return res.status(403).json({ error: 'Access denied' });
+
+    const attachment = db.prepare(`
+      SELECT * FROM invoice_attachments
+      WHERE id = ? AND invoice_id = ? AND project_id = ?
+    `).get(req.params.attachmentId, req.params.id, req.params.projectId);
+    if (!attachment) return res.status(404).json({ error: 'Attachment not found' });
+
+    const filePath = path.join(invoiceAttachmentRoot(), req.params.projectId, req.params.id, attachment.filename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Attachment file missing' });
+
+    if (String(req.query.inline || req.query.preview || '') === '1') {
+      logDataAccess(req, {
+        action: 'invoice_attachment_viewed',
+        accessType: 'view',
+        entityType: 'invoice_attachment',
+        entityId: attachment.id,
+        projectId: req.params.projectId,
+        riskLevel: 'high',
+        details: {
+          invoice_id: invoice.id,
+          invoice_number: invoice.invoice_number,
+          original_name: attachment.original_name,
+          mime_type: attachment.mime_type,
+          size: attachment.size,
+        },
+      });
+      res.setHeader('Content-Type', attachment.mime_type || 'application/octet-stream');
+      res.setHeader('Content-Disposition', `inline; filename="${headerFilename(attachment.original_name)}"`);
+      res.setHeader('Cache-Control', 'private, max-age=300');
+      return res.sendFile(filePath);
+    }
+
+    logDataAccess(req, {
+      action: 'invoice_attachment_downloaded',
+      accessType: 'download',
+      entityType: 'invoice_attachment',
+      entityId: attachment.id,
+      projectId: req.params.projectId,
+      riskLevel: 'high',
+      details: {
+        invoice_id: invoice.id,
+        invoice_number: invoice.invoice_number,
+        original_name: attachment.original_name,
+        mime_type: attachment.mime_type,
+        size: attachment.size,
+      },
+    });
+    return res.download(filePath, attachment.original_name);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load invoice attachment' });
+  }
 });
 
 // GET /api/projects/:projectId/invoices/:id/pdf - download PDF
@@ -486,6 +773,21 @@ router.get('/:id/pdf', authorizeProjectAccess, async (req, res) => {
     const lineItems = db.prepare('SELECT * FROM invoice_line_items WHERE invoice_id = ? ORDER BY sort_order').all(req.params.id);
 
     const pdfBuffer = await generateInvoicePDF({ invoice, lineItems, project, contractor });
+    logDataAccess(req, {
+      action: 'invoice_pdf_downloaded',
+      accessType: 'download',
+      entityType: 'invoice',
+      entityId: invoice.id,
+      projectId: req.params.projectId,
+      riskLevel: 'high',
+      details: {
+        invoice_number: invoice.invoice_number,
+        contractor_id: invoice.contractor_id,
+        contractor_name: contractor?.name || contractor?.email || null,
+        total: invoice.total,
+        line_item_count: lineItems.length,
+      },
+    });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="invoice-${invoice.invoice_number}.pdf"`);
     res.send(pdfBuffer);

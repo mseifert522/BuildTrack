@@ -1,17 +1,19 @@
-import { type ChangeEvent, type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ChangeEvent, type Dispatch, type KeyboardEvent, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useDropzone, type FileRejection } from 'react-dropzone';
 import { useAuthStore, canChangeProjectStatus, canManageProjects, isAdminRole } from '../store/authStore';
 import api from '../lib/api';
 import { Loading, StatusBadge, Modal } from '../components/ui';
 import Avatar from '../components/Avatar';
-import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, ClipboardList, Activity, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle, Send, Phone, Building2, AlertTriangle, Check, Paperclip } from 'lucide-react';
+import VoiceTextarea from '../components/VoiceTextarea';
+import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, ClipboardList, Activity, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle, Send, Phone, Building2, AlertTriangle, Check, Paperclip, ChevronLeft, ChevronRight, CalendarDays, Search } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useForm } from 'react-hook-form';
 import { format } from 'date-fns';
 import GooglePlacesInput from '../components/GooglePlacesInput';
 import CurrencyInput from '../components/CurrencyInput';
 import { formatEasternDate, formatEasternDateTime } from '../lib/time';
+import AddToCalendarButton from '../components/AddToCalendarButton';
 import {
   appendProgressUploadAudit,
   isSupportedProgressMediaFile,
@@ -22,6 +24,20 @@ import {
 import { getProgressMediaKind, isVideoMedia } from '../lib/progressMedia';
 
 type Tab = 'overview' | 'progress-history' | 'construction-plan' | 'quotes' | 'punch-list' | 'photos' | 'invoices' | 'activity' | 'notes' | 'team' | 'texts';
+
+type ProgressLightboxItem = {
+  id: string;
+  src: string;
+  isVideo: boolean;
+  name?: string;
+  meta?: string;
+  noteText?: string;
+};
+
+type ProgressLightboxState = {
+  items: ProgressLightboxItem[];
+  index: number;
+};
 
 type ContractorDirectoryProject = {
   id?: string | null;
@@ -60,6 +76,31 @@ type ContractorTextMessage = {
   sent_at?: string | null;
 };
 
+type DictationStatus = 'idle' | 'starting' | 'listening';
+
+function appendDictationText(base: string, spokenText: string) {
+  const cleanSpoken = spokenText.replace(/\s+/g, ' ').trim();
+  if (!cleanSpoken) return base;
+  if (!base.trim()) return cleanSpoken;
+  return `${base}${/\s$/.test(base) ? '' : ' '}${cleanSpoken}`;
+}
+
+function getRecognitionTranscript(results: any) {
+  const finalParts: string[] = [];
+  const interimParts: string[] = [];
+  for (let index = 0; index < results.length; index += 1) {
+    const result = results[index];
+    const transcript = String(result?.[0]?.transcript || '').trim();
+    if (!transcript) continue;
+    if (result.isFinal) {
+      finalParts.push(transcript);
+    } else {
+      interimParts.push(transcript);
+    }
+  }
+  return [...finalParts, ...interimParts].join(' ').trim();
+}
+
 const PROJECT_STATUS_OPTIONS = [
   { value: 'not_started', label: 'Not Started' },
   { value: 'active_rehab', label: 'Active Rehabs' },
@@ -67,6 +108,12 @@ const PROJECT_STATUS_OPTIONS = [
   { value: 'long_term_holding', label: 'Long-Term Holdings' },
   { value: 'commercial', label: 'Commercial' },
 ];
+
+function isPunchlistStageEnabled(value: any) {
+  if (value === true || value === 1) return true;
+  if (typeof value === 'string') return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
+  return false;
+}
 
 const getNotePhotos = (note: any) => {
   if (Array.isArray(note.photos) && note.photos.length) return note.photos;
@@ -98,6 +145,33 @@ const groupMediaByDay = (photos: any[]) =>
 
 const getProgressTimestamp = (item: any) =>
   item?.captured_at || item?.taken_at || item?.uploaded_at || item?.created_at;
+
+const progressPhotoKey = (photo: any) => String(photo?.id || photo?.filename || '');
+
+const progressPhotoSrc = (projectId: string, photo: any) => `/uploads/${projectId}/${photo.filename}`;
+
+const getProgressPhotoNoteText = (photo: any) =>
+  String(photo?.note_text || photo?.individual_note || '').trim();
+
+const getProgressPhotoGroupNoteText = (photo: any) =>
+  String(photo?.batch_note || '').trim();
+
+const buildProgressLightboxItems = (projectId: string, photos: any[]): ProgressLightboxItem[] =>
+  photos
+    .filter(photo => getProgressMediaKind(photo) !== 'file')
+    .map(photo => ({
+      id: progressPhotoKey(photo),
+      src: progressPhotoSrc(projectId, photo),
+      isVideo: getProgressMediaKind(photo) === 'video',
+      name: photo.original_name || photo.filename || 'Progress picture',
+      meta: [
+        photo.uploader_name || null,
+        getProgressTimestamp(photo)
+          ? formatEasternDateTime(getProgressTimestamp(photo), { hour: 'numeric', minute: '2-digit' })
+          : null,
+      ].filter(Boolean).join(' - '),
+      noteText: getProgressPhotoNoteText(photo),
+    }));
 
 const groupProgressRecordsByDay = (records: any[]) =>
   records.reduce<{ date: string; records: any[] }[]>((groups, record) => {
@@ -137,8 +211,8 @@ const groupStandaloneProgressMedia = (photos: any[], maxPerCard = 20) => {
       const uploaderNames = [...new Set(chunk.map(photo => photo.uploader_name || 'Unknown user'))];
       const uploaderAvatars = [...new Set(chunk.map(photo => photo.uploader_avatar_url).filter(Boolean).map(String))];
       const mediaTypes = new Set(chunk.map(photo => (isVideoMedia(photo) ? 'video' : 'picture')));
-      const notes = [...new Set(chunk
-        .map(photo => photo.individual_note || photo.batch_note || photo.caption)
+      const groupNotes = [...new Set(chunk
+        .map(photo => getProgressPhotoGroupNoteText(photo))
         .filter(Boolean)
         .map(String))];
 
@@ -149,7 +223,7 @@ const groupStandaloneProgressMedia = (photos: any[], maxPerCard = 20) => {
         userName: uploaderNames.length === 1 ? uploaderNames[0] : `${uploaderNames.length} users`,
         userAvatarUrl: uploaderNames.length === 1 && uploaderAvatars.length === 1 ? uploaderAvatars[0] : null,
         mediaType: mediaTypes.has('video') && mediaTypes.size === 1 ? 'video' : mediaTypes.has('video') ? 'mixed' : 'picture',
-        noteText: notes.length === 1 ? notes[0] : null,
+        noteText: groupNotes.length === 1 ? groupNotes[0] : null,
         photos: chunk,
       };
     });
@@ -161,6 +235,31 @@ function isMobileCaptureContext() {
   const userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent;
   return Boolean(window.matchMedia?.('(max-width: 767px)').matches) || /Android|iPhone|iPad|iPod|Mobile/i.test(userAgent);
 }
+
+const formatLocalDateInput = (date = new Date()) => {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+};
+
+const defaultReminderTime = () => {
+  const date = new Date(Date.now() + 30 * 60 * 1000);
+  const roundedMinutes = Math.ceil(date.getMinutes() / 15) * 15;
+  if (roundedMinutes >= 60) {
+    date.setHours(date.getHours() + 1);
+    date.setMinutes(0, 0, 0);
+  } else {
+    date.setMinutes(roundedMinutes, 0, 0);
+  }
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+};
+
+const splitReminderEmails = (value: string) =>
+  value
+    .split(/[\s,;]+/)
+    .map(item => item.trim())
+    .filter(Boolean);
+
+const localDateTimeToIso = (date: string, time: string) => new Date(`${date}T${time || '09:00'}`).toISOString();
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
@@ -177,7 +276,19 @@ export default function ProjectDetail() {
   const [newNote, setNewNote] = useState('');
   const [noteType, setNoteType] = useState('general');
   const [noteVisibility, setNoteVisibility] = useState<'private' | 'public'>('private');
-  const [listeningNote, setListeningNote] = useState(false);
+  const [showCalendarComposer, setShowCalendarComposer] = useState(false);
+  const [calendarTitle, setCalendarTitle] = useState('');
+  const [calendarDate, setCalendarDate] = useState(new Date().toISOString().slice(0, 10));
+  const [calendarEventType, setCalendarEventType] = useState('task');
+  const [calendarPriority, setCalendarPriority] = useState('normal');
+  const [calendarReminderEnabled, setCalendarReminderEnabled] = useState(false);
+  const [calendarReminderRecipients, setCalendarReminderRecipients] = useState('');
+  const [calendarReminderMessage, setCalendarReminderMessage] = useState('');
+  const [calendarReminderScheduleType, setCalendarReminderScheduleType] = useState<'now' | 'once' | 'weekly' | 'monthly'>('once');
+  const [calendarReminderDate, setCalendarReminderDate] = useState(formatLocalDateInput());
+  const [calendarReminderTime, setCalendarReminderTime] = useState(defaultReminderTime());
+  const [savingCalendarEvent, setSavingCalendarEvent] = useState(false);
+  const [noteDictationStatus, setNoteDictationStatus] = useState<DictationStatus>('idle');
   const [notePhotoFiles, setNotePhotoFiles] = useState<File[]>([]);
   const [notePhotoSource, setNotePhotoSource] = useState<ProgressCaptureSource>('desktop');
   const [attachNoteId, setAttachNoteId] = useState<string | null>(null);
@@ -187,6 +298,7 @@ export default function ProjectDetail() {
   const [editingNoteType, setEditingNoteType] = useState('general');
   const [editingNoteVisibility, setEditingNoteVisibility] = useState<'private' | 'public'>('private');
   const [uploadingMainPhoto, setUploadingMainPhoto] = useState(false);
+  const [activatingPunchList, setActivatingPunchList] = useState(false);
   const [activity, setActivity] = useState<any[]>([]);
   const [editAddress, setEditAddress] = useState('');
   const [editBudget, setEditBudget] = useState('');
@@ -195,9 +307,11 @@ export default function ProjectDetail() {
   const [editClosingCosts, setEditClosingCosts] = useState('');
   const { register, handleSubmit, reset, setValue, formState: { isSubmitting } } = useForm();
   const noteRecognitionRef = useRef<any>(null);
+  const noteDictationBaseRef = useRef('');
   const attachExistingNoteInputRef = useRef<HTMLInputElement>(null);
   const noteMediaInputRef = useRef<HTMLInputElement>(null);
   const noteCameraInputRef = useRef<HTMLInputElement>(null);
+  const listeningNote = noteDictationStatus !== 'idle';
 
   const load = useCallback(async () => {
     try {
@@ -291,8 +405,9 @@ export default function ProjectDetail() {
 
   const onEditProject = async (data: any) => {
     try {
-      const payload = { ...data, address: editAddress || data.address, budget: editBudget ? parseFloat(editBudget) : null, purchase_price: editPurchasePrice ? parseFloat(editPurchasePrice) : null, arv: editArv ? parseFloat(editArv) : null, closing_costs: editClosingCosts ? parseFloat(editClosingCosts) : null };
+      const payload = { ...data, address: editAddress || data.address, budget: editBudget ? parseFloat(editBudget) : null, purchase_price: editPurchasePrice ? parseFloat(editPurchasePrice) : null, arv: editArv ? parseFloat(editArv) : null, closing_costs: editClosingCosts ? parseFloat(editClosingCosts) : null, punchlist_stage: data.punchlist_stage ? 1 : 0 };
       if (!canChangeStatus) delete payload.status;
+      if (!canChangeStatus) delete payload.punchlist_stage;
       await api.put(`/projects/${id}`, payload);
       toast.success('Project updated');
       setShowEdit(false);
@@ -320,13 +435,27 @@ export default function ProjectDetail() {
     }
   };
 
+  const activatePunchList = async () => {
+    if (!id || !canChangeStatus || activatingPunchList) return;
+    setActivatingPunchList(true);
+    try {
+      await api.put(`/projects/${id}`, { punchlist_stage: 1 });
+      toast.success('Punch list activated');
+      await load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to activate punch list');
+    } finally {
+      setActivatingPunchList(false);
+    }
+  };
+
   const uploadProgressPicturesToNote = async (noteId: string, files: File[], source: ProgressCaptureSource = 'desktop') => {
     if (!files.length) return;
     const formData = new FormData();
     files.forEach(file => formData.append('photos', file));
     formData.append('note_id', noteId);
     formData.append('photo_type', 'progress');
-    formData.append('caption', 'Progress pictures attached to project note');
+    formData.append('caption', 'Photos attached to project note');
     await appendProgressUploadAudit(formData, files, files.map(() => source));
     await api.post(`/projects/${id}/photos?type=progress`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
@@ -342,7 +471,7 @@ export default function ProjectDetail() {
       toast.success(`${selectedFiles.length} progress picture${selectedFiles.length === 1 ? '' : 's'} attached`);
       await loadNotes();
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Failed to attach progress pictures');
+      toast.error(err.response?.data?.error || 'Failed to attach photos');
     } finally {
       setAttachNoteId(null);
       setAttachingNoteId(null);
@@ -374,6 +503,80 @@ export default function ProjectDetail() {
     }
   };
 
+  const openCalendarComposer = () => {
+    const defaultTitle = newNote.trim()
+      ? newNote.trim().replace(/\s+/g, ' ').slice(0, 120)
+      : `Follow up: ${project?.job_name || project?.address || 'project'}`;
+    setCalendarTitle(defaultTitle);
+    setCalendarDate(new Date().toISOString().slice(0, 10));
+    setCalendarReminderEnabled(false);
+    setCalendarReminderRecipients('');
+    setCalendarReminderMessage(newNote.trim() || defaultTitle);
+    setCalendarReminderScheduleType('once');
+    setCalendarReminderDate(formatLocalDateInput());
+    setCalendarReminderTime(defaultReminderTime());
+    setShowCalendarComposer(true);
+  };
+
+  const addCalendarEvent = async () => {
+    if (!calendarTitle.trim()) {
+      toast.error('Calendar title is required');
+      return;
+    }
+    if (!calendarDate) {
+      toast.error('Calendar date is required');
+      return;
+    }
+    const reminderRecipients = splitReminderEmails(calendarReminderRecipients);
+    if (calendarReminderEnabled && !reminderRecipients.length) {
+      toast.error('Enter at least one reminder email');
+      return;
+    }
+    if (calendarReminderEnabled && calendarReminderScheduleType !== 'now' && (!calendarReminderDate || !calendarReminderTime)) {
+      toast.error('Choose the reminder date and time');
+      return;
+    }
+    setSavingCalendarEvent(true);
+    try {
+      const payload: any = {
+        project_id: id,
+        title: calendarTitle.trim(),
+        description: newNote.trim() || null,
+        event_type: calendarEventType,
+        scheduled_for: calendarDate,
+        priority: calendarPriority,
+        source_type: 'project_note',
+      };
+      if (calendarReminderEnabled && isAdminRole(user?.role || '')) {
+        payload.email_reminder = {
+          enabled: true,
+          recipients: reminderRecipients,
+          subject: calendarTitle.trim(),
+          message: calendarReminderMessage.trim() || newNote.trim() || calendarTitle.trim(),
+          schedule_type: calendarReminderScheduleType,
+          send_at: calendarReminderScheduleType === 'now' ? new Date().toISOString() : localDateTimeToIso(calendarReminderDate, calendarReminderTime),
+        };
+      }
+      const res = await api.post('/calendar/events', payload);
+      if (res.data?.warning) {
+        toast.error(res.data.warning);
+      } else {
+        toast.success(calendarReminderEnabled ? 'Added to calendar with email reminder' : 'Added to operations calendar');
+      }
+      setShowCalendarComposer(false);
+      setCalendarTitle('');
+      setCalendarPriority('normal');
+      setCalendarEventType('task');
+      setCalendarReminderEnabled(false);
+      setCalendarReminderRecipients('');
+      setCalendarReminderMessage('');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to add calendar item');
+    } finally {
+      setSavingCalendarEvent(false);
+    }
+  };
+
   const saveNoteEdit = async (noteId: string) => {
     if (!editingNoteText.trim()) return;
     try {
@@ -395,59 +598,70 @@ export default function ProjectDetail() {
     }
 
     noteRecognitionRef.current?.stop?.();
+    noteRecognitionRef.current = null;
+    noteDictationBaseRef.current = newNote;
+    setNoteDictationStatus('starting');
     const recognition = new SpeechRecognition();
     recognition.lang = 'en-US';
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.onstart = () => setListeningNote(true);
+    recognition.maxAlternatives = 1;
+    recognition.onstart = () => {
+      if (noteRecognitionRef.current === recognition) setNoteDictationStatus('listening');
+    };
     recognition.onend = () => {
       if (noteRecognitionRef.current === recognition) {
-        setListeningNote(false);
+        setNoteDictationStatus('idle');
         noteRecognitionRef.current = null;
       }
     };
-    recognition.onerror = () => {
-      setListeningNote(false);
-      noteRecognitionRef.current = null;
-      toast.error('Microphone dictation stopped');
+    recognition.onerror = (event: any) => {
+      if (noteRecognitionRef.current === recognition) {
+        setNoteDictationStatus('idle');
+        noteRecognitionRef.current = null;
+      }
+      if (event?.error !== 'aborted') toast.error('Microphone dictation stopped');
     };
     recognition.onresult = (event: any) => {
-      const spokenText = Array.from(event.results).slice(event.resultIndex || 0)
-        .filter((result: any) => result.isFinal)
-        .map((result: any) => result[0]?.transcript)
-        .filter(Boolean)
-        .join(' ')
-        .trim();
-      if (spokenText) setNewNote(prev => `${prev}${prev.trim() ? ' ' : ''}${spokenText}`);
+      const spokenText = getRecognitionTranscript(event.results);
+      if (spokenText) setNewNote(appendDictationText(noteDictationBaseRef.current, spokenText));
     };
     noteRecognitionRef.current = recognition;
-    recognition.start();
+    try {
+      recognition.start();
+    } catch {
+      noteRecognitionRef.current = null;
+      setNoteDictationStatus('idle');
+      toast.error('Microphone dictation could not start');
+    }
   };
 
   const stopNoteDictation = () => {
-    noteRecognitionRef.current?.stop?.();
+    const recognition = noteRecognitionRef.current;
     noteRecognitionRef.current = null;
-    setListeningNote(false);
+    recognition?.stop?.();
+    setNoteDictationStatus('idle');
   };
 
   if (loading) return <Loading />;
   if (!project) return <div className="p-6 text-center text-gray-500">Project not found</div>;
+
+  const canEdit = user && canManageProjects(user.role);
+  const punchlistStageActive = isPunchlistStageEnabled(project.punchlist_stage);
+  const canAssign = user && isAdminRole(user.role);
+  const fieldWork = project.field_work || { counts: {}, tasks: [], invoice_holds: [] };
 
   const tabs: { id: Tab; label: string; icon: any }[] = [
     { id: 'overview', label: 'Overview', icon: MapPin },
     { id: 'progress-history', label: 'Progress, Pictures & Notes', icon: Activity },
     { id: 'construction-plan', label: 'Scope of Work', icon: FileText },
     { id: 'quotes', label: 'Upload Quotes', icon: FileText },
-    { id: 'punch-list', label: 'Punch List', icon: ClipboardList },
-    { id: 'photos', label: 'Progress Photos', icon: Camera },
-    { id: 'team', label: 'Assigned Contractors', icon: Users },
+    { id: 'punch-list', label: punchlistStageActive ? 'Punch List Active' : 'Start Punch List', icon: ClipboardList },
+    { id: 'photos', label: 'Photos', icon: Camera },
+    { id: 'team', label: 'Assign Contractors', icon: Users },
     { id: 'texts', label: 'Text Contractors', icon: MessageSquare },
     { id: 'activity', label: 'Activity', icon: Activity },
   ];
-
-  const canEdit = user && canManageProjects(user.role);
-  const canAssign = user && isAdminRole(user.role);
-  const fieldWork = project.field_work || { counts: {}, tasks: [], invoice_holds: [] };
 
   const openProjectPhotoCapture = () => {
     const projectId = id || project?.id;
@@ -499,7 +713,7 @@ export default function ProjectDetail() {
   };
 
   const notesPanel = (compact = false) => (
-    <div className="bt-project-notes-panel h-full rounded-xl border border-slate-400 bg-[#D8E0EA] p-3 shadow-[0_10px_24px_rgba(15,23,42,0.12)] sm:p-4">
+    <div className="bt-project-notes-panel h-full rounded-xl border border-blue-400/45 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 p-3 shadow-[0_18px_44px_rgba(15,23,42,0.34)] ring-1 ring-cyan-300/10 sm:p-4">
       <input
         ref={attachExistingNoteInputRef}
         type="file"
@@ -508,10 +722,10 @@ export default function ProjectDetail() {
         className="hidden"
         onChange={event => attachProgressPicturesToExistingNote(event.target.files)}
       />
-      <div className="bt-project-notes-header mb-3 flex items-center justify-between gap-3 rounded-xl border border-slate-400 bg-slate-50 px-3 py-2.5 shadow-sm">
+      <div className="bt-project-notes-header mb-3 flex items-center justify-between gap-3 rounded-xl border border-cyan-300/25 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 px-3 py-2.5 shadow-[0_8px_22px_rgba(37,99,235,0.18)]">
         <div className="min-w-0">
-          <h3 className="text-sm font-black text-slate-950">Project Notes</h3>
-          <p className="mt-0.5 text-xs font-semibold text-slate-600">Office, field, and general updates for this project</p>
+          <h3 className="text-sm font-black text-white">Project Notes</h3>
+          <p className="mt-0.5 text-xs font-semibold text-blue-100/80">Office, field, and general updates for this project</p>
         </div>
         <div className="flex flex-shrink-0 items-center gap-2">
           <button
@@ -527,15 +741,15 @@ export default function ProjectDetail() {
           <button
             type="button"
             onClick={() => setTab('notes')}
-            className="text-xs font-bold text-blue-600 hover:underline"
+            className="text-xs font-bold text-cyan-100 hover:text-white hover:underline"
           >
             View all
           </button>
           )}
         </div>
       </div>
-      <div className="bt-project-note-composer mb-4 rounded-2xl border border-slate-400 bg-[#EDF3F8] p-3 shadow-sm">
-        <textarea
+      <div className="bt-project-note-composer mb-4 rounded-2xl border border-amber-300/35 bg-gradient-to-br from-slate-950 via-slate-900 to-amber-950 p-3 shadow-[0_14px_34px_rgba(245,158,11,0.14)]">
+        <VoiceTextarea
           value={newNote}
           onChange={e => setNewNote(e.target.value)}
           rows={compact ? 2 : 3}
@@ -601,17 +815,17 @@ export default function ProjectDetail() {
           {notePhotoFiles.length ? `${notePhotoFiles.length} ready` : (
             <>
               <span className="sm:hidden">Take Pictures</span>
-              <span className="hidden sm:inline">Progress pictures</span>
+              <span className="hidden sm:inline">Photos</span>
             </>
           )}
         </button>
         <button
           type="button"
-          onClick={listeningNote ? stopNoteDictation : startNoteDictation}
-          className="inline-flex min-h-[46px] items-center justify-center gap-1.5 rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
+          onClick={openCalendarComposer}
+          className="inline-flex min-h-[46px] items-center justify-center gap-1.5 rounded-lg border border-amber-400 bg-amber-50 px-3 py-2 text-sm font-black text-amber-800 shadow-sm transition-colors hover:bg-amber-100"
         >
-          {listeningNote ? <Square className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-          {listeningNote ? 'Stop' : 'Mic'}
+          <CalendarDays className="w-4 h-4" />
+          Add to Calenda
         </button>
         <button
           type="button"
@@ -622,18 +836,127 @@ export default function ProjectDetail() {
           Submit Note
         </button>
         </div>
-      {listeningNote && (
-        <div className="mt-3 flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
-          <span>Listening</span>
-          <span className="flex items-end gap-0.5 h-4">
-            {[0, 1, 2, 3].map(i => (
-              <span
-                key={i}
-                className="w-1 rounded-full bg-amber-500 animate-pulse"
-                style={{ height: 6 + i * 3, animationDelay: `${i * 120}ms` }}
-              />
-            ))}
-          </span>
+      {showCalendarComposer && (
+        <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 shadow-sm">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-black uppercase tracking-wide text-amber-800">Operations Calendar</p>
+              <p className="text-xs font-semibold text-amber-700">Schedule this project item for the dashboard calendar.</p>
+            </div>
+            <button type="button" onClick={() => setShowCalendarComposer(false)} className="rounded-lg px-2 py-1 text-xs font-black text-amber-800 hover:bg-amber-100">
+              Close
+            </button>
+          </div>
+          <div className="grid gap-2 lg:grid-cols-[minmax(0,1.5fr)_150px_150px_130px_auto]">
+            <input
+              value={calendarTitle}
+              onChange={e => setCalendarTitle(e.target.value)}
+              className="min-h-[42px] rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              placeholder="Calendar item title"
+            />
+            <input
+              type="date"
+              value={calendarDate}
+              onChange={e => setCalendarDate(e.target.value)}
+              className="min-h-[42px] rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+            />
+            <select
+              value={calendarEventType}
+              onChange={e => setCalendarEventType(e.target.value)}
+              className="min-h-[42px] rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+            >
+              <option value="task">Task</option>
+              <option value="inspection">Inspection</option>
+              <option value="maintenance">Maintenance</option>
+              <option value="note">Note</option>
+            </select>
+            <select
+              value={calendarPriority}
+              onChange={e => setCalendarPriority(e.target.value)}
+              className="min-h-[42px] rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+            >
+              <option value="normal">Normal</option>
+              <option value="high">High</option>
+              <option value="critical">Critical</option>
+              <option value="low">Low</option>
+            </select>
+            <button
+              type="button"
+              onClick={addCalendarEvent}
+              disabled={savingCalendarEvent}
+              className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-black text-white shadow-sm transition-colors hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-300"
+            >
+              <CalendarDays className="h-4 w-4" />
+              {savingCalendarEvent ? 'Saving' : 'Save'}
+            </button>
+          </div>
+          {isAdminRole(user?.role || '') && (
+            <div className="mt-3 rounded-xl border border-amber-300 bg-white p-3 shadow-sm">
+              <label className="flex items-start gap-2 text-sm font-black text-amber-900">
+                <input
+                  type="checkbox"
+                  checked={calendarReminderEnabled}
+                  onChange={e => setCalendarReminderEnabled(e.target.checked)}
+                  className="mt-1 h-4 w-4 accent-amber-600"
+                />
+                <span>
+                  Add emailed reminder from info@newurbandev.com
+                  <span className="block text-xs font-semibold text-amber-700">Send now, one time, weekly, or monthly to any email address.</span>
+                </span>
+              </label>
+
+              {calendarReminderEnabled && (
+                <div className="mt-3 space-y-3">
+                  <label className="block">
+                    <span className="text-xs font-black uppercase tracking-wide text-slate-600">Reminder recipients</span>
+                    <textarea
+                      value={calendarReminderRecipients}
+                      onChange={e => setCalendarReminderRecipients(e.target.value)}
+                      rows={2}
+                      className="mt-1 w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      placeholder="contractor@email.com, manager@company.com"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-black uppercase tracking-wide text-slate-600">Email message</span>
+                    <VoiceTextarea
+                      value={calendarReminderMessage}
+                      onChange={e => setCalendarReminderMessage(e.target.value)}
+                      rows={3}
+                      className="mt-1 w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      placeholder="Write the reminder that should be emailed."
+                    />
+                  </label>
+                  <div className="grid gap-2 md:grid-cols-3">
+                    <select
+                      value={calendarReminderScheduleType}
+                      onChange={e => setCalendarReminderScheduleType(e.target.value as 'now' | 'once' | 'weekly' | 'monthly')}
+                      className="min-h-[42px] rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    >
+                      <option value="now">Send now</option>
+                      <option value="once">One time</option>
+                      <option value="weekly">Weekly</option>
+                      <option value="monthly">Monthly</option>
+                    </select>
+                    <input
+                      type="date"
+                      value={calendarReminderDate}
+                      onChange={e => setCalendarReminderDate(e.target.value)}
+                      disabled={calendarReminderScheduleType === 'now'}
+                      className="min-h-[42px] rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                    />
+                    <input
+                      type="time"
+                      value={calendarReminderTime}
+                      onChange={e => setCalendarReminderTime(e.target.value)}
+                      disabled={calendarReminderScheduleType === 'now'}
+                      className="min-h-[42px] rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
       {notePhotoFiles.length > 0 && (
@@ -643,27 +966,27 @@ export default function ProjectDetail() {
         </div>
       )}
       </div>
-      <div className={`bt-project-notes-list space-y-4 rounded-xl border border-slate-400 bg-[#C7D2DE] p-3 shadow-inner ${compact ? 'max-h-[620px] overflow-y-auto pr-2' : ''}`}>
+      <div className={`bt-project-notes-list space-y-4 rounded-xl border border-blue-300/30 bg-gradient-to-br from-slate-950/85 via-slate-900/90 to-cyan-950/70 p-3 shadow-inner ${compact ? 'max-h-[620px] overflow-y-auto pr-2' : ''}`}>
         {notes.map(note => (
-          <div key={note.id} className="bt-project-note-card flex items-start gap-3 rounded-2xl border border-slate-400 bg-[#F1F5F9] p-4 shadow-[0_4px_14px_rgba(15,23,42,0.10)] ring-1 ring-slate-300/70">
+          <div key={note.id} className="bt-project-note-card flex items-start gap-3 rounded-2xl border border-blue-300/35 bg-gradient-to-br from-slate-900 via-slate-950 to-blue-950 p-4 shadow-[0_14px_36px_rgba(15,23,42,0.32)] ring-1 ring-cyan-300/10">
             <Avatar src={note.user_avatar_url} name={note.user_name} size={36} />
             <div className="flex-1 min-w-0">
-              <div className="bt-project-note-meta-bar mb-2 flex items-start justify-between gap-3 border-b border-slate-300 pb-2">
+              <div className="bt-project-note-meta-bar mb-2 flex items-start justify-between gap-3 border-b border-blue-300/20 pb-2">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="text-sm font-black text-slate-950 truncate">{note.user_name}</span>
-                    <span className="text-xs font-semibold text-slate-600">
+                    <span className="text-sm font-black text-white truncate">{note.user_name}</span>
+                    <span className="text-xs font-semibold text-blue-100/80">
                       Inserted {formatEasternDateTime(note.created_at, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time
                     </span>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${note.note_type === 'field' ? 'bg-green-100 text-green-700' : note.note_type === 'office' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>{note.note_type}</span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full border font-black ${note.note_type === 'field' ? 'border-emerald-300/40 bg-emerald-500/15 text-emerald-100' : note.note_type === 'office' ? 'border-blue-300/40 bg-blue-500/15 text-blue-100' : 'border-slate-500 bg-slate-800 text-slate-200'}`}>{note.note_type}</span>
                 </div>
               </div>
               {editingNoteId === note.id ? (
                 <div className="space-y-2">
-                  <textarea
+                  <VoiceTextarea
                     value={editingNoteText}
                     onChange={e => setEditingNoteText(e.target.value)}
                     rows={3}
@@ -690,12 +1013,12 @@ export default function ProjectDetail() {
                 </div>
               ) : (
                 <>
-                  <p className="bt-project-note-body pt-2 text-sm leading-6 text-slate-800 whitespace-pre-wrap">{note.note}</p>
-                  <span className={`inline-flex mt-2 rounded-full border px-2 py-0.5 text-xs font-bold ${note.visibility === 'public' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-300 bg-white text-slate-700'}`}>
+                  <p className="bt-project-note-body rounded-xl border border-white/10 bg-black/20 px-3 py-3 text-sm leading-6 text-slate-100 whitespace-pre-wrap">{note.note}</p>
+                  <span className={`inline-flex mt-2 rounded-full border px-2 py-0.5 text-xs font-bold ${note.visibility === 'public' ? 'border-emerald-300/40 bg-emerald-500/15 text-emerald-100' : 'border-slate-500 bg-slate-800 text-slate-200'}`}>
                     {note.visibility === 'public' ? 'Public to contractors' : 'Private management note'}
                   </span>
                   {getNotePhotos(note).length > 0 && (
-                    <div className="bt-project-note-media-panel mt-3 rounded-xl border border-slate-400 bg-[#E2E8F0] p-2 shadow-inner">
+                    <div className="bt-project-note-media-panel mt-3 rounded-xl border border-cyan-300/25 bg-slate-950/70 p-2 shadow-inner">
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                         {getNotePhotos(note).map((photo: any) => {
                           const src = `/uploads/${note.project_id}/${photo.filename}`;
@@ -726,11 +1049,11 @@ export default function ProjectDetail() {
                           );
                         })}
                       </div>
-                      <p className="bt-project-note-media-label px-1 pt-2 text-xs font-bold text-slate-600">Progress pictures attached to this note</p>
+                      <p className="bt-project-note-media-label px-1 pt-2 text-xs font-bold text-cyan-100/80">Photos attached to this note</p>
                     </div>
                   )}
                   {note.edited_at && (
-                    <p className="text-xs text-gray-400 mt-2">Edited by {note.edited_by_name || note.user_name} on {formatEasternDateTime(note.edited_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time</p>
+                    <p className="text-xs text-slate-400 mt-2">Edited by {note.edited_by_name || note.user_name} on {formatEasternDateTime(note.edited_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time</p>
                   )}
                 </>
               )}
@@ -743,7 +1066,7 @@ export default function ProjectDetail() {
                     setEditingNoteType(note.note_type || 'general');
                     setEditingNoteVisibility(note.visibility === 'public' ? 'public' : 'private');
                   }}
-                  className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:underline"
+                  className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-blue-200 hover:text-white hover:underline"
                 >
                   <Edit2 className="w-3 h-3" />
                   Edit note
@@ -757,24 +1080,35 @@ export default function ProjectDetail() {
                     attachExistingNoteInputRef.current?.click();
                   }}
                   disabled={attachingNoteId === note.id}
-                  className="mt-2 ml-3 inline-flex items-center gap-1 text-xs font-bold text-amber-600 hover:underline disabled:opacity-50"
+                  className="mt-2 ml-3 inline-flex items-center gap-1 text-xs font-bold text-amber-200 hover:text-white hover:underline disabled:opacity-50"
                 >
                   <ImagePlus className="w-3 h-3" />
-                  {attachingNoteId === note.id ? 'Attaching...' : 'Attach progress pictures'}
+                  {attachingNoteId === note.id ? 'Attaching...' : 'Attach photos'}
                 </button>
               )}
             </div>
           </div>
         ))}
-        {notes.length === 0 && <p className="text-center text-gray-400 text-sm py-8">No notes yet</p>}
+        {notes.length === 0 && <p className="text-center text-slate-400 text-sm py-8">No notes yet</p>}
       </div>
     </div>
   );
 
+  const openEditProject = () => {
+    setShowEdit(true);
+    setEditAddress(project.address || '');
+    setEditBudget(project.budget ? String(project.budget) : '');
+    setEditPurchasePrice(project.purchase_price ? String(project.purchase_price) : '');
+    setEditArv(project.arv ? String(project.arv) : '');
+    setEditClosingCosts(project.closing_costs ? String(project.closing_costs) : '');
+    Object.entries(project).forEach(([key, value]) => setValue(key, value));
+    setValue('punchlist_stage', punchlistStageActive);
+  };
+
   return (
     <div className="min-h-full">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 sticky top-0 z-10">
+      <div className="sticky top-0 z-50 isolate bg-white border-b border-gray-200 shadow-sm">
         <div className="px-4 md:px-6 py-3">
           <div className="flex items-center gap-3 mb-3">
             <button onClick={() => navigate('/projects')} className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors">
@@ -791,6 +1125,11 @@ export default function ProjectDetail() {
               <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="font-bold text-gray-900 text-lg truncate">{project.address}</h1>
                 <StatusBadge status={project.status} />
+                {punchlistStageActive && (
+                  <span className="inline-flex items-center rounded-full border border-yellow-300 bg-yellow-400 px-3 py-1 text-sm font-black uppercase tracking-wide text-yellow-950 shadow-sm">
+                    Punch List Active
+                  </span>
+                )}
               </div>
               <p className="text-sm text-gray-500 truncate">{project.job_name}</p>
             </div>
@@ -798,29 +1137,39 @@ export default function ProjectDetail() {
               type="button"
               onClick={openProjectPhotoCapture}
               className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-amber-500 px-3 py-2 text-xs font-black text-white shadow-sm transition hover:bg-amber-600"
-              title="Take timestamped progress pictures for this project"
-              aria-label="Take progress pictures"
+              title="Upload timestamped photos for this project"
+              aria-label="Upload photos"
             >
               <Camera className="h-4 w-4" />
-              <span className="hidden md:inline">Upload Progress Pictures</span>
+              <span className="hidden md:inline">Upload Photos</span>
               <span className="md:hidden">Take Pictures</span>
             </button>
+            <AddToCalendarButton
+              label="Add to Calendar"
+              defaultTitle={`Project reminder - ${project.address || project.job_name || 'project'}`}
+              defaultDescription={[project.job_name, project.address].filter(Boolean).join('\n')}
+              defaultDate={project.target_completion || project.start_date || null}
+              projectId={id || project.id}
+              sourceType="project"
+              sourceId={id || project.id}
+              contextLabel={[project.address, project.job_name].filter(Boolean).join(' - ')}
+              buttonClassName="inline-flex min-h-10 items-center gap-2 rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs font-black text-cyan-800 shadow-sm transition hover:bg-cyan-100"
+            />
             {canEdit && (
-              <button onClick={() => { setShowEdit(true); setEditAddress(project.address || ''); setEditBudget(project.budget ? String(project.budget) : ''); setEditPurchasePrice(project.purchase_price ? String(project.purchase_price) : ''); setEditArv(project.arv ? String(project.arv) : ''); setEditClosingCosts(project.closing_costs ? String(project.closing_costs) : ''); Object.entries(project).forEach(([k, v]) => setValue(k, v)); }} className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors">
+              <button type="button" onClick={openEditProject} className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-blue-500/40 bg-blue-600 text-white shadow-sm transition hover:bg-blue-500" aria-label="Edit project details" title="Edit project details">
                 <Edit2 className="w-4 h-4" />
               </button>
             )}
           </div>
 
           {/* Tabs */}
-          <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-hide">
+          <div className="bt-project-tabs flex flex-wrap items-center gap-1.5 overflow-hidden pb-1">
             {tabs.map(({ id: tabId, label, icon: Icon }) => (
               <button
                 key={tabId}
                 onClick={() => setTab(tabId)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0 ${
-                  tab === tabId ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
-                }`}
+                aria-pressed={tab === tabId}
+                className={`bt-project-tab-button inline-flex min-h-9 flex-none items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-black leading-none whitespace-nowrap transition-colors sm:px-3 sm:text-xs ${tab === tabId ? 'is-active' : ''}`}
               >
                 <Icon className="w-3.5 h-3.5" />
                 {label}
@@ -840,7 +1189,7 @@ export default function ProjectDetail() {
               {[
                 { label: 'Open Punch Items', value: project.punch_stats?.filter((s: any) => s.status !== 'completed').reduce((a: number, b: any) => a + b.cnt, 0) || 0, color: 'text-orange-600', bg: 'bg-orange-50' },
                 { label: 'Completed Items', value: project.punch_stats?.find((s: any) => s.status === 'completed')?.cnt || 0, color: 'text-green-600', bg: 'bg-green-50' },
-                { label: 'Assigned Contractors', value: project.assignments?.length || 0, color: 'text-blue-600', bg: 'bg-blue-50' },
+                { label: 'Assigned Users', value: project.assignments?.length || 0, color: 'text-blue-600', bg: 'bg-blue-50' },
                 { label: 'Recent Field Photos', value: project.recent_photos?.length || 0, color: 'text-amber-600', bg: 'bg-amber-50' },
               ].map(({ label, value, color, bg }) => (
                 <div key={label} className="bg-white rounded-xl border border-gray-200 p-4">
@@ -857,10 +1206,23 @@ export default function ProjectDetail() {
               <div className="lg:col-span-2 space-y-4">
             {/* Project details */}
             <div className="bg-white rounded-xl border border-gray-200 p-4">
-              <h3 className="font-semibold text-gray-900 mb-3 text-sm">Project Details</h3>
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3 className="font-semibold text-gray-900 text-sm">Project Details</h3>
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={openEditProject}
+                    className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-blue-400 bg-blue-600 px-3 text-xs font-black text-white shadow-sm transition hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                  >
+                    <Edit2 className="h-3.5 w-3.5" />
+                    Edit Details
+                  </button>
+                )}
+              </div>
               <div className="grid sm:grid-cols-2 gap-4 text-sm">
                 {[
                   { label: 'Status', value: <StatusBadge status={project.status} /> },
+                  ...(punchlistStageActive ? [{ label: 'Punch List', value: <span className="inline-flex items-center rounded-full border border-yellow-300 bg-yellow-400 px-2.5 py-1 text-xs font-black uppercase tracking-wide text-yellow-950">Active</span> }] : []),
                   { label: 'Est. Closing Costs', value: project.closing_costs ? `$${Number(project.closing_costs).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—' },
                   { label: 'Start Date', value: project.start_date ? format(new Date(project.start_date), 'MMM d, yyyy') : '—' },
                   { label: 'Target Completion', value: project.target_completion ? format(new Date(project.target_completion), 'MMM d, yyyy') : '—' },
@@ -873,23 +1235,15 @@ export default function ProjectDetail() {
                     <div className="font-medium text-gray-900">{value}</div>
                   </div>
                 ))}
+                <ProjectContractorAssignmentPanel projectId={id!} compact canAssign={Boolean(canAssign)} />
               </div>
             </div>
-
-              <FieldWorkStatusPanel
-                tasks={Array.isArray(fieldWork.tasks) ? fieldWork.tasks : []}
-                counts={fieldWork.counts || {}}
-                canManage={!!canEdit}
-                      onStatusChange={updateFieldWorkTask}
-                      onApprove={approveFieldWorkTask}
-                      onReview={reviewFieldWorkTask}
-                      onOpenScope={() => setTab('construction-plan')}
-                    />
 
               <RecentFieldPhotosCard
                 projectId={id!}
                 photos={Array.isArray(project.recent_photos) ? project.recent_photos : []}
                 onViewAll={() => setTab('progress-history')}
+                onPhotoNoteSaved={load}
               />
 
               <button id="construction-plan" type="button" onClick={() => setTab('construction-plan')} className="w-full bg-white rounded-xl border border-gray-200 p-4 text-left hover:border-blue-300 hover:bg-blue-50 transition-colors">
@@ -920,7 +1274,14 @@ export default function ProjectDetail() {
 
         {/* Punch List Tab */}
         {tab === 'punch-list' && (
-          <PunchListTab projectId={id!} user={user} />
+          <PunchListTab
+            projectId={id!}
+            user={user}
+            isActive={punchlistStageActive}
+            canActivate={Boolean(canChangeStatus)}
+            activating={activatingPunchList}
+            onActivate={activatePunchList}
+          />
         )}
 
         {/* Photos Tab */}
@@ -940,33 +1301,7 @@ export default function ProjectDetail() {
 
         {/* Team Tab */}
         {tab === 'team' && (
-          <div className="space-y-4">
-            {canAssign && (
-              <button onClick={() => { setShowAssign(true); loadUsers(); }} className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-gray-300 rounded-xl text-sm font-medium text-gray-600 hover:border-blue-400 hover:text-blue-600 transition-colors">
-                <UserPlus className="w-4 h-4" /> Assign User to Project
-              </button>
-            )}
-            <div className="space-y-3">
-              {project.assignments?.map((a: any) => (
-                <div key={a.id} className="bg-white rounded-xl border border-gray-200 p-4 flex items-center gap-3">
-                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
-                    <span className="text-blue-700 font-bold text-sm">{a.name?.[0]?.toUpperCase()}</span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-gray-900 text-sm">{a.name}</p>
-                    <p className="text-xs text-gray-500">{a.email}</p>
-                    <span className="text-xs text-gray-400 capitalize">{a.role.replace(/_/g, ' ')}</span>
-                  </div>
-                  {canAssign && (
-                    <button onClick={() => handleUnassign(a.user_id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-              ))}
-              {project.assignments?.length === 0 && <p className="text-center text-gray-400 text-sm py-8">No users assigned</p>}
-            </div>
-          </div>
+          <ProjectContractorAssignmentPanel projectId={id!} canAssign={Boolean(canAssign)} />
         )}
 
         {tab === 'texts' && (
@@ -1052,6 +1387,19 @@ export default function ProjectDetail() {
               <label className="block text-sm font-medium text-gray-700 mb-1">Lockbox Code</label>
               <input {...register('lockbox_code')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Enter lockbox code" />
             </div>
+            {canChangeStatus && (
+              <label className="sm:col-span-2 flex items-start gap-3 rounded-xl border border-yellow-300 bg-yellow-50 p-3">
+                <input
+                  type="checkbox"
+                  {...register('punchlist_stage')}
+                  className="mt-1 h-4 w-4 rounded border-yellow-400 text-yellow-500 focus:ring-yellow-400"
+                />
+                <span>
+                  <span className="block text-sm font-black text-yellow-950">Punchlist Stage</span>
+                  <span className="block text-xs font-semibold text-yellow-800">Show a large yellow badge when this project is in the final punch list stage before going to market.</span>
+                </span>
+              </label>
+            )}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Acquisition Date</label>
               <input type="date" {...register('acquisition_date')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
@@ -1078,11 +1426,11 @@ export default function ProjectDetail() {
             </div>
             <div className="sm:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">Office Notes</label>
-              <textarea {...register('office_notes')} rows={2} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+              <VoiceTextarea {...register('office_notes')} rows={2} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
             </div>
             <div className="sm:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">Field Notes</label>
-              <textarea {...register('field_notes')} rows={2} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+              <VoiceTextarea {...register('field_notes')} rows={2} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
             </div>
           </div>
           <div className="flex gap-3 pt-2">
@@ -1133,6 +1481,232 @@ const contractorTypeLabel = (contractor?: ContractorDirectoryRow | null) => {
     .filter(Boolean)
     .join(' / ') || 'Uncategorized';
 };
+
+const contractorProjectIds = (contractor: ContractorDirectoryRow) =>
+  new Set((contractor.connected_projects || []).map(project => project.id).filter(Boolean).map(String));
+
+function ProjectContractorAssignmentPanel({
+  projectId,
+  compact = false,
+  canAssign,
+}: {
+  projectId: string;
+  compact?: boolean;
+  canAssign: boolean;
+}) {
+  const [contractors, setContractors] = useState<ContractorDirectoryRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAssign, setShowAssign] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [query, setQuery] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const isConnectedToProject = (contractor: ContractorDirectoryRow) =>
+    contractorProjectIds(contractor).has(projectId);
+
+  const loadContractors = async () => {
+    setLoading(true);
+    try {
+      const res = await api.get('/users/contractors/directory');
+      const rows: ContractorDirectoryRow[] = Array.isArray(res.data?.contractors) ? res.data.contractors : [];
+      setContractors(rows);
+      setSelectedIds(new Set(rows.filter(item => item.connected_projects?.some(project => project.id === projectId)).map(item => item.id)));
+    } catch {
+      toast.error('Failed to load contractors');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadContractors();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
+  const assignedContractors = useMemo(
+    () => contractors.filter(contractor => isConnectedToProject(contractor)).sort((left, right) => contractorDisplayName(left).localeCompare(contractorDisplayName(right))),
+    [contractors, projectId]
+  );
+
+  const visibleContractors = useMemo(() => {
+    const search = query.trim().toLowerCase();
+    return [...contractors]
+      .sort((left, right) => {
+        const leftSelected = selectedIds.has(left.id) ? 0 : 1;
+        const rightSelected = selectedIds.has(right.id) ? 0 : 1;
+        if (leftSelected !== rightSelected) return leftSelected - rightSelected;
+        return contractorDisplayName(left).localeCompare(contractorDisplayName(right));
+      })
+      .filter(contractor => {
+        if (!search) return true;
+        return [
+          contractorDisplayName(contractor),
+          contractor.contact_name,
+          contractor.phone,
+          contractor.email,
+          contractor.billing_address,
+          contractorTypeLabel(contractor),
+        ].filter(Boolean).join(' ').toLowerCase().includes(search);
+      });
+  }, [contractors, query, selectedIds]);
+
+  const openAssign = () => {
+    setSelectedIds(new Set(assignedContractors.map(contractor => contractor.id)));
+    setShowAssign(true);
+    if (!contractors.length) loadContractors();
+  };
+
+  const toggleContractor = (contractorId: string) => {
+    setSelectedIds(current => {
+      const next = new Set(current);
+      if (next.has(contractorId)) next.delete(contractorId);
+      else next.add(contractorId);
+      return next;
+    });
+  };
+
+  const saveAssignments = async () => {
+    setSaving(true);
+    try {
+      const updates = contractors
+        .map(contractor => {
+          const currentlyConnected = isConnectedToProject(contractor);
+          const shouldConnect = selectedIds.has(contractor.id);
+          if (currentlyConnected === shouldConnect) return null;
+          const nextProjectIds = contractorProjectIds(contractor);
+          if (shouldConnect) nextProjectIds.add(projectId);
+          else nextProjectIds.delete(projectId);
+          return api.put(`/users/contractors/${contractor.id}/projects`, { project_ids: Array.from(nextProjectIds) });
+        })
+        .filter(Boolean);
+
+      if (updates.length) {
+        const results = await Promise.allSettled(updates);
+        const failed = results.filter(result => result.status === 'rejected').length;
+        if (failed) throw new Error(`${failed} contractor assignment update${failed === 1 ? '' : 's'} failed`);
+      }
+
+      toast.success('Contractor assignments updated');
+      setShowAssign(false);
+      await loadContractors();
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to update contractor assignments');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const panel = (
+    <div className={`${compact ? 'sm:col-span-2' : ''} rounded-xl border border-blue-200 bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 p-4 text-white shadow-sm`}>
+      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-[11px] font-black uppercase tracking-wide text-blue-200">Project contractors</p>
+          <h3 className="text-sm font-black text-white">Assigned Contractors</h3>
+          <p className="mt-1 text-xs font-semibold text-blue-100">{assignedContractors.length} assigned to this project</p>
+        </div>
+        {canAssign && (
+          <button
+            type="button"
+            onClick={openAssign}
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-amber-300 bg-amber-500 px-4 text-sm font-black text-slate-950 shadow-sm transition hover:bg-amber-400"
+          >
+            <UserPlus className="h-4 w-4" />
+            Assign Contractors
+          </button>
+        )}
+      </div>
+
+      {loading ? (
+        <p className="rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-xs font-bold text-blue-100">Loading contractors...</p>
+      ) : assignedContractors.length ? (
+        <div className={`${compact ? 'max-h-44' : 'max-h-[28rem]'} space-y-1.5 overflow-y-auto pr-1`}>
+          {assignedContractors.map(contractor => (
+            <div key={contractor.id} className="grid gap-1 rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-xs sm:grid-cols-[minmax(8rem,1fr)_minmax(8rem,1fr)_minmax(6rem,.7fr)] sm:items-center">
+              <p className="truncate font-black text-white">{contractorDisplayName(contractor)}</p>
+              <p className="truncate font-semibold text-blue-100">{contractorTypeLabel(contractor)}</p>
+              <p className="truncate font-semibold text-slate-300">{contractor.phone || contractor.email || 'No contact on file'}</p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="rounded-lg border border-dashed border-white/20 bg-white/5 px-3 py-4 text-sm font-semibold text-blue-100">
+          No contractors assigned yet. Use Assign Contractors to select the contractors working this project.
+        </p>
+      )}
+
+      <Modal isOpen={showAssign} onClose={() => setShowAssign(false)} title="Assign Contractors" size="xl">
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
+            <p className="text-sm font-black text-blue-950">Select contractors for this project</p>
+            <p className="mt-1 text-xs font-semibold text-blue-800">Checked contractors will be connected to this project. Unchecked contractors will be removed from this project only.</p>
+          </div>
+          <div className="flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2.5">
+            <Search className="h-4 w-4 flex-shrink-0 text-slate-400" />
+            <input
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              placeholder="Search contractor, category, phone, email, or address"
+              className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-slate-950 outline-none placeholder:text-slate-500"
+            />
+          </div>
+          <div className="max-h-[55vh] space-y-2 overflow-y-auto pr-1">
+            {visibleContractors.map(contractor => {
+              const checked = selectedIds.has(contractor.id);
+              return (
+                <label
+                  key={contractor.id}
+                  className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition ${checked ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50'}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleContractor(contractor.id)}
+                    className="mt-1 h-5 w-5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="truncate text-sm font-black text-slate-950">{contractorDisplayName(contractor)}</p>
+                      {checked && <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-black text-emerald-800">Assigned</span>}
+                    </div>
+                    <p className="mt-1 text-xs font-bold text-slate-600">{contractorTypeLabel(contractor)}</p>
+                    <p className="mt-1 truncate text-xs font-semibold text-slate-500">{contractor.phone || contractor.email || contractor.billing_address || 'No contact details on file'}</p>
+                  </div>
+                </label>
+              );
+            })}
+            {!visibleContractors.length && (
+              <p className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm font-semibold text-slate-500">No contractors match this search.</p>
+            )}
+          </div>
+          <div className="flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm font-black text-slate-700">{selectedIds.size} contractor{selectedIds.size === 1 ? '' : 's'} selected</p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAssign(false)}
+                disabled={saving}
+                className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-300 bg-white px-4 text-sm font-black text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveAssignments()}
+                disabled={saving}
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-black text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Check className="h-4 w-4" />
+                {saving ? 'Saving...' : 'Save Contractor Assignments'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+
+  return panel;
+}
 
 const textStatusMeta = (status?: string) => {
   switch (status) {
@@ -1535,6 +2109,10 @@ type ProjectScopeForm = {
   status: string;
 };
 
+type BulkProjectScopeRow = ProjectScopeForm & {
+  rowId: string;
+};
+
 const blankProjectScopeForm: ProjectScopeForm = {
   section_name: '',
   scope_title: '',
@@ -1542,21 +2120,83 @@ const blankProjectScopeForm: ProjectScopeForm = {
   status: 'active',
 };
 
+let bulkScopeRowCounter = 0;
+
+const createBulkScopeRow = (): BulkProjectScopeRow => ({
+  ...blankProjectScopeForm,
+  rowId: `bulk-scope-${Date.now()}-${bulkScopeRowCounter += 1}`,
+});
+
+const createBulkScopeRows = (count: number) => Array.from({ length: count }, createBulkScopeRow);
+
 function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; project: any; canManage: boolean }) {
   const [scopes, setScopes] = useState<any[]>([]);
   const [legacyScope, setLegacyScope] = useState('');
   const [loading, setLoading] = useState(true);
   const [showEditor, setShowEditor] = useState(false);
+  const [showBulkEditor, setShowBulkEditor] = useState(false);
   const [editingScope, setEditingScope] = useState<any | null>(null);
   const [scopeForm, setScopeForm] = useState<ProjectScopeForm>(blankProjectScopeForm);
+  const [bulkScopeRows, setBulkScopeRows] = useState<BulkProjectScopeRow[]>(() => createBulkScopeRows(5));
   const [savingScope, setSavingScope] = useState(false);
+  const [savingBulkScopes, setSavingBulkScopes] = useState(false);
+  const [scopeDictationStatus, setScopeDictationStatus] = useState<DictationStatus>('idle');
   const [scopeAttachments, setScopeAttachments] = useState<File[]>([]);
+  const [selectedScopePhotoIds, setSelectedScopePhotoIds] = useState<string[]>([]);
+  const [selectedScopePhotos, setSelectedScopePhotos] = useState<any[]>([]);
+  const [scopePhotoPicker, setScopePhotoPicker] = useState<any | null>(null);
+  const [planItems, setPlanItems] = useState<any[]>([]);
+  const [materials, setMaterials] = useState<any[]>([]);
+  const [expandedScopeIds, setExpandedScopeIds] = useState<Set<string>>(() => new Set());
+  const [showStepEditor, setShowStepEditor] = useState(false);
+  const [showMaterialEditor, setShowMaterialEditor] = useState(false);
+  const [editingStep, setEditingStep] = useState<any | null>(null);
+  const [editingMaterial, setEditingMaterial] = useState<any | null>(null);
+  const [activeMaterialScopeId, setActiveMaterialScopeId] = useState<string | null>(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState<string | null>(null);
   const scopeAttachmentInputRef = useRef<HTMLInputElement | null>(null);
+  const scopeRecognitionRef = useRef<any>(null);
+  const scopeDictationBaseRef = useRef('');
   const scopeEditorFieldClass = 'bt-scope-editor-field w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500';
+  const listeningScope = scopeDictationStatus !== 'idle';
+  const blankStepForm = {
+    project_scope_id: '',
+    title: '',
+    category: '',
+    description: '',
+    status: 'not_started',
+    verification_status: 'not_requested',
+    invoice_status: 'not_received',
+    start_date: '',
+    target_date: '',
+    approval_notes: '',
+  };
+  const blankMaterialForm = {
+    plan_item_id: '',
+    material_name: '',
+    category: '',
+    quantity: '',
+    unit: '',
+    estimated_cost: '',
+    actual_cost: '',
+    supplier: '',
+    order_status: 'planned',
+    needed_by: '',
+    expected_delivery: '',
+    delivered_at: '',
+    notes: '',
+  };
+  const [stepForm, setStepForm] = useState(blankStepForm);
+  const [materialForm, setMaterialForm] = useState(blankMaterialForm);
 
   const updateScopeFormField = (field: keyof ProjectScopeForm) => (event: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const value = event.currentTarget.value;
     setScopeForm(current => ({ ...current, [field]: value }));
+  };
+
+  const updateBulkScopeRow = (rowId: string, field: keyof ProjectScopeForm) => (event: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    const value = event.currentTarget.value;
+    setBulkScopeRows(current => current.map(row => row.rowId === rowId ? { ...row, [field]: value } : row));
   };
 
   const keepScopeEditorTypingLocal = (event: KeyboardEvent<HTMLElement>) => {
@@ -1571,12 +2211,48 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
     on_hold: 'bg-amber-100 text-amber-700',
     completed: 'bg-green-100 text-green-700',
   };
+  const scopeCardStyles = [
+    {
+      card: 'border-blue-400/40 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 shadow-[0_18px_42px_rgba(37,99,235,0.20)]',
+      accent: 'bg-blue-400',
+      number: 'bg-blue-500 text-white ring-blue-200/40',
+      section: 'border-blue-300/25 bg-blue-400/15 text-blue-100',
+      hoverTitle: 'group-hover:text-blue-100',
+    },
+    {
+      card: 'border-emerald-400/40 bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 shadow-[0_18px_42px_rgba(16,185,129,0.18)]',
+      accent: 'bg-emerald-400',
+      number: 'bg-emerald-500 text-white ring-emerald-200/40',
+      section: 'border-emerald-300/25 bg-emerald-400/15 text-emerald-100',
+      hoverTitle: 'group-hover:text-emerald-100',
+    },
+    {
+      card: 'border-amber-300/40 bg-gradient-to-br from-slate-950 via-slate-900 to-amber-950 shadow-[0_18px_42px_rgba(245,158,11,0.16)]',
+      accent: 'bg-amber-300',
+      number: 'bg-amber-400 text-slate-950 ring-amber-100/50',
+      section: 'border-amber-200/25 bg-amber-300/15 text-amber-100',
+      hoverTitle: 'group-hover:text-amber-100',
+    },
+    {
+      card: 'border-cyan-300/40 bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950 shadow-[0_18px_42px_rgba(34,211,238,0.16)]',
+      accent: 'bg-cyan-300',
+      number: 'bg-cyan-400 text-slate-950 ring-cyan-100/50',
+      section: 'border-cyan-200/25 bg-cyan-300/15 text-cyan-100',
+      hoverTitle: 'group-hover:text-cyan-100',
+    },
+  ];
 
   const loadScopes = async () => {
     try {
-      const res = await api.get(`/projects/${projectId}/scopes`);
-      setScopes(Array.isArray(res.data?.scopes) ? res.data.scopes : []);
-      setLegacyScope(res.data?.legacy_scope_of_work || '');
+      const [scopeRes, planRes, materialRes] = await Promise.all([
+        api.get(`/projects/${projectId}/scopes`),
+        api.get(`/projects/${projectId}/construction-plan`),
+        api.get(`/projects/${projectId}/materials`),
+      ]);
+      setScopes(Array.isArray(scopeRes.data?.scopes) ? scopeRes.data.scopes : []);
+      setLegacyScope(scopeRes.data?.legacy_scope_of_work || '');
+      setPlanItems(Array.isArray(planRes.data?.items) ? planRes.data.items : []);
+      setMaterials(Array.isArray(materialRes.data) ? materialRes.data : []);
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to load scopes of work');
     } finally {
@@ -1589,23 +2265,59 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
     loadScopes();
   }, [projectId]);
 
+  useEffect(() => () => {
+    scopeRecognitionRef.current?.stop?.();
+    scopeRecognitionRef.current = null;
+  }, []);
+
   const clearScopeAttachmentInput = () => {
     setScopeAttachments([]);
     if (scopeAttachmentInputRef.current) scopeAttachmentInputRef.current.value = '';
   };
 
   const closeScopeEditor = () => {
+    const recognition = scopeRecognitionRef.current;
+    scopeRecognitionRef.current = null;
+    recognition?.stop?.();
+    setScopeDictationStatus('idle');
     setShowEditor(false);
     setEditingScope(null);
     setScopeForm(blankProjectScopeForm);
+    setSelectedScopePhotoIds([]);
+    setSelectedScopePhotos([]);
+    setScopePhotoPicker(null);
     clearScopeAttachmentInput();
   };
 
   const openAddScope = () => {
     setEditingScope(null);
     setScopeForm(blankProjectScopeForm);
+    setSelectedScopePhotoIds([]);
+    setSelectedScopePhotos([]);
     clearScopeAttachmentInput();
     setShowEditor(true);
+  };
+
+  const openBulkScopes = () => {
+    setBulkScopeRows(createBulkScopeRows(5));
+    setShowBulkEditor(true);
+  };
+
+  const closeBulkScopes = () => {
+    if (savingBulkScopes) return;
+    setShowBulkEditor(false);
+    setBulkScopeRows(createBulkScopeRows(5));
+  };
+
+  const addBulkScopeRows = (count = 5) => {
+    setBulkScopeRows(current => [...current, ...createBulkScopeRows(count)]);
+  };
+
+  const removeBulkScopeRow = (rowId: string) => {
+    setBulkScopeRows(current => {
+      const nextRows = current.filter(row => row.rowId !== rowId);
+      return nextRows.length ? nextRows : createBulkScopeRows(1);
+    });
   };
 
   const openEditScope = (scope: any) => {
@@ -1617,12 +2329,71 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
       scope_of_work: scope.scope_of_work || '',
       status: scope.status || 'active',
     });
+    setSelectedScopePhotos([]);
+    setSelectedScopePhotoIds([]);
     clearScopeAttachmentInput();
     setShowEditor(true);
   };
 
   const handleScopeAttachmentChange = (event: ChangeEvent<HTMLInputElement>) => {
     setScopeAttachments(Array.from(event.currentTarget.files || []));
+  };
+
+  const startScopeDictation = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      toast.error('Microphone dictation is not supported in this browser');
+      return;
+    }
+
+    scopeRecognitionRef.current?.stop?.();
+    scopeRecognitionRef.current = null;
+    scopeDictationBaseRef.current = scopeForm.scope_of_work;
+    setScopeDictationStatus('starting');
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'en-US';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+    recognition.onstart = () => {
+      if (scopeRecognitionRef.current === recognition) setScopeDictationStatus('listening');
+    };
+    recognition.onend = () => {
+      if (scopeRecognitionRef.current === recognition) {
+        setScopeDictationStatus('idle');
+        scopeRecognitionRef.current = null;
+      }
+    };
+    recognition.onerror = (event: any) => {
+      if (scopeRecognitionRef.current === recognition) {
+        setScopeDictationStatus('idle');
+        scopeRecognitionRef.current = null;
+      }
+      if (event?.error !== 'aborted') toast.error('Microphone dictation stopped');
+    };
+    recognition.onresult = (event: any) => {
+      const spokenText = getRecognitionTranscript(event.results);
+      if (!spokenText) return;
+      setScopeForm(current => ({
+        ...current,
+        scope_of_work: appendDictationText(scopeDictationBaseRef.current, spokenText),
+      }));
+    };
+    scopeRecognitionRef.current = recognition;
+    try {
+      recognition.start();
+    } catch {
+      scopeRecognitionRef.current = null;
+      setScopeDictationStatus('idle');
+      toast.error('Microphone dictation could not start');
+    }
+  };
+
+  const stopScopeDictation = () => {
+    const recognition = scopeRecognitionRef.current;
+    scopeRecognitionRef.current = null;
+    recognition?.stop?.();
+    setScopeDictationStatus('idle');
   };
 
   const uploadScopeAttachments = async (scopeId: string) => {
@@ -1634,6 +2405,74 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
     });
   };
 
+  const attachSelectedPhotosToScope = async (scopeId: string) => {
+    const photoIds = Array.from(new Set(selectedScopePhotoIds.map(String).filter(Boolean)));
+    if (!photoIds.length) return;
+    await api.post(`/projects/${projectId}/photos/assignments`, {
+      target_type: 'project_scope',
+      target_id: scopeId,
+      photo_ids: photoIds,
+    });
+  };
+
+  const openScopeEditorPhotoPicker = () => {
+    setScopePhotoPicker({
+      mode: 'editor',
+      title: editingScope ? `Photos for ${editingScope.scope_title}` : 'Select photos for this scope',
+      initialSelectedIds: selectedScopePhotoIds,
+    });
+  };
+
+  const openScopeAssignmentPhotoPicker = (scope: any) => {
+    setScopePhotoPicker({
+      mode: 'assign',
+      targetType: 'project_scope',
+      targetId: scope.id,
+      title: `Attach photos to ${scope.scope_title || 'scope of work'}`,
+      initialSelectedIds: [],
+    });
+  };
+
+  const saveScopePhotoPickerSelection = async (photos: any[]) => {
+    if (!scopePhotoPicker) return;
+    const photoIds = photos.map(photo => String(photo.id)).filter(Boolean);
+    if (scopePhotoPicker.mode === 'editor') {
+      setSelectedScopePhotos(photos);
+      setSelectedScopePhotoIds(photoIds);
+      setScopePhotoPicker(null);
+      return;
+    }
+
+    if (!photoIds.length) {
+      setScopePhotoPicker(null);
+      return;
+    }
+
+    try {
+      await api.post(`/projects/${projectId}/photos/assignments`, {
+        target_type: scopePhotoPicker.targetType,
+        target_id: scopePhotoPicker.targetId,
+        photo_ids: photoIds,
+      });
+      toast.success('Photos attached to scope');
+      setScopePhotoPicker(null);
+      await loadScopes();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to attach photos');
+    }
+  };
+
+  const removeScopePhotoAssignment = async (assignmentId?: string | null) => {
+    if (!assignmentId) return;
+    try {
+      await api.delete(`/projects/${projectId}/photos/assignments/${assignmentId}`);
+      toast.success('Photo removed from this scope');
+      await loadScopes();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to remove photo');
+    }
+  };
+
   const saveScope = async () => {
     const payload = {
       section_name: scopeForm.section_name.trim() || 'General',
@@ -1642,7 +2481,6 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
       status: scopeForm.status || 'active',
     };
     if (!payload.scope_title) return toast.error('Enter a scope title');
-    if (!payload.scope_of_work) return toast.error('Enter the scope of work');
 
     setSavingScope(true);
     try {
@@ -1655,8 +2493,13 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
       }
       if (!scopeId) throw new Error('Scope was saved but no scope ID was returned');
       await uploadScopeAttachments(scopeId);
-      toast.success(scopeAttachments.length
-        ? `Scope of work saved with ${scopeAttachments.length === 1 ? 'estimate doc' : `${scopeAttachments.length} estimate docs`}`
+      await attachSelectedPhotosToScope(scopeId);
+      const extraParts = [
+        scopeAttachments.length ? `${scopeAttachments.length} estimate doc${scopeAttachments.length === 1 ? '' : 's'}` : '',
+        selectedScopePhotoIds.length ? `${selectedScopePhotoIds.length} photo${selectedScopePhotoIds.length === 1 ? '' : 's'}` : '',
+      ].filter(Boolean);
+      toast.success(extraParts.length
+        ? `Scope of work saved with ${extraParts.join(' and ')}`
         : editingScope ? 'Scope of work updated' : 'Scope of work added'
       );
       closeScopeEditor();
@@ -1665,6 +2508,38 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
       toast.error(err.response?.data?.error || err.message || 'Failed to save scope of work');
     } finally {
       setSavingScope(false);
+    }
+  };
+
+  const saveBulkScopes = async () => {
+    const enteredRows = bulkScopeRows
+      .map((row, index) => ({ ...row, rowNumber: index + 1 }))
+      .filter(row => row.scope_title.trim() || row.section_name.trim() || row.scope_of_work.trim() || row.status !== 'active');
+    if (!enteredRows.length) return toast.error('Enter at least one scope title');
+    const missingTitle = enteredRows.find(row => !row.scope_title.trim());
+    if (missingTitle) return toast.error(`Enter a scope title on row ${missingTitle.rowNumber}`);
+
+    setSavingBulkScopes(true);
+    try {
+      const payload = {
+        scopes: enteredRows.map(row => ({
+          row_number: row.rowNumber,
+          scope_title: row.scope_title.trim(),
+          section_name: row.section_name.trim() || 'General',
+          scope_of_work: row.scope_of_work.trim(),
+          status: row.status || 'active',
+        })),
+      };
+      const res = await api.post(`/projects/${projectId}/scopes/bulk`, payload);
+      const count = Number(res.data?.count || payload.scopes.length);
+      toast.success(`${count} scope ${count === 1 ? 'item' : 'items'} added`);
+      setShowBulkEditor(false);
+      setBulkScopeRows(createBulkScopeRows(5));
+      loadScopes();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || err.message || 'Failed to save bulk scope of work');
+    } finally {
+      setSavingBulkScopes(false);
     }
   };
 
@@ -1689,8 +2564,233 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
     }
   };
 
+  const toggleScopeExpansion = (scopeId: string) => {
+    setExpandedScopeIds(current => {
+      const next = new Set(current);
+      if (next.has(scopeId)) next.delete(scopeId);
+      else next.add(scopeId);
+      return next;
+    });
+  };
+
+  const scopePlanItems = (scopeId: string) =>
+    planItems.filter(item => String(item.project_scope_id || '') === String(scopeId));
+
+  const scopeMaterials = (items: any[]) => {
+    const itemIds = new Set(items.map(item => String(item.id)));
+    return materials.filter(material => itemIds.has(String(material.plan_item_id || '')));
+  };
+
+  const materialCost = (materialList: any[]) =>
+    materialList.reduce((sum, material) => sum + Number(material.actual_cost || material.estimated_cost || 0), 0);
+
+  const statusColors: Record<string, string> = {
+    not_started: 'bg-slate-800 text-slate-200 border-slate-600',
+    in_progress: 'bg-blue-500/15 text-blue-100 border-blue-300/40',
+    waiting_materials: 'bg-amber-500/15 text-amber-100 border-amber-300/40',
+    needs_review: 'bg-purple-500/15 text-purple-100 border-purple-300/40',
+    completed: 'bg-emerald-500/15 text-emerald-100 border-emerald-300/40',
+  };
+  const materialColors: Record<string, string> = {
+    planned: 'bg-slate-800 text-slate-200 border-slate-600',
+    quote_requested: 'bg-blue-500/15 text-blue-100 border-blue-300/40',
+    ordered: 'bg-indigo-500/15 text-indigo-100 border-indigo-300/40',
+    waiting: 'bg-amber-500/15 text-amber-100 border-amber-300/40',
+    delivered: 'bg-emerald-500/15 text-emerald-100 border-emerald-300/40',
+    installed: 'bg-green-500/15 text-green-100 border-green-300/40',
+    cancelled: 'bg-red-500/15 text-red-100 border-red-300/40',
+  };
+
+  const openAddStep = (scopeId: string) => {
+    setEditingStep(null);
+    setStepForm({ ...blankStepForm, project_scope_id: scopeId });
+    setShowStepEditor(true);
+  };
+
+  const openEditStep = (item: any) => {
+    if (!canManage) return;
+    setEditingStep(item);
+    setStepForm({
+      project_scope_id: item.project_scope_id || '',
+      title: item.title || '',
+      category: item.category || '',
+      description: item.description || '',
+      status: item.status || 'not_started',
+      verification_status: item.verification_status || 'not_requested',
+      invoice_status: item.invoice_status || 'not_received',
+      start_date: item.start_date || '',
+      target_date: item.target_date || '',
+      approval_notes: item.approval_notes || '',
+    });
+    setShowStepEditor(true);
+  };
+
+  const closeStepEditor = () => {
+    setShowStepEditor(false);
+    setEditingStep(null);
+    setStepForm(blankStepForm);
+  };
+
+  const saveStep = async () => {
+    if (!stepForm.title.trim()) return toast.error('Enter a line item title');
+    const payload = {
+      ...stepForm,
+      title: stepForm.title.trim(),
+      category: stepForm.category.trim() || null,
+      description: stepForm.description.trim() || null,
+      project_scope_id: stepForm.project_scope_id || null,
+      start_date: stepForm.start_date || null,
+      target_date: stepForm.target_date || null,
+      approval_notes: stepForm.approval_notes.trim() || null,
+    };
+    try {
+      if (editingStep) {
+        await api.put(`/projects/${projectId}/construction-plan/${editingStep.id}`, payload);
+        toast.success('Scope execution line updated');
+      } else {
+        await api.post(`/projects/${projectId}/construction-plan`, payload);
+        toast.success('Scope execution line added');
+      }
+      closeStepEditor();
+      await loadScopes();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to save scope execution line');
+    }
+  };
+
+  const deleteStep = async () => {
+    if (!editingStep) return;
+    if (!window.confirm('Delete this execution line item?')) return;
+    try {
+      await api.delete(`/projects/${projectId}/construction-plan/${editingStep.id}`);
+      closeStepEditor();
+      await loadScopes();
+    } catch {
+      toast.error('Failed to delete execution line');
+    }
+  };
+
+  const moveStep = async (itemId: string, direction: 'up' | 'down') => {
+    try {
+      await api.post(`/projects/${projectId}/construction-plan/${itemId}/move`, { direction });
+      await loadScopes();
+    } catch {
+      toast.error('Failed to reorder execution line');
+    }
+  };
+
+  const quickStatus = async (item: any, status: string, patch: Record<string, any> = {}) => {
+    try {
+      await api.put(`/projects/${projectId}/construction-plan/${item.id}`, { ...item, status, ...patch });
+      await loadScopes();
+    } catch {
+      toast.error('Failed to update execution line');
+    }
+  };
+
+  const uploadStepPhoto = async (itemId: string, files?: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setUploadingPhoto(itemId);
+    try {
+      const formData = new FormData();
+      Array.from(files).forEach(file => formData.append('photos', file));
+      formData.append('construction_plan_item_id', itemId);
+      formData.append('caption', 'Scope execution photo');
+      await api.post(`/projects/${projectId}/photos`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      await loadScopes();
+    } catch {
+      toast.error('Failed to upload execution photo');
+    } finally {
+      setUploadingPhoto(null);
+    }
+  };
+
+  const openAddMaterial = (planItemId = '', scopeId: string | null = null) => {
+    setEditingMaterial(null);
+    setActiveMaterialScopeId(scopeId);
+    setMaterialForm({ ...blankMaterialForm, plan_item_id: planItemId });
+    setShowMaterialEditor(true);
+  };
+
+  const openEditMaterial = (material: any) => {
+    if (!canManage) return;
+    const linkedItem = planItems.find(item => item.id === material.plan_item_id);
+    setActiveMaterialScopeId(linkedItem?.project_scope_id || null);
+    setEditingMaterial(material);
+    setMaterialForm({
+      plan_item_id: material.plan_item_id || '',
+      material_name: material.material_name || '',
+      category: material.category || '',
+      quantity: material.quantity ? String(material.quantity) : '',
+      unit: material.unit || '',
+      estimated_cost: material.estimated_cost ? String(material.estimated_cost) : '',
+      actual_cost: material.actual_cost ? String(material.actual_cost) : '',
+      supplier: material.supplier || '',
+      order_status: material.order_status || 'planned',
+      needed_by: material.needed_by || '',
+      expected_delivery: material.expected_delivery || '',
+      delivered_at: material.delivered_at || '',
+      notes: material.notes || '',
+    });
+    setShowMaterialEditor(true);
+  };
+
+  const availableMaterialLineItems = activeMaterialScopeId
+    ? planItems.filter(item => String(item.project_scope_id || '') === String(activeMaterialScopeId))
+    : planItems;
+
+  const closeMaterialEditor = () => {
+    setShowMaterialEditor(false);
+    setEditingMaterial(null);
+    setActiveMaterialScopeId(null);
+    setMaterialForm(blankMaterialForm);
+  };
+
+  const saveMaterial = async () => {
+    if (!materialForm.material_name.trim()) return toast.error('Enter a material name');
+    const payload = {
+      ...materialForm,
+      material_name: materialForm.material_name.trim(),
+      category: materialForm.category.trim() || null,
+      plan_item_id: materialForm.plan_item_id || null,
+      quantity: materialForm.quantity ? Number(materialForm.quantity) : null,
+      estimated_cost: materialForm.estimated_cost ? Number(materialForm.estimated_cost) : null,
+      actual_cost: materialForm.actual_cost ? Number(materialForm.actual_cost) : null,
+      needed_by: materialForm.needed_by || null,
+      expected_delivery: materialForm.expected_delivery || null,
+      delivered_at: materialForm.delivered_at || null,
+      notes: materialForm.notes.trim() || null,
+    };
+    try {
+      if (editingMaterial) {
+        await api.put(`/projects/${projectId}/materials/${editingMaterial.id}`, payload);
+        toast.success('Material updated');
+      } else {
+        await api.post(`/projects/${projectId}/materials`, payload);
+        toast.success('Material added');
+      }
+      closeMaterialEditor();
+      await loadScopes();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to save material');
+    }
+  };
+
+  const deleteMaterial = async () => {
+    if (!editingMaterial) return;
+    if (!window.confirm('Delete this material line?')) return;
+    try {
+      await api.delete(`/projects/${projectId}/materials/${editingMaterial.id}`);
+      closeMaterialEditor();
+      await loadScopes();
+    } catch {
+      toast.error('Failed to delete material');
+    }
+  };
+
   const completedCount = scopes.filter(scope => scope.status === 'completed').length;
   const activeCount = scopes.filter(scope => scope.status === 'active').length;
+  const bulkEnteredCount = bulkScopeRows.filter(row => row.scope_title.trim() || row.section_name.trim() || row.scope_of_work.trim() || row.status !== 'active').length;
   const scopeAttachmentSummary = useMemo(() => {
     if (!scopeAttachments.length) return 'Attach agreed estimate, bid, or approval file';
     const names = scopeAttachments.slice(0, 2).map(file => file.name).join(', ');
@@ -1705,11 +2805,29 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
             <h3 className="font-black text-gray-900">Scope of Work</h3>
             <p className="text-sm text-gray-500 mt-1">Central scope sections for {project?.address}. Use one scope per house area, project phase, or work section.</p>
           </div>
-          {canManage && (
-            <button type="button" onClick={openAddScope} className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-black hover:bg-blue-700">
-              <Plus className="w-4 h-4" /> Add Scope Section
-            </button>
-          )}
+          <div className="flex flex-wrap gap-2">
+              <AddToCalendarButton
+                label="Add to Calendar"
+                defaultTitle={`Scope reminder - ${project?.address || project?.job_name || 'project'}`}
+                defaultDescription={`Scope of Work for ${project?.address || project?.job_name || 'this project'}`}
+                defaultDate={project?.target_completion || project?.start_date || null}
+                projectId={projectId}
+                sourceType="scope_of_work"
+                sourceId={projectId}
+                contextLabel={`Scope of Work - ${project?.address || project?.job_name || 'Project'}`}
+                buttonClassName="inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-2.5 text-sm font-black text-cyan-800 hover:bg-cyan-100"
+              />
+            {canManage && (
+              <>
+              <button type="button" onClick={openBulkScopes} className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-800 text-sm font-black hover:bg-emerald-100">
+                <ClipboardList className="w-4 h-4" /> Add Bulk Scope of Work
+              </button>
+              <button type="button" onClick={openAddScope} className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-black hover:bg-blue-700">
+                <Plus className="w-4 h-4" /> Add Scope Section
+              </button>
+              </>
+            )}
+          </div>
         </div>
         <div className="grid sm:grid-cols-3 gap-3 mt-4">
           <div className="rounded-xl bg-blue-50 p-3">
@@ -1744,44 +2862,106 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
               <p className="text-sm font-black text-gray-700">No scope sections entered yet</p>
               <p className="text-sm text-gray-500 mt-1">Add separate scopes for kitchen, bath, exterior, mechanicals, site work, or any project section.</p>
               {canManage && (
-                <button type="button" onClick={openAddScope} className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-bold">
-                  <Plus className="w-4 h-4" /> Add first scope
-                </button>
+                <div className="mt-4 flex flex-wrap justify-center gap-2">
+                  <button type="button" onClick={openBulkScopes} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-800 text-sm font-bold">
+                    <ClipboardList className="w-4 h-4" /> Add Bulk Scope of Work
+                  </button>
+                  <button type="button" onClick={openAddScope} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-bold">
+                    <Plus className="w-4 h-4" /> Add first scope
+                  </button>
+                </div>
               )}
             </div>
           ) : (
-            <div className="grid lg:grid-cols-2 gap-3">
+            <div className="space-y-2">
               {scopes.map((scope, index) => {
                 const estimateDocuments = Array.isArray(scope.estimate_documents) ? scope.estimate_documents : [];
+                const scopeCardStyle = scopeCardStyles[index % scopeCardStyles.length];
+                const scopeNumber = scope.sort_order || index + 1;
+                const isExpanded = expandedScopeIds.has(scope.id);
+                const executionItems = scopePlanItems(scope.id);
+                const executionMaterials = scopeMaterials(executionItems);
+                const scopeMaterialCost = materialCost(executionMaterials);
+                const waitingMaterials = executionMaterials.filter(material => ['ordered', 'waiting'].includes(material.order_status)).length;
+                const scopePhotos = Array.isArray(scope.photos) ? scope.photos : [];
                 return (
-                <div key={scope.id} className="bg-white rounded-2xl border border-gray-200 p-4" style={{ boxShadow: '0 8px 24px rgba(17,24,39,0.06)' }}>
-                  <div className="flex items-start justify-between gap-3">
-                    <button type="button" onClick={() => openEditScope(scope)} className="text-left flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="inline-flex w-7 h-7 rounded-lg bg-gray-900 text-white items-center justify-center text-xs font-black">{scope.sort_order || index + 1}</span>
-                        <span className="text-xs font-black uppercase tracking-wide text-blue-700">{scope.section_name || 'General'}</span>
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${scopeStatusColors[scope.status] || scopeStatusColors.active}`}>{String(scope.status || 'active').replace(/_/g, ' ')}</span>
+                <div key={scope.id} className={`relative overflow-hidden rounded-xl border text-slate-100 transition-all duration-150 hover:border-white/25 ${scopeCardStyle.card}`}>
+                  <div className={`absolute inset-y-0 left-0 w-1 ${scopeCardStyle.accent}`} />
+                  <div className="p-3 pl-4">
+                  <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                    <button type="button" onClick={() => toggleScopeExpansion(scope.id)} className="group flex min-w-0 flex-1 items-start gap-3 text-left">
+                      <span className={`inline-flex h-9 min-w-9 items-center justify-center rounded-lg px-2.5 text-sm font-black shadow-sm ring-1 ${scopeCardStyle.number}`}>{scopeNumber}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <h4 className={`min-w-0 truncate text-base font-black leading-6 text-white transition-colors ${scopeCardStyle.hoverTitle}`}>{scope.scope_title}</h4>
+                          <ChevronRight className={`h-4 w-4 flex-shrink-0 text-slate-300 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-black uppercase tracking-wide ${scopeCardStyle.section}`}>{scope.section_name || 'General'}</span>
+                          <span className={`rounded-full px-2 py-0.5 text-[11px] font-black capitalize shadow-sm ${scopeStatusColors[scope.status] || scopeStatusColors.active}`}>{String(scope.status || 'active').replace(/_/g, ' ')}</span>
+                          <span className="inline-flex items-center rounded-full border border-white/15 bg-white/10 px-2 py-0.5 text-[11px] font-black text-slate-100">
+                            {executionItems.length} line{executionItems.length === 1 ? '' : 's'}
+                          </span>
+                          <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
+                            Updated {formatEasternDateTime(scope.updated_at || scope.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        {scope.scope_of_work ? (
+                          <p className="mt-1 line-clamp-1 whitespace-pre-wrap text-xs font-semibold leading-5 text-slate-300">{scope.scope_of_work}</p>
+                        ) : null}
+                        <div className="mt-2 space-y-1">
+                          {executionItems.length === 0 ? (
+                            <p className="rounded-lg border border-dashed border-white/12 bg-black/15 px-3 py-2 text-xs font-semibold text-slate-400">No execution line items yet.</p>
+                          ) : (
+                            executionItems.map((item, lineIndex) => (
+                              <div key={item.id} className="flex min-w-0 items-center gap-2 rounded-lg border border-white/10 bg-slate-950/45 px-2.5 py-1.5">
+                                <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-md bg-white/10 px-1.5 text-[11px] font-black text-white">{item.sort_order || lineIndex + 1}</span>
+                                <span className="min-w-0 flex-1 truncate text-sm font-black text-slate-50">{item.title}</span>
+                                {item.category && <span className="hidden rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-slate-200 md:inline-flex">{item.category}</span>}
+                                <span className={`rounded-full border px-2 py-0.5 text-[10px] font-black capitalize ${statusColors[item.status] || statusColors.not_started}`}>{String(item.status || 'not_started').replace(/_/g, ' ')}</span>
+                              </div>
+                            ))
+                          )}
+                        </div>
                       </div>
-                      <h4 className="font-black text-gray-900 mt-3">{scope.scope_title}</h4>
-                      <p className="text-sm text-gray-700 mt-2 whitespace-pre-wrap">{scope.scope_of_work}</p>
-                      <p className="text-xs text-gray-400 mt-3">
-                        Updated {formatEasternDateTime(scope.updated_at || scope.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time
-                      </p>
                     </button>
-                    {canManage && (
-                      <div className="flex flex-col gap-2 flex-shrink-0">
-                        <button type="button" disabled={index === 0} onClick={() => moveScope(scope.id, 'up')} className="p-2 rounded-lg border border-gray-200 disabled:opacity-30 hover:bg-gray-50">
+                    <div className="flex flex-wrap items-center gap-1.5 flex-shrink-0 xl:justify-end">
+                      <button type="button" onClick={() => toggleScopeExpansion(scope.id)} className="rounded-lg border border-slate-600 bg-slate-950/45 px-2.5 py-2 text-xs font-black text-slate-100 transition-colors hover:bg-slate-800" aria-label={isExpanded ? 'Collapse scope details' : 'Expand scope details'}>
+                        {isExpanded ? 'Hide' : 'Details'}
+                      </button>
+                      <AddToCalendarButton
+                        label="Calendar"
+                        defaultTitle={`Scope: ${scope.scope_title || scope.section_name || 'Scope of work'}`}
+                        defaultDescription={[scope.section_name, scope.scope_of_work].filter(Boolean).join('\n\n')}
+                        defaultDate={project?.target_completion || project?.start_date || null}
+                        projectId={projectId}
+                        sourceType="scope"
+                        sourceId={scope.id}
+                        contextLabel={[project?.address, scope.scope_title].filter(Boolean).join(' - ')}
+                        buttonClassName="inline-flex items-center justify-center gap-1.5 rounded-lg border border-cyan-300/40 bg-cyan-500/15 px-2 py-2 text-xs font-black text-cyan-100 transition-colors hover:bg-cyan-500/25"
+                      />
+                      <button type="button" onClick={() => openScopeAssignmentPhotoPicker(scope)} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-amber-300/40 bg-amber-500/15 px-2 py-2 text-xs font-black text-amber-100 transition-colors hover:bg-amber-500/25" aria-label="Attach photos to scope">
+                        <Camera className="h-3.5 w-3.5" />
+                        Photos
+                      </button>
+                      {canManage && (
+                        <>
+                        <button type="button" onClick={() => openEditScope(scope)} className="rounded-lg border border-slate-600 bg-slate-950/40 p-2 text-slate-200 transition-colors hover:bg-slate-800" aria-label="Edit scope">
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button type="button" disabled={index === 0} onClick={() => moveScope(scope.id, 'up')} className="rounded-lg border border-slate-600 bg-slate-950/40 p-2 text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-30" aria-label="Move scope up">
                           <ArrowUp className="w-4 h-4" />
                         </button>
-                        <button type="button" disabled={index === scopes.length - 1} onClick={() => moveScope(scope.id, 'down')} className="p-2 rounded-lg border border-gray-200 disabled:opacity-30 hover:bg-gray-50">
+                        <button type="button" disabled={index === scopes.length - 1} onClick={() => moveScope(scope.id, 'down')} className="rounded-lg border border-slate-600 bg-slate-950/40 p-2 text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-30" aria-label="Move scope down">
                           <ArrowDown className="w-4 h-4" />
                         </button>
-                      </div>
-                    )}
+                        </>
+                      )}
+                    </div>
                   </div>
-                  {estimateDocuments.length > 0 && (
-                    <div className="mt-4 border-t border-gray-200 pt-3">
-                      <p className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-wide text-gray-500">
+                  {isExpanded && estimateDocuments.length > 0 && (
+                    <div className="mt-4 border-t border-white/10 pt-3">
+                      <p className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-wide text-slate-300">
                         <Paperclip className="w-3.5 h-3.5" /> Attached estimate docs
                       </p>
                       <div className="mt-2 flex flex-wrap gap-2">
@@ -1789,7 +2969,7 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                           <a
                             key={doc.scope_document_id || doc.id}
                             href={`/api/documents/${projectId}/${doc.id}/download`}
-                            className="inline-flex max-w-full items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100"
+                            className="inline-flex max-w-full items-center gap-2 rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-xs font-bold text-slate-100 hover:bg-white/15"
                           >
                             <FileText className="h-3.5 w-3.5 flex-shrink-0" />
                             <span className="truncate">{doc.original_name || 'Estimate document'}</span>
@@ -1798,6 +2978,215 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                       </div>
                     </div>
                   )}
+                  {isExpanded && scopePhotos.length > 0 && (
+                    <div className="mt-4 border-t border-white/10 pt-3">
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <p className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-wide text-slate-300">
+                          <Camera className="w-3.5 h-3.5" /> Attached photos
+                        </p>
+                        <span className="rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[11px] font-black text-slate-100">{scopePhotos.length}</span>
+                      </div>
+                      <div className="flex gap-2 overflow-x-auto pb-1">
+                        {scopePhotos.map((photo: any) => {
+                          const mediaKind = getProgressMediaKind(photo);
+                          const src = progressPhotoSrc(projectId, photo);
+                          return (
+                            <div key={photo.assignment_id || photo.id} className="group relative h-20 w-24 flex-shrink-0 overflow-hidden rounded-lg border border-white/10 bg-slate-900">
+                              {mediaKind === 'video' ? (
+                                <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+                              ) : mediaKind === 'image' ? (
+                                <img src={src} alt={photo.original_name || 'Scope photo'} className="h-full w-full object-cover" loading="lazy" />
+                              ) : (
+                                <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
+                              )}
+                              {photo.assignment_id && (
+                                <button
+                                  type="button"
+                                  onClick={() => removeScopePhotoAssignment(photo.assignment_id)}
+                                  className="absolute right-1 top-1 hidden rounded-md border border-red-300/60 bg-red-600 px-1.5 py-1 text-[10px] font-black text-white shadow-sm group-hover:inline-flex"
+                                  aria-label="Remove photo from scope"
+                                >
+                                  Remove
+                                </button>
+                              )}
+                              <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-1.5 py-1 text-[10px] font-black text-white">
+                                {photo.individual_note || photo.batch_note || photo.caption || photo.original_name || 'Photo'}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {isExpanded && (
+                    <div className="mt-5 border-t border-white/10 pt-4">
+                      <div className="rounded-xl border border-white/10 bg-slate-950/45 p-3">
+                        <p className="text-xs font-black uppercase tracking-wide text-slate-300">Scope details</p>
+                        {scope.scope_of_work ? (
+                          <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-100/90">{scope.scope_of_work}</p>
+                        ) : (
+                          <p className="mt-2 text-sm font-semibold italic text-slate-300">No scope details entered yet.</p>
+                        )}
+                        <p className="mt-3 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                          Updated {formatEasternDateTime(scope.updated_at || scope.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time
+                        </p>
+                      </div>
+                      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                        <div className="rounded-xl border border-blue-300/30 bg-blue-400/10 p-3">
+                          <p className="text-xl font-black text-blue-100">{executionItems.length}</p>
+                          <p className="text-xs font-black uppercase tracking-wide text-blue-200">Execution lines</p>
+                        </div>
+                        <div className="rounded-xl border border-amber-300/30 bg-amber-400/10 p-3">
+                          <p className="text-xl font-black text-amber-100">{waitingMaterials}</p>
+                          <p className="text-xs font-black uppercase tracking-wide text-amber-200">Materials waiting</p>
+                        </div>
+                        <div className="rounded-xl border border-emerald-300/30 bg-emerald-400/10 p-3">
+                          <p className="text-xl font-black text-emerald-100">${scopeMaterialCost.toLocaleString('en-US', { maximumFractionDigits: 0 })}</p>
+                          <p className="text-xs font-black uppercase tracking-wide text-emerald-200">Material cost</p>
+                        </div>
+                      </div>
+
+                      {canManage && (
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <button type="button" onClick={() => openScopeAssignmentPhotoPicker(scope)} className="inline-flex items-center gap-2 rounded-xl border border-amber-300/40 bg-amber-500/20 px-3 py-2 text-xs font-black text-amber-50 hover:bg-amber-500/30">
+                            <Camera className="h-4 w-4" /> Attach Photos
+                          </button>
+                          <button type="button" onClick={() => openAddStep(scope.id)} className="inline-flex items-center gap-2 rounded-xl border border-blue-300/40 bg-blue-500/20 px-3 py-2 text-xs font-black text-blue-50 hover:bg-blue-500/30">
+                            <Plus className="h-4 w-4" /> Line Item
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!executionItems.length) {
+                                toast.error('Add an execution line before adding materials');
+                                return;
+                              }
+                              openAddMaterial(executionItems[0].id, scope.id);
+                            }}
+                            className="inline-flex items-center gap-2 rounded-xl border border-amber-300/40 bg-amber-500/20 px-3 py-2 text-xs font-black text-amber-50 hover:bg-amber-500/30"
+                          >
+                            <Package className="h-4 w-4" /> Material
+                          </button>
+                        </div>
+                      )}
+
+                      {executionItems.length === 0 ? (
+                        <div className="mt-4 rounded-xl border border-dashed border-white/15 bg-black/20 p-5 text-center">
+                          <FileText className="mx-auto mb-2 h-7 w-7 text-slate-400" />
+                          <p className="text-sm font-black text-slate-200">No execution plan lines under this scope yet</p>
+                          <p className="mt-1 text-xs font-semibold text-slate-400">Add tile selections, supplier details, costs, work steps, and approval checks here.</p>
+                        </div>
+                      ) : (
+                        <div className="mt-4 space-y-3">
+                          {executionItems.map((item, itemIndex) => {
+                            const itemMaterials = materials.filter(material => material.plan_item_id === item.id);
+                            return (
+                              <div key={item.id} className="rounded-2xl border border-white/10 bg-slate-950/55 p-4 shadow-inner">
+                                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                                  <div
+                                    role={canManage ? 'button' : undefined}
+                                    tabIndex={canManage ? 0 : undefined}
+                                    onClick={() => openEditStep(item)}
+                                    onKeyDown={event => {
+                                      if (canManage && (event.key === 'Enter' || event.key === ' ')) openEditStep(item);
+                                    }}
+                                    className={`min-w-0 flex-1 ${canManage ? 'cursor-pointer' : ''}`}
+                                  >
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="inline-flex h-8 min-w-8 items-center justify-center rounded-lg bg-white/10 px-2 text-xs font-black text-white">{item.sort_order}</span>
+                                      {item.category && <span className="rounded-full border border-white/10 bg-white/10 px-2 py-1 text-[11px] font-black uppercase tracking-wide text-slate-200">{item.category}</span>}
+                                      <span className={`rounded-full border px-2 py-1 text-[11px] font-black ${statusColors[item.status] || statusColors.not_started}`}>{String(item.status || 'not_started').replace(/_/g, ' ')}</span>
+                                      <span className={`rounded-full border px-2 py-1 text-[11px] font-black ${item.verification_status === 'approved' ? 'border-emerald-300/40 bg-emerald-500/15 text-emerald-100' : item.verification_status === 'pending_review' ? 'border-purple-300/40 bg-purple-500/15 text-purple-100' : item.verification_status === 'rejected' ? 'border-red-300/40 bg-red-500/15 text-red-100' : 'border-slate-600 bg-slate-800 text-slate-200'}`}>
+                                        {String(item.verification_status || 'not_requested').replace(/_/g, ' ')}
+                                      </span>
+                                      <span className={`rounded-full border px-2 py-1 text-[11px] font-black ${['received', 'approval_needed'].includes(item.invoice_status) && item.verification_status !== 'approved' ? 'border-red-300/40 bg-red-500/15 text-red-100' : item.invoice_status === 'approved_for_payment' ? 'border-emerald-300/40 bg-emerald-500/15 text-emerald-100' : 'border-slate-600 bg-slate-800 text-slate-200'}`}>
+                                        {String(item.invoice_status || 'not_received').replace(/_/g, ' ')}
+                                      </span>
+                                    </div>
+                                    <h5 className="mt-3 text-base font-black text-white">{item.title}</h5>
+                                    {item.description && <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-300">{item.description}</p>}
+                                    <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold text-slate-400">
+                                      {item.start_date && <span>Start: {format(new Date(item.start_date), 'MMM d, yyyy')}</span>}
+                                      {item.target_date && <span>Target: {format(new Date(item.target_date), 'MMM d, yyyy')}</span>}
+                                    </div>
+                                  </div>
+                                  {canManage && (
+                                    <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                                      <AddToCalendarButton
+                                        label="Calendar"
+                                        defaultTitle={item.title || 'Scope execution line'}
+                                        defaultDescription={[scope.scope_title, item.description].filter(Boolean).join('\n\n')}
+                                        defaultDate={item.target_date || item.start_date || project?.target_completion || null}
+                                        projectId={projectId}
+                                        sourceType="scope_execution_line"
+                                        sourceId={item.id}
+                                        contextLabel={[project?.address, scope.scope_title, item.title].filter(Boolean).join(' - ')}
+                                        buttonClassName="inline-flex items-center gap-1.5 rounded-lg border border-cyan-300/40 bg-cyan-500/15 px-2.5 py-2 text-xs font-black text-cyan-100 hover:bg-cyan-500/25"
+                                      />
+                                      <button type="button" disabled={itemIndex === 0} onClick={() => moveStep(item.id, 'up')} className="rounded-lg border border-white/10 bg-black/20 p-2 text-slate-200 disabled:opacity-30" aria-label="Move line up"><ArrowUp className="h-4 w-4" /></button>
+                                      <button type="button" disabled={itemIndex === executionItems.length - 1} onClick={() => moveStep(item.id, 'down')} className="rounded-lg border border-white/10 bg-black/20 p-2 text-slate-200 disabled:opacity-30" aria-label="Move line down"><ArrowDown className="h-4 w-4" /></button>
+                                      <select value={item.status} onChange={event => quickStatus(item, event.target.value)} className="rounded-lg border border-white/10 bg-slate-950 px-2 py-2 text-xs font-bold text-slate-100">
+                                        {['not_started', 'in_progress', 'waiting_materials', 'needs_review', 'completed'].map(status => <option key={status} value={status}>{status.replace(/_/g, ' ')}</option>)}
+                                      </select>
+                                      <button type="button" onClick={() => quickStatus(item, 'completed', { verification_status: 'approved' })} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300/40 bg-emerald-500/15 px-2.5 py-2 text-xs font-black text-emerald-100">
+                                        <Check className="h-3.5 w-3.5" /> Approve
+                                      </button>
+                                      <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-blue-300/40 bg-blue-500/15 px-2.5 py-2 text-xs font-black text-blue-100">
+                                        <input type="file" accept="image/*" capture="environment" multiple className="hidden" disabled={uploadingPhoto === item.id} onChange={event => { uploadStepPhoto(item.id, event.target.files); event.currentTarget.value = ''; }} />
+                                        <Camera className="h-3.5 w-3.5" />
+                                        {uploadingPhoto === item.id ? 'Uploading' : 'Photo'}
+                                      </label>
+                                      <button type="button" onClick={() => openAddMaterial(item.id, scope.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300/40 bg-amber-500/15 px-2.5 py-2 text-xs font-black text-amber-100">
+                                        <Package className="h-3.5 w-3.5" /> Material
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                                {item.photos?.length > 0 && (
+                                  <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+                                    {item.photos.map((photo: any) => (
+                                      <img key={photo.id} src={`/uploads/${projectId}/${photo.filename}`} alt={photo.original_name || item.title} className="h-20 w-24 flex-shrink-0 rounded-lg border border-white/10 object-cover" />
+                                    ))}
+                                  </div>
+                                )}
+                                <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
+                                  <div className="mb-2 flex items-center justify-between gap-3">
+                                    <p className="text-xs font-black uppercase tracking-wide text-slate-300">Materials tied to this line</p>
+                                    <span className="text-xs font-black text-slate-400">{itemMaterials.length}</span>
+                                  </div>
+                                  {itemMaterials.length === 0 ? (
+                                    <p className="text-xs font-semibold text-slate-500">No materials linked yet.</p>
+                                  ) : (
+                                    <div className="space-y-2">
+                                      {itemMaterials.map(material => (
+                                        <button
+                                          key={material.id}
+                                          type="button"
+                                          onClick={() => openEditMaterial(material)}
+                                          className={`flex w-full flex-col gap-2 rounded-lg border border-white/10 bg-slate-950/70 p-3 text-left md:flex-row md:items-center md:justify-between ${canManage ? 'hover:border-amber-300/40 hover:bg-amber-500/10' : ''}`}
+                                        >
+                                          <div className="min-w-0">
+                                            <p className="truncate text-sm font-black text-white">{material.material_name}</p>
+                                            <p className="text-xs font-semibold text-slate-400">{material.quantity || '-'} {material.unit || ''} - {material.supplier || 'No supplier'} - {material.expected_delivery ? `ETA ${format(new Date(material.expected_delivery), 'MMM d')}` : 'No ETA'}</p>
+                                            {material.notes && <p className="mt-1 line-clamp-2 text-xs text-slate-400">{material.notes}</p>}
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                            <span className={`rounded-full border px-2 py-1 text-[11px] font-black ${materialColors[material.order_status] || materialColors.planned}`}>{String(material.order_status || 'planned').replace(/_/g, ' ')}</span>
+                                            <span className="text-sm font-black text-white">${Number(material.actual_cost || material.estimated_cost || 0).toLocaleString('en-US')}</span>
+                                          </div>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  </div>
                 </div>
                 );
               })}
@@ -1806,11 +3195,219 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
         </div>
       )}
 
-      <ConstructionPlanBoard projectId={projectId} canManage={canManage} />
+      <Modal isOpen={showStepEditor} onClose={closeStepEditor} title={editingStep ? 'Edit Scope Execution Line' : 'Add Scope Execution Line'} size="lg">
+        <div className="space-y-4">
+          <div className="grid md:grid-cols-2 gap-3">
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Scope Section</label>
+              <select value={stepForm.project_scope_id} onChange={e => setStepForm({ ...stepForm, project_scope_id: e.target.value })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="">No scope selected</option>
+                {scopes.map(scope => <option key={scope.id} value={scope.id}>{scope.sort_order || ''} {scope.section_name || 'General'} - {scope.scope_title}</option>)}
+              </select>
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Line Item *</label>
+              <input value={stepForm.title} onChange={e => setStepForm({ ...stepForm, title: e.target.value })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Example: Install 12x24 porcelain tile" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+              <input value={stepForm.category} onChange={e => setStepForm({ ...stepForm, category: e.target.value })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Tile, vanity, electrical..." />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+              <select value={stepForm.status} onChange={e => setStepForm({ ...stepForm, status: e.target.value })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                {['not_started', 'in_progress', 'waiting_materials', 'needs_review', 'completed'].map(status => <option key={status} value={status}>{status.replace(/_/g, ' ')}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Field Verification</label>
+              <select value={stepForm.verification_status} onChange={e => setStepForm({ ...stepForm, verification_status: e.target.value })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                {['not_requested', 'pending_review', 'approved', 'rejected'].map(status => <option key={status} value={status}>{status.replace(/_/g, ' ')}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Invoice Status</label>
+              <select value={stepForm.invoice_status} onChange={e => setStepForm({ ...stepForm, invoice_status: e.target.value })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                {fieldInvoiceStatusOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+              <input type="date" value={stepForm.start_date} onChange={e => setStepForm({ ...stepForm, start_date: e.target.value })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Target Date</label>
+              <input type="date" value={stepForm.target_date} onChange={e => setStepForm({ ...stepForm, target_date: e.target.value })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Execution Details</label>
+              <VoiceTextarea value={stepForm.description} onChange={e => setStepForm({ ...stepForm, description: e.target.value })} rows={4} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" placeholder="Describe the work, material selection, supplier, approximate cost, or approval requirements..." />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Approval Notes</label>
+              <VoiceTextarea value={stepForm.approval_notes} onChange={e => setStepForm({ ...stepForm, approval_notes: e.target.value })} rows={2} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" placeholder="What must be checked before payment approval?" />
+            </div>
+          </div>
+          <div className="flex gap-3">
+            {editingStep && <button type="button" onClick={deleteStep} className="px-4 py-2.5 rounded-xl border border-red-200 text-red-700 text-sm font-black hover:bg-red-50">Delete</button>}
+            <button type="button" onClick={closeStepEditor} className="ml-auto px-4 py-2.5 rounded-xl border border-gray-300 text-sm font-black text-gray-700 hover:bg-gray-50">Cancel</button>
+            <button type="button" onClick={saveStep} className="px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-black hover:bg-blue-700">Save Line</button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={showMaterialEditor} onClose={closeMaterialEditor} title={editingMaterial ? 'Edit Scope Material' : 'Add Scope Material'} size="lg">
+        <div className="space-y-4">
+          <div className="grid md:grid-cols-3 gap-3">
+            <div className="md:col-span-3">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Link To Scope Execution Line</label>
+              <select value={materialForm.plan_item_id} onChange={e => setMaterialForm({ ...materialForm, plan_item_id: e.target.value })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="">Unlinked material</option>
+                {availableMaterialLineItems.map(item => <option key={item.id} value={item.id}>{item.sort_order}. {item.title}</option>)}
+              </select>
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Material *</label>
+              <input value={materialForm.material_name} onChange={e => setMaterialForm({ ...materialForm, material_name: e.target.value })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Example: 12x24 porcelain tile" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+              <select value={materialForm.order_status} onChange={e => setMaterialForm({ ...materialForm, order_status: e.target.value })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                {['planned', 'quote_requested', 'ordered', 'waiting', 'delivered', 'installed', 'cancelled'].map(status => <option key={status} value={status}>{status.replace(/_/g, ' ')}</option>)}
+              </select>
+            </div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Category</label><input value={materialForm.category} onChange={e => setMaterialForm({ ...materialForm, category: e.target.value })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label><input value={materialForm.quantity} onChange={e => setMaterialForm({ ...materialForm, quantity: e.target.value })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Unit</label><input value={materialForm.unit} onChange={e => setMaterialForm({ ...materialForm, unit: e.target.value })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Estimated Cost</label><input value={materialForm.estimated_cost} onChange={e => setMaterialForm({ ...materialForm, estimated_cost: e.target.value })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Actual Cost</label><input value={materialForm.actual_cost} onChange={e => setMaterialForm({ ...materialForm, actual_cost: e.target.value })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Supplier</label><input value={materialForm.supplier} onChange={e => setMaterialForm({ ...materialForm, supplier: e.target.value })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Where it will be purchased" /></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Needed By</label><input type="date" value={materialForm.needed_by} onChange={e => setMaterialForm({ ...materialForm, needed_by: e.target.value })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Expected Delivery</label><input type="date" value={materialForm.expected_delivery} onChange={e => setMaterialForm({ ...materialForm, expected_delivery: e.target.value })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Delivered At</label><input type="date" value={materialForm.delivered_at} onChange={e => setMaterialForm({ ...materialForm, delivered_at: e.target.value })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
+            <div className="md:col-span-3">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Material Notes</label>
+              <VoiceTextarea value={materialForm.notes} onChange={e => setMaterialForm({ ...materialForm, notes: e.target.value })} rows={3} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" placeholder="Type of material, supplier notes, cost assumptions, or install notes..." />
+            </div>
+          </div>
+          <div className="flex gap-3">
+            {editingMaterial && <button type="button" onClick={deleteMaterial} className="px-4 py-2.5 rounded-xl border border-red-200 text-red-700 text-sm font-black hover:bg-red-50">Delete</button>}
+            <button type="button" onClick={closeMaterialEditor} className="ml-auto px-4 py-2.5 rounded-xl border border-gray-300 text-sm font-black text-gray-700 hover:bg-gray-50">Cancel</button>
+            <button type="button" onClick={saveMaterial} className="px-4 py-2.5 rounded-xl bg-amber-500 text-white text-sm font-black hover:bg-amber-600">Save Material</button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={showBulkEditor} onClose={closeBulkScopes} title="Add Bulk Scope of Work Items" size="xl">
+        <div className="space-y-4 bt-scope-editor" onKeyDown={keepScopeEditorTypingLocal}>
+          <div className="rounded-2xl border border-emerald-400/40 bg-gradient-to-br from-slate-950 via-emerald-950 to-blue-950 p-4 shadow-[0_18px_42px_rgba(16,185,129,0.16)]">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-sm font-black text-white">Bulk scope entry</p>
+                <p className="text-xs font-bold text-emerald-100/80">{bulkScopeRows.length} rows ready, {bulkEnteredCount} filled</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => addBulkScopeRows(5)}
+                disabled={savingBulkScopes}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-300/50 bg-emerald-400/15 px-4 py-2.5 text-sm font-black text-emerald-50 hover:bg-emerald-400/25 disabled:opacity-60"
+              >
+                <Plus className="h-4 w-4" /> Add 5 Rows
+              </button>
+            </div>
+          </div>
+
+          <div className="hidden gap-3 px-3 text-[11px] font-black uppercase tracking-wide text-gray-500 md:grid md:grid-cols-[3rem_minmax(12rem,1fr)_minmax(9rem,.65fr)_minmax(8rem,.55fr)_minmax(14rem,1fr)_3rem]">
+            <span>#</span>
+            <span>Scope Title *</span>
+            <span>House / Section</span>
+            <span>Status</span>
+            <span>Scope Details</span>
+            <span className="sr-only">Remove</span>
+          </div>
+
+          <div className="space-y-3">
+            {bulkScopeRows.map((row, index) => (
+              <div key={row.rowId} className="rounded-2xl border border-slate-700 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-3 shadow-sm">
+                <div className="grid gap-3 md:grid-cols-[3rem_minmax(12rem,1fr)_minmax(9rem,.65fr)_minmax(8rem,.55fr)_minmax(14rem,1fr)_3rem] md:items-start">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-900 text-sm font-black text-white">
+                    {index + 1}
+                  </div>
+                  <label>
+                    <span className="bt-scope-editor-label mb-1 block text-xs font-black uppercase tracking-wide text-gray-500 md:sr-only">Scope Title *</span>
+                    <input
+                      type="text"
+                      autoComplete="off"
+                      value={row.scope_title}
+                      onChange={updateBulkScopeRow(row.rowId, 'scope_title')}
+                      placeholder="Paint cabinets"
+                      className={scopeEditorFieldClass}
+                    />
+                  </label>
+                  <label>
+                    <span className="bt-scope-editor-label mb-1 block text-xs font-black uppercase tracking-wide text-gray-500 md:sr-only">House / Section</span>
+                    <input
+                      type="text"
+                      autoComplete="off"
+                      value={row.section_name}
+                      onChange={updateBulkScopeRow(row.rowId, 'section_name')}
+                      placeholder="Kitchen"
+                      className={scopeEditorFieldClass}
+                    />
+                  </label>
+                  <label>
+                    <span className="bt-scope-editor-label mb-1 block text-xs font-black uppercase tracking-wide text-gray-500 md:sr-only">Status</span>
+                    <select value={row.status} onChange={updateBulkScopeRow(row.rowId, 'status')} className={`${scopeEditorFieldClass} bg-white`}>
+                      {['draft', 'active', 'on_hold', 'completed'].map(status => <option key={status} value={status}>{status.replace(/_/g, ' ')}</option>)}
+                    </select>
+                  </label>
+                  <label>
+                    <span className="bt-scope-editor-label mb-1 block text-xs font-black uppercase tracking-wide text-gray-500 md:sr-only">Scope Details</span>
+                    <textarea
+                      value={row.scope_of_work}
+                      onChange={updateBulkScopeRow(row.rowId, 'scope_of_work')}
+                      rows={2}
+                      placeholder="Enter work details..."
+                      className={`${scopeEditorFieldClass} min-h-[44px] resize-y`}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => removeBulkScopeRow(row.rowId)}
+                    disabled={savingBulkScopes}
+                    className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 disabled:opacity-60"
+                    aria-label={`Remove bulk scope row ${index + 1}`}
+                    title="Remove row"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex flex-col gap-3 border-t border-gray-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs font-bold text-gray-500">{bulkEnteredCount} scope {bulkEnteredCount === 1 ? 'item' : 'items'} ready to save</p>
+            <div className="flex flex-wrap justify-end gap-3">
+              <button type="button" disabled={savingBulkScopes} onClick={closeBulkScopes} className="px-4 py-2.5 rounded-xl border border-gray-300 text-sm font-black text-gray-700 hover:bg-gray-50 disabled:opacity-60">Cancel</button>
+              <button type="button" disabled={savingBulkScopes} onClick={() => addBulkScopeRows(5)} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-emerald-300 bg-white text-sm font-black text-emerald-800 hover:bg-emerald-50 disabled:opacity-60">
+                <Plus className="h-4 w-4" /> Add 5 Rows
+              </button>
+              <button type="button" disabled={savingBulkScopes} onClick={saveBulkScopes} className="px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-black hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70">
+                {savingBulkScopes ? 'Saving...' : 'Save Scope Items'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Modal>
 
       <Modal isOpen={showEditor} onClose={closeScopeEditor} title={editingScope ? 'Edit Scope of Work' : 'Add Scope of Work'} size="lg">
         <div className="space-y-4 bt-scope-editor" onKeyDown={keepScopeEditorTypingLocal}>
           <div className="grid md:grid-cols-2 gap-3">
+            <div className="md:col-span-2">
+              <label className="bt-scope-editor-label block text-sm font-medium text-gray-700 mb-1">Scope Title *</label>
+              <input type="text" autoComplete="off" value={scopeForm.scope_title} onChange={updateScopeFormField('scope_title')} placeholder="Kitchen cabinet and countertop replacement" className={scopeEditorFieldClass} />
+            </div>
             <div>
               <label className="bt-scope-editor-label block text-sm font-medium text-gray-700 mb-1">House / Project Section</label>
               <input type="text" autoComplete="off" value={scopeForm.section_name} onChange={updateScopeFormField('section_name')} placeholder="Kitchen, exterior, roof, site work..." className={scopeEditorFieldClass} />
@@ -1822,11 +3419,7 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
               </select>
             </div>
             <div className="md:col-span-2">
-              <label className="bt-scope-editor-label block text-sm font-medium text-gray-700 mb-1">Scope Title *</label>
-              <input type="text" autoComplete="off" value={scopeForm.scope_title} onChange={updateScopeFormField('scope_title')} placeholder="Kitchen cabinet and countertop replacement" className={scopeEditorFieldClass} />
-            </div>
-            <div className="md:col-span-2">
-              <label className="bt-scope-editor-label block text-sm font-medium text-gray-700 mb-1">Scope of Work *</label>
+              <label className="bt-scope-editor-label block text-sm font-medium text-gray-700 mb-1">Scope of Work</label>
               <textarea value={scopeForm.scope_of_work} onChange={updateScopeFormField('scope_of_work')} rows={8} placeholder="Enter the full scope for this section..." className={`${scopeEditorFieldClass} resize-none`} />
             </div>
           </div>
@@ -1847,6 +3440,13 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
               >
                 <Paperclip className="h-4 w-4" /> Attach Doc
               </button>
+              <button
+                type="button"
+                onClick={openScopeEditorPhotoPicker}
+                className="inline-flex items-center gap-2 rounded-xl border border-cyan-300 bg-cyan-50 px-4 py-2.5 text-sm font-black text-cyan-800 hover:bg-cyan-100"
+              >
+                <Camera className="h-4 w-4" /> Select Photos
+              </button>
               <span className="max-w-lg truncate text-xs font-semibold text-gray-500">{scopeAttachmentSummary}</span>
               {scopeAttachments.length > 0 && (
                 <button type="button" onClick={clearScopeAttachmentInput} className="rounded-lg px-2 py-1 text-xs font-bold text-gray-500 hover:bg-gray-100">
@@ -1857,13 +3457,63 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
             </div>
             <div className="flex justify-end gap-3">
               <button type="button" disabled={savingScope} onClick={closeScopeEditor} className="px-4 py-2.5 rounded-xl border border-gray-300 text-sm font-black text-gray-700 hover:bg-gray-50 disabled:opacity-60">Cancel</button>
+              <button
+                type="button"
+                disabled={savingScope}
+                onClick={listeningScope ? stopScopeDictation : startScopeDictation}
+                className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-black disabled:opacity-60 ${
+                  listeningScope
+                    ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100'
+                    : 'border-blue-200 bg-white text-blue-700 hover:bg-blue-50'
+                }`}
+                aria-pressed={listeningScope}
+                aria-label={listeningScope ? 'Stop scope of work dictation' : 'Speak scope of work'}
+              >
+                {listeningScope ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                {scopeDictationStatus === 'starting' ? 'Starting...' : listeningScope ? 'Stop' : 'Speak Scope'}
+              </button>
               <button type="button" disabled={savingScope} onClick={saveScope} className="px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-black hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70">
                 {savingScope ? 'Saving...' : 'Save Scope'}
               </button>
             </div>
           </div>
+          {selectedScopePhotos.length > 0 && (
+            <div className="rounded-2xl border border-cyan-200 bg-cyan-50 p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-xs font-black uppercase tracking-wide text-cyan-800">{selectedScopePhotos.length} selected photo{selectedScopePhotos.length === 1 ? '' : 's'}</p>
+                <button type="button" onClick={() => { setSelectedScopePhotos([]); setSelectedScopePhotoIds([]); }} className="rounded-lg px-2 py-1 text-xs font-black text-cyan-800 hover:bg-cyan-100">
+                  Clear photos
+                </button>
+              </div>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {selectedScopePhotos.map(photo => {
+                  const mediaKind = getProgressMediaKind(photo);
+                  const src = progressPhotoSrc(projectId, photo);
+                  return (
+                    <div key={photo.id} className="h-16 w-20 flex-shrink-0 overflow-hidden rounded-lg border border-cyan-200 bg-white">
+                      {mediaKind === 'video' ? (
+                        <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+                      ) : mediaKind === 'image' ? (
+                        <img src={src} alt={photo.original_name || 'Selected scope photo'} className="h-full w-full object-cover" loading="lazy" />
+                      ) : (
+                        <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </Modal>
+      <PhotoBucketPickerModal
+        projectId={projectId}
+        isOpen={Boolean(scopePhotoPicker)}
+        title={scopePhotoPicker?.title || 'Select photos'}
+        initialSelectedIds={scopePhotoPicker?.initialSelectedIds || []}
+        onClose={() => setScopePhotoPicker(null)}
+        onSave={saveScopePhotoPickerSelection}
+      />
     </div>
   );
 }
@@ -2325,11 +3975,11 @@ function ConstructionPlanBoard({ projectId, canManage }: { projectId: string; ca
             </div>
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-              <textarea value={stepForm.description} onChange={e => setStepForm({ ...stepForm, description: e.target.value })} rows={4} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+              <VoiceTextarea value={stepForm.description} onChange={e => setStepForm({ ...stepForm, description: e.target.value })} rows={4} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
             </div>
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">Approval Notes</label>
-              <textarea value={stepForm.approval_notes} onChange={e => setStepForm({ ...stepForm, approval_notes: e.target.value })} rows={2} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" placeholder="What was checked before invoice approval?" />
+              <VoiceTextarea value={stepForm.approval_notes} onChange={e => setStepForm({ ...stepForm, approval_notes: e.target.value })} rows={2} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" placeholder="What was checked before invoice approval?" />
             </div>
           </div>
           <div className="flex gap-3">
@@ -2371,7 +4021,7 @@ function ConstructionPlanBoard({ projectId, canManage }: { projectId: string; ca
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Delivered At</label><input type="date" value={materialForm.delivered_at} onChange={e => setMaterialForm({ ...materialForm, delivered_at: e.target.value })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
             <div className="md:col-span-3">
               <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-              <textarea value={materialForm.notes} onChange={e => setMaterialForm({ ...materialForm, notes: e.target.value })} rows={3} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+              <VoiceTextarea value={materialForm.notes} onChange={e => setMaterialForm({ ...materialForm, notes: e.target.value })} rows={3} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
             </div>
           </div>
           <div className="flex gap-3">
@@ -2693,13 +4343,28 @@ function ConstructionPlanTab({ projectId, canManage }: { projectId: string; canM
   );
 }
 
-function PunchListTab({ projectId, user }: { projectId: string; user: any }) {
+function PunchListTab({
+  projectId,
+  user,
+  isActive,
+  canActivate,
+  activating,
+  onActivate,
+}: {
+  projectId: string;
+  user: any;
+  isActive: boolean;
+  canActivate: boolean;
+  activating: boolean;
+  onActivate: () => Promise<void> | void;
+}) {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [filter, setFilter] = useState('');
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
   const [uploadingItemPhoto, setUploadingItemPhoto] = useState<string | null>(null);
+  const [punchPhotoPickerItem, setPunchPhotoPickerItem] = useState<any | null>(null);
   const { register, handleSubmit, reset, formState: { isSubmitting } } = useForm();
 
   const load = async () => {
@@ -2713,6 +4378,10 @@ function PunchListTab({ projectId, user }: { projectId: string; user: any }) {
   useEffect(() => { load(); }, [filter]);
 
   const onAdd = async (data: any) => {
+    if (!isActive) {
+      toast.error('Activate the punch list before adding items');
+      return;
+    }
     try {
       await api.post(`/projects/${projectId}/punch-list`, data);
       toast.success('Item added');
@@ -2751,18 +4420,75 @@ function PunchListTab({ projectId, user }: { projectId: string; user: any }) {
     }
   };
 
+  const savePunchPhotoPickerSelection = async (photos: any[]) => {
+    if (!punchPhotoPickerItem) return;
+    const photoIds = photos.map(photo => String(photo.id)).filter(Boolean);
+    if (!photoIds.length) {
+      setPunchPhotoPickerItem(null);
+      return;
+    }
+    try {
+      await api.post(`/projects/${projectId}/photos/assignments`, {
+        target_type: 'punch_list_item',
+        target_id: punchPhotoPickerItem.id,
+        photo_ids: photoIds,
+      });
+      toast.success('Photos attached to punch item');
+      setPunchPhotoPickerItem(null);
+      await load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to attach photos');
+    }
+  };
+
+  const removePunchPhotoAssignment = async (assignmentId?: string | null) => {
+    if (!assignmentId) return;
+    try {
+      await api.delete(`/projects/${projectId}/photos/assignments/${assignmentId}`);
+      toast.success('Photo removed from punch item');
+      await load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to remove photo');
+    }
+  };
+
   const priorityColors: Record<string, string> = { low: 'bg-gray-100 text-gray-600', medium: 'bg-blue-100 text-blue-700', high: 'bg-orange-100 text-orange-700', urgent: 'bg-red-100 text-red-700' };
   const statusColors: Record<string, string> = { not_started: 'bg-gray-100 text-gray-600', in_progress: 'bg-blue-100 text-blue-700', waiting_materials: 'bg-orange-100 text-orange-700', needs_review: 'bg-purple-100 text-purple-700', completed: 'bg-green-100 text-green-700' };
 
   return (
     <div className="space-y-4">
+      <div className={`rounded-2xl border p-4 shadow-[0_16px_38px_rgba(15,23,42,0.16)] ${isActive ? 'border-yellow-300 bg-gradient-to-br from-yellow-50 via-white to-blue-50' : 'border-slate-300 bg-gradient-to-br from-slate-50 via-white to-blue-50'}`}>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-lg font-black text-slate-950">{isActive ? 'Punch List Active' : 'Start Punch List'}</h3>
+              {isActive && <span className="rounded-full border border-yellow-400 bg-yellow-300 px-3 py-1 text-xs font-black uppercase tracking-wide text-yellow-950">Punch List Active</span>}
+              <span className="rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-black uppercase tracking-wide text-emerald-800">Active Rehab</span>
+            </div>
+            <p className="mt-1 text-sm font-semibold text-slate-600">Punch list is the final 90% completion workflow. It stays separate from scope of work and only opens when management activates it.</p>
+          </div>
+          {!isActive && (
+            <button
+              type="button"
+              onClick={onActivate}
+              disabled={!canActivate || activating}
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-yellow-500 px-4 py-2.5 text-sm font-black text-yellow-950 shadow-sm transition hover:bg-yellow-400 disabled:cursor-not-allowed disabled:opacity-60"
+              title={canActivate ? 'Activate punch list for this project' : 'Only management can activate punch list'}
+            >
+              <ClipboardList className="h-4 w-4" />
+              {activating ? 'Activating...' : 'Activate Punch List'}
+            </button>
+          )}
+        </div>
+      </div>
+
       <div className="flex gap-2">
         <div className="flex gap-1 flex-1 overflow-x-auto">
           {[['', 'All'], ['not_started', 'Open'], ['in_progress', 'In Progress'], ['completed', 'Done'], ['urgent', 'Urgent']].map(([val, label]) => (
             <button key={val} onClick={() => setFilter(val)} className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${filter === val ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50'}`}>{label}</button>
           ))}
         </div>
-        <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 transition-colors flex-shrink-0">
+        <button disabled={!isActive} onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 transition-colors flex-shrink-0 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600" title={isActive ? 'Add punch list item' : 'Activate punch list before adding items'}>
           <Plus className="w-3.5 h-3.5" /> Add
         </button>
       </div>
@@ -2773,8 +4499,9 @@ function PunchListTab({ projectId, user }: { projectId: string; user: any }) {
             <div key={item.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
               <div className="p-4 flex items-start gap-3">
                 <button
+                  disabled={!isActive}
                   onClick={() => updateStatus(item.id, item.status === 'completed' ? 'not_started' : 'completed')}
-                  className={`w-5 h-5 rounded-full border-2 flex-shrink-0 mt-0.5 transition-colors ${item.status === 'completed' ? 'bg-green-500 border-green-500' : 'border-gray-300 hover:border-green-400'}`}
+                  className={`w-5 h-5 rounded-full border-2 flex-shrink-0 mt-0.5 transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${item.status === 'completed' ? 'bg-green-500 border-green-500' : 'border-gray-300 hover:border-green-400'}`}
                 >
                   {item.status === 'completed' && <svg className="w-full h-full text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                 </button>
@@ -2802,7 +4529,7 @@ function PunchListTab({ projectId, user }: { projectId: string; user: any }) {
                   )}
                   <div className="flex gap-2 flex-wrap">
                     {['not_started', 'in_progress', 'waiting_materials', 'needs_review', 'completed'].map(s => (
-                      <button key={s} onClick={() => updateStatus(item.id, s)} className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${item.status === s ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{s.replace(/_/g, ' ')}</button>
+                      <button key={s} disabled={!isActive} onClick={() => updateStatus(item.id, s)} className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${item.status === s ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{s.replace(/_/g, ' ')}</button>
                     ))}
                     <label className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-blue-700 bg-blue-50 border border-blue-100 cursor-pointer hover:bg-blue-100 transition-colors">
                       <input
@@ -2811,7 +4538,7 @@ function PunchListTab({ projectId, user }: { projectId: string; user: any }) {
                         capture="environment"
                         multiple
                         className="hidden"
-                        disabled={uploadingItemPhoto === item.id}
+                        disabled={!isActive || uploadingItemPhoto === item.id}
                         onChange={e => {
                           uploadItemPhoto(item.id, e.target.files);
                           e.currentTarget.value = '';
@@ -2820,7 +4547,54 @@ function PunchListTab({ projectId, user }: { projectId: string; user: any }) {
                       <Camera className="w-3.5 h-3.5" />
                       {uploadingItemPhoto === item.id ? 'Uploading...' : 'Add Photo'}
                     </label>
+                    <button
+                      type="button"
+                      disabled={!isActive}
+                      onClick={() => setPunchPhotoPickerItem(item)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-200 bg-cyan-50 px-2.5 py-1 text-xs font-bold text-cyan-700 transition-colors hover:bg-cyan-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Camera className="w-3.5 h-3.5" />
+                      Use Bucket Photo
+                    </button>
                   </div>
+                  {Array.isArray(item.photos) && item.photos.length > 0 && (
+                    <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <p className="text-xs font-black uppercase tracking-wide text-slate-500">Attached photos</p>
+                        <span className="rounded-full bg-white px-2 py-0.5 text-xs font-black text-slate-600">{item.photos.length}</span>
+                      </div>
+                      <div className="flex gap-2 overflow-x-auto pb-1">
+                        {item.photos.map((photo: any) => {
+                          const mediaKind = getProgressMediaKind(photo);
+                          const src = progressPhotoSrc(projectId, photo);
+                          return (
+                            <div key={photo.assignment_id || photo.id} className="group relative h-20 w-24 flex-shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+                              {mediaKind === 'video' ? (
+                                <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+                              ) : mediaKind === 'image' ? (
+                                <img src={src} alt={photo.original_name || 'Punch list photo'} className="h-full w-full object-cover" loading="lazy" />
+                              ) : (
+                                <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
+                              )}
+                              {photo.assignment_id && (
+                                <button
+                                  type="button"
+                                  onClick={() => removePunchPhotoAssignment(photo.assignment_id)}
+                                  className="absolute right-1 top-1 hidden rounded-md border border-red-300 bg-red-600 px-1.5 py-1 text-[10px] font-black text-white shadow-sm group-hover:inline-flex"
+                                  aria-label="Remove photo from punch item"
+                                >
+                                  Remove
+                                </button>
+                              )}
+                              <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-1.5 py-1 text-[10px] font-black text-white">
+                                {photo.individual_note || photo.batch_note || photo.caption || photo.original_name || 'Photo'}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                   {item.notes && <p className="text-xs text-gray-600 mt-2 bg-gray-50 rounded-lg p-2">{item.notes}</p>}
                 </div>
               )}
@@ -2830,7 +4604,7 @@ function PunchListTab({ projectId, user }: { projectId: string; user: any }) {
         </div>
       )}
 
-      <Modal isOpen={showAdd} onClose={() => { setShowAdd(false); reset(); }} title="Add Punch List Item">
+      <Modal isOpen={showAdd && isActive} onClose={() => { setShowAdd(false); reset(); }} title="Add Punch List Item">
         <form onSubmit={handleSubmit(onAdd)} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
@@ -2857,7 +4631,7 @@ function PunchListTab({ projectId, user }: { projectId: string; user: any }) {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-            <textarea {...register('notes')} rows={2} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+            <VoiceTextarea {...register('notes')} rows={2} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
           </div>
           <div className="flex gap-3">
             <button type="button" onClick={() => { setShowAdd(false); reset(); }} className="flex-1 py-2.5 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50">Cancel</button>
@@ -2865,6 +4639,14 @@ function PunchListTab({ projectId, user }: { projectId: string; user: any }) {
           </div>
         </form>
       </Modal>
+      <PhotoBucketPickerModal
+        projectId={projectId}
+        isOpen={Boolean(punchPhotoPickerItem)}
+        title={punchPhotoPickerItem ? `Attach photos to ${punchPhotoPickerItem.title}` : 'Attach photos to punch item'}
+        initialSelectedIds={[]}
+        onClose={() => setPunchPhotoPickerItem(null)}
+        onSave={savePunchPhotoPickerSelection}
+      />
     </div>
   );
 }
@@ -2874,7 +4656,7 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
   const [photos, setPhotos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
-  const [lightbox, setLightbox] = useState<{ src: string; isVideo: boolean; name?: string } | null>(null);
+  const [lightbox, setLightbox] = useState<ProgressLightboxState | null>(null);
   const [deletingPhotoId, setDeletingPhotoId] = useState('');
 
   const load = async () => {
@@ -2893,17 +4675,27 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
     }
   };
 
-  const deleteProgressPhoto = async (photo: any) => {
-    if (!photo?.can_delete_correction || deletingPhotoId) return;
-    const confirmed = window.confirm('Remove this uploaded progress picture? This uses your one correction and then locks this upload record.');
+  const deleteProgressPhotos = async (selectedPhotos: any[]) => {
+    if (deletingPhotoId) return;
+    const eligiblePhotos = selectedPhotos.filter(photo => photo?.can_delete_correction);
+    if (!eligiblePhotos.length) {
+      toast.error('Select at least one eligible progress picture to delete.');
+      return;
+    }
+    const confirmed = window.confirm(`Delete ${eligiblePhotos.length} selected progress picture${eligiblePhotos.length === 1 ? '' : 's'}? This removes them from this project and locks correction for the selected upload record${eligiblePhotos.length === 1 ? '' : 's'}.`);
     if (!confirmed) return;
-    setDeletingPhotoId(photo.id);
+    setDeletingPhotoId('__batch__');
     try {
-      await api.delete(`/projects/${projectId}/photos/${photo.id}`);
-      toast.success('Progress picture removed. Correction is now locked.');
+      const results = await Promise.allSettled(
+        eligiblePhotos.map(photo => api.delete(`/projects/${projectId}/photos/${photo.id}`))
+      );
+      const deleted = results.filter(result => result.status === 'fulfilled').length;
+      const failed = results.length - deleted;
+      if (deleted) toast.success(`${deleted} progress picture${deleted === 1 ? '' : 's'} removed.`);
+      if (failed) toast.error(`${failed} progress picture${failed === 1 ? '' : 's'} could not be deleted.`);
       await load();
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Failed to delete progress picture');
+      toast.error(err.response?.data?.error || 'Failed to delete selected photos');
     } finally {
       setDeletingPhotoId('');
     }
@@ -2967,43 +4759,64 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
   const attachedMediaCount = notes.reduce((count, note) => count + getNotePhotos(note).length, 0);
   const standaloneMediaCount = standalonePhotos.length;
 
+  const saveProgressGroupNote = async (record: any, note: string) => {
+    const photoIds = (record.photos || []).map((photo: any) => photo.id).filter(Boolean);
+    if (!photoIds.length) {
+      toast.error('No photos are available for this note');
+      return;
+    }
+    try {
+      await api.put(`/projects/${projectId}/photos/batch-note`, { photo_ids: photoIds, note });
+      toast.success(note.trim() ? 'Progress picture group note entered' : 'Progress picture group note cleared');
+      await load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to save progress picture group note');
+    }
+  };
+
   if (loading) return <Loading />;
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <div
+        className="relative overflow-hidden rounded-md border border-blue-400/50 px-4 py-4 shadow-[0_22px_60px_rgba(2,6,23,0.38)]"
+        style={{
+          background: 'radial-gradient(110% 120% at 8% 0%, rgba(37,99,235,0.28), transparent 44%), radial-gradient(100% 90% at 92% 10%, rgba(245,158,11,0.18), transparent 42%), linear-gradient(135deg, rgba(15,23,42,0.98) 0%, rgba(17,24,39,0.96) 50%, rgba(8,47,73,0.74) 100%)',
+        }}
+      >
+        <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-blue-500 via-cyan-300 to-amber-300" />
+        <div className="relative flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className="text-xs font-black uppercase tracking-wide text-slate-500">Project Record</p>
-            <h2 className="mt-1 text-lg font-black text-slate-950">Progress Notes</h2>
-            <p className="mt-1 text-sm font-medium text-slate-500">{project?.address || 'Project progress'} </p>
+            <p className="text-xs font-black uppercase tracking-wide text-amber-200">Project Record</p>
+            <h2 className="mt-1 text-xl font-black text-white">Progress Notes</h2>
+            <p className="mt-1 text-sm font-bold text-blue-100">{project?.address || 'Project progress'} </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={load}
-              className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-black text-white hover:bg-slate-800"
+              className="rounded-md border border-blue-300/40 bg-blue-500/20 px-3 py-2 text-xs font-black text-blue-50 shadow-[0_0_18px_rgba(59,130,246,0.22)] hover:bg-blue-500/30"
             >
               Refresh now
             </button>
           </div>
         </div>
-        <div className="mt-3 grid gap-2 sm:grid-cols-4">
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-            <p className="text-lg font-black text-slate-950">{notes.length}</p>
-            <p className="text-xs font-semibold text-slate-500">Notes</p>
+        <div className="relative mt-4 grid gap-2 sm:grid-cols-4">
+          <div className="rounded-md border border-white/10 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]" style={{ background: 'linear-gradient(135deg, rgba(15,23,42,0.92), rgba(30,41,59,0.76))' }}>
+            <p className="text-xl font-black text-white">{notes.length}</p>
+            <p className="text-xs font-black uppercase tracking-wide text-slate-300">Notes</p>
           </div>
-          <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
-            <p className="text-lg font-black text-blue-700">{attachedMediaCount}</p>
-            <p className="text-xs font-semibold text-blue-700">Attached media</p>
+          <div className="rounded-md border border-blue-300/40 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]" style={{ background: 'linear-gradient(135deg, rgba(37,99,235,0.24), rgba(15,23,42,0.84))' }}>
+            <p className="text-xl font-black text-blue-100">{attachedMediaCount}</p>
+            <p className="text-xs font-black uppercase tracking-wide text-blue-100">Attached media</p>
           </div>
-          <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
-            <p className="text-lg font-black text-amber-700">{standaloneMediaCount}</p>
-            <p className="text-xs font-semibold text-amber-700">Standalone media</p>
+          <div className="rounded-md border border-amber-300/50 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]" style={{ background: 'linear-gradient(135deg, rgba(245,158,11,0.24), rgba(69,26,3,0.52))' }}>
+            <p className="text-xl font-black text-amber-100">{standaloneMediaCount}</p>
+            <p className="text-xs font-black uppercase tracking-wide text-amber-100">Standalone media</p>
           </div>
-          <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-            <p className="text-sm font-black text-slate-800">{lastUpdated ? formatEasternDateTime(lastUpdated, { hour: 'numeric', minute: '2-digit' }) : '-'}</p>
-            <p className="text-xs font-semibold text-slate-500">Last refresh</p>
+          <div className="rounded-md border border-cyan-300/40 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]" style={{ background: 'linear-gradient(135deg, rgba(8,47,73,0.72), rgba(15,23,42,0.88))' }}>
+            <p className="text-sm font-black text-cyan-50">{lastUpdated ? formatEasternDateTime(lastUpdated, { hour: 'numeric', minute: '2-digit' }) : '-'}</p>
+            <p className="text-xs font-black uppercase tracking-wide text-cyan-100">Last refresh</p>
           </div>
         </div>
       </div>
@@ -3065,7 +4878,13 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
                         </>
                       )}
                     </div>
-                    {record.noteText && (
+                    {record.kind === 'media' ? (
+                      <ProgressGroupNoteEditor
+                        initialNote={record.noteText || ''}
+                        photoCount={record.photos.length}
+                        onSave={(note) => saveProgressGroupNote(record, note)}
+                      />
+                    ) : record.noteText && (
                       <div className={`bt-project-progress-note-body ${record.kind === 'media' ? 'mt-2 max-h-16' : 'mt-2 max-h-28'} overflow-y-auto whitespace-pre-wrap pr-2 text-sm leading-6 text-slate-700`}>
                         {record.noteText}
                       </div>
@@ -3074,9 +4893,10 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
                       projectId={projectId}
                       photos={record.photos}
                       maxItems={20}
-                      onLightbox={setLightbox}
-                      onDeleteCorrection={deleteProgressPhoto}
+                      onLightbox={(items, index) => setLightbox({ items, index })}
+                      onDeleteSelected={deleteProgressPhotos}
                       deletingPhotoId={deletingPhotoId}
+                      onPhotoNoteSaved={load}
                     />
                   </div>
                 </div>
@@ -3086,23 +4906,102 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
         ))
       )}
 
-      {lightbox && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4" onClick={() => setLightbox(null)}>
-          {lightbox.isVideo ? (
-            <video src={lightbox.src} controls autoPlay className="max-h-[88vh] max-w-[92vw] rounded-lg" onClick={event => event.stopPropagation()} />
-          ) : (
-            <img src={lightbox.src} alt={lightbox.name || 'Progress record'} className="max-h-[88vh] max-w-[92vw] rounded-lg object-contain" onClick={event => event.stopPropagation()} />
-          )}
-          {lightbox.name && (
-            <div className="absolute bottom-4 left-1/2 max-w-[80vw] -translate-x-1/2 rounded-lg bg-black/70 px-3 py-2 text-sm font-semibold text-white">
-              {lightbox.name}
-            </div>
-          )}
-          <button className="absolute right-4 top-4 text-white/70 hover:text-white" onClick={() => setLightbox(null)}>
-            <XIcon />
-          </button>
+      <ProgressMediaLightbox state={lightbox} onChange={setLightbox} />
+    </div>
+  );
+}
+
+function ProgressGroupNoteEditor({
+  initialNote,
+  photoCount,
+  onSave,
+}: {
+  initialNote: string;
+  photoCount: number;
+  onSave: (note: string) => Promise<void> | void;
+}) {
+  const [note, setNote] = useState(initialNote || '');
+  const [saving, setSaving] = useState(false);
+  const [voiceStopSignal, setVoiceStopSignal] = useState(0);
+
+  useEffect(() => {
+    setNote(initialNote || '');
+  }, [initialNote]);
+
+  const normalizedNote = note.trim();
+  const normalizedInitial = String(initialNote || '').trim();
+  const changed = normalizedNote !== normalizedInitial;
+
+  const save = async (nextNote = normalizedNote) => {
+    if (saving) return;
+    setVoiceStopSignal(current => current + 1);
+    setSaving(true);
+    try {
+      await onSave(nextNote);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="bt-progress-group-note mt-3">
+      <div className="bt-progress-group-note-header">
+        <div className="bt-progress-group-note-title">
+          <div className="bt-progress-group-note-icon">
+            <MessageSquare className="h-4 w-4" />
+          </div>
+          <div>
+            <p>Picture group note</p>
+            <span>{photoCount} progress picture{photoCount === 1 ? '' : 's'} share this note</span>
+          </div>
         </div>
-      )}
+        <div className="bt-progress-group-note-chips">
+          <span>{normalizedInitial ? 'Saved note' : 'No saved note'}</span>
+          {changed ? <span className="is-warning">Unsaved changes</span> : null}
+        </div>
+      </div>
+
+      {normalizedInitial ? (
+        <div className="bt-progress-group-note-preview" aria-label="Saved picture group note">
+          <span>Combined group note</span>
+          <p>{normalizedInitial}</p>
+        </div>
+      ) : null}
+
+      <div className="bt-progress-group-note-compose">
+        <VoiceTextarea
+          value={note}
+          onChange={event => setNote(event.target.value)}
+          rows={4}
+          disabled={saving}
+          stopSignal={voiceStopSignal}
+          placeholder="Add one clean note that applies to this full picture group..."
+          wrapperClassName="bt-progress-group-note-input-wrap"
+          className="bt-progress-group-note-field"
+          buttonClassName="bt-progress-group-note-mic"
+        />
+        <div className="bt-progress-group-note-actions">
+          <button
+            type="button"
+            onClick={() => void save()}
+            disabled={saving || !changed || !normalizedNote}
+            className="bt-progress-group-note-save"
+          >
+            <MessageSquare className="h-4 w-4" />
+            {saving ? 'Saving...' : normalizedInitial ? 'Update note' : 'Enter note'}
+          </button>
+          {(normalizedInitial || normalizedNote) && (
+            <button
+              type="button"
+              onClick={() => void save('')}
+              disabled={saving || (!normalizedInitial && !normalizedNote)}
+              className="bt-progress-group-note-clear"
+            >
+              Clear note
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -3112,45 +5011,125 @@ function ProgressMediaGrid({
   photos,
   maxItems,
   onLightbox,
-  onDeleteCorrection,
+  onDeleteSelected,
   deletingPhotoId,
+  onPhotoNoteSaved,
 }: {
   projectId: string;
   photos: any[];
   maxItems: number;
-  onLightbox: (value: { src: string; isVideo: boolean; name?: string }) => void;
-  onDeleteCorrection?: (photo: any) => void;
+  onLightbox: (items: ProgressLightboxItem[], index: number) => void;
+  onDeleteSelected?: (photos: any[]) => Promise<void>;
   deletingPhotoId?: string;
+  onPhotoNoteSaved?: (photo: any) => Promise<void> | void;
 }) {
+  const [deleteMode, setDeleteMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [notePhoto, setNotePhoto] = useState<any | null>(null);
   if (!photos.length) return null;
   const visiblePhotos = photos.slice(0, maxItems);
   const hiddenCount = photos.length - visiblePhotos.length;
+  const lightboxItems = buildProgressLightboxItems(projectId, visiblePhotos);
+  const selectablePhotos = visiblePhotos.filter(photo => photo.can_delete_correction);
+  const selectedPhotos = selectablePhotos.filter(photo => selectedIds.has(progressPhotoKey(photo)));
+  const deleting = Boolean(deletingPhotoId);
+
+  const toggleSelection = (photo: any) => {
+    if (!photo.can_delete_correction || deleting) return;
+    const key = progressPhotoKey(photo);
+    setSelectedIds(current => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const closeDeleteMode = () => {
+    setDeleteMode(false);
+    setSelectedIds(new Set());
+  };
+
+  const deleteSelected = async () => {
+    if (!onDeleteSelected || !selectedPhotos.length || deleting) return;
+    await onDeleteSelected(selectedPhotos);
+    closeDeleteMode();
+  };
 
   return (
-    <div className="bt-project-progress-media-grid mt-3 flex flex-wrap gap-2 rounded-lg border border-slate-100 bg-slate-50/70 p-2">
+    <div className="bt-project-progress-media-grid mt-3 rounded-lg border border-slate-100 bg-slate-50/70 p-2">
+      {selectablePhotos.length > 0 && onDeleteSelected && (
+        <div className="mb-2 flex flex-wrap items-center justify-center gap-2 rounded-lg border border-red-500/40 bg-red-950/25 px-2 py-2 shadow-inner">
+          {!deleteMode ? (
+            <button
+              type="button"
+              onClick={() => setDeleteMode(true)}
+              className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-red-400 bg-red-600 px-3 text-xs font-black text-white shadow-lg shadow-red-950/30 transition hover:border-red-300 hover:bg-red-500 focus:outline-none focus:ring-2 focus:ring-red-300"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete pictures
+            </button>
+          ) : (
+            <>
+              <span className="text-xs font-black text-red-100">Select pictures to delete</span>
+              <button
+                type="button"
+                onClick={() => void deleteSelected()}
+                disabled={!selectedPhotos.length || deleting}
+                className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-red-400 bg-red-600 px-3 text-xs font-black text-white shadow-lg shadow-red-950/30 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:border-red-300 disabled:bg-red-300 disabled:text-red-950"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {deleting ? 'Deleting...' : `Delete selected${selectedPhotos.length ? ` (${selectedPhotos.length})` : ''}`}
+              </button>
+              <button
+                type="button"
+                onClick={closeDeleteMode}
+                disabled={deleting}
+                className="inline-flex min-h-9 items-center justify-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-black text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      <div className="flex flex-wrap gap-2">
       {visiblePhotos.map(photo => {
-        const src = `/uploads/${projectId}/${photo.filename}`;
+        const src = progressPhotoSrc(projectId, photo);
         const mediaKind = getProgressMediaKind(photo);
         const isVideo = mediaKind === 'video';
         const timestamp = getProgressTimestamp(photo);
+        const key = progressPhotoKey(photo);
+        const isSelected = selectedIds.has(key);
+        const lightboxIndex = lightboxItems.findIndex(item => item.id === key);
+        const hasNote = Boolean(getProgressPhotoNoteText(photo));
 
         return (
           <div
-            key={photo.id || photo.filename}
+            key={key}
             role="button"
             tabIndex={0}
             onClick={() => {
+              if (deleteMode) {
+                toggleSelection(photo);
+                return;
+              }
               if (mediaKind === 'file') window.open(src, '_blank', 'noopener,noreferrer');
-              else onLightbox({ src, isVideo, name: photo.original_name || photo.filename });
+              else if (lightboxIndex >= 0) onLightbox(lightboxItems, lightboxIndex);
             }}
             onKeyDown={event => {
               if (event.key !== 'Enter' && event.key !== ' ') return;
               event.preventDefault();
+              if (deleteMode) {
+                toggleSelection(photo);
+                return;
+              }
               if (mediaKind === 'file') window.open(src, '_blank', 'noopener,noreferrer');
-              else onLightbox({ src, isVideo, name: photo.original_name || photo.filename });
+              else if (lightboxIndex >= 0) onLightbox(lightboxItems, lightboxIndex);
             }}
-            className="group relative h-20 w-20 flex-shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-md md:h-24 md:w-24"
-            aria-label={photo.original_name || 'Open progress media'}
+            className={`group relative h-20 w-20 flex-shrink-0 cursor-pointer overflow-hidden rounded-lg border bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-md md:h-24 md:w-24 ${deleteMode && photo.can_delete_correction ? 'ring-2 ring-red-200' : 'border-slate-200'} ${isSelected ? 'border-red-500 ring-4 ring-red-300' : ''} ${deleteMode && !photo.can_delete_correction ? 'cursor-not-allowed opacity-60' : ''}`}
+            aria-label={deleteMode ? `Select ${photo.original_name || 'photo'} for deletion` : photo.original_name || 'Open photo'}
+            aria-pressed={deleteMode ? isSelected : undefined}
           >
             {isVideo ? (
               <>
@@ -3164,21 +5143,26 @@ function ProgressMediaGrid({
             )}
             {mediaKind !== 'file' && (
               <div className="absolute inset-x-0 top-0 bg-gradient-to-b from-black/45 to-transparent px-1.5 py-1 text-[10px] font-black uppercase tracking-wide text-white opacity-0 transition-opacity group-hover:opacity-100">
-                Click to expand
+                {deleteMode ? 'Select to delete' : 'Click to expand'}
               </div>
             )}
-            {photo.can_delete_correction && onDeleteCorrection && (
+            {deleteMode && (
+              <div className={`absolute right-1 top-1 inline-flex h-7 w-7 items-center justify-center rounded-md border text-xs font-black shadow-sm ${isSelected ? 'border-red-500 bg-red-600 text-white' : photo.can_delete_correction ? 'border-white/80 bg-black/60 text-white' : 'border-slate-400 bg-slate-700 text-slate-300'}`}>
+                {isSelected ? <Check className="h-4 w-4" /> : photo.can_delete_correction ? '' : 'X'}
+              </div>
+            )}
+            {!deleteMode && (
               <button
                 type="button"
                 onClick={event => {
                   event.stopPropagation();
-                  onDeleteCorrection(photo);
+                  setNotePhoto(photo);
                 }}
-                disabled={deletingPhotoId === photo.id}
-                className="absolute right-1 top-1 inline-flex min-h-10 min-w-10 items-center justify-center rounded-md border border-red-200 bg-white/95 px-1.5 text-[10px] font-black text-red-700 shadow-sm transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
-                aria-label="Delete this progress picture as your one correction"
+                className={`absolute right-1 top-1 z-0 inline-flex min-h-7 items-center justify-center gap-1 rounded-md border px-1.5 text-[10px] font-black shadow-sm transition ${hasNote ? 'border-amber-300 bg-amber-500 text-slate-950 hover:bg-amber-400' : 'border-white/70 bg-black/65 text-white hover:border-amber-300 hover:text-amber-200'}`}
+                aria-label={`${hasNote ? 'Edit' : 'Add'} note for ${photo.original_name || 'progress picture'}`}
               >
-                <Trash2 className="h-3.5 w-3.5" />
+                <MessageSquare className="h-3 w-3" />
+                {hasNote ? 'Note' : 'Add'}
               </button>
             )}
             {timestamp && (
@@ -3194,6 +5178,233 @@ function ProgressMediaGrid({
           +{hiddenCount}
         </div>
       )}
+      </div>
+      <PhotoNoteModal
+        projectId={projectId}
+        photo={notePhoto}
+        onClose={() => setNotePhoto(null)}
+        onSaved={async updatedPhoto => {
+          setNotePhoto(null);
+          await onPhotoNoteSaved?.(updatedPhoto);
+        }}
+      />
+    </div>
+  );
+}
+
+function ProgressMediaLightbox({
+  state,
+  onChange,
+}: {
+  state: ProgressLightboxState | null;
+  onChange: Dispatch<SetStateAction<ProgressLightboxState | null>>;
+}) {
+  const activeItem = state?.items[state.index] || null;
+  const itemCount = state?.items.length || 0;
+
+  const move = useCallback((direction: -1 | 1) => {
+    onChange(current => {
+      if (!current || current.items.length < 2) return current;
+      const nextIndex = (current.index + direction + current.items.length) % current.items.length;
+      return { ...current, index: nextIndex };
+    });
+  }, [onChange]);
+
+  useEffect(() => {
+    if (!state) return;
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') onChange(null);
+      if (event.key === 'ArrowLeft') move(-1);
+      if (event.key === 'ArrowRight') move(1);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [move, onChange, state]);
+
+  if (!state || !activeItem) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4" onClick={() => onChange(null)}>
+      <div className="relative flex h-[90vh] w-[94vw] max-w-7xl flex-col overflow-hidden rounded-xl border border-white/20 bg-slate-950 shadow-2xl" onClick={event => event.stopPropagation()}>
+        <div className="flex min-h-14 items-center justify-between gap-3 border-b border-white/10 bg-black/45 px-4 py-3">
+          <div className="min-w-0">
+            <p className="text-[11px] font-black uppercase tracking-wide text-orange-300">Progress picture preview</p>
+            <h3 className="truncate text-sm font-black text-white">{activeItem.name || 'Progress picture'}</h3>
+            <p className="truncate text-xs font-semibold text-white/60">
+              {activeItem.meta || 'Project media'}{itemCount > 1 ? ` - ${state.index + 1} of ${itemCount}` : ''}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-white/20 bg-white/10 text-white transition hover:border-orange-300 hover:text-orange-200"
+            onClick={() => onChange(null)}
+            aria-label="Close progress picture preview"
+          >
+            <XIcon />
+          </button>
+        </div>
+
+        <div className="relative flex min-h-0 flex-1 items-center justify-center bg-black">
+          {activeItem.isVideo ? (
+            <video key={activeItem.src} src={activeItem.src} controls autoPlay className="max-h-full max-w-full object-contain" />
+          ) : (
+            <img key={activeItem.src} src={activeItem.src} alt={activeItem.name || 'Progress picture'} className="max-h-full max-w-full object-contain" />
+          )}
+
+          {activeItem.noteText && (
+            <div className="absolute bottom-4 left-4 right-4 max-h-36 overflow-y-auto rounded-xl border border-amber-300/40 bg-slate-950/90 p-3 shadow-2xl backdrop-blur">
+              <p className="text-[11px] font-black uppercase tracking-wide text-amber-300">Picture note</p>
+              <p className="mt-1 whitespace-pre-wrap text-sm font-semibold leading-6 text-white">{activeItem.noteText}</p>
+            </div>
+          )}
+
+          {itemCount > 1 && (
+            <>
+              <button
+                type="button"
+                onClick={() => move(-1)}
+                className="absolute left-3 top-1/2 inline-flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/70 text-white shadow-lg transition hover:border-orange-300 hover:bg-black/90 hover:text-orange-200"
+                aria-label="Previous progress picture"
+              >
+                <ChevronLeft className="h-7 w-7" />
+              </button>
+              <button
+                type="button"
+                onClick={() => move(1)}
+                className="absolute right-3 top-1/2 inline-flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/70 text-white shadow-lg transition hover:border-orange-300 hover:bg-black/90 hover:text-orange-200"
+                aria-label="Next progress picture"
+              >
+                <ChevronRight className="h-7 w-7" />
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PhotoNoteModal({
+  projectId,
+  photo,
+  onClose,
+  onSaved,
+}: {
+  projectId: string;
+  photo: any | null;
+  onClose: () => void;
+  onSaved: (photo: any) => Promise<void> | void;
+}) {
+  const [noteText, setNoteText] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [voiceStopSignal, setVoiceStopSignal] = useState(0);
+  const mediaKind = photo ? getProgressMediaKind(photo) : 'image';
+  const src = photo ? progressPhotoSrc(projectId, photo) : '';
+  const existingNote = getProgressPhotoNoteText(photo);
+
+  useEffect(() => {
+    setNoteText(existingNote);
+  }, [photo?.id, photo?.filename, existingNote]);
+
+  if (!photo) return null;
+
+  const saveNote = async (overrideNote?: string) => {
+    if (!photo.id || saving) return;
+    const nextNote = overrideNote ?? noteText;
+    setVoiceStopSignal(current => current + 1);
+    setSaving(true);
+    try {
+      const res = await api.put(`/projects/${projectId}/photos/${photo.id}/note`, { note: nextNote });
+      const updatedPhoto = res.data?.photo || res.data;
+      toast.success(nextNote.trim() ? 'Photo note entered' : 'Photo note cleared');
+      setSaving(false);
+      await onSaved(updatedPhoto);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to save photo note');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
+      <div className="w-full max-w-3xl overflow-hidden rounded-xl border border-amber-400/40 bg-slate-950 shadow-2xl" onClick={event => event.stopPropagation()}>
+        <div
+          className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3"
+          style={{ background: 'linear-gradient(135deg, rgba(15,23,42,0.98), rgba(69,26,3,0.72))' }}
+        >
+          <div className="min-w-0">
+            <p className="text-[11px] font-black uppercase tracking-wide text-amber-300">Picture note</p>
+            <h3 className="truncate text-sm font-black text-white">{photo.original_name || photo.filename || 'Project picture'}</h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-white/20 bg-white/10 text-white transition hover:border-amber-300 hover:text-amber-200"
+            aria-label="Close picture note"
+          >
+            <XIcon />
+          </button>
+        </div>
+
+        <div className="grid gap-4 p-4 md:grid-cols-[260px_minmax(0,1fr)]">
+          <div className="overflow-hidden rounded-lg border border-white/10 bg-black">
+            <div className="aspect-square">
+              {mediaKind === 'video' ? (
+                <video src={src} className="h-full w-full object-cover" controls />
+              ) : mediaKind === 'image' ? (
+                <img src={src} alt={photo.original_name || 'Project picture'} className="h-full w-full object-cover" />
+              ) : (
+                <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <label className="block">
+              <span className="mb-2 block text-xs font-black uppercase tracking-wide text-slate-300">Descriptive note</span>
+              <VoiceTextarea
+                value={noteText}
+                onChange={event => setNoteText(event.target.value)}
+                rows={8}
+                disabled={saving}
+                stopSignal={voiceStopSignal}
+                className="w-full resize-none rounded-lg border border-amber-300/30 bg-slate-900 px-3 py-2 text-sm font-semibold leading-6 text-white outline-none transition placeholder:text-slate-500 focus:border-amber-300 focus:ring-2 focus:ring-amber-300/30"
+                placeholder="Describe what this picture shows..."
+                autoFocus
+              />
+            </label>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={saving}
+                className="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-600 bg-slate-900 px-4 text-sm font-black text-slate-200 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveNote()}
+                disabled={saving || !noteText.trim() || noteText.trim() === existingNote}
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-amber-300 bg-amber-500 px-4 text-sm font-black text-slate-950 shadow-lg shadow-amber-950/25 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:border-slate-500 disabled:bg-slate-700 disabled:text-slate-300"
+              >
+                <MessageSquare className="h-4 w-4" />
+                {saving ? 'Saving...' : 'Enter Note'}
+              </button>
+              {(existingNote || noteText.trim()) && (
+                <button
+                  type="button"
+                  onClick={() => void saveNote('')}
+                  disabled={saving || (!existingNote && !noteText.trim())}
+                  className="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-600 bg-slate-900 px-4 text-sm font-black text-slate-200 transition hover:border-red-300 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Clear note
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -3202,81 +5413,115 @@ function RecentFieldPhotosCard({
   projectId,
   photos,
   onViewAll,
+  onPhotoNoteSaved,
 }: {
   projectId: string;
   photos: any[];
   onViewAll: () => void;
+  onPhotoNoteSaved: (photo: any) => Promise<void> | void;
 }) {
   const visiblePhotos = photos.slice(0, 4);
+  const [notePhoto, setNotePhoto] = useState<any | null>(null);
 
   return (
-    <section className="rounded-xl border border-gray-200 bg-white p-4">
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold text-gray-900">Recent Field Photos</h3>
-          <p className="mt-1 text-xs font-semibold text-gray-500">
-            {photos.length ? `${photos.length} latest project media item${photos.length === 1 ? '' : 's'}` : 'No field photos yet'}
-          </p>
+    <>
+      <section className="rounded-xl border border-gray-200 bg-white p-4">
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">Recent Field Photos</h3>
+            <p className="mt-1 text-xs font-semibold text-gray-500">
+              {photos.length ? `${photos.length} latest project media item${photos.length === 1 ? '' : 's'}` : 'No field photos yet'}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onViewAll}
+            className="rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-xs font-black text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
+          >
+            View all
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={onViewAll}
-          className="rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-xs font-black text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
-        >
-          View all
-        </button>
-      </div>
 
-      {visiblePhotos.length ? (
-        <div className="grid grid-cols-2 gap-2">
-          {visiblePhotos.map(photo => {
-            const src = `/uploads/${projectId}/${photo.filename}`;
-            const mediaKind = getProgressMediaKind(photo);
-            const isVideo = mediaKind === 'video';
-            const timestamp = getProgressTimestamp(photo);
+        {visiblePhotos.length ? (
+          <div className="grid grid-cols-2 gap-2">
+            {visiblePhotos.map(photo => {
+              const src = `/uploads/${projectId}/${photo.filename}`;
+              const mediaKind = getProgressMediaKind(photo);
+              const isVideo = mediaKind === 'video';
+              const timestamp = getProgressTimestamp(photo);
+              const noteText = getProgressPhotoNoteText(photo);
 
-            return (
-              <button
-                key={photo.id || photo.filename}
-                type="button"
-                onClick={onViewAll}
-                className="group overflow-hidden rounded-lg border border-gray-200 bg-gray-50 text-left transition hover:border-blue-300 hover:shadow-sm"
-                aria-label={`Open ${photo.original_name || 'field photo'} in progress history`}
-              >
-                <div className="relative aspect-[4/3] bg-gray-100">
-                  {isVideo ? (
-                    <>
-                      <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
-                      <PlayCircle className="absolute inset-0 m-auto h-8 w-8 text-white drop-shadow" />
-                    </>
-                  ) : mediaKind === 'image' ? (
-                    <img src={src} alt={photo.original_name || 'Recent field photo'} className="h-full w-full object-cover" loading="lazy" />
-                  ) : (
-                    <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
-                  )}
-                  <span className="absolute left-1.5 top-1.5 rounded-full bg-black/70 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-white">
-                    {photo.photo_type || 'media'}
-                  </span>
-                </div>
-                <div className="p-2">
-                  <p className="truncate text-xs font-black text-gray-900">
-                    {photo.uploader_name || 'Unknown user'}
-                  </p>
-                  <p className="mt-0.5 text-[11px] font-semibold text-gray-500">
-                    {timestamp ? formatEasternDateTime(timestamp, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'No timestamp'}
-                  </p>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4 text-center">
-          <Camera className="mx-auto mb-2 h-7 w-7 text-gray-300" />
-          <p className="text-sm font-bold text-gray-500">No field photos connected yet.</p>
-        </div>
-      )}
-    </section>
+              return (
+                <article
+                  key={photo.id || photo.filename}
+                  className="group overflow-hidden rounded-lg border border-gray-200 bg-gray-50 text-left transition hover:border-blue-300 hover:shadow-sm"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setNotePhoto(photo)}
+                    className="block w-full text-left"
+                    aria-label={`${noteText ? 'View or edit' : 'Add'} note for ${photo.original_name || 'field photo'}`}
+                  >
+                    <div className="relative aspect-[4/3] bg-gray-100">
+                      {isVideo ? (
+                        <>
+                          <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+                          <PlayCircle className="absolute inset-0 m-auto h-8 w-8 text-white drop-shadow" />
+                        </>
+                      ) : mediaKind === 'image' ? (
+                        <img src={src} alt={photo.original_name || 'Recent field photo'} className="h-full w-full object-cover" loading="lazy" />
+                      ) : (
+                        <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
+                      )}
+                      <span className="absolute left-1.5 top-1.5 rounded-full bg-black/70 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-white">
+                        {photo.photo_type || 'media'}
+                      </span>
+                      {noteText && (
+                        <span className="absolute right-1.5 top-1.5 inline-flex items-center gap-1 rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-black text-slate-950 shadow-sm">
+                          <MessageSquare className="h-3 w-3" />
+                          Note
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                  <div className="space-y-1.5 p-2">
+                    <p className="truncate text-xs font-black text-gray-900">
+                      {photo.uploader_name || 'Unknown user'}
+                    </p>
+                    <p className="text-[11px] font-semibold text-gray-500">
+                      {timestamp ? formatEasternDateTime(timestamp, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'No timestamp'}
+                    </p>
+                    {noteText && <p className="line-clamp-2 text-[11px] font-semibold leading-4 text-amber-700">{noteText}</p>}
+                    <button
+                      type="button"
+                      onClick={() => setNotePhoto(photo)}
+                      className="inline-flex min-h-7 items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 text-[11px] font-black text-amber-800 transition hover:bg-amber-100"
+                    >
+                      <MessageSquare className="h-3 w-3" />
+                      {noteText ? 'Edit note' : 'Add note'}
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4 text-center">
+            <Camera className="mx-auto mb-2 h-7 w-7 text-gray-300" />
+            <p className="text-sm font-bold text-gray-500">No field photos connected yet.</p>
+          </div>
+        )}
+      </section>
+      <PhotoNoteModal
+        projectId={projectId}
+        photo={notePhoto}
+        onClose={() => setNotePhoto(null)}
+        onSaved={async updatedPhoto => {
+          setNotePhoto(null);
+          await onPhotoNoteSaved(updatedPhoto);
+        }}
+      />
+    </>
   );
 }
 
@@ -3294,22 +5539,193 @@ function UnsupportedProgressMediaTile({ name }: { name?: string }) {
   );
 }
 
+function PhotoBucketPickerModal({
+  projectId,
+  isOpen,
+  title,
+  initialSelectedIds,
+  onClose,
+  onSave,
+}: {
+  projectId: string;
+  isOpen: boolean;
+  title: string;
+  initialSelectedIds: string[];
+  onClose: () => void;
+  onSave: (photos: any[]) => Promise<void> | void;
+}) {
+  const [photos, setPhotos] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [query, setQuery] = useState('');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set(initialSelectedIds));
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setSelectedIds(new Set(initialSelectedIds));
+    setQuery('');
+    setLoading(true);
+    api.get(`/projects/${projectId}/photos`)
+      .then(res => setPhotos(Array.isArray(res.data) ? res.data : []))
+      .catch(() => toast.error('Failed to load project photos'))
+      .finally(() => setLoading(false));
+  }, [isOpen, projectId, initialSelectedIds.join('|')]);
+
+  const visiblePhotos = useMemo(() => {
+    const search = query.trim().toLowerCase();
+    if (!search) return photos;
+    return photos.filter(photo => [
+      photo.original_name,
+      photo.caption,
+      photo.individual_note,
+      photo.batch_note,
+      photo.note_text,
+      photo.uploader_name,
+      photo.category_name,
+      photo.label,
+    ].filter(Boolean).join(' ').toLowerCase().includes(search));
+  }, [photos, query]);
+
+  const selectedPhotos = photos.filter(photo => selectedIds.has(String(photo.id)));
+
+  const togglePhoto = (photoId: string) => {
+    setSelectedIds(current => {
+      const next = new Set(current);
+      if (next.has(photoId)) next.delete(photoId);
+      else next.add(photoId);
+      return next;
+    });
+  };
+
+  const saveSelection = async () => {
+    setSaving(true);
+    try {
+      await onSave(selectedPhotos);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={title}
+      size="xl"
+    >
+      <div className="space-y-4">
+        <div className="flex flex-col gap-3 rounded-2xl border border-cyan-200 bg-gradient-to-br from-cyan-50 to-blue-50 p-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-sm font-black text-slate-950">Project photo bucket</p>
+            <p className="mt-1 text-xs font-semibold text-slate-600">{selectedPhotos.length} selected from {photos.length} available</p>
+          </div>
+          <div className="flex min-h-11 min-w-0 items-center gap-2 rounded-xl border border-cyan-200 bg-white px-3">
+            <Search className="h-4 w-4 flex-shrink-0 text-cyan-700" />
+            <input
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              placeholder="Search photos"
+              className="min-w-0 flex-1 bg-transparent text-sm font-bold text-slate-950 outline-none placeholder:text-slate-400"
+            />
+          </div>
+        </div>
+
+        {loading ? (
+          <Loading />
+        ) : visiblePhotos.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+            <Camera className="mx-auto mb-2 h-8 w-8 text-slate-300" />
+            <p className="text-sm font-black text-slate-600">No photos found</p>
+          </div>
+        ) : (
+          <div className="grid max-h-[56vh] grid-cols-2 gap-3 overflow-y-auto pr-1 sm:grid-cols-3 lg:grid-cols-4">
+            {visiblePhotos.map(photo => {
+              const selected = selectedIds.has(String(photo.id));
+              const mediaKind = getProgressMediaKind(photo);
+              const src = progressPhotoSrc(projectId, photo);
+              const timestamp = photo.captured_at || photo.taken_at || photo.uploaded_at || photo.created_at;
+              return (
+                <button
+                  key={photo.id}
+                  type="button"
+                  onClick={() => togglePhoto(String(photo.id))}
+                  className={`overflow-hidden rounded-2xl border bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg ${selected ? 'border-cyan-500 ring-4 ring-cyan-200' : 'border-slate-200'}`}
+                  aria-pressed={selected}
+                >
+                  <div className="relative aspect-square bg-slate-100">
+                    {mediaKind === 'video' ? (
+                      <>
+                        <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+                        <PlayCircle className="absolute inset-0 m-auto h-8 w-8 text-white drop-shadow" />
+                      </>
+                    ) : mediaKind === 'image' ? (
+                      <img src={src} alt={photo.original_name || 'Project photo'} className="h-full w-full object-cover" loading="lazy" />
+                    ) : (
+                      <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
+                    )}
+                    <span className={`absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-lg border text-xs font-black shadow-sm ${selected ? 'border-cyan-500 bg-cyan-600 text-white' : 'border-white/80 bg-black/60 text-white'}`}>
+                      {selected ? <Check className="h-4 w-4" /> : ''}
+                    </span>
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent p-2">
+                      <p className="truncate text-xs font-black text-white">{photo.individual_note || photo.batch_note || photo.caption || photo.original_name || 'Project photo'}</p>
+                    </div>
+                  </div>
+                  <div className="space-y-1 p-2">
+                    <p className="truncate text-xs font-black text-slate-900">{photo.uploader_name || 'Unknown user'}</p>
+                    <p className="text-[11px] font-semibold text-slate-500">
+                      {timestamp ? formatEasternDateTime(timestamp, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'No timestamp'}
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-3">
+          <button type="button" onClick={onClose} className="min-h-10 rounded-xl border border-slate-300 bg-white px-4 text-sm font-black text-slate-700 hover:bg-slate-50">
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={saveSelection}
+            disabled={saving}
+            className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-cyan-300 bg-cyan-600 px-4 text-sm font-black text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Camera className="h-4 w-4" />
+            {saving ? 'Attaching...' : `Use ${selectedPhotos.length} Photo${selectedPhotos.length === 1 ? '' : 's'}`}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
   const [photos, setPhotos] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState('');
   const [uploading, setUploading] = useState(false);
-  const [lightbox, setLightbox] = useState<{ src: string; isVideo: boolean } | null>(null);
+  const [lightbox, setLightbox] = useState<ProgressLightboxState | null>(null);
+  const [notePhoto, setNotePhoto] = useState<any | null>(null);
   const [deletingPhotoId, setDeletingPhotoId] = useState('');
+  const [deleteMode, setDeleteMode] = useState(false);
+  const [selectedDeleteIds, setSelectedDeleteIds] = useState<Set<string>>(new Set());
   const [showNewCat, setShowNewCat] = useState(false);
   const [newCatName, setNewCatName] = useState('');
   const groupedPhotos = groupMediaByDay(photos);
+  const lightboxItems = useMemo(() => buildProgressLightboxItems(projectId, photos), [projectId, photos]);
+  const deletablePhotos = useMemo(() => photos.filter(photo => photo.can_delete_correction), [photos]);
+  const selectedDeletePhotos = useMemo(
+    () => deletablePhotos.filter(photo => selectedDeleteIds.has(progressPhotoKey(photo))),
+    [deletablePhotos, selectedDeleteIds]
+  );
 
   const load = useCallback(async () => {
     try {
       const [photosRes, catsRes] = await Promise.all([
-        api.get(`/projects/${projectId}/photos?type=progress${selectedCategory ? `&category_id=${selectedCategory}` : ''}`),
+        api.get(`/projects/${projectId}/photos${selectedCategory ? `?category_id=${selectedCategory}` : ''}`),
         api.get(`/projects/${projectId}/photos/categories`),
       ]);
       setPhotos(photosRes.data);
@@ -3342,7 +5758,7 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
     await appendProgressUploadAudit(formData, files, files.map(() => 'desktop'));
     try {
       await api.post(`/projects/${projectId}/photos?type=progress`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
-      toast.success(`${files.length} progress media item${files.length === 1 ? '' : 's'} uploaded`);
+      toast.success(`${files.length} photo${files.length === 1 ? '' : 's'} uploaded`);
       load();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Upload failed');
@@ -3388,17 +5804,39 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
     } catch (err) { toast.error('Failed to add category'); }
   };
 
-  const deleteProgressPhoto = async (photo: any) => {
-    if (!photo?.can_delete_correction || deletingPhotoId) return;
-    const confirmed = window.confirm('Remove this uploaded progress picture? This uses your one correction and then locks this upload record.');
+  const closeDeleteMode = () => {
+    setDeleteMode(false);
+    setSelectedDeleteIds(new Set());
+  };
+
+  const toggleDeleteSelection = (photo: any) => {
+    if (!photo.can_delete_correction || deletingPhotoId) return;
+    const key = progressPhotoKey(photo);
+    setSelectedDeleteIds(current => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const deleteSelectedProgressPhotos = async () => {
+    if (!selectedDeletePhotos.length || deletingPhotoId) return;
+    const confirmed = window.confirm(`Delete ${selectedDeletePhotos.length} selected photo${selectedDeletePhotos.length === 1 ? '' : 's'}? This removes them from this project and locks correction for the selected upload record${selectedDeletePhotos.length === 1 ? '' : 's'}.`);
     if (!confirmed) return;
-    setDeletingPhotoId(photo.id);
+    setDeletingPhotoId('__batch__');
     try {
-      await api.delete(`/projects/${projectId}/photos/${photo.id}`);
-      toast.success('Progress picture removed. Correction is now locked.');
+      const results = await Promise.allSettled(
+        selectedDeletePhotos.map(photo => api.delete(`/projects/${projectId}/photos/${photo.id}`))
+      );
+      const deleted = results.filter(result => result.status === 'fulfilled').length;
+      const failed = results.length - deleted;
+      if (deleted) toast.success(`${deleted} photo${deleted === 1 ? '' : 's'} removed.`);
+      if (failed) toast.error(`${failed} photo${failed === 1 ? '' : 's'} could not be deleted.`);
+      closeDeleteMode();
       await load();
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Failed to delete progress picture');
+      toast.error(err.response?.data?.error || 'Failed to delete selected photos');
     } finally {
       setDeletingPhotoId('');
     }
@@ -3425,7 +5863,7 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
             </div>
             <div>
               <p className="text-sm font-black text-slate-900">
-                {uploading ? 'Uploading progress media...' : isDragActive ? 'Drop photos or videos here' : 'Drag and drop progress pictures here'}
+                {uploading ? 'Uploading photos...' : isDragActive ? 'Drop photos or videos here' : 'Drag and drop photos here'}
               </p>
               <p className="mt-1 text-xs font-semibold text-slate-500">
                 Upload up to {MAX_PROGRESS_UPLOAD_BATCH_FILES} items at once. HEIC, JPG, PNG, WebP, MP4, and MOV files are supported.
@@ -3464,6 +5902,42 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
         </div>
       )}
 
+      {deletablePhotos.length > 0 && (
+        <div className="flex flex-wrap items-center justify-center gap-2 rounded-xl border border-red-500/40 bg-red-950/25 px-3 py-3 shadow-inner">
+          {!deleteMode ? (
+            <button
+              type="button"
+              onClick={() => setDeleteMode(true)}
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-red-400 bg-red-600 px-4 text-sm font-black text-white shadow-lg shadow-red-950/30 transition hover:border-red-300 hover:bg-red-500 focus:outline-none focus:ring-2 focus:ring-red-300"
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete pictures
+            </button>
+          ) : (
+            <>
+              <span className="text-sm font-black text-red-100">Select pictures to delete</span>
+              <button
+                type="button"
+                onClick={() => void deleteSelectedProgressPhotos()}
+                disabled={!selectedDeletePhotos.length || Boolean(deletingPhotoId)}
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-red-400 bg-red-600 px-4 text-sm font-black text-white shadow-lg shadow-red-950/30 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:border-red-300 disabled:bg-red-300 disabled:text-red-950"
+              >
+                <Trash2 className="h-4 w-4" />
+                {deletingPhotoId ? 'Deleting...' : `Delete selected${selectedDeletePhotos.length ? ` (${selectedDeletePhotos.length})` : ''}`}
+              </button>
+              <button
+                type="button"
+                onClick={closeDeleteMode}
+                disabled={Boolean(deletingPhotoId)}
+                className="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-black text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       {loading ? <Loading /> : (
         <div className="space-y-5">
           {groupedPhotos.map(group => (
@@ -3477,17 +5951,39 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
                 {group.photos.map(photo => {
-                  const src = `/uploads/${projectId}/${photo.filename}`;
+                  const src = progressPhotoSrc(projectId, photo);
                   const mediaKind = getProgressMediaKind(photo);
                   const isVideo = mediaKind === 'video';
+                  const key = progressPhotoKey(photo);
+                  const lightboxIndex = lightboxItems.findIndex(item => item.id === key);
+                  const isSelected = selectedDeleteIds.has(key);
+                  const noteText = getProgressPhotoNoteText(photo);
                   return (
                     <div
-                      key={photo.id}
-                      className="relative group aspect-square rounded-xl overflow-hidden bg-gray-100 cursor-pointer"
+                      key={key}
+                      role="button"
+                      tabIndex={0}
+                      className={`relative group aspect-square cursor-pointer overflow-hidden rounded-xl border bg-gray-100 transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-lg ${deleteMode && photo.can_delete_correction ? 'ring-2 ring-red-200' : 'border-transparent'} ${isSelected ? 'border-red-500 ring-4 ring-red-300' : ''} ${deleteMode && !photo.can_delete_correction ? 'cursor-not-allowed opacity-60' : ''}`}
                       onClick={() => {
+                        if (deleteMode) {
+                          toggleDeleteSelection(photo);
+                          return;
+                        }
                         if (mediaKind === 'file') window.open(src, '_blank', 'noopener,noreferrer');
-                        else setLightbox({ src, isVideo });
+                        else if (lightboxIndex >= 0) setLightbox({ items: lightboxItems, index: lightboxIndex });
                       }}
+                      onKeyDown={event => {
+                        if (event.key !== 'Enter' && event.key !== ' ') return;
+                        event.preventDefault();
+                        if (deleteMode) {
+                          toggleDeleteSelection(photo);
+                          return;
+                        }
+                        if (mediaKind === 'file') window.open(src, '_blank', 'noopener,noreferrer');
+                        else if (lightboxIndex >= 0) setLightbox({ items: lightboxItems, index: lightboxIndex });
+                      }}
+                      aria-label={deleteMode ? `Select ${photo.original_name || 'photo'} for deletion` : `Open ${photo.original_name || 'photo'}`}
+                      aria-pressed={deleteMode ? isSelected : undefined}
                     >
                       {isVideo ? (
                         <>
@@ -3499,26 +5995,38 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
                       ) : (
                         <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
                       )}
-                      {photo.note_id && (
-                        <span className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-black text-white">Note</span>
+                      {noteText && (
+                        <span className="absolute left-2 top-2 z-0 inline-flex items-center gap-1 rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-black text-slate-950 shadow-sm">
+                          <MessageSquare className="h-3 w-3" />
+                          Note
+                        </span>
                       )}
-                      {photo.can_delete_correction && (
+                      {deleteMode && (
+                        <div className={`absolute right-2 top-2 z-0 inline-flex h-8 w-8 items-center justify-center rounded-lg border text-xs font-black shadow-sm ${isSelected ? 'border-red-500 bg-red-600 text-white' : photo.can_delete_correction ? 'border-white/80 bg-black/60 text-white' : 'border-slate-400 bg-slate-700 text-slate-300'}`}>
+                          {isSelected ? <Check className="h-4 w-4" /> : photo.can_delete_correction ? '' : 'X'}
+                        </div>
+                      )}
+                      {!deleteMode && (
                         <button
                           type="button"
                           onClick={event => {
                             event.stopPropagation();
-                            void deleteProgressPhoto(photo);
+                            setNotePhoto(photo);
                           }}
-                          disabled={deletingPhotoId === photo.id}
-                          className="absolute right-2 top-2 inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-white/95 px-2 text-[11px] font-black text-red-700 shadow-sm transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
-                          aria-label="Delete this progress picture as your one correction"
+                          className={`absolute right-2 top-2 z-0 inline-flex min-h-8 items-center justify-center gap-1 rounded-lg border px-2 text-[11px] font-black shadow-sm transition ${noteText ? 'border-amber-300 bg-amber-500 text-slate-950 hover:bg-amber-400' : 'border-white/70 bg-black/65 text-white hover:border-amber-300 hover:text-amber-200'}`}
+                          aria-label={`${noteText ? 'Edit' : 'Add'} note for ${photo.original_name || 'photo'}`}
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          {deletingPhotoId === photo.id ? 'Deleting' : 'Delete once'}
+                          <MessageSquare className="h-3.5 w-3.5" />
+                          {noteText ? 'Note' : 'Add note'}
                         </button>
                       )}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent opacity-100 transition-opacity" />
-                      <div className="absolute bottom-0 left-0 right-0 p-2">
+                      {!deleteMode && mediaKind !== 'file' && (
+                        <div className="absolute inset-x-0 top-0 z-0 bg-gradient-to-b from-black/45 to-transparent px-2 py-1.5 text-[10px] font-black uppercase tracking-wide text-white opacity-0 transition-opacity group-hover:opacity-100">
+                          Click to expand
+                        </div>
+                      )}
+                      <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent opacity-100 transition-opacity" />
+                      <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-10 p-2">
                         <p className="text-white text-xs font-bold truncate">{photo.uploader_name || 'Unknown user'}</p>
                         <p className="text-white/80 text-xs">{formatEasternDateTime(photo.taken_at || photo.created_at, { hour: 'numeric', minute: '2-digit' })}</p>
                         <p className="text-white/70 text-[10px] truncate">{photo.capture_latitude ? 'GPS recorded' : 'IP recorded'}{photo.upload_ip_address ? ` / ${photo.upload_ip_address}` : ''}</p>
@@ -3538,19 +6046,17 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
         </div>
       )}
 
-      {/* Lightbox */}
-      {lightbox && (
-        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4" onClick={() => setLightbox(null)}>
-          {lightbox.isVideo ? (
-            <video src={lightbox.src} controls autoPlay className="max-w-full max-h-full rounded-lg" onClick={event => event.stopPropagation()} />
-          ) : (
-            <img src={lightbox.src} alt="" className="max-w-full max-h-full object-contain rounded-lg" />
-          )}
-          <button className="absolute top-4 right-4 text-white/70 hover:text-white" onClick={() => setLightbox(null)}>
-            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
-        </div>
-      )}
+      <ProgressMediaLightbox state={lightbox} onChange={setLightbox} />
+      <PhotoNoteModal
+        projectId={projectId}
+        photo={notePhoto}
+        onClose={() => setNotePhoto(null)}
+        onSaved={async updatedPhoto => {
+          setNotePhoto(null);
+          setPhotos(current => current.map(photo => (photo.id === updatedPhoto.id ? { ...photo, ...updatedPhoto } : photo)));
+          await load();
+        }}
+      />
     </div>
   );
 }
@@ -3905,7 +6411,7 @@ function QuotesTab({ projectId, project }: { projectId: string; project: any }) 
               <label className="block text-xs font-black uppercase tracking-wide text-gray-500 mb-1">Scope</label>
               <textarea value={quoteForm.scope_description} onChange={e => setQuoteForm(current => ({ ...current, scope_description: e.target.value }))} rows={3} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500" />
               <label className="block text-xs font-black uppercase tracking-wide text-gray-500 mt-3 mb-1">Notes</label>
-              <textarea value={quoteForm.notes} onChange={e => setQuoteForm(current => ({ ...current, notes: e.target.value }))} rows={3} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <VoiceTextarea value={quoteForm.notes} onChange={e => setQuoteForm(current => ({ ...current, notes: e.target.value }))} rows={3} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
           </div>
 

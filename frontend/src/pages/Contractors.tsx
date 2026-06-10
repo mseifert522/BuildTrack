@@ -29,6 +29,7 @@ import { Loading, Modal } from '../components/ui';
 import Avatar from '../components/Avatar';
 import { useAuthStore } from '../store/authStore';
 import { formatEasternDate, formatEasternDateTime, parseBuildTrackTimestamp } from '../lib/time';
+import VoiceTextarea from '../components/VoiceTextarea';
 
 interface ContractorInvoice {
   id: string;
@@ -179,7 +180,7 @@ const contractorAddressLine = (value?: string | null) => {
 };
 
 const contractorFilterFieldClass =
-  'h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-950 shadow-sm outline-none placeholder:text-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-200';
+  'bt-directory-field h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-950 shadow-sm outline-none placeholder:text-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-200';
 
 const isSetupComplete = (contractor: ContractorRow) =>
   contractor.onboarding_status === 'submitted' || Boolean(contractor.onboarding_submitted_at);
@@ -239,6 +240,7 @@ export default function Contractors() {
   const [expandedContractorId, setExpandedContractorId] = useState<string | null>(null);
   const [contractorNotes, setContractorNotes] = useState<Record<string, ContractorNote[]>>({});
   const [noteInputs, setNoteInputs] = useState<Record<string, string>>({});
+  const [noteEntryOpen, setNoteEntryOpen] = useState<Record<string, boolean>>({});
   const [loadingNotes, setLoadingNotes] = useState<Record<string, boolean>>({});
   const [savingNotes, setSavingNotes] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
@@ -327,6 +329,17 @@ export default function Contractors() {
     if (!contractorNotes[contractorId]) await loadContractorNotes(contractorId);
   };
 
+  const openContractorNoteEntry = (contractorId: string) => {
+    setNoteEntryOpen(prev => ({ ...prev, [contractorId]: true }));
+    if (!contractorNotes[contractorId]) {
+      loadContractorNotes(contractorId).catch(() => {});
+    }
+  };
+
+  const closeContractorNoteEntry = (contractorId: string) => {
+    setNoteEntryOpen(prev => ({ ...prev, [contractorId]: false }));
+  };
+
   const openContractorDetails = (contractorId: string) => {
     setFocused1099ContractorId(null);
     setSelectedContractorId(contractorId);
@@ -347,6 +360,7 @@ export default function Contractors() {
         [contractorId]: [res.data, ...(prev[contractorId] || [])],
       }));
       setNoteInputs(prev => ({ ...prev, [contractorId]: '' }));
+      closeContractorNoteEntry(contractorId);
       setContractors(prev => prev.map(contractor => contractor.id === contractorId
         ? {
             ...contractor,
@@ -745,26 +759,27 @@ export default function Contractors() {
   if (loading) return <Loading />;
 
   return (
-    <div className="bt-desktop-page min-h-full px-6 py-6 md:px-8">
+    <div className="bt-desktop-page bt-directory-page bt-contractors-page min-h-full px-6 py-6 md:px-8">
       <div className="max-w-7xl mx-auto space-y-5">
-        <div className="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-black text-gray-900 tracking-tight">Contractors</h1>
-            <p className="text-sm text-gray-500 mt-1">
+        <div className="bt-directory-hero flex flex-col xl:flex-row xl:items-end xl:justify-between gap-4">
+          <div className="bt-directory-title-block">
+            <p className="bt-directory-kicker">Field labor directory</p>
+            <h1 className="text-2xl font-black tracking-tight">Contractors</h1>
+            <p className="text-sm mt-1">
               {filteredContractors.length} of {contractors.length} contractor records
             </p>
           </div>
-          <div className="flex flex-col sm:flex-row gap-3 w-full xl:w-auto">
+          <div className="bt-directory-actions flex flex-col sm:flex-row gap-3 w-full xl:w-auto">
             <button
               type="button"
               onClick={openAdd}
-              className="bt-btn bt-btn-primary"
+              className="bt-directory-primary-action"
             >
               <Plus className="w-4 h-4" />
               Add Contractor
             </button>
             <div
-              className="flex items-center gap-2 px-3 py-2.5 rounded-lg w-full sm:w-[460px] bg-white border border-slate-300 shadow-sm"
+              className="bt-directory-search flex items-center gap-2 px-3 py-2.5 rounded-lg w-full sm:w-[460px] bg-white border border-slate-300 shadow-sm"
             >
               <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
               <input
@@ -777,7 +792,7 @@ export default function Contractors() {
           </div>
         </div>
 
-        <div className="bt-toolbar">
+        <div className="bt-toolbar bt-directory-filter-panel">
           <div className="flex items-center gap-2 mb-3">
             <SlidersHorizontal className="w-4 h-4 text-slate-500" />
             <p className="text-sm font-black text-slate-900">Filters</p>
@@ -807,7 +822,7 @@ export default function Contractors() {
           </div>
           <div className="mt-4 border-t border-slate-200 pt-4">
             <label className="block text-xs font-black uppercase tracking-wide text-slate-500 mb-2">Find contractor by name</label>
-            <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-gray-300 bg-white">
+            <div className="bt-directory-search bt-directory-search-wide flex items-center gap-2 px-3 py-2.5 rounded-xl border border-gray-300 bg-white">
               <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
               <input
                 value={nameSearch}
@@ -829,7 +844,7 @@ export default function Contractors() {
             <p className="text-sm font-bold text-gray-500">No contractors match these filters</p>
           </div>
         ) : (
-          <div className="bt-table-wrap space-y-3 p-2">
+          <div className="bt-table-wrap bt-directory-list space-y-3 p-2">
             {filteredContractors.map((contractor) => {
               const lastPaid = contractor.last_paid_invoice;
               const connectedProjects = contractor.connected_projects || [];
@@ -851,22 +866,43 @@ export default function Contractors() {
                     if (target.closest('button,a,input,textarea,select,label')) return;
                     setExpandedContractorId(current => current === contractor.id ? null : contractor.id);
                   }}
-                  className={`overflow-hidden rounded-lg border border-l-4 transition-colors cursor-pointer ${isExpanded ? 'border-blue-300 border-l-blue-600 bg-blue-50 ring-1 ring-blue-100' : 'border-slate-200 border-l-slate-400 bg-white hover:border-blue-200 hover:bg-slate-50'}`}
+                  className={`bt-directory-card overflow-hidden rounded-lg border border-l-4 transition-colors cursor-pointer ${isExpanded ? 'is-expanded border-blue-300 border-l-blue-600 bg-blue-50 ring-1 ring-blue-100' : 'border-slate-200 border-l-slate-400 bg-white hover:border-blue-200 hover:bg-slate-50'}`}
                   title={isExpanded ? 'Click to collapse contractor details' : 'Click to expand contractor details'}
                 >
                   <div>
-                    <button
-                      type="button"
+                    <div
+                      role="button"
+                      tabIndex={0}
                       onClick={() => setExpandedContractorId(current => current === contractor.id ? null : contractor.id)}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Enter' && event.key !== ' ') return;
+                        event.preventDefault();
+                        setExpandedContractorId(current => current === contractor.id ? null : contractor.id);
+                      }}
                       aria-expanded={isExpanded}
-                      className="grid w-full grid-cols-1 items-center gap-3 px-4 py-3 text-left md:grid-cols-[minmax(190px,0.95fr)_minmax(150px,0.75fr)_minmax(150px,0.65fr)_minmax(260px,1.25fr)_auto] md:px-5"
+                      className="bt-directory-row grid w-full grid-cols-1 items-center gap-3 px-4 py-3 text-left md:grid-cols-[minmax(190px,0.95fr)_minmax(150px,0.75fr)_minmax(150px,0.65fr)_minmax(260px,1.25fr)_auto] md:px-5"
                     >
                       <div className="flex min-w-0 items-center gap-3">
-                        <div className="h-9 w-9 flex-shrink-0 rounded-lg flex items-center justify-center bg-slate-100 text-slate-700 text-xs font-black ring-1 ring-slate-200">
+                        <div className="bt-directory-avatar h-9 w-9 flex-shrink-0 rounded-lg flex items-center justify-center bg-slate-100 text-slate-700 text-xs font-black ring-1 ring-slate-200">
                           {initials(contractor.name)}
                         </div>
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-black text-gray-950">{contractor.name}</p>
+                          <div className="flex min-w-0 flex-wrap items-center gap-2">
+                            <p className="truncate text-sm font-black text-gray-950">{contractor.name}</p>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                openContractorNoteEntry(contractor.id);
+                              }}
+                              className="inline-flex flex-shrink-0 items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[11px] font-black text-amber-800 shadow-sm transition hover:bg-amber-100"
+                              title={`Enter note for ${contractor.name}`}
+                              aria-label={`Enter note for ${contractor.name}`}
+                            >
+                              <MessageSquare className="h-3.5 w-3.5" />
+                              Enter Note
+                            </button>
+                          </div>
                         </div>
                       </div>
                       <div className="flex min-w-0 items-center gap-2 text-sm font-black text-slate-800">
@@ -881,14 +917,56 @@ export default function Contractors() {
                         <MapPin className="h-4 w-4 flex-shrink-0 text-gray-400" />
                         <span className="truncate">{addressLine}</span>
                       </div>
-                      <div className="flex items-center justify-end gap-2 text-xs font-black text-blue-700">
+                      <div className="bt-directory-row-action flex items-center justify-end gap-2 text-xs font-black text-blue-700">
                         <span>{isExpanded ? 'Hide details' : 'Expand'}</span>
                         <ChevronDown className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                       </div>
-                    </button>
+                    </div>
+
+                    {noteEntryOpen[contractor.id] && (
+                      <div
+                        className="border-t border-amber-200 bg-amber-50/80 px-4 py-4 md:px-5"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <div className="rounded-2xl border border-amber-200 bg-white p-4 shadow-sm">
+                          <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <p className="text-xs font-black uppercase tracking-wide text-amber-700">New Contractor Note</p>
+                              <p className="text-sm font-black text-gray-950">{contractor.name}</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => closeContractorNoteEntry(contractor.id)}
+                              className="inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black text-gray-600 hover:bg-gray-50"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                          <div className="flex flex-col gap-3 md:flex-row md:items-end">
+                            <VoiceTextarea
+                              value={noteInputs[contractor.id] || ''}
+                              onChange={(event) => setNoteInputs(prev => ({ ...prev, [contractor.id]: event.target.value }))}
+                              rows={3}
+                              placeholder={`Enter a note about ${contractor.name}`}
+                              wrapperClassName="flex-1"
+                              className="min-h-24 w-full resize-none rounded-xl border border-amber-200 bg-amber-50/40 px-3.5 py-3 text-sm font-semibold text-gray-950 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => addContractorNote(contractor.id)}
+                              disabled={savingNotes[contractor.id] || !(noteInputs[contractor.id] || '').trim()}
+                              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <Send className="h-4 w-4" />
+                              Save Note
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {isExpanded && (
-                      <div className="border-t border-slate-200 bg-slate-50 px-4 py-4 md:px-5">
+                      <div className="bt-directory-expanded border-t border-slate-200 bg-slate-50 px-4 py-4 md:px-5">
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                           <div className="flex flex-wrap items-center gap-2">
                             <span
@@ -1108,12 +1186,13 @@ export default function Contractors() {
                           <p className="text-sm text-gray-400">No notes yet</p>
                         )}
                         <div className="mt-3 flex items-end gap-2" onClick={(event) => event.stopPropagation()}>
-                          <textarea
+                          <VoiceTextarea
                             value={noteInputs[contractor.id] || ''}
                             onChange={(event) => setNoteInputs(prev => ({ ...prev, [contractor.id]: event.target.value }))}
                             rows={2}
                             placeholder="Add note"
-                            className="flex-1 min-h-16 resize-none px-3 py-2 rounded-xl border border-gray-200 bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            wrapperClassName="flex-1"
+                            className="min-h-16 w-full resize-none px-3 py-2 rounded-xl border border-gray-200 bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                           />
                           <button
                             type="button"
@@ -1179,12 +1258,13 @@ export default function Contractors() {
                           </div>
                         </div>
                         <div className="flex flex-col md:flex-row gap-3">
-                          <textarea
+                          <VoiceTextarea
                             value={noteInputs[contractor.id] || ''}
                             onChange={(event) => setNoteInputs(prev => ({ ...prev, [contractor.id]: event.target.value }))}
                             rows={2}
                             placeholder={`Add a note about ${contractor.name}`}
-                            className="flex-1 px-3.5 py-2.5 rounded-xl border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                            wrapperClassName="flex-1"
+                            className="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                           />
                           <button
                             type="button"
@@ -1578,14 +1658,60 @@ export default function Contractors() {
                     <MessageSquare className="h-4 w-4 text-gray-400" />
                     <h3 className="text-sm font-black text-gray-900">Contractor Notes</h3>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => openNotes(contractor.id)}
-                    className="rounded-xl bg-white px-3 py-2 text-xs font-black text-amber-700 hover:bg-amber-50"
-                  >
-                    Open notes on card
-                  </button>
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => openContractorNoteEntry(contractor.id)}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-black text-amber-800 shadow-sm hover:bg-amber-100"
+                    >
+                      <MessageSquare className="h-3.5 w-3.5" />
+                      Enter Note
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openNotes(contractor.id)}
+                      className="rounded-xl bg-white px-3 py-2 text-xs font-black text-amber-700 hover:bg-amber-50"
+                    >
+                      Open notes on card
+                    </button>
+                  </div>
                 </div>
+                {noteEntryOpen[contractor.id] ? (
+                  <div className="mb-4 rounded-2xl border border-amber-200 bg-white p-4 shadow-sm">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-black uppercase tracking-wide text-amber-700">New Contractor Note</p>
+                        <p className="text-sm font-bold text-gray-500">Type or use the microphone to add this note.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => closeContractorNoteEntry(contractor.id)}
+                        className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black text-gray-600 hover:bg-gray-50"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                    <div className="flex flex-col gap-3 md:flex-row md:items-end">
+                      <VoiceTextarea
+                        value={noteInputs[contractor.id] || ''}
+                        onChange={(event) => setNoteInputs(prev => ({ ...prev, [contractor.id]: event.target.value }))}
+                        rows={3}
+                        placeholder={`Enter a note about ${contractor.name}`}
+                        wrapperClassName="flex-1"
+                        className="min-h-24 w-full resize-none rounded-xl border border-amber-200 bg-amber-50/40 px-3.5 py-3 text-sm font-semibold text-gray-950 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => addContractorNote(contractor.id)}
+                        disabled={savingNotes[contractor.id] || !(noteInputs[contractor.id] || '').trim()}
+                        className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Send className="h-4 w-4" />
+                        Save Note
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
                 {loadingNotes[contractor.id] ? (
                   <p className="rounded-xl border border-gray-100 bg-white p-4 text-sm font-semibold text-gray-400">Loading notes...</p>
                 ) : notes.length > 0 ? (

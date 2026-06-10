@@ -474,8 +474,129 @@ async function sendInvoiceEmail({ invoice, project, contractor, pdfBuffer }) {
   }
 }
 
+async function sendApprovedPayNotificationEmail({ approvedInvoices, approvedInvoice, approvedBy }) {
+  const transporter = createTransporter();
+  const operationsEmail = process.env.APPROVED_INVOICE_NOTIFY_EMAIL || process.env.OFFICE_EMAIL || 'info@newurbandev.com';
+  const appUrl = (process.env.APP_URL || BRAND.url || 'https://buildtrack.newurbandev.com').replace(/\/$/, '');
+  const rows = Array.isArray(approvedInvoices) ? approvedInvoices : [];
+  const total = rows.reduce((sum, invoice) => sum + Number(invoice.quickbooks_balance ?? invoice.total ?? 0), 0);
+  const approvedLabel = approvedInvoice
+    ? `${approvedInvoice.external_invoice_number || approvedInvoice.invoice_number || approvedInvoice.id} - ${approvedInvoice.vendor_name || approvedInvoice.contractor_name || 'Contractor'}`
+    : 'Approved invoice queue';
+
+  const invoiceRows = rows.length
+    ? rows.map(invoice => `
+      <tr>
+        <td style="padding:10px; border:1px solid #E5E7EB; font-size:12px; color:#111827;">
+          <strong>${escapeHtml(invoice.vendor_name || invoice.contractor_name || 'Unassigned contractor')}</strong><br />
+          <span style="color:#6B7280;">${escapeHtml(invoice.vendor_email || invoice.contractor_email || '')}</span>
+        </td>
+        <td style="padding:10px; border:1px solid #E5E7EB; font-size:12px; color:#111827;">
+          ${escapeHtml(invoice.external_invoice_number || invoice.invoice_number || invoice.id)}
+        </td>
+        <td style="padding:10px; border:1px solid #E5E7EB; font-size:12px; color:#111827;">
+          ${escapeHtml(invoice.address || invoice.job_name || 'Project not listed')}
+        </td>
+        <td style="padding:10px; border:1px solid #E5E7EB; font-size:12px; color:#111827; text-align:right;">
+          $${Number(invoice.quickbooks_balance ?? invoice.total ?? 0).toFixed(2)}
+        </td>
+      </tr>
+    `).join('')
+    : `<tr><td colspan="4" style="padding:12px; border:1px solid #E5E7EB; font-size:13px; color:#6B7280;">No approved invoices are currently queued.</td></tr>`;
+
+  const html = emailWrapper(`
+    <h2 style="color:#111827; font-size:20px; font-weight:800; margin:0 0 8px;">BuildTrack approved invoices ready for payment review</h2>
+    <p style="color:#6B7280; font-size:14px; line-height:1.6; margin:0 0 18px;">
+      ${escapeHtml(approvedBy || 'A BuildTrack user')} approved an invoice for payment. QuickBooks remains the accounting source of truth for final paid/unpaid balances.
+    </p>
+    <div style="background:#FFFBEB; border:1px solid #FDE68A; border-radius:12px; padding:16px; margin-bottom:18px;">
+      <p style="font-size:12px; color:#92400E; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin:0 0 8px;">New approval</p>
+      <p style="font-size:14px; color:#111827; font-weight:700; margin:0;">${escapeHtml(approvedLabel)}</p>
+    </div>
+    <table style="width:100%; border-collapse:collapse; margin-bottom:18px;">
+      <thead>
+        <tr>
+          <th style="padding:9px; border:1px solid #E5E7EB; background:#F9FAFB; color:#374151; font-size:11px; text-align:left; text-transform:uppercase;">Contractor</th>
+          <th style="padding:9px; border:1px solid #E5E7EB; background:#F9FAFB; color:#374151; font-size:11px; text-align:left; text-transform:uppercase;">Invoice</th>
+          <th style="padding:9px; border:1px solid #E5E7EB; background:#F9FAFB; color:#374151; font-size:11px; text-align:left; text-transform:uppercase;">Project</th>
+          <th style="padding:9px; border:1px solid #E5E7EB; background:#F9FAFB; color:#374151; font-size:11px; text-align:right; text-transform:uppercase;">Amount Due</th>
+        </tr>
+      </thead>
+      <tbody>${invoiceRows}</tbody>
+    </table>
+    <div style="background:#ECFDF5; border:1px solid #A7F3D0; border-radius:12px; padding:16px; margin-bottom:18px;">
+      <p style="font-size:12px; color:#047857; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin:0 0 6px;">Current approved-to-pay balance</p>
+      <p style="font-size:24px; color:#065F46; font-weight:900; margin:0;">$${total.toFixed(2)}</p>
+    </div>
+    <a href="${appUrl}/invoices" style="display:block; text-align:center; background:${BRAND.color}; color:white; padding:14px 24px; border-radius:12px; text-decoration:none; font-weight:800; font-size:14px;">
+      Open BuildTrack Invoices
+    </a>
+  `);
+
+  await transporter.sendMail({
+    from: process.env.EMAIL_FROM || `BuildTrack <noreply@newurbandev.com>`,
+    to: operationsEmail,
+    subject: `BuildTrack approved invoices ready to pay - $${total.toFixed(2)}`,
+    html,
+  });
+}
+
+function formatReminderDateTime(value) {
+  if (!value) return 'Not scheduled';
+  const parsed = new Date(String(value).includes('T') ? value : `${value}Z`);
+  if (!Number.isFinite(parsed.getTime())) return String(value);
+  return parsed.toLocaleString('en-US', {
+    timeZone: 'America/New_York',
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  });
+}
+
+async function sendCalendarReminderEmail({ recipients, subject, message, event, project, createdBy, scheduleLabel }) {
+  const transporter = createTransporter();
+  const appUrl = (process.env.APP_URL || BRAND.url || 'https://buildtrack.newurbandev.com').replace(/\/$/, '');
+  const projectUrl = event?.project_id ? `${appUrl}/projects/${event.project_id}` : appUrl;
+  const recipientList = Array.isArray(recipients) ? recipients.filter(Boolean) : [];
+  const eventTitle = event?.title || subject || 'BuildTrack calendar reminder';
+  const projectLabel = project?.address || project?.job_name || event?.project_address || 'BuildTrack';
+  const reminderMessage = message || event?.description || 'This is a scheduled BuildTrack reminder.';
+  const html = emailWrapper(`
+    <h2 style="color:#111827; font-size:20px; font-weight:800; margin:0 0 8px;">${escapeHtml(eventTitle)}</h2>
+    <p style="color:#6B7280; font-size:14px; line-height:1.6; margin:0 0 18px;">
+      ${escapeHtml(reminderMessage).replace(/\n/g, '<br />')}
+    </p>
+    <div style="background:#F9FAFB; border:1px solid #E5E7EB; border-radius:12px; padding:16px; margin-bottom:18px;">
+      <p style="font-size:12px; color:#92400E; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin:0 0 8px;">Calendar reminder</p>
+      <p style="font-size:13px; color:#374151; margin:0 0 8px;"><strong>Project:</strong> ${escapeHtml(projectLabel)}</p>
+      <p style="font-size:13px; color:#374151; margin:0 0 8px;"><strong>Calendar date:</strong> ${escapeHtml(formatReminderDateTime(event?.scheduled_for ? `${event.scheduled_for}T12:00:00` : null))}</p>
+      ${event?.due_time ? `<p style="font-size:13px; color:#374151; margin:0 0 8px;"><strong>Calendar time:</strong> ${escapeHtml(event.due_time)}</p>` : ''}
+      ${scheduleLabel ? `<p style="font-size:13px; color:#374151; margin:0;"><strong>Schedule:</strong> ${escapeHtml(scheduleLabel)}</p>` : ''}
+    </div>
+    <a href="${projectUrl}" style="display:block; text-align:center; background:${BRAND.color}; color:white; padding:14px 24px; border-radius:12px; text-decoration:none; font-weight:800; font-size:14px;">
+      Open in BuildTrack
+    </a>
+    <p style="color:#9CA3AF; font-size:11px; text-align:center; margin:14px 0 0;">
+      Sent by ${escapeHtml(createdBy || 'BuildTrack')} from info@newurbandev.com.
+    </p>
+  `);
+
+  await transporter.sendMail({
+    from: process.env.CALENDAR_REMINDER_EMAIL_FROM || `BuildTrack Calendar <info@newurbandev.com>`,
+    to: recipientList.join(', '),
+    subject: subject || `BuildTrack reminder: ${eventTitle}`,
+    html,
+  });
+}
+
 module.exports = {
   sendInvoiceEmail,
+  sendApprovedPayNotificationEmail,
+  sendCalendarReminderEmail,
   sendInviteEmail,
   sendContractorPinEmail,
   sendPasswordResetEmail,

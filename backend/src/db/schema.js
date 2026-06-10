@@ -204,7 +204,7 @@ function ensureProjectStatusConstraintSupportsCurrentStatuses(db) {
     id, address, job_name, status, start_date, target_completion, scope_of_work, budget,
     project_stage, office_notes, field_notes, lifecycle_status, is_occupied, construction_start_date,
     acquisition_date, sold_date, occupant_vacate_date, sale_price, purchase_price, arv, closing_costs,
-    main_photo_url, lockbox_code, created_by, created_at, updated_at
+    main_photo_url, lockbox_code, punchlist_stage, created_by, created_at, updated_at
   `;
   const foreignKeysEnabled = db.pragma('foreign_keys', { simple: true });
 
@@ -235,8 +235,11 @@ function ensureProjectStatusConstraintSupportsCurrentStatuses(db) {
           purchase_price REAL,
           arv REAL,
           closing_costs REAL,
+          quickbooks_class_id TEXT,
+          quickbooks_class_name TEXT,
           main_photo_url TEXT,
           lockbox_code TEXT,
+          punchlist_stage INTEGER NOT NULL DEFAULT 0,
           created_by TEXT NOT NULL,
           created_at TEXT NOT NULL DEFAULT (datetime('now')),
           updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -255,7 +258,7 @@ function ensureProjectStatusConstraintSupportsCurrentStatuses(db) {
           start_date, target_completion, scope_of_work, budget,
           project_stage, office_notes, field_notes, lifecycle_status, is_occupied, construction_start_date,
           acquisition_date, sold_date, occupant_vacate_date, sale_price, purchase_price, arv, closing_costs,
-          main_photo_url, lockbox_code, created_by, created_at, updated_at
+          main_photo_url, lockbox_code, COALESCE(punchlist_stage, 0), created_by, created_at, updated_at
         FROM projects
       `);
       db.exec('DROP TABLE projects');
@@ -327,6 +330,9 @@ function initializeSchema() {
       purchase_price REAL,
       main_photo_url TEXT,
       lockbox_code TEXT,
+      market_status TEXT NOT NULL DEFAULT 'not_on_market' CHECK(market_status IN ('not_on_market','on_market')),
+      work_priority INTEGER CHECK(work_priority IS NULL OR (work_priority BETWEEN 1 AND 20)),
+      punchlist_stage INTEGER NOT NULL DEFAULT 0,
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -362,6 +368,7 @@ function initializeSchema() {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       completed_at TEXT,
+      completion_note TEXT,
       FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
       FOREIGN KEY (assigned_to) REFERENCES users(id),
       FOREIGN KEY (created_by) REFERENCES users(id)
@@ -386,10 +393,11 @@ function initializeSchema() {
       description TEXT,
       category TEXT NOT NULL DEFAULT 'General',
       status TEXT NOT NULL DEFAULT 'not_started' CHECK(status IN ('not_started','in_progress','waiting_materials','needs_review','completed')),
-      verification_status TEXT NOT NULL DEFAULT 'not_requested',
-      invoice_status TEXT NOT NULL DEFAULT 'not_received',
-      sort_order INTEGER NOT NULL DEFAULT 0,
-      assigned_to TEXT,
+	      verification_status TEXT NOT NULL DEFAULT 'not_requested',
+	      invoice_status TEXT NOT NULL DEFAULT 'not_received',
+	      project_scope_id TEXT,
+	      sort_order INTEGER NOT NULL DEFAULT 0,
+	      assigned_to TEXT,
       start_date TEXT,
       target_date TEXT,
       approved_by TEXT,
@@ -400,10 +408,11 @@ function initializeSchema() {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       completed_at TEXT,
-      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-      FOREIGN KEY (assigned_to) REFERENCES users(id),
-      FOREIGN KEY (approved_by) REFERENCES users(id),
-      FOREIGN KEY (created_by) REFERENCES users(id)
+	      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+	      FOREIGN KEY (project_scope_id) REFERENCES project_scopes(id) ON DELETE SET NULL,
+	      FOREIGN KEY (assigned_to) REFERENCES users(id),
+	      FOREIGN KEY (approved_by) REFERENCES users(id),
+	      FOREIGN KEY (created_by) REFERENCES users(id)
     );
 
     CREATE INDEX IF NOT EXISTS idx_construction_plan_project_order
@@ -482,6 +491,9 @@ function initializeSchema() {
       size INTEGER NOT NULL,
       caption TEXT,
       photo_type TEXT DEFAULT 'general',
+      show_in_general INTEGER NOT NULL DEFAULT 1,
+      show_in_progress INTEGER NOT NULL DEFAULT 0,
+      show_in_scope INTEGER NOT NULL DEFAULT 0,
       taken_at TEXT,
       upload_ip_address TEXT,
       upload_user_agent TEXT,
@@ -522,6 +534,27 @@ function initializeSchema() {
       FOREIGN KEY (uploaded_by) REFERENCES users(id)
     );
 
+    CREATE TABLE IF NOT EXISTS photo_assignments (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      photo_id TEXT NOT NULL,
+      target_type TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      note TEXT,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE,
+      FOREIGN KEY (created_by) REFERENCES users(id),
+      UNIQUE(project_id, photo_id, target_type, target_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_photo_assignments_target
+      ON photo_assignments(project_id, target_type, target_id, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_photo_assignments_photo
+      ON photo_assignments(photo_id, target_type);
+
     -- Invoices
     CREATE TABLE IF NOT EXISTS invoices (
       id TEXT PRIMARY KEY,
@@ -532,12 +565,19 @@ function initializeSchema() {
       notes TEXT,
       total REAL NOT NULL DEFAULT 0,
       quickbooks_status TEXT NOT NULL DEFAULT 'not_ready' CHECK(quickbooks_status IN ('not_ready','queued','synced','failed')),
-      quickbooks_bill_id TEXT,
-      quickbooks_error TEXT,
-      quickbooks_synced_at TEXT,
-      submitted_at TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	      quickbooks_bill_id TEXT,
+	      quickbooks_error TEXT,
+	      quickbooks_synced_at TEXT,
+	      source TEXT NOT NULL DEFAULT 'manual',
+	      source_intake_id TEXT,
+	      source_attachment_id TEXT,
+	      source_attachment_name TEXT,
+	      vendor_name TEXT,
+	      vendor_email TEXT,
+	      external_invoice_number TEXT,
+	      submitted_at TEXT,
+	      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
       FOREIGN KEY (contractor_id) REFERENCES users(id)
     );
@@ -551,6 +591,162 @@ function initializeSchema() {
       sort_order INTEGER DEFAULT 0,
       FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS invoice_attachments (
+      id TEXT PRIMARY KEY,
+      invoice_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      original_name TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      size INTEGER NOT NULL DEFAULT 0,
+      uploaded_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (uploaded_by) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_invoice_attachments_invoice
+      ON invoice_attachments(invoice_id, created_at);
+
+    -- QuickBooks Online accounting connection and Bill mirror. QuickBooks is the
+    -- accounting source of truth; BuildTrack keeps these records so invoices can
+    -- show the same paid/unpaid state and expose unmatched QBO bills for project
+    -- assignment without inventing local accounting data.
+    CREATE TABLE IF NOT EXISTS quickbooks_connections (
+      id TEXT PRIMARY KEY,
+      realm_id TEXT NOT NULL,
+      environment TEXT NOT NULL DEFAULT 'production',
+      company_name TEXT,
+      scope TEXT,
+      access_token_encrypted TEXT,
+      refresh_token_encrypted TEXT NOT NULL,
+      access_token_expires_at TEXT,
+      connected_by TEXT,
+      connected_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_sync_at TEXT,
+      last_sync_status TEXT,
+      last_sync_error TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      FOREIGN KEY (connected_by) REFERENCES users(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS quickbooks_oauth_states (
+      state TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS quickbooks_bills (
+      qbo_id TEXT PRIMARY KEY,
+      realm_id TEXT NOT NULL,
+      environment TEXT NOT NULL DEFAULT 'production',
+      sync_token TEXT,
+      doc_number TEXT,
+      vendor_id TEXT,
+      vendor_name TEXT,
+      txn_date TEXT,
+      due_date TEXT,
+      total_amt REAL NOT NULL DEFAULT 0,
+      balance REAL NOT NULL DEFAULT 0,
+      payment_status TEXT NOT NULL DEFAULT 'unpaid',
+      private_note TEXT,
+      qbo_class_id TEXT,
+      qbo_class_name TEXT,
+      payment_approval_status TEXT NOT NULL DEFAULT 'not_approved',
+      payment_approved_at TEXT,
+      payment_approved_by TEXT,
+      payment_run_date TEXT,
+      payment_approval_notified_at TEXT,
+      payment_approval_notified_by TEXT,
+      matched_invoice_id TEXT,
+      project_id TEXT,
+      line_json TEXT NOT NULL DEFAULT '[]',
+      linked_txn_json TEXT NOT NULL DEFAULT '[]',
+      raw_json TEXT NOT NULL DEFAULT '{}',
+      qbo_created_at TEXT,
+      qbo_updated_at TEXT,
+      first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (matched_invoice_id) REFERENCES invoices(id) ON DELETE SET NULL,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_quickbooks_bills_payment_status
+      ON quickbooks_bills(payment_status, due_date);
+
+    CREATE INDEX IF NOT EXISTS idx_quickbooks_bills_match
+      ON quickbooks_bills(matched_invoice_id, project_id);
+
+    CREATE TABLE IF NOT EXISTS quickbooks_bill_lines (
+      id TEXT PRIMARY KEY,
+      qbo_bill_id TEXT NOT NULL,
+      realm_id TEXT NOT NULL,
+      environment TEXT NOT NULL DEFAULT 'production',
+      qbo_line_id TEXT,
+      line_num INTEGER,
+      description TEXT,
+      amount REAL NOT NULL DEFAULT 0,
+      detail_type TEXT,
+      category_id TEXT,
+      category_name TEXT,
+      class_id TEXT,
+      class_name TEXT,
+      customer_id TEXT,
+      customer_name TEXT,
+      project_id TEXT,
+      raw_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (qbo_bill_id) REFERENCES quickbooks_bills(qbo_id) ON DELETE CASCADE,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL,
+      UNIQUE(qbo_bill_id, qbo_line_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_quickbooks_bill_lines_bill
+      ON quickbooks_bill_lines(qbo_bill_id, line_num);
+
+    CREATE INDEX IF NOT EXISTS idx_quickbooks_bill_lines_project
+      ON quickbooks_bill_lines(project_id, class_id);
+
+    CREATE TABLE IF NOT EXISTS quickbooks_bill_payments (
+      qbo_id TEXT PRIMARY KEY,
+      realm_id TEXT NOT NULL,
+      environment TEXT NOT NULL DEFAULT 'production',
+      sync_token TEXT,
+      vendor_id TEXT,
+      vendor_name TEXT,
+      txn_date TEXT,
+      total_amt REAL NOT NULL DEFAULT 0,
+      linked_bill_ids_json TEXT NOT NULL DEFAULT '[]',
+      raw_json TEXT NOT NULL DEFAULT '{}',
+      qbo_created_at TEXT,
+      qbo_updated_at TEXT,
+      first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS quickbooks_webhook_events (
+      id TEXT PRIMARY KEY,
+      realm_id TEXT,
+      event_hash TEXT UNIQUE NOT NULL,
+      entity_names TEXT,
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      received_at TEXT NOT NULL DEFAULT (datetime('now')),
+      processed_at TEXT,
+      process_status TEXT NOT NULL DEFAULT 'queued',
+      error TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_quickbooks_webhook_events_received
+      ON quickbooks_webhook_events(received_at, process_status);
 
     -- Field work items linked to a contractor invoice. This lets mobile field
     -- invoices and desktop payment review use the same source of truth.
@@ -696,6 +892,8 @@ function initializeSchema() {
       session_type TEXT NOT NULL DEFAULT 'desktop',
       user_agent TEXT,
       ip_address TEXT,
+      current_ip_address TEXT,
+      ip_address_updated_at TEXT,
       issued_at TEXT NOT NULL DEFAULT (datetime('now')),
       last_seen_at TEXT,
       revoked_at TEXT,
@@ -730,6 +928,35 @@ function initializeSchema() {
 
     CREATE INDEX IF NOT EXISTS idx_security_events_created
       ON security_events(created_at);
+
+    CREATE TABLE IF NOT EXISTS data_access_events (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      access_type TEXT NOT NULL DEFAULT 'view',
+      entity_type TEXT NOT NULL,
+      entity_id TEXT,
+      project_id TEXT,
+      record_count INTEGER,
+      risk_level TEXT NOT NULL DEFAULT 'standard',
+      route TEXT,
+      method TEXT,
+      ip_address TEXT,
+      user_agent TEXT,
+      details TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_data_access_events_created
+      ON data_access_events(created_at);
+    CREATE INDEX IF NOT EXISTS idx_data_access_events_user_created
+      ON data_access_events(user_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_data_access_events_project_created
+      ON data_access_events(project_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_data_access_events_entity_created
+      ON data_access_events(entity_type, entity_id, created_at);
 
     -- Notifications
     CREATE TABLE IF NOT EXISTS notifications (
@@ -816,6 +1043,62 @@ function initializeSchema() {
       FOREIGN KEY (user_id) REFERENCES users(id),
       FOREIGN KEY (edited_by) REFERENCES users(id)
     );
+
+    CREATE TABLE IF NOT EXISTS operations_calendar_events (
+      id TEXT PRIMARY KEY,
+      project_id TEXT,
+      source_type TEXT NOT NULL DEFAULT 'manual',
+      source_id TEXT,
+      title TEXT NOT NULL,
+      description TEXT,
+      event_type TEXT NOT NULL DEFAULT 'other' CHECK(event_type IN ('task','invoice','maintenance','inspection','note','payment','other')),
+      scheduled_for TEXT NOT NULL,
+      due_time TEXT,
+      status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled','in_progress','completed','cancelled')),
+      priority TEXT NOT NULL DEFAULT 'normal' CHECK(priority IN ('low','normal','high','critical')),
+      amount REAL NOT NULL DEFAULT 0,
+      vendor_name TEXT,
+      visibility TEXT NOT NULL DEFAULT 'team',
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      completed_at TEXT,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_operations_calendar_date
+      ON operations_calendar_events(scheduled_for, status, event_type);
+
+    CREATE INDEX IF NOT EXISTS idx_operations_calendar_project
+      ON operations_calendar_events(project_id, scheduled_for);
+
+    CREATE TABLE IF NOT EXISTS calendar_email_reminders (
+      id TEXT PRIMARY KEY,
+      event_id TEXT NOT NULL,
+      project_id TEXT,
+      recipients_json TEXT NOT NULL DEFAULT '[]',
+      subject TEXT NOT NULL,
+      message TEXT,
+      schedule_type TEXT NOT NULL DEFAULT 'once' CHECK(schedule_type IN ('now','once','weekly','monthly')),
+      next_send_at TEXT,
+      last_sent_at TEXT,
+      sent_count INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','sent','cancelled','failed')),
+      last_error TEXT,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (event_id) REFERENCES operations_calendar_events(id) ON DELETE CASCADE,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_calendar_email_reminders_due
+      ON calendar_email_reminders(status, next_send_at);
+
+    CREATE INDEX IF NOT EXISTS idx_calendar_email_reminders_event
+      ON calendar_email_reminders(event_id, status);
 
     -- Contractor/vendor directory. These records are not necessarily login users.
     CREATE TABLE IF NOT EXISTS contractor_profiles (
@@ -1208,6 +1491,17 @@ function initializeSchema() {
   try { db.exec(`ALTER TABLE users ADD COLUMN last_seen_at TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE users ADD COLUMN session_revoked_at TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE auth_sessions ADD COLUMN details TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE auth_sessions ADD COLUMN current_ip_address TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE auth_sessions ADD COLUMN ip_address_updated_at TEXT`); } catch (_) { /* already exists */ }
+  try {
+    db.exec(`
+      UPDATE auth_sessions
+      SET current_ip_address = ip_address,
+          ip_address_updated_at = COALESCE(last_seen_at, issued_at, created_at, datetime('now'))
+      WHERE current_ip_address IS NULL
+        AND ip_address IS NOT NULL
+    `);
+  } catch (_) { /* best effort */ }
   try {
     db.exec(`
       CREATE TABLE IF NOT EXISTS auth_sessions (
@@ -1216,6 +1510,8 @@ function initializeSchema() {
         session_type TEXT NOT NULL DEFAULT 'desktop',
         user_agent TEXT,
         ip_address TEXT,
+        current_ip_address TEXT,
+        ip_address_updated_at TEXT,
         issued_at TEXT NOT NULL DEFAULT (datetime('now')),
         last_seen_at TEXT,
         revoked_at TEXT,
@@ -1246,20 +1542,118 @@ function initializeSchema() {
       );
       CREATE INDEX IF NOT EXISTS idx_security_events_created
         ON security_events(created_at);
+      CREATE TABLE IF NOT EXISTS data_access_events (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        access_type TEXT NOT NULL DEFAULT 'view',
+        entity_type TEXT NOT NULL,
+        entity_id TEXT,
+        project_id TEXT,
+        record_count INTEGER,
+        risk_level TEXT NOT NULL DEFAULT 'standard',
+        route TEXT,
+        method TEXT,
+        ip_address TEXT,
+        user_agent TEXT,
+        details TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_data_access_events_created
+        ON data_access_events(created_at);
+      CREATE INDEX IF NOT EXISTS idx_data_access_events_user_created
+        ON data_access_events(user_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_data_access_events_project_created
+        ON data_access_events(project_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_data_access_events_entity_created
+        ON data_access_events(entity_type, entity_id, created_at);
     `);
   } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE projects ADD COLUMN arv REAL`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE projects ADD COLUMN closing_costs REAL`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE projects ADD COLUMN main_photo_url TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE projects ADD COLUMN lockbox_code TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE operations_calendar_events ADD COLUMN completion_note TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE projects ADD COLUMN punchlist_stage INTEGER NOT NULL DEFAULT 0`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE projects ADD COLUMN market_status TEXT NOT NULL DEFAULT 'not_on_market' CHECK(market_status IN ('not_on_market','on_market'))`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE projects ADD COLUMN work_priority INTEGER CHECK(work_priority IS NULL OR (work_priority BETWEEN 1 AND 20))`); } catch (_) { /* already exists */ }
+  try { db.exec(`UPDATE projects SET market_status = 'not_on_market' WHERE market_status IS NULL OR market_status NOT IN ('not_on_market','on_market')`); } catch (_) { /* best-effort */ }
+  try { db.exec(`UPDATE projects SET work_priority = NULL WHERE work_priority IS NOT NULL AND (work_priority < 1 OR work_priority > 20)`); } catch (_) { /* best-effort */ }
+  try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_work_priority_active ON projects(work_priority) WHERE work_priority IS NOT NULL AND status != 'archived'`); } catch (_) { /* best-effort */ }
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_projects_market_status ON projects(market_status, status)`); } catch (_) { /* best-effort */ }
+  try { db.exec(`ALTER TABLE projects ADD COLUMN quickbooks_class_id TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE projects ADD COLUMN quickbooks_class_name TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_projects_quickbooks_class_id ON projects(quickbooks_class_id)`); } catch (_) { /* best-effort */ }
   try { ensureProjectStatusConstraintSupportsCurrentStatuses(db); } catch (err) { console.error('[MIGRATION] Failed to update project status constraint:', err.message); }
+  try { db.exec(`ALTER TABLE projects ADD COLUMN market_status TEXT NOT NULL DEFAULT 'not_on_market' CHECK(market_status IN ('not_on_market','on_market'))`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE projects ADD COLUMN work_priority INTEGER CHECK(work_priority IS NULL OR (work_priority BETWEEN 1 AND 20))`); } catch (_) { /* already exists */ }
+  try { db.exec(`UPDATE projects SET market_status = 'not_on_market' WHERE market_status IS NULL OR market_status NOT IN ('not_on_market','on_market')`); } catch (_) { /* best-effort */ }
+  try { db.exec(`UPDATE projects SET work_priority = NULL WHERE work_priority IS NOT NULL AND (work_priority < 1 OR work_priority > 20)`); } catch (_) { /* best-effort */ }
+  try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_work_priority_active ON projects(work_priority) WHERE work_priority IS NOT NULL AND status != 'archived'`); } catch (_) { /* best-effort */ }
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_projects_market_status ON projects(market_status, status)`); } catch (_) { /* best-effort */ }
   try { db.exec(`ALTER TABLE project_notes ADD COLUMN edited_at TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE project_notes ADD COLUMN edited_by TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE project_notes ADD COLUMN edit_count INTEGER NOT NULL DEFAULT 0`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE project_notes ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'`); } catch (_) { /* already exists */ }
   try { db.exec(`UPDATE project_notes SET visibility = 'private' WHERE visibility IS NULL OR visibility NOT IN ('private','public')`); } catch (_) { /* best-effort */ }
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS calendar_email_reminders (
+        id TEXT PRIMARY KEY,
+        event_id TEXT NOT NULL,
+        project_id TEXT,
+        recipients_json TEXT NOT NULL DEFAULT '[]',
+        subject TEXT NOT NULL,
+        message TEXT,
+        schedule_type TEXT NOT NULL DEFAULT 'once' CHECK(schedule_type IN ('now','once','weekly','monthly')),
+        next_send_at TEXT,
+        last_sent_at TEXT,
+        sent_count INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','sent','cancelled','failed')),
+        last_error TEXT,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (event_id) REFERENCES operations_calendar_events(id) ON DELETE CASCADE,
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+        FOREIGN KEY (created_by) REFERENCES users(id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_calendar_email_reminders_due
+        ON calendar_email_reminders(status, next_send_at);
+      CREATE INDEX IF NOT EXISTS idx_calendar_email_reminders_event
+        ON calendar_email_reminders(event_id, status);
+    `);
+  } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE contractor_quotes ADD COLUMN contractor_address TEXT`); } catch (_) { /* already exists */ }
+  let needsPhotoContextBackfill = false;
+  try {
+    const photoColumns = new Set(db.prepare(`PRAGMA table_info(photos)`).all().map(column => column.name));
+    needsPhotoContextBackfill = !photoColumns.has('show_in_progress') || !photoColumns.has('show_in_scope');
+  } catch (_) { /* best effort */ }
   try { db.exec(`ALTER TABLE photos ADD COLUMN photo_type TEXT DEFAULT 'general'`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN show_in_general INTEGER NOT NULL DEFAULT 1`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN show_in_progress INTEGER NOT NULL DEFAULT 0`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN show_in_scope INTEGER NOT NULL DEFAULT 0`); } catch (_) { /* already exists */ }
+  try {
+    db.exec(`
+      UPDATE photos
+      SET show_in_general = 1,
+          show_in_progress = CASE
+            WHEN ${needsPhotoContextBackfill ? 1 : 0} = 1 AND photo_type IN ('progress', 'note') THEN 1
+            ELSE COALESCE(show_in_progress, 0)
+          END,
+          show_in_scope = CASE
+            WHEN ${needsPhotoContextBackfill ? 1 : 0} = 1 AND photo_type IN ('scope', 'construction_plan') THEN 1
+            ELSE COALESCE(show_in_scope, 0)
+          END
+      WHERE show_in_general IS NULL
+         OR show_in_progress IS NULL
+         OR show_in_scope IS NULL
+         OR ${needsPhotoContextBackfill ? 1 : 0} = 1
+    `);
+  } catch (_) { /* best effort */ }
   try { db.exec(`ALTER TABLE photos ADD COLUMN taken_at TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE photos ADD COLUMN note_id TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE photos ADD COLUMN construction_plan_item_id TEXT`); } catch (_) { /* already exists */ }
@@ -1298,12 +1692,35 @@ function initializeSchema() {
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_photos_project_batch ON photos(project_id, batch_id, batch_sequence)`); } catch (_) { /* best-effort */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_photos_project_label_uploaded ON photos(project_id, label, uploaded_at)`); } catch (_) { /* best-effort */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_photos_project_correction_status ON photos(project_id, upload_status, correction_deleted_at)`); } catch (_) { /* best-effort */ }
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS photo_assignments (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        photo_id TEXT NOT NULL,
+        target_type TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        note TEXT,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+        FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE,
+        FOREIGN KEY (created_by) REFERENCES users(id),
+        UNIQUE(project_id, photo_id, target_type, target_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_photo_assignments_target
+        ON photo_assignments(project_id, target_type, target_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_photo_assignments_photo
+        ON photo_assignments(photo_id, target_type);
+    `);
+  } catch (_) { /* best-effort */ }
   try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN verification_status TEXT NOT NULL DEFAULT 'not_requested'`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN invoice_status TEXT NOT NULL DEFAULT 'not_received'`); } catch (_) { /* already exists */ }
-  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN approved_by TEXT`); } catch (_) { /* already exists */ }
-  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN approved_at TEXT`); } catch (_) { /* already exists */ }
-  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN approval_notes TEXT`); } catch (_) { /* already exists */ }
-  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN last_field_update_at TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN approved_by TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN approved_at TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN approval_notes TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN last_field_update_at TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN project_scope_id TEXT`); } catch (_) { /* already exists */ }
   try {
     db.exec(`
       UPDATE construction_plan_items
@@ -1320,10 +1737,213 @@ function initializeSchema() {
   } catch (_) { /* best-effort */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_construction_plan_watch_status ON construction_plan_items(project_id, status, verification_status, invoice_status, target_date)`); } catch (_) { /* best-effort */ }
   try { db.exec(`ALTER TABLE invoices ADD COLUMN quickbooks_status TEXT NOT NULL DEFAULT 'not_ready'`); } catch (_) { /* already exists */ }
-  try { db.exec(`ALTER TABLE invoices ADD COLUMN quickbooks_bill_id TEXT`); } catch (_) { /* already exists */ }
-  try { db.exec(`ALTER TABLE invoices ADD COLUMN quickbooks_error TEXT`); } catch (_) { /* already exists */ }
-  try { db.exec(`ALTER TABLE invoices ADD COLUMN quickbooks_synced_at TEXT`); } catch (_) { /* already exists */ }
-  try { db.exec(`UPDATE invoices SET quickbooks_status = 'not_ready' WHERE quickbooks_status IS NULL OR quickbooks_status NOT IN ('not_ready','queued','synced','failed')`); } catch (_) { /* best-effort */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN quickbooks_bill_id TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN quickbooks_error TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN quickbooks_synced_at TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN source_intake_id TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN source_attachment_id TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN source_attachment_name TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN vendor_name TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN vendor_email TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN external_invoice_number TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN quickbooks_balance REAL`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN quickbooks_payment_status TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN quickbooks_vendor_id TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN quickbooks_vendor_name TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN quickbooks_doc_number TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN quickbooks_txn_date TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN quickbooks_due_date TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN quickbooks_last_seen_at TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`UPDATE invoices SET quickbooks_status = 'not_ready' WHERE quickbooks_status IS NULL OR quickbooks_status NOT IN ('not_ready','queued','synced','failed')`); } catch (_) { /* best-effort */ }
+	  try { db.exec(`UPDATE invoices SET source = 'manual' WHERE source IS NULL OR source = ''`); } catch (_) { /* best-effort */ }
+	  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_invoices_source_intake ON invoices(source_intake_id)`); } catch (_) { /* best-effort */ }
+	  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_invoices_source_attachment ON invoices(source_intake_id, source_attachment_id)`); } catch (_) { /* best-effort */ }
+	  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_invoices_quickbooks_bill ON invoices(quickbooks_bill_id)`); } catch (_) { /* best-effort */ }
+	  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_invoices_quickbooks_doc ON invoices(quickbooks_doc_number, quickbooks_payment_status)`); } catch (_) { /* best-effort */ }
+	  try { db.exec(`ALTER TABLE quickbooks_bills ADD COLUMN qbo_class_id TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE quickbooks_bills ADD COLUMN qbo_class_name TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE quickbooks_bills ADD COLUMN payment_approval_status TEXT NOT NULL DEFAULT 'not_approved'`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE quickbooks_bills ADD COLUMN payment_approved_at TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE quickbooks_bills ADD COLUMN payment_approved_by TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE quickbooks_bills ADD COLUMN payment_run_date TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE quickbooks_bills ADD COLUMN payment_approval_notified_at TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE quickbooks_bills ADD COLUMN payment_approval_notified_by TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_quickbooks_bills_qbo_class ON quickbooks_bills(qbo_class_id, project_id)`); } catch (_) { /* best-effort */ }
+	  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_quickbooks_bills_payment_approval ON quickbooks_bills(payment_approval_status, payment_run_date, payment_status)`); } catch (_) { /* best-effort */ }
+	  try {
+	    db.exec(`
+	      CREATE TABLE IF NOT EXISTS quickbooks_bill_lines (
+	        id TEXT PRIMARY KEY,
+	        qbo_bill_id TEXT NOT NULL,
+	        realm_id TEXT NOT NULL,
+	        environment TEXT NOT NULL DEFAULT 'production',
+	        qbo_line_id TEXT,
+	        line_num INTEGER,
+	        description TEXT,
+	        amount REAL NOT NULL DEFAULT 0,
+	        detail_type TEXT,
+	        category_id TEXT,
+	        category_name TEXT,
+	        class_id TEXT,
+	        class_name TEXT,
+	        customer_id TEXT,
+	        customer_name TEXT,
+	        project_id TEXT,
+	        raw_json TEXT NOT NULL DEFAULT '{}',
+	        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	        FOREIGN KEY (qbo_bill_id) REFERENCES quickbooks_bills(qbo_id) ON DELETE CASCADE,
+	        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL,
+	        UNIQUE(qbo_bill_id, qbo_line_id)
+	      );
+	      CREATE INDEX IF NOT EXISTS idx_quickbooks_bill_lines_bill
+	        ON quickbooks_bill_lines(qbo_bill_id, line_num);
+	      CREATE INDEX IF NOT EXISTS idx_quickbooks_bill_lines_project
+	        ON quickbooks_bill_lines(project_id, class_id);
+	    `);
+	  } catch (_) { /* best-effort */ }
+	  try {
+	    db.exec(`
+	      CREATE TABLE IF NOT EXISTS quickbooks_connections (
+	        id TEXT PRIMARY KEY,
+	        realm_id TEXT NOT NULL,
+	        environment TEXT NOT NULL DEFAULT 'production',
+	        company_name TEXT,
+	        scope TEXT,
+	        access_token_encrypted TEXT,
+	        refresh_token_encrypted TEXT NOT NULL,
+	        access_token_expires_at TEXT,
+	        connected_by TEXT,
+	        connected_at TEXT NOT NULL DEFAULT (datetime('now')),
+	        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	        last_sync_at TEXT,
+	        last_sync_status TEXT,
+	        last_sync_error TEXT,
+	        is_active INTEGER NOT NULL DEFAULT 1,
+	        FOREIGN KEY (connected_by) REFERENCES users(id) ON DELETE SET NULL
+	      );
+
+	      CREATE TABLE IF NOT EXISTS quickbooks_oauth_states (
+	        state TEXT PRIMARY KEY,
+	        user_id TEXT NOT NULL,
+	        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	        expires_at TEXT NOT NULL,
+	        used_at TEXT,
+	        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+	      );
+
+	      CREATE TABLE IF NOT EXISTS quickbooks_bills (
+	        qbo_id TEXT PRIMARY KEY,
+	        realm_id TEXT NOT NULL,
+	        environment TEXT NOT NULL DEFAULT 'production',
+	        sync_token TEXT,
+	        doc_number TEXT,
+	        vendor_id TEXT,
+	        vendor_name TEXT,
+	        txn_date TEXT,
+	        due_date TEXT,
+      total_amt REAL NOT NULL DEFAULT 0,
+      balance REAL NOT NULL DEFAULT 0,
+      payment_status TEXT NOT NULL DEFAULT 'unpaid',
+      private_note TEXT,
+      qbo_class_id TEXT,
+      qbo_class_name TEXT,
+      payment_approval_status TEXT NOT NULL DEFAULT 'not_approved',
+      payment_approved_at TEXT,
+      payment_approved_by TEXT,
+      payment_run_date TEXT,
+      payment_approval_notified_at TEXT,
+      payment_approval_notified_by TEXT,
+      matched_invoice_id TEXT,
+      project_id TEXT,
+	        line_json TEXT NOT NULL DEFAULT '[]',
+	        linked_txn_json TEXT NOT NULL DEFAULT '[]',
+	        raw_json TEXT NOT NULL DEFAULT '{}',
+	        qbo_created_at TEXT,
+	        qbo_updated_at TEXT,
+	        first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+	        last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+	        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	        FOREIGN KEY (matched_invoice_id) REFERENCES invoices(id) ON DELETE SET NULL,
+	        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
+	      );
+
+	      CREATE INDEX IF NOT EXISTS idx_quickbooks_bills_payment_status
+	        ON quickbooks_bills(payment_status, due_date);
+
+	      CREATE INDEX IF NOT EXISTS idx_quickbooks_bills_match
+	        ON quickbooks_bills(matched_invoice_id, project_id);
+
+	      CREATE INDEX IF NOT EXISTS idx_quickbooks_bills_payment_approval
+	        ON quickbooks_bills(payment_approval_status, payment_run_date, payment_status);
+
+	      CREATE TABLE IF NOT EXISTS quickbooks_bill_lines (
+	        id TEXT PRIMARY KEY,
+	        qbo_bill_id TEXT NOT NULL,
+	        realm_id TEXT NOT NULL,
+	        environment TEXT NOT NULL DEFAULT 'production',
+	        qbo_line_id TEXT,
+	        line_num INTEGER,
+	        description TEXT,
+	        amount REAL NOT NULL DEFAULT 0,
+	        detail_type TEXT,
+	        category_id TEXT,
+	        category_name TEXT,
+	        class_id TEXT,
+	        class_name TEXT,
+	        customer_id TEXT,
+	        customer_name TEXT,
+	        project_id TEXT,
+	        raw_json TEXT NOT NULL DEFAULT '{}',
+	        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	        FOREIGN KEY (qbo_bill_id) REFERENCES quickbooks_bills(qbo_id) ON DELETE CASCADE,
+	        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL,
+	        UNIQUE(qbo_bill_id, qbo_line_id)
+	      );
+
+	      CREATE INDEX IF NOT EXISTS idx_quickbooks_bill_lines_bill
+	        ON quickbooks_bill_lines(qbo_bill_id, line_num);
+
+	      CREATE INDEX IF NOT EXISTS idx_quickbooks_bill_lines_project
+	        ON quickbooks_bill_lines(project_id, class_id);
+
+	      CREATE TABLE IF NOT EXISTS quickbooks_bill_payments (
+	        qbo_id TEXT PRIMARY KEY,
+	        realm_id TEXT NOT NULL,
+	        environment TEXT NOT NULL DEFAULT 'production',
+	        sync_token TEXT,
+	        vendor_id TEXT,
+	        vendor_name TEXT,
+	        txn_date TEXT,
+	        total_amt REAL NOT NULL DEFAULT 0,
+	        linked_bill_ids_json TEXT NOT NULL DEFAULT '[]',
+	        raw_json TEXT NOT NULL DEFAULT '{}',
+	        qbo_created_at TEXT,
+	        qbo_updated_at TEXT,
+	        first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+	        last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+	        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+	      );
+
+	      CREATE TABLE IF NOT EXISTS quickbooks_webhook_events (
+	        id TEXT PRIMARY KEY,
+	        realm_id TEXT,
+	        event_hash TEXT UNIQUE NOT NULL,
+	        entity_names TEXT,
+	        payload_json TEXT NOT NULL DEFAULT '{}',
+	        received_at TEXT NOT NULL DEFAULT (datetime('now')),
+	        processed_at TEXT,
+	        process_status TEXT NOT NULL DEFAULT 'queued',
+	        error TEXT
+	      );
+
+	      CREATE INDEX IF NOT EXISTS idx_quickbooks_webhook_events_received
+	        ON quickbooks_webhook_events(received_at, process_status);
+	    `);
+	  } catch (_) { /* best-effort */ }
+	  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_construction_plan_scope ON construction_plan_items(project_id, project_scope_id, sort_order)`); } catch (_) { /* best-effort */ }
   try {
     db.exec(`
       CREATE TABLE IF NOT EXISTS invoice_work_items (

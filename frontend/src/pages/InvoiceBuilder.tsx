@@ -5,6 +5,7 @@ import api from '../lib/api';
 import { Loading } from '../components/ui';
 import { Plus, Trash2, ArrowLeft, Send, Save, Download, Paperclip, ClipboardList, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import VoiceTextarea from '../components/VoiceTextarea';
 
 interface LineItem {
   id?: string;
@@ -305,7 +306,7 @@ export default function InvoiceBuilder() {
         <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
           <div className="bg-white rounded-xl border border-gray-200 p-5">
             <label className="block text-sm font-medium text-gray-700 mb-2">Notes</label>
-            <textarea
+            <VoiceTextarea
               value={notes}
               onChange={e => setNotes(e.target.value)}
               rows={4}

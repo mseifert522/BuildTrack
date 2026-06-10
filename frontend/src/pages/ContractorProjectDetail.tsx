@@ -5,6 +5,7 @@ import api from '../lib/api';
 import toast from 'react-hot-toast';
 import { formatEasternDateTime, formatEasternRelative } from '../lib/time';
 import { PROGRESS_MEDIA_ACCEPT } from '../lib/progressUpload';
+import VoiceTextarea from '../components/VoiceTextarea';
 
 type Tab = 'plan' | 'notes' | 'photos' | 'punch';
 
@@ -242,7 +243,7 @@ export default function ContractorProjectDetail() {
           <div>
             {/* Add Note */}
             <div style={{ background: 'white', borderRadius: 14, padding: 14, marginBottom: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-              <textarea
+              <VoiceTextarea
                 value={newNote}
                 onChange={e => setNewNote(e.target.value)}
                 placeholder="Add a field note..."

@@ -8,6 +8,8 @@ import toast from 'react-hot-toast';
 import { appendProgressUploadAudit, PROGRESS_MEDIA_ACCEPT } from '../lib/progressUpload';
 import { getProgressMediaKind } from '../lib/progressMedia';
 
+type PhotoView = 'general' | 'progress' | 'scope';
+
 interface Photo {
   id: string;
   filename: string;
@@ -29,6 +31,9 @@ interface Photo {
   capture_accuracy?: number | null;
   capture_source?: string | null;
   uploaded_by?: string;
+  photo_type?: string;
+  show_in_progress?: number | boolean;
+  show_in_scope?: number | boolean;
   can_delete_correction?: boolean;
   correction_locked?: boolean;
   correction_delete_count?: number;
@@ -39,8 +44,40 @@ interface LightboxMedia {
   isVideo: boolean;
 }
 
-function mediaLabel(count: number) {
-  return `${count} progress item${count === 1 ? '' : 's'}`;
+const PHOTO_VIEW_META: Record<PhotoView, { label: string; type: string; uploadType: 'general' | 'progress' | 'scope'; caption: string }> = {
+  general: {
+    label: 'General Bucket',
+    type: 'general',
+    uploadType: 'general',
+    caption: 'All project photos',
+  },
+  progress: {
+    label: 'Photos',
+    type: 'progress',
+    uploadType: 'progress',
+    caption: 'Project photo bucket',
+  },
+  scope: {
+    label: 'Scope of Work',
+    type: 'scope',
+    uploadType: 'scope',
+    caption: 'Scope reference photos',
+  },
+};
+
+function normalizePhotoView(value: string | null): PhotoView {
+  return value === 'general' || value === 'scope' ? value : 'progress';
+}
+
+function mediaLabel(count: number, photoView: PhotoView) {
+  const noun = photoView === 'scope' ? 'scope item' : photoView === 'general' ? 'project photo' : 'photo item';
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+function isPhotoContextEnabled(value: number | boolean | undefined, fallback = false) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  return fallback;
 }
 
 function UnsupportedMediaTile({ name }: { name?: string }) {
@@ -66,11 +103,13 @@ function groupPhotosByDay(photos: Photo[]) {
 export default function Photos() {
   const [searchParams] = useSearchParams();
   const requestedProjectId = searchParams.get('projectId') || '';
+  const requestedPhotoView = normalizePhotoView(searchParams.get('type'));
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [view, setView] = useState<'grid' | 'list'>('grid');
+  const [photoView, setPhotoView] = useState<PhotoView>(requestedPhotoView);
   const [lightbox, setLightbox] = useState<LightboxMedia | null>(null);
   const [selectedProject, setSelectedProject] = useState(requestedProjectId);
   const [caption, setCaption] = useState('');
@@ -91,7 +130,7 @@ export default function Photos() {
 
       for (const proj of projectsToLoad) {
         try {
-          const res = await api.get(`/projects/${proj.id}/photos?type=progress`);
+          const res = await api.get(`/projects/${proj.id}/photos?type=${PHOTO_VIEW_META[photoView].type}`);
           res.data.forEach((photo: Photo) => {
             allPhotos.push({ ...photo, project_address: proj.address });
           });
@@ -100,7 +139,7 @@ export default function Photos() {
       setPhotos(allPhotos.sort((a, b) => new Date(b.taken_at || b.created_at).getTime() - new Date(a.taken_at || a.created_at).getTime()));
     } catch (err) {
       console.error(err);
-      toast.error('Failed to load progress photos');
+      toast.error('Failed to load project photos');
     } finally {
       setLoading(false);
     }
@@ -108,7 +147,7 @@ export default function Photos() {
 
   useEffect(() => {
     load();
-  }, [selectedProject]);
+  }, [selectedProject, photoView]);
 
   useEffect(() => {
     if (requestedProjectId && requestedProjectId !== selectedProject) {
@@ -116,10 +155,14 @@ export default function Photos() {
     }
   }, [requestedProjectId, selectedProject]);
 
+  useEffect(() => {
+    setPhotoView(current => current === requestedPhotoView ? current : requestedPhotoView);
+  }, [requestedPhotoView]);
+
   const uploadMedia = async (files?: FileList | null) => {
     if (!files || files.length === 0) return;
     if (!selectedProject) {
-      toast.error('Select a project before uploading progress photos or videos');
+      toast.error('Select a project before uploading photos or videos');
       if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
@@ -128,15 +171,22 @@ export default function Photos() {
     try {
       const formData = new FormData();
       const uploadFiles = Array.from(files);
+      const uploadType = PHOTO_VIEW_META[photoView].uploadType;
+      const contexts = photoView === 'scope'
+        ? ['general', 'scope']
+        : photoView === 'general'
+          ? ['general']
+          : ['general', 'progress'];
       uploadFiles.forEach(file => formData.append('photos', file));
       if (caption.trim()) formData.append('caption', caption.trim());
-      formData.append('photo_type', 'progress');
+      formData.append('photo_type', uploadType);
+      formData.append('photo_contexts', JSON.stringify(contexts));
       await appendProgressUploadAudit(formData, uploadFiles, uploadFiles.map(() => 'desktop'));
 
-      await api.post(`/projects/${selectedProject}/photos?type=progress`, formData, {
+      await api.post(`/projects/${selectedProject}/photos?type=${uploadType}`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      toast.success(`${files.length} progress item${files.length === 1 ? '' : 's'} uploaded`);
+      toast.success(`${files.length} ${photoView === 'scope' ? 'scope' : 'project'} item${files.length === 1 ? '' : 's'} uploaded`);
       setCaption('');
       await load();
     } catch (err: any) {
@@ -162,17 +212,32 @@ export default function Photos() {
 
   const deleteProgressPhoto = async (photo: Photo) => {
     if (!photo.can_delete_correction || deletingPhotoId) return;
-    const confirmed = window.confirm('Remove this uploaded progress picture? This uses your one correction and then locks this upload record.');
+    const confirmed = window.confirm('Remove this uploaded project picture? This uses your one correction and then locks this upload record.');
     if (!confirmed) return;
     setDeletingPhotoId(photo.id);
     try {
       await api.delete(`/projects/${photo.project_id}/photos/${photo.id}`);
-      toast.success('Progress picture removed. Correction is now locked.');
+      toast.success('Project picture removed. Correction is now locked.');
       await load();
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Failed to delete progress picture');
+      toast.error(err.response?.data?.error || 'Failed to delete project picture');
     } finally {
       setDeletingPhotoId('');
+    }
+  };
+
+  const updatePhotoContexts = async (photo: Photo, next: { progress?: boolean; scope?: boolean }) => {
+    const currentProgress = isPhotoContextEnabled(photo.show_in_progress, photo.photo_type === 'progress' || photo.photo_type === 'note');
+    const currentScope = isPhotoContextEnabled(photo.show_in_scope, photo.photo_type === 'scope' || photo.photo_type === 'construction_plan');
+    try {
+      await api.put(`/projects/${photo.project_id}/photos/${photo.id}/contexts`, {
+        show_in_progress: next.progress ?? currentProgress,
+        show_in_scope: next.scope ?? currentScope,
+      });
+      toast.success('Photo usage updated');
+      await load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to update photo usage');
     }
   };
 
@@ -180,8 +245,8 @@ export default function Photos() {
     <div className="p-4 md:p-6 max-w-7xl mx-auto">
       <div className="flex flex-col gap-3 mb-5 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">Progress Photos</h1>
-          <p className="text-sm text-gray-500 mt-0.5">{mediaLabel(photos.length)}</p>
+          <h1 className="text-xl font-bold text-gray-900">Project Photo Library</h1>
+          <p className="text-sm text-gray-500 mt-0.5">{mediaLabel(photos.length, photoView)}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -191,7 +256,7 @@ export default function Photos() {
             className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-black text-white shadow-sm transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
           >
             <Camera className="h-4 w-4" />
-            {uploading ? 'Uploading...' : 'Upload Progress Pictures'}
+            {uploading ? 'Uploading...' : `Upload ${photoView === 'scope' ? 'Scope' : 'Project'} Pictures`}
           </button>
           <input
             ref={fileInputRef}
@@ -218,6 +283,19 @@ export default function Photos() {
         </select>
 
         <div className="rounded-xl border border-gray-200 bg-white p-3">
+          <div className="mb-3 grid gap-2 sm:grid-cols-3">
+            {(Object.keys(PHOTO_VIEW_META) as PhotoView[]).map(option => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setPhotoView(option)}
+                className={`min-h-11 rounded-lg border px-3 py-2 text-left text-xs font-black transition ${photoView === option ? 'border-amber-300 bg-amber-50 text-amber-800 shadow-sm' : 'border-gray-200 bg-gray-50 text-gray-600 hover:bg-white'}`}
+              >
+                <span className="block">{PHOTO_VIEW_META[option].label}</span>
+                <span className="mt-0.5 block text-[10px] font-bold opacity-75">{PHOTO_VIEW_META[option].caption}</span>
+              </button>
+            ))}
+          </div>
           <div className="flex flex-col gap-2 sm:flex-row">
             <input
               value={caption}
@@ -227,7 +305,7 @@ export default function Photos() {
             />
           </div>
           <p className="text-xs text-gray-500 mt-2">
-            {selectedProject ? 'Media will be hosted under the selected project with captured timestamp metadata.' : 'Select a project to add progress photos or project videos.'}
+            {selectedProject ? 'Media will be hosted once under the selected project and can be reused for progress, scope, or both.' : 'Select a project to add project photos or videos.'}
           </p>
         </div>
       </div>
@@ -236,7 +314,7 @@ export default function Photos() {
         photos.length === 0 ? (
           <div className="text-center py-16 bg-white rounded-xl border border-gray-200">
             <Camera className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-            <p className="text-gray-500 font-medium">No progress photos yet</p>
+            <p className="text-gray-500 font-medium">No {photoView === 'scope' ? 'scope photos' : photoView === 'general' ? 'project photos' : 'photos'} yet</p>
             <p className="text-gray-400 text-sm mt-1">Select a project above to upload photos or videos</p>
           </div>
         ) : view === 'grid' ? (
@@ -246,7 +324,7 @@ export default function Photos() {
                 <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <h2 className="text-sm font-black text-gray-900">{group.date}</h2>
-                    <p className="text-xs font-semibold text-gray-500">{group.photos.length} progress item{group.photos.length === 1 ? '' : 's'} ordered by capture time</p>
+                    <p className="text-xs font-semibold text-gray-500">{group.photos.length} project item{group.photos.length === 1 ? '' : 's'} ordered by capture time</p>
                   </div>
                   <span className="w-fit rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-black text-emerald-700">User / timestamp / IP audit</span>
                 </div>
@@ -255,6 +333,8 @@ export default function Photos() {
                     const src = `/uploads/${photo.project_id}/${photo.filename}`;
                     const mediaKind = getProgressMediaKind(photo);
                     const isVideo = mediaKind === 'video';
+                    const progressContext = isPhotoContextEnabled(photo.show_in_progress, photo.photo_type === 'progress' || photo.photo_type === 'note');
+                    const scopeContext = isPhotoContextEnabled(photo.show_in_scope, photo.photo_type === 'scope' || photo.photo_type === 'construction_plan');
                     return (
                       <div
                         key={photo.id}
@@ -274,6 +354,28 @@ export default function Photos() {
                           </div>
                         )}
                         {photo.note_id && <span className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-black text-white">Note</span>}
+                        <div className="absolute bottom-14 left-2 right-2 z-20 grid grid-cols-2 gap-1.5">
+                          <button
+                            type="button"
+                            onClick={event => {
+                              event.stopPropagation();
+                              void updatePhotoContexts(photo, { progress: !progressContext });
+                            }}
+                            className={`min-h-8 rounded-lg border px-2 text-[10px] font-black shadow-sm ${progressContext ? 'border-amber-200 bg-amber-100 text-amber-800' : 'border-white/40 bg-black/55 text-white'}`}
+                          >
+                            {progressContext ? 'In Progress' : 'Use Progress'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={event => {
+                              event.stopPropagation();
+                              void updatePhotoContexts(photo, { scope: !scopeContext });
+                            }}
+                            className={`min-h-8 rounded-lg border px-2 text-[10px] font-black shadow-sm ${scopeContext ? 'border-teal-200 bg-teal-100 text-teal-800' : 'border-white/40 bg-black/55 text-white'}`}
+                          >
+                            {scopeContext ? 'In Scope' : 'Use Scope'}
+                          </button>
+                        </div>
                         {photo.can_delete_correction && (
                           <button
                             type="button"
@@ -282,15 +384,15 @@ export default function Photos() {
                               void deleteProgressPhoto(photo);
                             }}
                             disabled={deletingPhotoId === photo.id}
-                            className="absolute right-2 top-2 inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-white/95 px-2 text-[11px] font-black text-red-700 shadow-sm transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
-                            aria-label="Delete this progress picture as your one correction"
+                            className="absolute right-2 top-2 z-30 inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-white/95 px-2 text-[11px] font-black text-red-700 shadow-sm transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                            aria-label="Delete this project picture as your one correction"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                             {deletingPhotoId === photo.id ? 'Deleting' : 'Delete once'}
                           </button>
                         )}
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent opacity-100 transition-opacity" />
-                        <div className="absolute bottom-0 left-0 right-0 p-2">
+                        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent opacity-100 transition-opacity" />
+                        <div className="pointer-events-none absolute bottom-0 left-0 right-0 p-2">
                           <p className="text-white text-xs font-bold truncate">{photo.project_address}</p>
                           <p className="text-white/80 text-xs truncate">{photo.uploader_name || 'Unknown user'} / {format(new Date(photo.taken_at || photo.created_at), 'h:mm a')}</p>
                           <p className="text-white/70 text-[10px] truncate">{photo.capture_latitude ? 'GPS recorded' : 'IP recorded'}{photo.upload_ip_address ? ` / ${photo.upload_ip_address}` : ''}</p>
@@ -312,6 +414,8 @@ export default function Photos() {
                     const src = `/uploads/${photo.project_id}/${photo.filename}`;
                     const mediaKind = getProgressMediaKind(photo);
                     const isVideo = mediaKind === 'video';
+                    const progressContext = isPhotoContextEnabled(photo.show_in_progress, photo.photo_type === 'progress' || photo.photo_type === 'note');
+                    const scopeContext = isPhotoContextEnabled(photo.show_in_scope, photo.photo_type === 'scope' || photo.photo_type === 'construction_plan');
                     return (
                       <div key={photo.id} className="bg-white rounded-xl border border-gray-200 p-3 flex items-center gap-3">
                         <div className="w-16 h-16 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0 cursor-pointer relative" onClick={() => openMedia(photo)}>
@@ -328,7 +432,23 @@ export default function Photos() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-gray-900 truncate">{photo.project_address}</p>
-                          <p className="text-xs text-gray-500">{isVideo ? 'Project video' : 'Progress photo'} / {photo.uploader_name || 'Unknown user'}</p>
+                          <p className="text-xs text-gray-500">{isVideo ? 'Project video' : 'Project photo'} / {photo.uploader_name || 'Unknown user'}</p>
+                          <div className="mt-1 flex flex-wrap gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => void updatePhotoContexts(photo, { progress: !progressContext })}
+                              className={`min-h-8 rounded-lg border px-2 text-[10px] font-black ${progressContext ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-gray-200 bg-gray-50 text-gray-600'}`}
+                            >
+                              {progressContext ? 'In Progress' : 'Use Progress'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void updatePhotoContexts(photo, { scope: !scopeContext })}
+                              className={`min-h-8 rounded-lg border px-2 text-[10px] font-black ${scopeContext ? 'border-teal-200 bg-teal-50 text-teal-800' : 'border-gray-200 bg-gray-50 text-gray-600'}`}
+                            >
+                              {scopeContext ? 'In Scope' : 'Use Scope'}
+                            </button>
+                          </div>
                           {photo.note_text && <p className="text-xs font-semibold text-amber-700 truncate">Note: {photo.note_text}</p>}
                           {photo.caption && <p className="text-xs text-gray-400 truncate">{photo.caption}</p>}
                           <p className="text-xs text-gray-400">{format(new Date(photo.taken_at || photo.created_at), 'MMM d, yyyy h:mm a')} / {photo.capture_latitude ? 'GPS recorded' : 'IP recorded'}{photo.upload_ip_address ? ` / ${photo.upload_ip_address}` : ''}</p>

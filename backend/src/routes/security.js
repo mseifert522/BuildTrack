@@ -3,6 +3,13 @@ const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/schema');
 const { authenticate, authorize } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
+const { getClientIp } = require('../utils/requestIp');
+const {
+  DESKTOP_SESSION_IDLE_TIMEOUT_MINUTES,
+  MOBILE_SESSION_MAX_AGE_HOURS,
+  SESSION_ARCHIVE_AFTER_DAYS,
+  applySessionRetentionPolicy,
+} = require('../utils/sessionPolicy');
 
 const router = express.Router();
 
@@ -11,19 +18,6 @@ router.use(authorize('super_admin', 'operations_manager'));
 
 function nowIso() {
   return new Date().toISOString();
-}
-
-function getClientIp(req) {
-  const forwardedFor = String(req.headers['x-forwarded-for'] || '')
-    .split(',')
-    .map(value => value.trim())
-    .filter(Boolean);
-  return forwardedFor[0]
-    || String(req.headers['cf-connecting-ip'] || '').trim()
-    || String(req.headers['x-real-ip'] || '').trim()
-    || req.ip
-    || req.socket?.remoteAddress
-    || '';
 }
 
 function requestMeta(req) {
@@ -82,17 +76,27 @@ function parseUserAgent(userAgent = '', sessionType = '') {
 
 function formatSession(row, currentSessionId = null) {
   const parsed = parseUserAgent(row.user_agent, row.session_type);
+  const loginIp = row.ip_address || '';
+  const currentIp = row.current_ip_address || loginIp;
   return {
     id: row.id,
     user_id: row.user_id,
     session_type: row.session_type || 'desktop',
-    ip_address: row.ip_address || '',
+    ip_address: currentIp,
+    login_ip_address: loginIp,
+    current_ip_address: currentIp,
+    ip_address_updated_at: row.ip_address_updated_at || null,
     user_agent: row.user_agent || '',
     issued_at: row.issued_at || null,
     last_seen_at: row.last_seen_at || null,
     created_at: row.created_at || null,
     updated_at: row.updated_at || null,
     details: parseJsonObject(row.details),
+    revoked_at: row.revoked_at || null,
+    revoke_reason: row.revoke_reason || null,
+    revoked_by: row.revoked_by || null,
+    revoked_by_name: row.revoked_by_name || null,
+    archived_reason: row.archived_reason || row.revoke_reason || null,
     security_status: sessionStatus(row.last_seen_at),
     is_current_session: currentSessionId && row.id === currentSessionId,
     ...parsed,
@@ -154,6 +158,9 @@ function revokeUserAccess(db, userId, actorId, reason, revokedAt) {
 router.get('/sessions', (req, res) => {
   try {
     const db = getDb();
+    const cleanup = applySessionRetentionPolicy(db);
+    const activeLimit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 10, 1), 50);
+    const archiveLimit = Math.min(Math.max(Number.parseInt(req.query.archive_limit, 10) || 40, 1), 200);
     const users = db.prepare(`
       WITH session_summary AS (
         SELECT
@@ -231,8 +238,13 @@ router.get('/sessions', (req, res) => {
         s.session_type,
         s.user_agent,
         s.ip_address,
+        s.current_ip_address,
+        s.ip_address_updated_at,
         s.issued_at,
         s.last_seen_at,
+        s.revoked_at,
+        s.revoke_reason,
+        s.revoked_by,
         s.details,
         s.created_at,
         s.updated_at
@@ -243,7 +255,52 @@ router.get('/sessions', (req, res) => {
       ORDER BY
         datetime(COALESCE(s.last_seen_at, s.issued_at, s.created_at)) DESC,
         s.created_at DESC
-    `).all().map(row => formatSession(row, req.auth?.session_id || null));
+      LIMIT ?
+    `).all(activeLimit).map(row => formatSession(row, req.auth?.session_id || null));
+
+    const archivedSessions = db.prepare(`
+      SELECT
+        s.id,
+        s.user_id,
+        s.session_type,
+        s.user_agent,
+        s.ip_address,
+        s.current_ip_address,
+        s.ip_address_updated_at,
+        s.issued_at,
+        s.last_seen_at,
+        s.revoked_at,
+        s.revoke_reason,
+        s.revoked_by,
+        s.details,
+        s.created_at,
+        s.updated_at,
+        u.name as user_name,
+        u.email as user_email,
+        u.role as user_role,
+        actor.name as revoked_by_name,
+        CASE
+          WHEN s.revoked_at IS NULL THEN 'Archived after 14 days'
+          WHEN s.revoke_reason IS NOT NULL THEN s.revoke_reason
+          ELSE 'Past session'
+        END as archived_reason
+      FROM auth_sessions s
+      JOIN users u ON u.id = s.user_id
+      LEFT JOIN users actor ON actor.id = s.revoked_by
+      WHERE (
+          s.revoked_at IS NOT NULL
+          OR datetime(COALESCE(s.last_seen_at, s.issued_at, s.created_at)) <= datetime('now', '-14 days')
+        )
+      ORDER BY
+        datetime(COALESCE(s.revoked_at, s.last_seen_at, s.issued_at, s.created_at)) DESC,
+        s.created_at DESC
+      LIMIT ?
+    `).all(archiveLimit).map(row => ({
+      ...formatSession(row, req.auth?.session_id || null),
+      user_name: row.user_name,
+      user_email: row.user_email,
+      user_role: row.user_role,
+    }));
 
     const sessionsByUser = sessions.reduce((acc, session) => {
       if (!acc.has(session.user_id)) acc.set(session.user_id, []);
@@ -262,10 +319,28 @@ router.get('/sessions', (req, res) => {
       return acc;
     }, { total: 0, online: 0, recently_active: 0, signed_in: 0, offline: 0 });
     counts.session_records = sessions.length;
+    counts.total_active_session_records = db.prepare(`
+      SELECT COUNT(*) as count
+      FROM auth_sessions s
+      JOIN users u ON u.id = s.user_id
+      WHERE s.revoked_at IS NULL AND u.is_active = 1
+    `).get().count || 0;
+    counts.archived_session_records = db.prepare(`
+      SELECT COUNT(*) as count
+      FROM auth_sessions
+      WHERE revoked_at IS NOT NULL
+        OR datetime(COALESCE(last_seen_at, issued_at, created_at)) <= datetime('now', '-14 days')
+    `).get().count || 0;
     counts.online_sessions = sessions.filter(row => row.security_status === 'online').length;
     counts.recent_sessions = sessions.filter(row => ['online', 'recently_active'].includes(row.security_status)).length;
+    counts.active_session_display_limit = activeLimit;
+    counts.archive_display_limit = archiveLimit;
+    counts.desktop_idle_timeout_minutes = DESKTOP_SESSION_IDLE_TIMEOUT_MINUTES;
+    counts.mobile_session_max_age_hours = MOBILE_SESSION_MAX_AGE_HOURS;
+    counts.session_archive_after_days = SESSION_ARCHIVE_AFTER_DAYS;
+    counts.cleanup = cleanup;
 
-    res.json({ users: usersWithSessions, sessions, counts });
+    res.json({ users: usersWithSessions, sessions, archived_sessions: archivedSessions, counts });
   } catch (err) {
     console.error('Security sessions error:', err);
     res.status(500).json({ error: 'Failed to load security sessions' });
@@ -293,6 +368,95 @@ router.get('/events', (req, res) => {
   } catch (err) {
     console.error('Security events error:', err);
     res.status(500).json({ error: 'Failed to load security history' });
+  }
+});
+
+router.get('/data-access', (req, res) => {
+  try {
+    const db = getDb();
+    const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 100, 1), 500);
+    const accessType = String(req.query.access_type || '').trim();
+    const entityType = String(req.query.entity_type || '').trim();
+    const userId = String(req.query.user_id || '').trim();
+    const q = String(req.query.q || '').trim();
+
+    const where = [];
+    const params = [];
+
+    if (accessType) {
+      where.push('dae.access_type = ?');
+      params.push(accessType);
+    }
+
+    if (entityType) {
+      where.push('dae.entity_type = ?');
+      params.push(entityType);
+    }
+
+    if (userId) {
+      where.push('dae.user_id = ?');
+      params.push(userId);
+    }
+
+    if (q) {
+      const like = `%${q}%`;
+      where.push(`(
+        u.name LIKE ?
+        OR u.email LIKE ?
+        OR dae.action LIKE ?
+        OR dae.entity_type LIKE ?
+        OR COALESCE(dae.route, '') LIKE ?
+        OR COALESCE(dae.details, '') LIKE ?
+        OR COALESCE(p.address, '') LIKE ?
+        OR COALESCE(p.job_name, '') LIKE ?
+      )`);
+      params.push(like, like, like, like, like, like, like, like);
+    }
+
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const events = db.prepare(`
+      SELECT
+        dae.*,
+        u.name AS user_name,
+        u.email AS user_email,
+        u.role AS user_role,
+        p.address AS project_address,
+        p.job_name AS project_job_name
+      FROM data_access_events dae
+      JOIN users u ON u.id = dae.user_id
+      LEFT JOIN projects p ON p.id = dae.project_id
+      ${whereSql}
+      ORDER BY datetime(dae.created_at) DESC, dae.created_at DESC
+      LIMIT ?
+    `).all(...params, limit).map(row => ({
+      ...row,
+      details: parseJsonObject(row.details),
+    }));
+
+    const counts = db.prepare(`
+      SELECT
+        COUNT(*) AS total_24h,
+        COALESCE(SUM(CASE WHEN access_type = 'download' THEN 1 ELSE 0 END), 0) AS downloads_24h,
+        COALESCE(SUM(CASE WHEN access_type = 'sensitive_view' THEN 1 ELSE 0 END), 0) AS sensitive_views_24h,
+        COALESCE(SUM(CASE WHEN entity_type = 'project' THEN 1 ELSE 0 END), 0) AS project_access_24h,
+        COALESCE(SUM(CASE WHEN entity_type IN ('contractor', 'contractor_profile', 'supplier') THEN 1 ELSE 0 END), 0) AS vendor_supplier_access_24h
+      FROM data_access_events
+      WHERE datetime(created_at) >= datetime('now', '-24 hours')
+    `).get();
+
+    res.json({
+      events,
+      counts: {
+        total_24h: Number(counts?.total_24h || 0),
+        downloads_24h: Number(counts?.downloads_24h || 0),
+        sensitive_views_24h: Number(counts?.sensitive_views_24h || 0),
+        project_access_24h: Number(counts?.project_access_24h || 0),
+        vendor_supplier_access_24h: Number(counts?.vendor_supplier_access_24h || 0),
+      },
+    });
+  } catch (err) {
+    console.error('Data access audit error:', err);
+    res.status(500).json({ error: 'Failed to load data access audit' });
   }
 });
 
@@ -331,6 +495,8 @@ router.post('/sessions/:sessionId/logout', (req, res) => {
         s.user_id,
         s.session_type,
         s.ip_address,
+        s.current_ip_address,
+        s.ip_address_updated_at,
         s.user_agent,
         s.last_seen_at,
         u.name,
@@ -366,7 +532,9 @@ router.post('/sessions/:sessionId/logout', (req, res) => {
           target_email: target.email,
           session_id: target.id,
           session_type: target.session_type,
-          ip_address: target.ip_address,
+          ip_address: target.current_ip_address || target.ip_address,
+          login_ip_address: target.ip_address,
+          current_ip_address: target.current_ip_address || target.ip_address,
           user_agent: target.user_agent,
         },
       });

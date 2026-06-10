@@ -1,39 +1,14 @@
-<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-<rect width="64" height="64" rx="12" fill="#1B2A4A"/>
-<defs>
-<linearGradient id="bar1" x1="0" y1="1" x2="0" y2="0">
-<stop offset="0%" stop-color="#3B7DD8"/>
-<stop offset="100%" stop-color="#6BA3E8"/>
-</linearGradient>
-<linearGradient id="bar2" x1="0" y1="1" x2="0" y2="0">
-<stop offset="0%" stop-color="#4A8DE0"/>
-<stop offset="100%" stop-color="#7BB5F0"/>
-</linearGradient>
-<linearGradient id="bar3" x1="0" y1="1" x2="0" y2="0">
-<stop offset="0%" stop-color="#5A9DE8"/>
-<stop offset="100%" stop-color="#8DC5F8"/>
-</linearGradient>
-</defs>
-<!-- Three rising bars -->
-<rect x="8" y="32" width="13" height="22" rx="2" fill="url(#bar1)"/>
-<rect x="25" y="22" width="13" height="32" rx="2" fill="url(#bar2)"/>
-<rect x="42" y="10" width="13" height="44" rx="2" fill="url(#bar3)"/>
-<!-- Amber tick marks -->
-<rect x="11" y="36" width="7" height="2" rx="1" fill="#E8920B" opacity="0.9"/>
-<rect x="11" y="41" width="7" height="2" rx="1" fill="#E8920B" opacity="0.9"/>
-<rect x="11" y="46" width="7" height="2" rx="1" fill="#E8920B" opacity="0.6"/>
-<rect x="28" y="26" width="7" height="2" rx="1" fill="#E8920B" opacity="0.9"/>
-<rect x="28" y="31" width="7" height="2" rx="1" fill="#E8920B" opacity="0.9"/>
-<rect x="28" y="36" width="7" height="2" rx="1" fill="#E8920B" opacity="0.9"/>
-<rect x="28" y="41" width="7" height="2" rx="1" fill="#E8920B" opacity="0.6"/>
-<rect x="45" y="14" width="7" height="2" rx="1" fill="#E8920B" opacity="0.9"/>
-<rect x="45" y="19" width="7" height="2" rx="1" fill="#E8920B" opacity="0.9"/>
-<rect x="45" y="24" width="7" height="2" rx="1" fill="#E8920B" opacity="0.9"/>
-<rect x="45" y="29" width="7" height="2" rx="1" fill="#E8920B" opacity="0.9"/>
-<rect x="45" y="34" width="7" height="2" rx="1" fill="#E8920B" opacity="0.7"/>
-<rect x="45" y="39" width="7" height="2" rx="1" fill="#E8920B" opacity="0.5"/>
-<!-- Crane accent -->
-<polygon points="55,9 59,5 59,13" fill="#E8920B"/>
-<!-- Ground line -->
-<rect x="5" y="56" width="54" height="2" rx="1" fill="rgba(255,255,255,0.2)"/>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>BuildTrack logo mark</title>
+<rect x="18" y="18" width="476" height="476" rx="96" fill="#F8FAFC" stroke="#C7D2E0" stroke-width="8"/>
+<rect x="116" y="252" width="84" height="150" rx="12" fill="#1B2A4A"/>
+<rect x="214" y="166" width="84" height="236" rx="12" fill="#1B2A4A"/>
+<rect x="312" y="80" width="84" height="322" rx="12" fill="#1B2A4A"/>
+<g fill="#E8920B">
+<rect x="132" y="286" width="52" height="8" rx="4"/><rect x="132" y="316" width="52" height="8" rx="4"/><rect x="132" y="346" width="52" height="8" rx="4"/><rect x="132" y="376" width="52" height="8" rx="4"/>
+<rect x="230" y="202" width="52" height="8" rx="4"/><rect x="230" y="232" width="52" height="8" rx="4"/><rect x="230" y="262" width="52" height="8" rx="4"/><rect x="230" y="292" width="52" height="8" rx="4"/><rect x="230" y="322" width="52" height="8" rx="4"/>
+<rect x="328" y="116" width="52" height="8" rx="4"/><rect x="328" y="146" width="52" height="8" rx="4"/><rect x="328" y="176" width="52" height="8" rx="4"/><rect x="328" y="206" width="52" height="8" rx="4"/><rect x="328" y="236" width="52" height="8" rx="4"/><rect x="328" y="266" width="52" height="8" rx="4"/><rect x="328" y="296" width="52" height="8" rx="4"/>
+<polygon points="396,72 432,42 432,102"/><rect x="432" y="42" width="36" height="8" rx="4"/><rect x="464" y="42" width="8" height="86" rx="4"/>
+</g>
+<rect x="78" y="420" width="360" height="10" rx="5" fill="#1B2A4A"/>
 </svg>

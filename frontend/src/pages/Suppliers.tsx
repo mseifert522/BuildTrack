@@ -232,15 +232,16 @@ export default function Suppliers() {
   if (loading) return <Loading />;
 
   return (
-    <div className="bt-desktop-page min-h-full px-6 py-6 md:px-8">
+    <div className="bt-desktop-page bt-directory-page bt-suppliers-page min-h-full px-6 py-6 md:px-8">
       <div className="mx-auto max-w-7xl space-y-5">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="text-2xl font-black tracking-tight text-gray-950">Suppliers</h1>
-            <p className="mt-1 text-sm font-semibold text-gray-500">{filteredSuppliers.length} active supplier records</p>
+        <div className="bt-directory-hero flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="bt-directory-title-block">
+            <p className="bt-directory-kicker">Materials and vendor directory</p>
+            <h1 className="text-2xl font-black tracking-tight">Suppliers</h1>
+            <p className="mt-1 text-sm font-semibold">{filteredSuppliers.length} active supplier records</p>
           </div>
-          <div className="flex w-full flex-col gap-2 sm:flex-row md:w-auto">
-            <div className="flex min-h-11 w-full items-center gap-2 rounded-xl border border-slate-400 bg-slate-50 px-3 shadow-sm sm:w-80">
+          <div className="bt-directory-actions flex w-full flex-col gap-2 sm:flex-row md:w-auto">
+            <div className="bt-directory-search flex min-h-11 w-full items-center gap-2 rounded-xl border border-slate-400 bg-slate-50 px-3 shadow-sm sm:w-80">
               <Search className="h-4 w-4 flex-shrink-0 text-gray-400" />
               <input
                 value={query}
@@ -252,7 +253,7 @@ export default function Suppliers() {
             <button
               type="button"
               onClick={openAddSupplier}
-              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-black text-white shadow-sm transition hover:bg-blue-700"
+              className="bt-directory-primary-action"
             >
               <Plus className="h-4 w-4" />
               Add Supplier
@@ -272,8 +273,8 @@ export default function Suppliers() {
             <p className="font-bold text-gray-700">No suppliers found</p>
           </div>
         ) : (
-          <div className="bt-table-wrap p-2">
-            <div className="hidden rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-black uppercase tracking-wide text-slate-500 xl:grid xl:grid-cols-[minmax(210px,1.1fr)_minmax(220px,1fr)_minmax(260px,1.25fr)_minmax(190px,0.9fr)_minmax(160px,0.75fr)_80px] xl:gap-4">
+          <div className="bt-table-wrap bt-directory-list p-2">
+            <div className="bt-directory-list-header hidden rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-black uppercase tracking-wide text-slate-500 xl:grid xl:grid-cols-[minmax(210px,1.1fr)_minmax(220px,1fr)_minmax(260px,1.25fr)_minmax(190px,0.9fr)_minmax(160px,0.75fr)_80px] xl:gap-4">
               <span>Name</span>
               <span>Category</span>
               <span>Address</span>
@@ -288,7 +289,7 @@ export default function Suppliers() {
                 return (
                   <div
                     key={supplier.id}
-                    className={`overflow-hidden rounded-lg border border-l-4 transition-colors ${isExpanded ? 'border-blue-300 border-l-blue-600 bg-blue-50 ring-1 ring-blue-100' : 'border-slate-200 border-l-slate-400 bg-white hover:border-blue-200 hover:bg-slate-50'}`}
+                    className={`bt-directory-card overflow-hidden rounded-lg border border-l-4 transition-colors ${isExpanded ? 'is-expanded border-blue-300 border-l-blue-600 bg-blue-50 ring-1 ring-blue-100' : 'border-slate-200 border-l-slate-400 bg-white hover:border-blue-200 hover:bg-slate-50'}`}
                     onClick={event => {
                       const target = event.target as HTMLElement;
                       if (target.closest('button,a,input,textarea,select,label')) return;
@@ -298,11 +299,11 @@ export default function Suppliers() {
                     <button
                       type="button"
                       onClick={() => setExpandedSupplierId(current => current === supplier.id ? null : supplier.id)}
-                      className="grid w-full grid-cols-1 gap-3 px-4 py-4 text-left xl:grid-cols-[minmax(210px,1.1fr)_minmax(220px,1fr)_minmax(260px,1.25fr)_minmax(190px,0.9fr)_minmax(160px,0.75fr)_80px] xl:items-center xl:gap-4"
+                      className="bt-directory-row grid w-full grid-cols-1 gap-3 px-4 py-4 text-left xl:grid-cols-[minmax(210px,1.1fr)_minmax(220px,1fr)_minmax(260px,1.25fr)_minmax(190px,0.9fr)_minmax(160px,0.75fr)_80px] xl:items-center xl:gap-4"
                       aria-expanded={isExpanded}
                     >
                       <div className="flex min-w-0 items-center gap-3">
-                        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-blue-50 text-xs font-black text-blue-700 ring-1 ring-blue-100">
+                        <div className="bt-directory-avatar flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-blue-50 text-xs font-black text-blue-700 ring-1 ring-blue-100">
                           {supplierInitials(supplier.name)}
                         </div>
                         <div className="min-w-0">
@@ -313,17 +314,17 @@ export default function Suppliers() {
 
                       <div className="flex min-w-0 flex-wrap gap-1.5">
                         {categories.length > 0 ? categories.slice(0, 2).map(category => (
-                          <span key={category} className="inline-flex min-h-7 items-center gap-1 rounded-lg border border-blue-100 bg-blue-50 px-2 py-1 text-xs font-black text-blue-700">
+                          <span key={category} className="bt-directory-chip inline-flex min-h-7 items-center gap-1 rounded-lg border border-blue-100 bg-blue-50 px-2 py-1 text-xs font-black text-blue-700">
                             <PackageCheck className="h-3.5 w-3.5 flex-shrink-0" />
                             {category}
                           </span>
                         )) : (
-                          <span className="inline-flex min-h-7 items-center rounded-lg border border-amber-100 bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">
+                          <span className="bt-directory-chip bt-directory-chip-warning inline-flex min-h-7 items-center rounded-lg border border-amber-100 bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">
                             Needs supply category
                           </span>
                         )}
                         {categories.length > 2 && (
-                          <span className="inline-flex min-h-7 items-center rounded-lg bg-slate-100 px-2 py-1 text-xs font-black text-slate-600">
+                          <span className="bt-directory-chip inline-flex min-h-7 items-center rounded-lg bg-slate-100 px-2 py-1 text-xs font-black text-slate-600">
                             +{categories.length - 2}
                           </span>
                         )}
@@ -344,16 +345,16 @@ export default function Suppliers() {
                         <span className="min-w-0 truncate">{supplierPhone(supplier)}</span>
                       </div>
 
-                      <div className="flex items-center justify-end gap-2 text-xs font-black text-blue-700">
+                      <div className="bt-directory-row-action flex items-center justify-end gap-2 text-xs font-black text-blue-700">
                         <span>{isExpanded ? 'Hide' : 'Expand'}</span>
                         <ChevronDown className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                       </div>
                     </button>
 
                     {isExpanded && (
-                      <div className="border-t border-slate-200 bg-slate-50 px-4 py-4">
+                      <div className="bt-directory-expanded border-t border-slate-200 bg-slate-50 px-4 py-4">
                         <div className="grid gap-3 lg:grid-cols-[1.1fr_1fr_auto] lg:items-start">
-                          <div className="rounded-xl border border-slate-400 bg-slate-50 p-4 shadow-sm">
+                          <div className="bt-directory-info-panel rounded-xl border border-slate-400 bg-slate-50 p-4 shadow-sm">
                             <p className="mb-2 text-xs font-black uppercase tracking-wide text-slate-500">Supplier Details</p>
                             <div className="grid gap-3 sm:grid-cols-2">
                               <DetailLine label="Name" value={supplier.name} />
@@ -362,7 +363,7 @@ export default function Suppliers() {
                               <DetailLine label="Contact Person" value={supplierContact(supplier)} />
                             </div>
                           </div>
-                          <div className="rounded-xl border border-slate-400 bg-slate-50 p-4 shadow-sm">
+                          <div className="bt-directory-info-panel rounded-xl border border-slate-400 bg-slate-50 p-4 shadow-sm">
                             <p className="mb-2 text-xs font-black uppercase tracking-wide text-slate-500">Contact</p>
                             <div className="space-y-2 text-sm">
                               <p className="flex min-w-0 items-center gap-2 font-semibold text-slate-700"><Phone className="h-4 w-4 text-slate-400" />{supplierPhone(supplier)}</p>

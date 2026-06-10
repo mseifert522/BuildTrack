@@ -2,12 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthStore, canChangeProjectStatus, canCreateProjects, isAdminRole } from '../store/authStore';
 import api from '../lib/api';
-import { Loading, StatusBadge, Modal, PageHeader } from '../components/ui';
-import { Activity, Camera, CheckCircle2, FileText, Plus, Search, MapPin, Users, ClipboardList, ChevronRight, Bell, KeyRound, MessageSquare, Upload, MoreHorizontal } from 'lucide-react';
+import { Loading, Modal, PageHeader } from '../components/ui';
+import { Camera, CheckCircle2, FileText, Plus, Search, MapPin, Users, ClipboardList, ChevronRight, Bell, KeyRound, MessageSquare, Upload, MoreHorizontal } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useForm } from 'react-hook-form';
 import GooglePlacesInput from '../components/GooglePlacesInput';
 import CurrencyInput from '../components/CurrencyInput';
+import VoiceTextarea from '../components/VoiceTextarea';
+import AddToCalendarButton from '../components/AddToCalendarButton';
 
 interface Project {
   id: string;
@@ -22,6 +24,8 @@ interface Project {
   updated_at: string;
   main_photo_url?: string | null;
   lockbox_code?: string | null;
+  market_status?: string | null;
+  work_priority?: number | string | null;
 }
 
 interface ProjectForm {
@@ -36,6 +40,8 @@ interface ProjectForm {
   purchase_price: string;
   acquisition_date: string;
   lockbox_code: string;
+  market_status: string;
+  work_priority: string;
 }
 
 interface ProjectReviewSummary {
@@ -63,6 +69,27 @@ const PROJECT_STATUS_OPTIONS = [
   { value: 'commercial', label: 'Commercial' },
 ];
 
+const PROJECT_STATUS_BADGES: Record<string, { label: string; className: string }> = {
+  not_started: { label: 'Not Started', className: 'border-slate-300 bg-slate-100 text-slate-700' },
+  active_rehab: { label: 'Being Worked On', className: 'border-blue-300 bg-blue-100 text-blue-800' },
+  rehab_completed: { label: 'Completed', className: 'border-emerald-300 bg-emerald-100 text-emerald-800' },
+  long_term_holding: { label: 'Holding', className: 'border-amber-300 bg-amber-100 text-amber-800' },
+  commercial: { label: 'Commercial', className: 'border-cyan-300 bg-cyan-100 text-cyan-800' },
+};
+
+const MARKET_STATUS_OPTIONS = [
+  { value: 'not_on_market', label: 'Not On Market' },
+  { value: 'on_market', label: 'On Market' },
+];
+
+const WORK_PRIORITY_OPTIONS = Array.from({ length: 20 }, (_, index) => index + 1);
+
+const DEFAULT_PROJECT_FORM_VALUES: Partial<ProjectForm> = {
+  status: 'not_started',
+  market_status: 'not_on_market',
+  work_priority: '',
+};
+
 const DOCUMENT_CATEGORIES = [
   { value: 'invoices', label: 'Invoices' },
   { value: 'quotes', label: 'Quotes' },
@@ -70,10 +97,19 @@ const DOCUMENT_CATEGORIES = [
   { value: 'insurance_documents', label: 'Insurance Documents' },
 ];
 
-function isMobileCaptureContext() {
-  if (typeof window === 'undefined') return false;
-  const userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent;
-  return Boolean(window.matchMedia?.('(max-width: 767px)').matches) || /Android|iPhone|iPad|iPod|Mobile/i.test(userAgent);
+const SOLD_DISPLAY_STATUSES = new Set(['sold', 'closed_sold', 'rehab_completed']);
+
+function getProjectStatusBadge(status?: string | null) {
+  return PROJECT_STATUS_BADGES[String(status || '')] || PROJECT_STATUS_BADGES.not_started;
+}
+
+function getProjectPriority(project: Project) {
+  const priority = Number(project.work_priority || 0);
+  return Number.isInteger(priority) && priority >= 1 && priority <= 20 ? priority : null;
+}
+
+function getMarketStatusLabel(value?: string | null) {
+  return MARKET_STATUS_OPTIONS.find(option => option.value === value)?.label || 'Not On Market';
 }
 
 export default function Projects() {
@@ -97,9 +133,12 @@ export default function Projects() {
   const [budgetValue, setBudgetValue] = useState('');
   const [purchasePriceValue, setPurchasePriceValue] = useState('');
   const [activeActionsProjectId, setActiveActionsProjectId] = useState<string | null>(null);
-  const [sortBy, setSortBy] = useState('updated');
+  const [sortBy, setSortBy] = useState('priority');
   const [teamFilter, setTeamFilter] = useState('');
-  const { register, handleSubmit, reset, setValue, formState: { isSubmitting, errors } } = useForm<ProjectForm>();
+  const [updatingPlanning, setUpdatingPlanning] = useState<string | null>(null);
+  const { register, handleSubmit, reset, setValue, formState: { isSubmitting, errors } } = useForm<ProjectForm>({
+    defaultValues: DEFAULT_PROJECT_FORM_VALUES,
+  });
 
   const load = async () => {
     try {
@@ -131,10 +170,18 @@ export default function Projects() {
 
   const onCreateProject = async (data: ProjectForm) => {
     try {
-      const res = await api.post('/projects', { ...data, address: addressValue || data.address, budget: budgetValue ? parseFloat(budgetValue) : null, purchase_price: purchasePriceValue ? parseFloat(purchasePriceValue) : null });
+      const priority = data.work_priority ? Number.parseInt(String(data.work_priority), 10) : null;
+      const res = await api.post('/projects', {
+        ...data,
+        address: addressValue || data.address,
+        budget: budgetValue ? parseFloat(budgetValue) : null,
+        purchase_price: purchasePriceValue ? parseFloat(purchasePriceValue) : null,
+        market_status: data.market_status || 'not_on_market',
+        work_priority: priority,
+      });
       toast.success('Project created!');
       setShowCreate(false);
-      reset();
+      reset(DEFAULT_PROJECT_FORM_VALUES);
       navigate(`/projects/${res.data.id}`);
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to create project');
@@ -154,6 +201,12 @@ export default function Projects() {
         return true;
       })
       .sort((a, b) => {
+        if (sortBy === 'priority') {
+          const priorityA = getProjectPriority(a) || 999;
+          const priorityB = getProjectPriority(b) || 999;
+          if (priorityA !== priorityB) return priorityA - priorityB;
+          return toTime(b.updated_at) - toTime(a.updated_at);
+        }
         if (sortBy === 'address') return String(a.address || '').localeCompare(String(b.address || ''));
         if (sortBy === 'budget') return Number(b.budget || 0) - Number(a.budget || 0);
         if (sortBy === 'punch') return Number(b.open_punch_items || 0) - Number(a.open_punch_items || 0);
@@ -174,6 +227,21 @@ export default function Projects() {
       toast.error(err.response?.data?.error || 'Failed to update project status');
     } finally {
       setUpdatingStatus(null);
+    }
+  };
+
+  const updateProjectPlanning = async (project: Project, patch: Partial<Pick<Project, 'market_status' | 'work_priority'>>) => {
+    if (!canChangeStatus) return;
+    setUpdatingPlanning(project.id);
+    try {
+      await api.put(`/projects/${project.id}`, patch);
+      setProjects(current => current.map(item => item.id === project.id ? { ...item, ...patch } : item));
+      toast.success(patch.market_status !== undefined ? 'Market status updated' : 'Project priority updated');
+      load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to update project priority');
+    } finally {
+      setUpdatingPlanning(null);
     }
   };
 
@@ -278,6 +346,7 @@ export default function Projects() {
           className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-auto"
           aria-label="Sort projects"
         >
+          <option value="priority">Sort: Priority order</option>
           <option value="updated">Sort: Recently updated</option>
           <option value="target">Sort: Target completion</option>
           <option value="punch">Sort: Open punch items</option>
@@ -300,6 +369,9 @@ export default function Projects() {
             </div>
           ) : projectRows.map(p => {
             const review = reviewSummaries[p.id];
+            const priority = getProjectPriority(p);
+            const statusBadge = getProjectStatusBadge(p.status);
+            const isOnMarket = p.market_status === 'on_market';
             return (
               <div
                 key={p.id}
@@ -307,7 +379,7 @@ export default function Projects() {
                 className="bt-project-card group relative flex w-full min-w-0 cursor-pointer flex-col items-stretch gap-3 overflow-visible rounded-[1.35rem] border border-slate-300 bg-gradient-to-br from-white via-white to-blue-50/45 p-4 transition-all hover:border-blue-400 hover:bg-blue-50/35 hover:shadow-xl sm:flex-row sm:items-center sm:gap-4"
                 style={{
                   boxShadow: '0 10px 28px rgba(15,23,42,0.10), 0 1px 0 rgba(15,23,42,0.04)',
-                  borderLeft: '5px solid #2563EB',
+                  borderLeft: `5px solid ${priority ? (priority <= 5 ? '#F59E0B' : '#2563EB') : '#2563EB'}`,
                 }}
               >
                 <button
@@ -357,6 +429,32 @@ export default function Projects() {
                 <div className="w-full flex-1 min-w-0 max-w-full">
                   <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
+                      <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                        {priority && (
+                          <span
+                            className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-black uppercase tracking-wide shadow-sm ${
+                              priority <= 5
+                                ? 'border-amber-300 bg-amber-400 text-amber-950'
+                                : 'border-blue-300 bg-blue-100 text-blue-800'
+                            }`}
+                            title={`Work priority ${priority} of 20`}
+                          >
+                            Priority {priority}
+                          </span>
+                        )}
+                        <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-black uppercase tracking-wide ${statusBadge.className}`}>
+                          {statusBadge.label}
+                        </span>
+                        <span
+                          className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-black uppercase tracking-wide ${
+                            isOnMarket
+                              ? 'border-emerald-300 bg-emerald-500 text-emerald-950 shadow-sm'
+                              : 'border-slate-300 bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          {getMarketStatusLabel(p.market_status)}
+                        </span>
+                      </div>
                       <p className="bt-project-title font-semibold text-gray-900 truncate">{p.address}</p>
                       <p className="bt-project-subtitle text-sm text-gray-500 truncate">{p.job_name}</p>
                     </div>
@@ -371,7 +469,28 @@ export default function Projects() {
                           New info to review
                         </span>
                       )}
-                      <StatusBadge status={p.status} className="flex-shrink-0" />
+                      {SOLD_DISPLAY_STATUSES.has(String(p.status || '')) && (
+                        <span className="inline-flex flex-shrink-0 items-center rounded-full border border-emerald-300 bg-emerald-500 px-3 py-1 text-xs font-black uppercase tracking-wide text-emerald-950 shadow-sm">
+                          Sold
+                        </span>
+                      )}
+                      <div
+                        className="relative z-30"
+                        onClick={event => event.stopPropagation()}
+                        onMouseDown={event => event.stopPropagation()}
+                      >
+                        <AddToCalendarButton
+                          label="Add to Calendar"
+                          defaultTitle={`Project reminder - ${p.address || p.job_name || 'project'}`}
+                          defaultDescription={[p.job_name, p.address].filter(Boolean).join('\n')}
+                          defaultDate={p.target_completion || p.start_date || null}
+                          projectId={p.id}
+                          sourceType="project"
+                          sourceId={p.id}
+                          contextLabel={[p.address, p.job_name].filter(Boolean).join(' - ')}
+                          buttonClassName="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs font-black text-cyan-800 shadow-sm transition-colors hover:bg-cyan-100"
+                        />
+                      </div>
                       <div
                         className="relative z-30"
                         onClick={event => event.stopPropagation()}
@@ -477,6 +596,35 @@ export default function Projects() {
                                     <option key={option.value} value={option.value}>{option.label}</option>
                                   ))}
                                 </select>
+                                <label className="mb-1 block text-[11px] font-black uppercase tracking-wide text-slate-500">
+                                  Market status
+                                </label>
+                                <select
+                                  value={p.market_status || 'not_on_market'}
+                                  disabled={updatingPlanning === p.id}
+                                  onChange={event => updateProjectPlanning(p, { market_status: event.target.value })}
+                                  className="mb-2 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-60"
+                                  aria-label={`Change market status for ${p.address}`}
+                                >
+                                  {MARKET_STATUS_OPTIONS.map(option => (
+                                    <option key={option.value} value={option.value}>{option.label}</option>
+                                  ))}
+                                </select>
+                                <label className="mb-1 block text-[11px] font-black uppercase tracking-wide text-slate-500">
+                                  Work priority
+                                </label>
+                                <select
+                                  value={getProjectPriority(p) || ''}
+                                  disabled={updatingPlanning === p.id}
+                                  onChange={event => updateProjectPlanning(p, { work_priority: event.target.value ? Number(event.target.value) : null })}
+                                  className="mb-2 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-60"
+                                  aria-label={`Change work priority for ${p.address}`}
+                                >
+                                  <option value="">No priority</option>
+                                  {WORK_PRIORITY_OPTIONS.map(priorityNumber => (
+                                    <option key={priorityNumber} value={priorityNumber}>Priority {priorityNumber}</option>
+                                  ))}
+                                </select>
                                 <button
                                   type="button"
                                   disabled={updatingStatus === p.id || p.status === 'rehab_completed'}
@@ -514,36 +662,6 @@ export default function Projects() {
                     {p.budget && (
                       <span className="bt-project-meta text-xs text-gray-500">${Number(p.budget).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                     )}
-                  </div>
-                  <div className="mt-3 grid w-full min-w-0 grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">
-                    <button
-                      type="button"
-                      onClick={e => {
-                        e.stopPropagation();
-                        navigate(isMobileCaptureContext() ? `/mobile/photos?projectId=${p.id}&camera=1` : `/photos?projectId=${p.id}`);
-                      }}
-                      className="relative z-20 inline-flex min-h-10 w-full max-w-full items-center justify-center gap-1.5 rounded-lg border border-blue-700 bg-blue-600 px-3 py-2 text-center text-xs font-black leading-tight text-white shadow-sm transition-colors cursor-pointer hover:bg-blue-700 sm:w-auto"
-                      title="Take timestamped progress pictures for this project"
-                      aria-label={`Take progress pictures for ${p.address}`}
-                    >
-                      <Camera className="h-3.5 w-3.5 flex-shrink-0" />
-                      <span className="min-w-0 whitespace-normal sm:hidden">Take Pictures</span>
-                      <span className="hidden min-w-0 whitespace-normal sm:inline">Upload Progress Pictures</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={e => {
-                        e.stopPropagation();
-                        navigate(`/projects/${p.id}#progress-history`);
-                      }}
-                      className="relative z-20 inline-flex min-h-10 w-full max-w-full items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-center text-xs font-black leading-tight text-white shadow-sm transition-colors cursor-pointer hover:bg-slate-800 sm:w-auto"
-                      style={{ background: '#0F172A', border: '1px solid #020617' }}
-                      title="View progress pictures, notes, timestamps, and historical project activity"
-                      aria-label={`View progress pictures and notes for ${p.address}`}
-                    >
-                      <Activity className="h-3.5 w-3.5 flex-shrink-0" />
-                      <span className="min-w-0 whitespace-normal">View Progress, Pictures, and Notes</span>
-                    </button>
                   </div>
                 </div>
                 <ChevronRight className="hidden w-4 h-4 text-gray-400 flex-shrink-0 sm:block" />
@@ -633,7 +751,7 @@ export default function Projects() {
       </Modal>
 
       {/* Create Project Modal */}
-      <Modal isOpen={showCreate} onClose={() => { setShowCreate(false); reset(); setAddressValue(''); setBudgetValue(''); setPurchasePriceValue(''); }} title="Create New Project" size="lg">
+      <Modal isOpen={showCreate} onClose={() => { setShowCreate(false); reset(DEFAULT_PROJECT_FORM_VALUES); setAddressValue(''); setBudgetValue(''); setPurchasePriceValue(''); }} title="Create New Project" size="lg">
         <form onSubmit={handleSubmit(onCreateProject)} className="space-y-4">
           <input type="hidden" {...register('address', { required: 'Property address is required' })} />
 
@@ -669,6 +787,23 @@ export default function Projects() {
                 <select {...register('status')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
                   {PROJECT_STATUS_OPTIONS.map(option => (
                     <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-800 mb-1">Market Status</label>
+                <select {...register('market_status')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                  {MARKET_STATUS_OPTIONS.map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-800 mb-1">Work Priority</label>
+                <select {...register('work_priority')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                  <option value="">No priority</option>
+                  {WORK_PRIORITY_OPTIONS.map(priorityNumber => (
+                    <option key={priorityNumber} value={priorityNumber}>Priority {priorityNumber}</option>
                   ))}
                 </select>
               </div>
@@ -720,12 +855,12 @@ export default function Projects() {
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-800 mb-1">Office Notes</label>
-                <textarea {...register('office_notes')} rows={2} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" placeholder="Internal notes..." />
+                <VoiceTextarea {...register('office_notes')} rows={2} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" placeholder="Internal notes..." />
               </div>
             </div>
           </fieldset>
           <div className="flex gap-3 pt-2">
-            <button type="button" onClick={() => { setShowCreate(false); reset(); setAddressValue(''); setBudgetValue(''); setPurchasePriceValue(''); }} className="flex-1 py-2.5 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">Cancel</button>
+            <button type="button" onClick={() => { setShowCreate(false); reset(DEFAULT_PROJECT_FORM_VALUES); setAddressValue(''); setBudgetValue(''); setPurchasePriceValue(''); }} className="flex-1 py-2.5 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">Cancel</button>
             <button type="submit" disabled={isSubmitting} className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50">
               {isSubmitting ? 'Creating...' : 'Create Project'}
             </button>

@@ -1,7 +1,7 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/schema');
-const { authenticate, authorize, authorizeProjectAccess } = require('../middleware/auth');
+const { authenticate, authorize, authorizeUpperManagement, blockProjectManagerMutation, authorizeProjectAccess } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
 const { recordWorkItemEvent } = require('../utils/workItemEvents');
 
@@ -390,7 +390,7 @@ router.post('/projects/:projectId/tasks', authorize(...MANAGEMENT_ROLES), author
   }
 });
 
-router.put('/projects/:projectId/tasks/:itemId', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, (req, res) => {
+router.put('/projects/:projectId/tasks/:itemId', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, blockProjectManagerMutation, (req, res) => {
   try {
     const db = getDb();
     const item = db.prepare('SELECT * FROM construction_plan_items WHERE id = ? AND project_id = ?').get(req.params.itemId, req.params.projectId);
@@ -471,7 +471,7 @@ router.put('/projects/:projectId/tasks/:itemId', authorize(...MANAGEMENT_ROLES),
   }
 });
 
-router.post('/projects/:projectId/tasks/:itemId/approve', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, (req, res) => {
+router.post('/projects/:projectId/tasks/:itemId/approve', authorizeUpperManagement, authorizeProjectAccess, (req, res) => {
   try {
     const db = getDb();
     const item = db.prepare('SELECT * FROM construction_plan_items WHERE id = ? AND project_id = ?').get(req.params.itemId, req.params.projectId);
@@ -525,7 +525,7 @@ router.post('/projects/:projectId/tasks/:itemId/approve', authorize(...MANAGEMEN
   }
 });
 
-router.post('/projects/:projectId/tasks/:itemId/review', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, (req, res) => {
+router.post('/projects/:projectId/tasks/:itemId/review', authorizeUpperManagement, authorizeProjectAccess, (req, res) => {
   try {
     const db = getDb();
     const item = db.prepare('SELECT * FROM construction_plan_items WHERE id = ? AND project_id = ?').get(req.params.itemId, req.params.projectId);

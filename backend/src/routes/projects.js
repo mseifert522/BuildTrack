@@ -4,8 +4,9 @@ const fs = require('fs');
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/schema');
-const { authenticate, authorize, authorizeProjectAccess } = require('../middleware/auth');
+const { authenticate, authorize, authorizeUpperManagement, blockProjectManagerMutation, authorizeProjectAccess } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
+const { logDataAccess } = require('../utils/dataAccessAudit');
 const { getNoteEditPermission } = require('../utils/projectNotes');
 const { recordWorkItemEvent } = require('../utils/workItemEvents');
 
@@ -15,6 +16,51 @@ router.use(authenticate);
 const MANAGEMENT_ROLES = ['super_admin', 'operations_manager', 'project_manager'];
 const PROJECT_STATUS_ADMIN_ROLES = ['super_admin', 'operations_manager'];
 const PROJECT_STATUSES = ['not_started', 'active_rehab', 'rehab_completed', 'long_term_holding', 'commercial'];
+const PROJECT_MARKET_STATUSES = ['not_on_market', 'on_market'];
+
+function toFlag(value) {
+  if (value === true || value === 1) return 1;
+  if (typeof value === 'string') return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase()) ? 1 : 0;
+  return 0;
+}
+
+function projectRouteError(message, statusCode = 400) {
+  const err = new Error(message);
+  err.statusCode = statusCode;
+  return err;
+}
+
+function normalizeProjectMarketStatus(value, fallback = 'not_on_market') {
+  if (value === undefined || value === null || value === '') return fallback;
+  const next = String(value).trim();
+  if (!PROJECT_MARKET_STATUSES.includes(next)) throw projectRouteError('Invalid market status');
+  return next;
+}
+
+function normalizeProjectPriority(value, fallback = null) {
+  if (value === undefined) return fallback;
+  if (value === null || value === '' || String(value).trim() === 'none') return null;
+  const priority = Number.parseInt(String(value), 10);
+  if (!Number.isInteger(priority) || priority < 1 || priority > 20) {
+    throw projectRouteError('Priority must be between 1 and 20');
+  }
+  return priority;
+}
+
+function assertWorkPriorityAvailable(db, priority, currentProjectId = null) {
+  if (!priority) return;
+  const existing = db.prepare(`
+    SELECT id, address, job_name
+    FROM projects
+    WHERE work_priority = ?
+      AND status != 'archived'
+      AND (? IS NULL OR id != ?)
+    LIMIT 1
+  `).get(priority, currentProjectId, currentProjectId);
+  if (existing) {
+    throw projectRouteError(`Priority ${priority} is already assigned to ${existing.address || existing.job_name || 'another project'}`, 409);
+  }
+}
 
 function activePhotoSql(alias = 'ph') {
   return `COALESCE(${alias}.upload_status, 'uploaded') != 'correction_deleted' AND ${alias}.correction_deleted_at IS NULL`;
@@ -134,9 +180,44 @@ function getProjectScopes(db, projectId) {
     documentsByScope.set(doc.scope_id, rows);
   }
 
+  const assignedPhotos = db.prepare(`
+    SELECT
+      pa.id as assignment_id,
+      pa.target_id as scope_id,
+      pa.created_at as assigned_at,
+      ph.id,
+      ph.filename,
+      ph.original_name,
+      ph.mime_type,
+      ph.caption,
+      ph.taken_at,
+      ph.captured_at,
+      ph.created_at,
+      ph.individual_note,
+      ph.batch_note,
+      u.name as uploader_name
+    FROM photo_assignments pa
+    JOIN photos ph ON ph.id = pa.photo_id
+    LEFT JOIN users u ON u.id = ph.uploaded_by
+    WHERE pa.project_id = ?
+      AND pa.target_type = 'project_scope'
+      AND ph.project_id = pa.project_id
+      AND ${activePhotoSql('ph')}
+    ORDER BY datetime(pa.created_at) DESC, datetime(COALESCE(ph.captured_at, ph.taken_at, ph.uploaded_at, ph.created_at)) DESC
+  `).all(projectId);
+
+  const photosByScope = new Map();
+  for (const photo of assignedPhotos) {
+    const rows = photosByScope.get(photo.scope_id) || [];
+    rows.push(photo);
+    photosByScope.set(photo.scope_id, rows);
+  }
+
   return scopes.map(scope => ({
     ...scope,
     estimate_documents: documentsByScope.get(scope.id) || [],
+    photos: photosByScope.get(scope.id) || [],
+    assigned_photos: photosByScope.get(scope.id) || [],
   }));
 }
 
@@ -425,7 +506,23 @@ router.get('/', (req, res) => {
   const enriched = projects.map(p => {
     const assignedCount = db.prepare('SELECT COUNT(*) as cnt FROM project_assignments WHERE project_id = ?').get(p.id);
     const openItems = db.prepare("SELECT COUNT(*) as cnt FROM punch_list_items WHERE project_id = ? AND status != 'completed'").get(p.id);
-    return { ...p, assigned_count: assignedCount.cnt, open_punch_items: openItems.cnt };
+    const activeScopes = db.prepare("SELECT COUNT(*) as cnt FROM project_scopes WHERE project_id = ? AND status = 'active'").get(p.id);
+    const activeFieldWork = db.prepare("SELECT COUNT(*) as cnt FROM construction_plan_items WHERE project_id = ? AND status != 'completed'").get(p.id);
+    return {
+      ...p,
+      assigned_count: assignedCount.cnt,
+      open_punch_items: openItems.cnt,
+      active_scope_count: activeScopes.cnt,
+      field_work_task_count: activeFieldWork.cnt,
+    };
+  });
+
+  logDataAccess(req, {
+    action: 'project_list_viewed',
+    accessType: 'view',
+    entityType: 'project',
+    recordCount: enriched.length,
+    details: { status: status || null, search: search || null, role: req.user.role },
   });
 
   res.json(enriched);
@@ -528,7 +625,28 @@ router.get('/:id', authorizeProjectAccess, (req, res) => {
     ORDER BY i.created_at DESC LIMIT 5
   `).all(req.params.id);
 
-  res.json({ ...project, assignments, punch_stats: punchStats, recent_photos: recentPhotos, recent_invoices: recentInvoices });
+  const activeScopeCount = db.prepare("SELECT COUNT(*) as cnt FROM project_scopes WHERE project_id = ? AND status = 'active'").get(req.params.id);
+  const fieldWorkTaskCount = db.prepare("SELECT COUNT(*) as cnt FROM construction_plan_items WHERE project_id = ? AND status != 'completed'").get(req.params.id);
+
+  logDataAccess(req, {
+    action: 'project_detail_viewed',
+    accessType: 'view',
+    entityType: 'project',
+    entityId: project.id,
+    projectId: project.id,
+    riskLevel: 'high',
+    details: { address: project.address, job_name: project.job_name },
+  });
+
+  res.json({
+    ...project,
+    assignments,
+    punch_stats: punchStats,
+    recent_photos: recentPhotos,
+    recent_invoices: recentInvoices,
+    active_scope_count: activeScopeCount.cnt,
+    field_work_task_count: fieldWorkTaskCount.cnt,
+  });
 });
 
 const PROJECT_SCOPE_STATUSES = ['draft', 'active', 'on_hold', 'completed'];
@@ -546,8 +664,17 @@ router.get('/:id/scopes', authorizeProjectAccess, (req, res) => {
   const db = getDb();
   const project = db.prepare('SELECT id, scope_of_work FROM projects WHERE id = ?').get(req.params.id);
   if (!project) return res.status(404).json({ error: 'Project not found' });
+  const scopes = getProjectScopes(db, req.params.id);
+  logDataAccess(req, {
+    action: 'project_scopes_viewed',
+    accessType: 'view',
+    entityType: 'project_scope',
+    projectId: req.params.id,
+    recordCount: scopes.length,
+    riskLevel: 'high',
+  });
   res.json({
-    scopes: getProjectScopes(db, req.params.id),
+    scopes,
     legacy_scope_of_work: project.scope_of_work || '',
   });
 });
@@ -560,7 +687,6 @@ router.post('/:id/scopes', authorize(...MANAGEMENT_ROLES), authorizeProjectAcces
     const body = String(scope_of_work || '').trim();
     const scopeStatus = PROJECT_SCOPE_STATUSES.includes(String(status || 'active')) ? String(status || 'active') : 'active';
     if (!title) return res.status(400).json({ error: 'Scope title is required' });
-    if (!body) return res.status(400).json({ error: 'Scope of work is required' });
 
     const db = getDb();
     const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(req.params.id);
@@ -590,8 +716,77 @@ router.post('/:id/scopes', authorize(...MANAGEMENT_ROLES), authorizeProjectAcces
   }
 });
 
+// POST /api/projects/:id/scopes/bulk
+router.post('/:id/scopes/bulk', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, (req, res) => {
+  try {
+    const rows = Array.isArray(req.body?.scopes) ? req.body.scopes : [];
+    if (!rows.length) return res.status(400).json({ error: 'At least one scope item is required' });
+    if (rows.length > 100) return res.status(400).json({ error: 'Bulk scope import is limited to 100 items at a time' });
+
+    const scopes = rows.map((row, index) => {
+      const title = String(row?.scope_title || '').trim();
+      if (!title) {
+        const rowNumber = Number(row?.row_number || index + 1);
+        const message = rowNumber ? `Scope title is required on row ${rowNumber}` : 'Scope title is required';
+        const err = new Error(message);
+        err.statusCode = 400;
+        throw err;
+      }
+      const requestedStatus = String(row?.status || 'active');
+      return {
+        id: uuidv4(),
+        section_name: String(row?.section_name || 'General').trim() || 'General',
+        scope_title: title,
+        scope_of_work: String(row?.scope_of_work || '').trim(),
+        status: PROJECT_SCOPE_STATUSES.includes(requestedStatus) ? requestedStatus : 'active',
+      };
+    });
+
+    const db = getDb();
+    const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const insertBulkScopes = db.transaction(scopeRows => {
+      const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) as max FROM project_scopes WHERE project_id = ?').get(req.params.id);
+      const insert = db.prepare(`
+        INSERT INTO project_scopes (id, project_id, section_name, scope_title, scope_of_work, status, sort_order, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      scopeRows.forEach((scope, index) => {
+        insert.run(
+          scope.id,
+          req.params.id,
+          scope.section_name,
+          scope.scope_title,
+          scope.scope_of_work,
+          scope.status,
+          maxOrder.max + index + 1,
+          req.user.id
+        );
+      });
+      db.prepare("UPDATE projects SET updated_at = datetime('now') WHERE id = ?").run(req.params.id);
+    });
+
+    insertBulkScopes(scopes);
+    scopes.forEach(scope => {
+      logActivity({
+        userId: req.user.id,
+        projectId: req.params.id,
+        action: 'project_scope_created',
+        entityType: 'project_scope',
+        entityId: scope.id,
+        details: { scope_title: scope.scope_title, section_name: scope.section_name, bulk_created: true },
+      });
+    });
+    res.status(201).json({ ids: scopes.map(scope => scope.id), count: scopes.length });
+  } catch (err) {
+    console.error(err);
+    res.status(err.statusCode || 500).json({ error: err.statusCode ? err.message : 'Failed to create bulk scope of work' });
+  }
+});
+
 // PUT /api/projects/:id/scopes/:scopeId
-router.put('/:id/scopes/:scopeId', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, (req, res) => {
+router.put('/:id/scopes/:scopeId', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, blockProjectManagerMutation, (req, res) => {
   try {
     const db = getDb();
     const scope = db.prepare('SELECT * FROM project_scopes WHERE id = ? AND project_id = ?').get(req.params.scopeId, req.params.id);
@@ -603,7 +798,6 @@ router.put('/:id/scopes/:scopeId', authorize(...MANAGEMENT_ROLES), authorizeProj
     const nextTitle = req.body.scope_title !== undefined ? String(req.body.scope_title || '').trim() : scope.scope_title;
     const nextScope = req.body.scope_of_work !== undefined ? String(req.body.scope_of_work || '').trim() : scope.scope_of_work;
     if (!nextTitle) return res.status(400).json({ error: 'Scope title is required' });
-    if (!nextScope) return res.status(400).json({ error: 'Scope of work is required' });
 
     db.prepare(`
       UPDATE project_scopes
@@ -702,7 +896,7 @@ router.post(
 );
 
 // POST /api/projects/:id/scopes/:scopeId/move
-router.post('/:id/scopes/:scopeId/move', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, (req, res) => {
+router.post('/:id/scopes/:scopeId/move', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, blockProjectManagerMutation, (req, res) => {
   try {
     const { direction } = req.body;
     if (!['up', 'down'].includes(direction)) return res.status(400).json({ error: 'Direction must be up or down' });
@@ -728,7 +922,7 @@ router.post('/:id/scopes/:scopeId/move', authorize(...MANAGEMENT_ROLES), authori
 });
 
 // DELETE /api/projects/:id/scopes/:scopeId
-router.delete('/:id/scopes/:scopeId', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, (req, res) => {
+router.delete('/:id/scopes/:scopeId', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, blockProjectManagerMutation, (req, res) => {
   const db = getDb();
   const scope = db.prepare('SELECT * FROM project_scopes WHERE id = ? AND project_id = ?').get(req.params.scopeId, req.params.id);
   if (!scope) return res.status(404).json({ error: 'Scope of work not found' });
@@ -743,18 +937,32 @@ router.get('/:id/construction-plan', authorizeProjectAccess, (req, res) => {
   const db = getDb();
   const project = db.prepare('SELECT id, created_by FROM projects WHERE id = ?').get(req.params.id);
   if (!project) return res.status(404).json({ error: 'Project not found' });
-  res.json({ items: getConstructionPlan(db, req.params.id) });
+  const items = getConstructionPlan(db, req.params.id);
+  logDataAccess(req, {
+    action: 'project_construction_plan_viewed',
+    accessType: 'view',
+    entityType: 'construction_plan',
+    projectId: req.params.id,
+    recordCount: items.length,
+    riskLevel: 'high',
+  });
+  res.json({ items });
 });
 
 // POST /api/projects/:id/construction-plan
 router.post('/:id/construction-plan', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, (req, res) => {
   try {
-    const { title, description, category, status, assigned_to, start_date, target_date, verification_status, invoice_status, approval_notes } = req.body;
+    const { title, description, category, status, assigned_to, start_date, target_date, verification_status, invoice_status, approval_notes, project_scope_id } = req.body;
     if (!title || !title.trim()) return res.status(400).json({ error: 'Title is required' });
 
     const db = getDb();
     const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(req.params.id);
     if (!project) return res.status(404).json({ error: 'Project not found' });
+    const nextScopeId = project_scope_id ? String(project_scope_id).trim() : null;
+    if (nextScopeId) {
+      const scope = db.prepare('SELECT id FROM project_scopes WHERE id = ? AND project_id = ?').get(nextScopeId, req.params.id);
+      if (!scope) return res.status(400).json({ error: 'Scope of work not found for this project' });
+    }
 
     const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) as max FROM construction_plan_items WHERE project_id = ?').get(req.params.id);
     const itemId = uuidv4();
@@ -769,9 +977,9 @@ router.post('/:id/construction-plan', authorize(...MANAGEMENT_ROLES), authorizeP
       db.prepare(`
         INSERT INTO construction_plan_items (
           id, project_id, title, description, category, status, verification_status, invoice_status,
-          sort_order, assigned_to, start_date, target_date, approval_notes, created_by
+          project_scope_id, sort_order, assigned_to, start_date, target_date, approval_notes, created_by
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         itemId,
         req.params.id,
@@ -781,6 +989,7 @@ router.post('/:id/construction-plan', authorize(...MANAGEMENT_ROLES), authorizeP
         nextStatus,
         nextVerificationStatus,
         nextInvoiceStatus,
+        nextScopeId,
         maxOrder.max + 1,
         assigned_to || null,
         start_date || null,
@@ -810,13 +1019,21 @@ router.post('/:id/construction-plan', authorize(...MANAGEMENT_ROLES), authorizeP
 });
 
 // PUT /api/projects/:id/construction-plan/:itemId
-router.put('/:id/construction-plan/:itemId', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, (req, res) => {
+router.put('/:id/construction-plan/:itemId', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, blockProjectManagerMutation, (req, res) => {
   try {
     const db = getDb();
     const item = db.prepare('SELECT * FROM construction_plan_items WHERE id = ? AND project_id = ?').get(req.params.itemId, req.params.id);
     if (!item) return res.status(404).json({ error: 'Construction plan item not found' });
 
-    const { title, description, category, status, assigned_to, start_date, target_date, verification_status, invoice_status, approval_notes } = req.body;
+    const { title, description, category, status, assigned_to, start_date, target_date, verification_status, invoice_status, approval_notes, project_scope_id } = req.body;
+    let nextScopeId = item.project_scope_id || null;
+    if (project_scope_id !== undefined) {
+      nextScopeId = project_scope_id ? String(project_scope_id).trim() : null;
+      if (nextScopeId) {
+        const scope = db.prepare('SELECT id FROM project_scopes WHERE id = ? AND project_id = ?').get(nextScopeId, req.params.id);
+        if (!scope) return res.status(400).json({ error: 'Scope of work not found for this project' });
+      }
+    }
     const nextStatus = status !== undefined ? normalizeFieldStatus(status, CONSTRUCTION_PLAN_STATUSES, item.status) : item.status;
     let nextVerificationStatus = verification_status !== undefined
       ? normalizeFieldStatus(verification_status, FIELD_VERIFICATION_STATUSES, item.verification_status || 'not_requested')
@@ -841,7 +1058,7 @@ router.put('/:id/construction-plan/:itemId', authorize(...MANAGEMENT_ROLES), aut
       db.prepare(`
         UPDATE construction_plan_items
         SET title = ?, description = ?, category = ?, status = ?, verification_status = ?, invoice_status = ?,
-            assigned_to = ?, start_date = ?, target_date = ?, approved_by = ?, approved_at = ?,
+            project_scope_id = ?, assigned_to = ?, start_date = ?, target_date = ?, approved_by = ?, approved_at = ?,
             approval_notes = ?, completed_at = ?, updated_at = datetime('now')
         WHERE id = ? AND project_id = ?
       `).run(
@@ -851,6 +1068,7 @@ router.put('/:id/construction-plan/:itemId', authorize(...MANAGEMENT_ROLES), aut
         nextStatus,
         nextVerificationStatus,
         nextInvoiceStatus,
+        nextScopeId,
         assigned_to !== undefined ? assigned_to : item.assigned_to,
         start_date !== undefined ? start_date : item.start_date,
         target_date !== undefined ? target_date : item.target_date,
@@ -884,7 +1102,7 @@ router.put('/:id/construction-plan/:itemId', authorize(...MANAGEMENT_ROLES), aut
 });
 
 // POST /api/projects/:id/construction-plan/:itemId/move
-router.post('/:id/construction-plan/:itemId/move', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, (req, res) => {
+router.post('/:id/construction-plan/:itemId/move', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, blockProjectManagerMutation, (req, res) => {
   try {
     const { direction } = req.body;
     if (!['up', 'down'].includes(direction)) return res.status(400).json({ error: 'Direction must be up or down' });
@@ -910,7 +1128,7 @@ router.post('/:id/construction-plan/:itemId/move', authorize(...MANAGEMENT_ROLES
 });
 
 // DELETE /api/projects/:id/construction-plan/:itemId
-router.delete('/:id/construction-plan/:itemId', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, (req, res) => {
+router.delete('/:id/construction-plan/:itemId', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, blockProjectManagerMutation, (req, res) => {
   const db = getDb();
   db.prepare('DELETE FROM construction_plan_items WHERE id = ? AND project_id = ?').run(req.params.itemId, req.params.id);
   logActivity({ userId: req.user.id, projectId: req.params.id, action: 'construction_plan_item_deleted', entityType: 'construction_plan_item', entityId: req.params.itemId });
@@ -927,6 +1145,14 @@ router.get('/:id/materials', authorizeProjectAccess, (req, res) => {
     WHERE cm.project_id = ?
     ORDER BY COALESCE(cm.expected_delivery, cm.needed_by, cm.created_at) ASC
   `).all(req.params.id);
+  logDataAccess(req, {
+    action: 'project_materials_viewed',
+    accessType: 'view',
+    entityType: 'construction_material',
+    projectId: req.params.id,
+    recordCount: materials.length,
+    riskLevel: 'high',
+  });
   res.json(materials);
 });
 
@@ -973,7 +1199,7 @@ router.post('/:id/materials', authorize(...MANAGEMENT_ROLES), authorizeProjectAc
 });
 
 // PUT /api/projects/:id/materials/:materialId
-router.put('/:id/materials/:materialId', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, (req, res) => {
+router.put('/:id/materials/:materialId', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, blockProjectManagerMutation, (req, res) => {
   try {
     const db = getDb();
     const material = db.prepare('SELECT * FROM construction_materials WHERE id = ? AND project_id = ?').get(req.params.materialId, req.params.id);
@@ -1016,7 +1242,7 @@ router.put('/:id/materials/:materialId', authorize(...MANAGEMENT_ROLES), authori
   }
 });
 
-router.delete('/:id/materials/:materialId', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, (req, res) => {
+router.delete('/:id/materials/:materialId', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, blockProjectManagerMutation, (req, res) => {
   const db = getDb();
   db.prepare('DELETE FROM construction_materials WHERE id = ? AND project_id = ?').run(req.params.materialId, req.params.id);
   logActivity({ userId: req.user.id, projectId: req.params.id, action: 'material_deleted', entityType: 'construction_material', entityId: req.params.materialId });
@@ -1024,7 +1250,7 @@ router.delete('/:id/materials/:materialId', authorize(...MANAGEMENT_ROLES), auth
 });
 
 // POST /api/projects/:id/main-photo - upload one primary house photo for project cards
-router.post('/:id/main-photo', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, (req, res) => {
+router.post('/:id/main-photo', authorizeUpperManagement, authorizeProjectAccess, (req, res) => {
   mainPhotoUpload.single('photo')(req, res, (err) => {
     if (err) return res.status(400).json({ error: err.message });
     if (!req.file) return res.status(400).json({ error: 'No photo uploaded' });
@@ -1068,13 +1294,14 @@ router.post('/:id/reviewed', authorize(...MANAGEMENT_ROLES), authorizeProjectAcc
 });
 
 // POST /api/projects - create project
-router.post('/', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
+router.post('/', authorizeUpperManagement, (req, res) => {
   try {
     const {
       address, job_name, status, start_date, target_completion, scope_of_work, budget,
       project_stage, office_notes, field_notes,
       lifecycle_status, is_occupied, construction_start_date, acquisition_date,
-      sold_date, occupant_vacate_date, sale_price, purchase_price, arv, closing_costs, lockbox_code
+      sold_date, occupant_vacate_date, sale_price, purchase_price, arv, closing_costs, lockbox_code, punchlist_stage,
+      market_status, work_priority
     } = req.body;
     if (!address || !job_name) return res.status(400).json({ error: 'Address and job name are required' });
     if (status !== undefined && !PROJECT_STATUS_ADMIN_ROLES.includes(req.user.role)) {
@@ -1090,14 +1317,18 @@ router.post('/', authorize('super_admin', 'operations_manager', 'project_manager
     const projectLifecycle = lifecycle_status && lifecycle_status !== 'acquired'
       ? lifecycle_status
       : lifecycleFromStatus(projectStatus);
+    const projectMarketStatus = normalizeProjectMarketStatus(market_status);
+    const projectWorkPriority = normalizeProjectPriority(work_priority);
+    assertWorkPriorityAvailable(db, projectWorkPriority);
     db.prepare(`
       INSERT INTO projects (
         id, address, job_name, status, start_date, target_completion, scope_of_work, budget,
         project_stage, office_notes, field_notes, created_by,
         lifecycle_status, is_occupied, construction_start_date, acquisition_date,
-        sold_date, occupant_vacate_date, sale_price, purchase_price, arv, closing_costs, lockbox_code,
+        sold_date, occupant_vacate_date, sale_price, purchase_price, arv, closing_costs, lockbox_code, punchlist_stage,
+        market_status, work_priority,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
     `).run(
       id, address, job_name, projectStatus,
       start_date || null, target_completion || null, scope_of_work || null, budget || null,
@@ -1105,7 +1336,8 @@ router.post('/', authorize('super_admin', 'operations_manager', 'project_manager
       projectLifecycle, is_occupied ? 1 : 0,
       construction_start_date || null, acquisition_date || null,
       sold_date || null, occupant_vacate_date || null,
-      sale_price || null, purchase_price || null, arv || null, closing_costs || null, lockbox_code || null
+      sale_price || null, purchase_price || null, arv || null, closing_costs || null, lockbox_code || null,
+      toFlag(punchlist_stage), projectMarketStatus, projectWorkPriority
     );
 
     // Create default photo categories
@@ -1122,17 +1354,31 @@ router.post('/', authorize('super_admin', 'operations_manager', 'project_manager
       `).run(uuidv4(), id, String(scope_of_work).trim(), req.user.id);
     }
 
-    logActivity({ userId: req.user.id, projectId: id, action: 'project_created', entityType: 'project', entityId: id, details: { address, job_name, status: projectStatus, lifecycle_status: projectLifecycle } });
+    logActivity({
+      userId: req.user.id,
+      projectId: id,
+      action: 'project_created',
+      entityType: 'project',
+      entityId: id,
+      details: {
+        address,
+        job_name,
+        status: projectStatus,
+        lifecycle_status: projectLifecycle,
+        market_status: projectMarketStatus,
+        work_priority: projectWorkPriority,
+      },
+    });
 
     res.status(201).json({ id, address, job_name });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to create project' });
+    res.status(err.statusCode || 500).json({ error: err.statusCode ? err.message : 'Failed to create project' });
   }
 });
 
 // PUT /api/projects/:id - update project
-router.put('/:id', authorize('super_admin', 'operations_manager', 'project_manager'), authorizeProjectAccess, (req, res) => {
+router.put('/:id', authorizeUpperManagement, authorizeProjectAccess, (req, res) => {
   try {
     const db = getDb();
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
@@ -1142,12 +1388,15 @@ router.put('/:id', authorize('super_admin', 'operations_manager', 'project_manag
       address, job_name, status, start_date, target_completion, scope_of_work, budget,
       project_stage, office_notes, field_notes,
       lifecycle_status, is_occupied, construction_start_date, acquisition_date,
-      sold_date, occupant_vacate_date, sale_price, purchase_price, arv, closing_costs, lockbox_code
+      sold_date, occupant_vacate_date, sale_price, purchase_price, arv, closing_costs, lockbox_code, punchlist_stage,
+      market_status, work_priority
     } = req.body;
 
     // Log lifecycle status change
     const prevLifecycle = project.lifecycle_status;
     const prevStatus = project.status;
+    const prevMarketStatus = project.market_status || 'not_on_market';
+    const prevWorkPriority = project.work_priority === null || project.work_priority === undefined ? null : Number(project.work_priority);
     const nextStatus = status ?? project.status;
     if (!PROJECT_STATUSES.includes(nextStatus)) {
       return res.status(400).json({ error: 'Invalid project status' });
@@ -1155,16 +1404,28 @@ router.put('/:id', authorize('super_admin', 'operations_manager', 'project_manag
     if (status !== undefined && nextStatus !== project.status && !PROJECT_STATUS_ADMIN_ROLES.includes(req.user.role)) {
       return res.status(403).json({ error: 'Only an operations manager or super admin can change project status' });
     }
+    const nextPunchlistStage = punchlist_stage !== undefined ? toFlag(punchlist_stage) : Number(project.punchlist_stage || 0);
+    if (punchlist_stage !== undefined && nextPunchlistStage !== Number(project.punchlist_stage || 0) && !PROJECT_STATUS_ADMIN_ROLES.includes(req.user.role)) {
+      return res.status(403).json({ error: 'Only an operations manager or super admin can change punchlist stage' });
+    }
     const newLifecycle = lifecycle_status && lifecycle_status !== 'acquired'
       ? lifecycle_status
       : lifecycleFromStatus(nextStatus, project.lifecycle_status);
+    const nextMarketStatus = market_status !== undefined
+      ? normalizeProjectMarketStatus(market_status, prevMarketStatus)
+      : prevMarketStatus;
+    const nextWorkPriority = work_priority !== undefined
+      ? normalizeProjectPriority(work_priority, prevWorkPriority)
+      : prevWorkPriority;
+    assertWorkPriorityAvailable(db, nextWorkPriority, req.params.id);
 
     db.prepare(`
       UPDATE projects SET
         address = ?, job_name = ?, status = ?, start_date = ?, target_completion = ?,
         scope_of_work = ?, budget = ?, project_stage = ?, office_notes = ?, field_notes = ?,
         lifecycle_status = ?, is_occupied = ?, construction_start_date = ?, acquisition_date = ?,
-        sold_date = ?, occupant_vacate_date = ?, sale_price = ?, purchase_price = ?, arv = ?, closing_costs = ?, lockbox_code = ?,
+        sold_date = ?, occupant_vacate_date = ?, sale_price = ?, purchase_price = ?, arv = ?, closing_costs = ?, lockbox_code = ?, punchlist_stage = ?,
+        market_status = ?, work_priority = ?,
         updated_at = datetime('now')
       WHERE id = ?
     `).run(
@@ -1183,6 +1444,9 @@ router.put('/:id', authorize('super_admin', 'operations_manager', 'project_manag
       arv !== undefined ? arv : project.arv,
       closing_costs !== undefined ? closing_costs : project.closing_costs,
       lockbox_code !== undefined ? lockbox_code : project.lockbox_code,
+      nextPunchlistStage,
+      nextMarketStatus,
+      nextWorkPriority,
       req.params.id
     );
 
@@ -1196,14 +1460,19 @@ router.put('/:id', authorize('super_admin', 'operations_manager', 'project_manag
       }
     }
 
-    const details = { status: nextStatus, lifecycle_status: newLifecycle };
+    const details = { status: nextStatus, lifecycle_status: newLifecycle, punchlist_stage: nextPunchlistStage };
     if (prevStatus !== nextStatus) details.previous_status = prevStatus;
     if (prevLifecycle !== newLifecycle) details.previous_lifecycle = prevLifecycle;
+    if (nextPunchlistStage !== Number(project.punchlist_stage || 0)) details.previous_punchlist_stage = Number(project.punchlist_stage || 0);
+    if (prevMarketStatus !== nextMarketStatus) details.market_status = nextMarketStatus;
+    if (prevMarketStatus !== nextMarketStatus) details.previous_market_status = prevMarketStatus;
+    if (prevWorkPriority !== nextWorkPriority) details.work_priority = nextWorkPriority;
+    if (prevWorkPriority !== nextWorkPriority) details.previous_work_priority = prevWorkPriority;
     logActivity({ userId: req.user.id, projectId: req.params.id, action: 'project_updated', entityType: 'project', entityId: req.params.id, details });
     res.json({ message: 'Project updated' });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to update project' });
+    res.status(err.statusCode || 500).json({ error: err.statusCode ? err.message : 'Failed to update project' });
   }
 });
 
@@ -1216,7 +1485,7 @@ router.delete('/:id', authorize('super_admin'), (req, res) => {
 });
 
 // POST /api/projects/:id/assign - assign user to project
-router.post('/:id/assign', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
+router.post('/:id/assign', authorizeUpperManagement, (req, res) => {
   try {
     const { user_id } = req.body;
     if (!user_id) return res.status(400).json({ error: 'user_id required' });
@@ -1233,7 +1502,7 @@ router.post('/:id/assign', authorize('super_admin', 'operations_manager', 'proje
 });
 
 // DELETE /api/projects/:id/assign/:userId - remove assignment
-router.delete('/:id/assign/:userId', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
+router.delete('/:id/assign/:userId', authorizeUpperManagement, (req, res) => {
   const db = getDb();
   db.prepare('DELETE FROM project_assignments WHERE project_id = ? AND user_id = ?').run(req.params.id, req.params.userId);
   logActivity({ userId: req.user.id, projectId: req.params.id, action: 'user_unassigned', entityType: 'project', entityId: req.params.id });
@@ -1249,6 +1518,14 @@ router.get('/:id/activity', authorizeProjectAccess, (req, res) => {
     WHERE al.project_id = ?
     ORDER BY al.created_at DESC LIMIT 50
   `).all(req.params.id);
+  logDataAccess(req, {
+    action: 'project_activity_viewed',
+    accessType: 'view',
+    entityType: 'activity_log',
+    projectId: req.params.id,
+    recordCount: logs.length,
+    riskLevel: 'high',
+  });
   res.json(logs);
 });
 
@@ -1273,7 +1550,16 @@ router.get('/:id/notes', authorizeProjectAccess, (req, res) => {
       )
     ORDER BY datetime(pn.created_at) DESC, pn.created_at DESC
   `).all(req.params.id, req.user.role, req.user.id);
-  res.json(attachPhotosToNotes(db, notes, req.user));
+  const responseNotes = attachPhotosToNotes(db, notes, req.user);
+  logDataAccess(req, {
+    action: 'project_notes_viewed',
+    accessType: 'view',
+    entityType: 'project_note',
+    projectId: req.params.id,
+    recordCount: responseNotes.length,
+    riskLevel: 'high',
+  });
+  res.json(responseNotes);
 });
 
 // POST /api/projects/:id/notes - add note

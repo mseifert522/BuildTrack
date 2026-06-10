@@ -54,7 +54,7 @@ export const PROGRESS_IMAGE_QUALITY = 0.86;
 
 export type ProgressCaptureSource = 'batch_camera' | 'device_camera' | 'library' | 'desktop' | 'unknown';
 
-const GEOLOCATION_TIMEOUT_MS = 3500;
+const GEOLOCATION_TIMEOUT_MS = 1400;
 const IMAGE_TYPES_TO_RESIZE = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp']);
 const PROGRESS_MEDIA_EXTENSION_SET = new Set(PROGRESS_MEDIA_EXTENSIONS);
 
@@ -75,6 +75,14 @@ export interface ProgressUploadAuditOptions {
   individualNotes?: string[];
   timezone?: string;
   batchSequenceStart?: number;
+  location?: ProgressUploadLocation | null;
+  skipDeviceLocation?: boolean;
+}
+
+export interface ProgressUploadLocation {
+  latitude: number;
+  longitude: number;
+  accuracy?: number;
 }
 
 interface ImageMetadata {
@@ -93,7 +101,7 @@ function getUploadPosition(): Promise<GeolocationPosition | null> {
       () => resolve(null),
       {
         enableHighAccuracy: true,
-        maximumAge: 60 * 1000,
+        maximumAge: 2 * 60 * 1000,
         timeout: GEOLOCATION_TIMEOUT_MS,
       }
     );
@@ -202,11 +210,11 @@ export async function appendProgressUploadAudit(
   if (longitudes.some(value => value !== null)) formData.append('gps_longitude_values', JSON.stringify(longitudes));
   if (accuracies.some(value => value !== null)) formData.append('gps_accuracy_values', JSON.stringify(accuracies));
 
-  const position = await getUploadPosition();
+  const position = options.location || options.skipDeviceLocation ? null : await getUploadPosition();
   const firstMetadata = metadata[0];
-  const latitude = firstMetadata?.latitude ?? position?.coords.latitude;
-  const longitude = firstMetadata?.longitude ?? position?.coords.longitude;
-  const accuracy = firstMetadata?.accuracy ?? position?.coords.accuracy;
+  const latitude = firstMetadata?.latitude ?? options.location?.latitude ?? position?.coords.latitude;
+  const longitude = firstMetadata?.longitude ?? options.location?.longitude ?? position?.coords.longitude;
+  const accuracy = firstMetadata?.accuracy ?? options.location?.accuracy ?? position?.coords.accuracy;
   if (latitude === undefined || longitude === undefined) return;
 
   formData.append('capture_latitude', String(latitude));

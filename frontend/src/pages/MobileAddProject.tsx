@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { useAuthStore, canCreateProjects } from '../store/authStore';
 import GooglePlacesInput from '../components/GooglePlacesInput';
 import CurrencyInput from '../components/CurrencyInput';
+import VoiceTextarea from '../components/VoiceTextarea';
 
 
 const STATUSES = [
@@ -93,7 +94,7 @@ export default function MobileAddProject() {
             <p style={{ color: 'white', fontWeight: 700, fontSize: 16, margin: 0 }}>New Project</p>
             <p style={{ color: '#D99D26', fontSize: 12, margin: '2px 0 0' }}>New Urban Development</p>
           </div>
-          <img src="/buildtrack-logo-mark.png" alt="BuildTrack" style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover', border: '2px solid #D99D26' }} />
+          <img src="/buildtrack-logo-mark.png" alt="BuildTrack" style={{ width: 36, height: 36, borderRadius: 12, objectFit: 'cover', border: '2px solid rgba(231,139,74,0.72)', background: '#0E1012' }} />
         </div>
       </div>
 
@@ -259,7 +260,7 @@ export default function MobileAddProject() {
               <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>
                 Field Notes
               </label>
-              <textarea
+              <VoiceTextarea
                 value={fieldNotes}
                 onChange={e => setFieldNotes(e.target.value)}
                 placeholder="Field observations, access info, etc..."

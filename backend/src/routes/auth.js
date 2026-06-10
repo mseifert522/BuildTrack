@@ -8,32 +8,28 @@ const { authenticate } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
 const { sendPasswordResetEmail, send2FACodeEmail, sendContractorPinEmail } = require('../utils/email');
 const { ensureContractorMobileAccountByEmail, normalizeEmail } = require('../utils/contractorAccess');
+const { getClientIp } = require('../utils/requestIp');
+const {
+  DESKTOP_SESSION_IDLE_TIMEOUT_MINUTES,
+  MOBILE_SESSION_MAX_AGE_HOURS,
+} = require('../utils/sessionPolicy');
 
 const router = express.Router();
 const MANAGEMENT_ROLES = ['super_admin', 'operations_manager', 'project_manager'];
 const TRUSTED_DEVICE_DAYS = 60;
 const MOBILE_QUICK_ACCESS_DAYS = 7;
-const DESKTOP_SESSION_MAX_AGE_MS = 45 * 60 * 1000;
-const DESKTOP_SESSION_EXPIRES_IN = '45m';
-const MOBILE_SESSION_EXPIRES_IN = '7d';
+const DESKTOP_SESSION_EXPIRES_IN = `${DESKTOP_SESSION_IDLE_TIMEOUT_MINUTES}m`;
+const MOBILE_SESSION_EXPIRES_IN = `${MOBILE_SESSION_MAX_AGE_HOURS}h`;
 const CONTRACTOR_EMAIL_LOGIN_MESSAGE = 'If that contractor email is on file, BuildTrack will send login instructions.';
+const MOBILE_APP_HOSTS = new Set(
+  String(process.env.MOBILE_APP_HOSTS || 'mobile.buildtrack.newurbandev.com,m.buildtrack.newurbandev.com')
+    .split(',')
+    .map(host => host.trim().toLowerCase())
+    .filter(Boolean)
+);
 
 function sqliteDateTime(date) {
   return date.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
-}
-
-function parseSqliteDateTime(value) {
-  if (!value) return 0;
-  const normalized = String(value).includes('T') ? String(value) : `${String(value).replace(' ', 'T')}Z`;
-  const timestamp = new Date(normalized).getTime();
-  return Number.isFinite(timestamp) ? timestamp : 0;
-}
-
-function desktopSessionSecondsRemaining(issuedAt) {
-  const issuedAtMs = typeof issuedAt === 'number' ? issuedAt * 1000 : parseSqliteDateTime(issuedAt);
-  if (!issuedAtMs) return Math.ceil(DESKTOP_SESSION_MAX_AGE_MS / 1000);
-  const remainingMs = issuedAtMs + DESKTOP_SESSION_MAX_AGE_MS - Date.now();
-  return Math.max(0, Math.ceil(remainingMs / 1000));
 }
 
 function minutesFromNow(minutes) {
@@ -52,27 +48,52 @@ function shouldTrustDevice(value) {
   return value === true || value === 'true' || value === 1 || value === '1';
 }
 
-function getClientIp(req) {
-  const forwardedFor = String(req?.headers?.['x-forwarded-for'] || '')
-    .split(',')
-    .map(value => value.trim())
-    .filter(Boolean);
-  return forwardedFor[0]
-    || String(req?.headers?.['cf-connecting-ip'] || '').trim()
-    || String(req?.headers?.['x-real-ip'] || '').trim()
-    || req?.ip
-    || req?.socket?.remoteAddress
-    || '';
-}
-
 function isMobileUserAgent(userAgent = '') {
   return /android|iphone|ipad|ipod|mobile|tablet|silk|kindle|webos|blackberry|windows phone/i.test(userAgent);
+}
+
+function hostWithoutPort(value = '') {
+  return String(value || '').split(',')[0].trim().toLowerCase().replace(/:\d+$/, '');
+}
+
+function isMobileHost(value = '') {
+  const host = hostWithoutPort(value);
+  return host ? MOBILE_APP_HOSTS.has(host) : false;
+}
+
+function isMobileClientHint(value = '') {
+  return ['mobile', 'mobile_app', 'mobile-web', 'contractor-mobile', 'field-mobile']
+    .includes(String(value || '').trim().toLowerCase());
+}
+
+function hostFromUrl(value = '') {
+  try {
+    return value ? new URL(value).host : '';
+  } catch (_) {
+    return '';
+  }
+}
+
+function isMobileClientRequest(req = {}) {
+  const body = req.body || {};
+  const originalUrl = String(req.originalUrl || req.url || '');
+  return isMobileClientHint(body.client_type)
+    || isMobileClientHint(body.clientType)
+    || isMobileClientHint(body.platform)
+    || isMobileClientHint(body.app_surface)
+    || isMobileHost(req.headers?.host)
+    || isMobileHost(req.headers?.['x-forwarded-host'])
+    || isMobileHost(hostFromUrl(req.headers?.origin))
+    || isMobileHost(hostFromUrl(req.headers?.referer))
+    || originalUrl === '/mobile'
+    || originalUrl.startsWith('/mobile/')
+    || isMobileUserAgent(req?.headers?.['user-agent'] || '');
 }
 
 function inferSessionType(user, req, sessionType = null) {
   if (sessionType) return sessionType;
   if (user.role === 'contractor') return 'mobile_app';
-  return isMobileUserAgent(req?.headers?.['user-agent'] || '') ? 'mobile_app' : 'desktop';
+  return isMobileClientRequest(req) ? 'mobile_app' : 'desktop';
 }
 
 function markUserOnline(db, userId, includeLogin = false, sessionId = null) {
@@ -124,16 +145,18 @@ function createSessionToken(user, sessionId = null, sessionType = null, expiresI
 function createAuthSession(db, user, req, details = null, sessionType = null) {
   const sessionId = uuidv4();
   const resolvedSessionType = inferSessionType(user, req, sessionType);
+  const clientIp = getClientIp(req);
   db.prepare(`
     INSERT INTO auth_sessions (
-      id, user_id, session_type, user_agent, ip_address, issued_at, last_seen_at, details
-    ) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'), ?)
+      id, user_id, session_type, user_agent, ip_address, current_ip_address, ip_address_updated_at, issued_at, last_seen_at, details
+    ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'), ?)
   `).run(
     sessionId,
     user.id,
     resolvedSessionType,
     req?.headers?.['user-agent'] || '',
-    getClientIp(req),
+    clientIp,
+    clientIp,
     details ? JSON.stringify({ issued_via: details }) : null,
   );
 
@@ -151,7 +174,14 @@ function issueSession(db, user, details, req = null, sessionType = null) {
     entityId: user.id,
     details,
   });
-  return { token, user: publicUser(user), session_id: session.id };
+  return {
+    token,
+    user: publicUser(user),
+    session_id: session.id,
+    session_type: session.sessionType,
+    desktop_session_expires_in_minutes: session.sessionType === 'desktop' ? DESKTOP_SESSION_IDLE_TIMEOUT_MINUTES : null,
+    mobile_session_expires_in_hours: session.sessionType === 'mobile_app' ? MOBILE_SESSION_MAX_AGE_HOURS : null,
+  };
 }
 
 function issueTrustedDevice(db, user, req, previousDeviceToken) {
@@ -166,7 +196,7 @@ function issueTrustedDevice(db, user, req, previousDeviceToken) {
   db.prepare(`
     INSERT INTO trusted_devices (id, user_id, device_token, user_agent, ip_address, expires_at)
     VALUES (?, ?, ?, ?, ?, ?)
-  `).run(uuidv4(), user.id, deviceToken, req.headers['user-agent'] || '', req.ip || '', expiresAt);
+  `).run(uuidv4(), user.id, deviceToken, req.headers['user-agent'] || '', getClientIp(req), expiresAt);
 
   return {
     device_token: deviceToken,
@@ -197,7 +227,7 @@ function issueMobileQuickAccess(db, user, req) {
     user.id,
     hashMobileQuickAccessToken(quickAccessToken),
     req.headers['user-agent'] || '',
-    req.ip || '',
+    getClientIp(req),
     expiresAt
   );
 
@@ -617,7 +647,7 @@ router.post('/refresh', authenticate, (req, res) => {
       sessionType = session.sessionType;
     } else {
       sessionRow = db.prepare(`
-        SELECT session_type, issued_at
+        SELECT session_type, issued_at, last_seen_at, created_at
         FROM auth_sessions
         WHERE id = ? AND user_id = ? AND revoked_at IS NULL
         LIMIT 1
@@ -625,22 +655,14 @@ router.post('/refresh', authenticate, (req, res) => {
       sessionType = sessionRow?.session_type || sessionType || inferSessionType(req.user, req);
     }
 
-    let expiresIn = null;
-    if (sessionType === 'desktop') {
-      const remainingSeconds = desktopSessionSecondsRemaining(sessionRow?.issued_at || req.auth?.issued_at || null);
-      if (remainingSeconds <= 0) {
-        db.prepare(`
-          UPDATE auth_sessions
-          SET revoked_at = COALESCE(revoked_at, datetime('now')), updated_at = datetime('now')
-          WHERE id = ? AND user_id = ?
-        `).run(sessionId, req.user.id);
-        return res.status(401).json({ error: 'Desktop session expired. Please log in again.' });
-      }
-      expiresIn = remainingSeconds;
-    }
-
     markUserOnline(db, req.user.id, false, sessionId);
-    res.json({ token: createSessionToken(req.user, sessionId, sessionType, expiresIn), user: publicUser(req.user) });
+    res.json({
+      token: createSessionToken(req.user, sessionId, sessionType),
+      user: publicUser(req.user),
+      session_type: sessionType,
+      desktop_session_expires_in_minutes: sessionType === 'desktop' ? DESKTOP_SESSION_IDLE_TIMEOUT_MINUTES : null,
+      mobile_session_expires_in_hours: sessionType === 'mobile_app' ? MOBILE_SESSION_MAX_AGE_HOURS : null,
+    });
   } catch (err) {
     console.error('Token refresh error:', err);
     res.status(500).json({ error: 'Failed to refresh session' });

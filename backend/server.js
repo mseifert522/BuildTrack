@@ -18,12 +18,13 @@ const notesRoutes = require('./src/routes/notes');
 const searchRoutes = require('./src/routes/search');
 const textMessageRoutes = require('./src/routes/textMessages');
 const fieldWorkRoutes = require('./src/routes/fieldWork');
-const invoiceEmailIntakeRoutes = require('./src/routes/invoiceEmailIntake');
-const { startGmailInvoicePoller } = require('./src/services/gmailInvoicePoller');
+const calendarRoutes = require('./src/routes/calendar');
+const { startCalendarReminderScheduler } = require('./src/services/calendarReminderScheduler');
 const documentRoutes = require('./src/routes/documents');
 const contractorOnboardingRoutes = require('./src/routes/contractorOnboarding');
 const quoteAnalyticsRoutes = require('./src/routes/quoteAnalytics');
 const securityRoutes = require('./src/routes/security');
+const quickBooksRoutes = require('./src/routes/quickbooks');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -66,7 +67,14 @@ app.use(cors({
   credentials: true,
 }));
 const bodyLimit = process.env.REQUEST_BODY_LIMIT || process.env.INBOUND_EMAIL_JSON_LIMIT || '25mb';
-app.use(express.json({ limit: bodyLimit }));
+app.use(express.json({
+  limit: bodyLimit,
+  verify: (req, _res, buf) => {
+    if (req.originalUrl && req.originalUrl.startsWith('/api/quickbooks/webhook')) {
+      req.rawBody = Buffer.from(buf);
+    }
+  },
+}));
 app.use(express.urlencoded({ extended: true, limit: bodyLimit }));
 
 // Serve uploaded files
@@ -108,14 +116,20 @@ app.use('/api/projects/:projectId/photos', photoRoutes);
 app.use('/api/projects/:projectId/invoices', invoiceRoutes);
 app.use('/api/projects/:projectId/notes', notesRoutes);
 app.use('/api/field-work', fieldWorkRoutes);
+app.use('/api/calendar', calendarRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/text-messages', textMessageRoutes);
-app.use('/api/inbound/invoices', invoiceEmailIntakeRoutes.publicRouter);
-app.use('/api/invoices/email-intake', invoiceEmailIntakeRoutes.authenticatedRouter);
+app.use('/api/inbound/invoices', (_req, res) => {
+  res.status(410).json({ error: 'Email invoice intake has been removed. Use mobile app invoices or QuickBooks bills.' });
+});
+app.use('/api/invoices/email-intake', (_req, res) => {
+  res.status(410).json({ error: 'Email invoice intake has been removed. Use mobile app invoices or QuickBooks bills.' });
+});
 app.use('/api/documents', documentRoutes);
 app.use('/api/contractor-onboarding', contractorOnboardingRoutes);
 app.use('/api/quote-analytics', quoteAnalyticsRoutes.analyticsRouter);
 app.use('/api/security', securityRoutes);
+app.use('/api/quickbooks', quickBooksRoutes);
 app.use('/api/projects/:projectId/quotes', quoteAnalyticsRoutes.projectQuotesRouter);
 app.use('/api/invoice-agent', (_req, res) => {
   res.status(404).json({ error: 'Endpoint removed' });
@@ -186,6 +200,105 @@ app.get('/api/notes/recent', authenticate, (req, res) => {
   `).all(...(contractorOnly ? [req.user.id, req.user.id, limit] : [limit]));
 
   res.json(notes);
+});
+
+function parseActivityDetails(details) {
+  if (!details) return null;
+  try {
+    return JSON.parse(details);
+  } catch (_) {
+    return null;
+  }
+}
+
+// Dashboard feed: latest human-entered project notes only, newest first.
+app.get('/api/dashboard/activity-feed', authenticate, (req, res) => {
+  const { getDb } = require('./src/db/schema');
+  const { logDataAccess } = require('./src/utils/dataAccessAudit');
+  const db = getDb();
+  const requestedLimit = Number.parseInt(req.query.limit, 10);
+  const limit = Number.isFinite(requestedLimit) ? Math.min(Math.max(requestedLimit, 10), 100) : 25;
+  const contractorOnly = req.user.role === 'contractor';
+
+  const noteAssignmentJoin = contractorOnly
+    ? 'JOIN project_assignments pa ON pa.project_id = n.project_id AND pa.user_id = ?'
+    : '';
+  const noteVisibilityWhere = contractorOnly
+    ? "(n.user_id = ? OR n.visibility = 'public')"
+    : '1 = 1';
+
+  const rows = db.prepare(`
+    SELECT
+      'note' as feed_type,
+      n.id,
+      n.project_id,
+      n.user_id,
+      u.name as user_name,
+      u.role as user_role,
+      u.avatar_url as user_avatar_url,
+      n.created_at,
+      p.address as project_address,
+      p.job_name as project_job_name,
+      p.status as project_status,
+      n.note,
+      n.note_type,
+      n.visibility,
+      n.edited_at,
+      n.edit_count,
+      (
+        SELECT ph.id FROM photos ph
+        WHERE ph.note_id = n.id
+        ORDER BY datetime(COALESCE(ph.taken_at, ph.created_at)) DESC, ph.created_at DESC
+        LIMIT 1
+      ) as photo_id,
+      (
+        SELECT ph.filename FROM photos ph
+        WHERE ph.note_id = n.id
+        ORDER BY datetime(COALESCE(ph.taken_at, ph.created_at)) DESC, ph.created_at DESC
+        LIMIT 1
+      ) as photo_filename,
+      (
+        SELECT ph.original_name FROM photos ph
+        WHERE ph.note_id = n.id
+        ORDER BY datetime(COALESCE(ph.taken_at, ph.created_at)) DESC, ph.created_at DESC
+        LIMIT 1
+      ) as photo_original_name,
+      (
+        SELECT ph.caption FROM photos ph
+        WHERE ph.note_id = n.id
+        ORDER BY datetime(COALESCE(ph.taken_at, ph.created_at)) DESC, ph.created_at DESC
+        LIMIT 1
+      ) as photo_caption,
+      NULL as action,
+      NULL as entity_type,
+      NULL as entity_id,
+      NULL as details
+    FROM project_notes n
+    JOIN users u ON u.id = n.user_id
+    JOIN projects p ON p.id = n.project_id
+    ${noteAssignmentJoin}
+    WHERE ${noteVisibilityWhere}
+    ORDER BY datetime(n.created_at) DESC, n.created_at DESC
+    LIMIT ?
+  `).all(...(contractorOnly
+    ? [req.user.id, req.user.id, limit]
+    : [limit]
+  ));
+
+  const items = rows.map(row => ({
+    ...row,
+    details: parseActivityDetails(row.details),
+  }));
+
+  logDataAccess(req, {
+    action: 'dashboard_activity_feed_viewed',
+    accessType: 'view',
+    entityType: 'dashboard_activity_feed',
+    recordCount: items.length,
+    details: { limit, contractor_only: contractorOnly, feed_scope: 'project_notes_only' },
+  });
+
+  res.json({ items });
 });
 
 // All invoices endpoint (for admin dashboard)
@@ -305,9 +418,46 @@ app.get('/', (req, res, next) => {
 // Serve React frontend in production
 const frontendDist = path.resolve(__dirname, '../frontend/dist');
 if (fs.existsSync(frontendDist)) {
-  app.use(express.static(frontendDist));
+  app.use(express.static(frontendDist, {
+    setHeaders: (res, filePath) => {
+      const normalized = String(filePath || '');
+      if (normalized.endsWith(`${path.sep}index.html`)) {
+        res.setHeader('Cache-Control', 'private, no-store, max-age=0, must-revalidate');
+        return;
+      }
+      if (normalized.includes(`${path.sep}assets${path.sep}`)) {
+        res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+        return;
+      }
+      res.setHeader('Cache-Control', 'public, max-age=300, must-revalidate');
+    },
+  }));
+  app.get('/assets/{*assetPath}', (req, res, next) => {
+    const requested = String(req.params?.assetPath || req.path || '');
+    if (!/\.(js|mjs)$/.test(requested)) {
+      if (/\.css$/.test(requested)) {
+        res.setHeader('Cache-Control', 'private, no-store, max-age=0, must-revalidate');
+        res.type('text/css').send('');
+        return;
+      }
+      return next();
+    }
+
+    res.setHeader('Cache-Control', 'private, no-store, max-age=0, must-revalidate');
+    res.type('application/javascript').send(`
+const key = 'bt_missing_asset_reload_attempted_at';
+const now = Date.now();
+const last = Number(sessionStorage.getItem(key) || 0);
+if (now - last > 30000) {
+  sessionStorage.setItem(key, String(now));
+  window.location.reload();
+}
+export default function BuildTrackAssetRefresh() { return null; }
+`);
+  });
   // SPA fallback — serve index.html for all non-API routes
   app.get('/{*path}', (req, res) => {
+    res.setHeader('Cache-Control', 'private, no-store, max-age=0, must-revalidate');
     res.sendFile(path.join(frontendDist, 'index.html'));
   });
 }
@@ -326,7 +476,10 @@ async function start() {
       console.log('║   Database: SQLite (data/buildtrack.db)            ║');
       console.log('╚══════════════════════════════════════════════════╝');
       console.log('');
-      startGmailInvoicePoller();
+      startCalendarReminderScheduler();
+      if (typeof quickBooksRoutes.startQuickBooksAutoSync === 'function') {
+        quickBooksRoutes.startQuickBooksAutoSync();
+      }
     });
   } catch (err) {
     console.error('Failed to start server:', err);

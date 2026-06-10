@@ -10,7 +10,9 @@ import {
 } from 'lucide-react';
 import { formatEasternDate, formatEasternDateTime, formatEasternRelative } from '../lib/time';
 import { appendProgressUploadAudit, PROGRESS_MEDIA_ACCEPT } from '../lib/progressUpload';
+import { notifyMobileDataChanged } from '../lib/mobileEvents';
 import Avatar from '../components/Avatar';
+import VoiceTextarea from '../components/VoiceTextarea';
 
 interface NotePhoto {
   id: string;
@@ -49,6 +51,7 @@ interface Note {
 const roleLabel: Record<string, { label: string; color: string; bg: string }> = {
   super_admin:        { label: 'Super Admin',   color: '#7C3AED', bg: '#EDE9FE' },
   operations_manager: { label: 'Ops Manager',   color: '#2563EB', bg: '#DBEAFE' },
+  project_manager:    { label: 'Project Manager', color: '#0F766E', bg: '#CCFBF1' },
   admin_assistant:    { label: 'Admin',         color: '#0891B2', bg: '#CFFAFE' },
   contractor:         { label: 'Contractor',    color: '#D97706', bg: '#FEF3C7' },
   field_supervisor:   { label: 'Supervisor',    color: '#059669', bg: '#D1FAE5' },
@@ -76,6 +79,7 @@ function noteCreatedAtMs(note: Note) {
 
 function canEditNote(note: Note, user?: { id?: string; role?: string } | null) {
   if (!user || note.user_id !== user.id) return false;
+  if (user.role === 'project_manager') return false;
   if (user.role === 'contractor') {
     const createdAt = noteCreatedAtMs(note);
     return Boolean(createdAt && Date.now() - createdAt <= CONTRACTOR_NOTE_EDIT_WINDOW_MS);
@@ -262,6 +266,7 @@ export default function MobileNotes() {
     try {
       await uploadFilesToNote(noteId, selectedFiles);
       await refreshNotes();
+      notifyMobileDataChanged({ entity: 'note_photo', action: 'attached', projectId });
       toast.success(`${selectedFiles.length} progress picture${selectedFiles.length === 1 ? '' : 's'} attached`);
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to attach progress pictures');
@@ -270,7 +275,7 @@ export default function MobileNotes() {
       setAttachToNoteId(null);
       if (attachExistingInputRef.current) attachExistingInputRef.current.value = '';
     }
-  }, [attachToNoteId, refreshNotes, uploadFilesToNote]);
+  }, [attachToNoteId, projectId, refreshNotes, uploadFilesToNote]);
 
   const handleSend = useCallback(async () => {
     if (!text.trim() || sending) return;
@@ -303,6 +308,7 @@ export default function MobileNotes() {
         setNotes(prev => prev.map(n => n.id === optimisticNote.id ? res.data : n));
       }
       clearNoteFiles();
+      notifyMobileDataChanged({ entity: 'note', action: 'saved', projectId });
     } catch {
       toast.error('Failed to post note');
       setNotes(prev => prev.filter(n => n.id !== optimisticNote.id));
@@ -333,6 +339,7 @@ export default function MobileNotes() {
       });
       setNotes(prev => prev.map(item => item.id === note.id ? res.data : item));
       cancelEdit();
+      notifyMobileDataChanged({ entity: 'note', action: 'updated', projectId });
       toast.success('Note updated');
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to update note');
@@ -541,7 +548,7 @@ export default function MobileNotes() {
                         >
                           {isEditing ? (
                             <div className="space-y-3">
-                              <textarea
+                              <VoiceTextarea
                                 value={editingText}
                                 onChange={e => setEditingText(e.target.value)}
                                 rows={3}

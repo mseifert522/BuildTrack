@@ -23,6 +23,10 @@ function getNoteEditPermission(user, note) {
   const isOwner = note?.user_id === user?.id;
   const canOverride = canOverrideNoteEdit(user);
 
+  if (user?.role === 'project_manager') {
+    return { allowed: false, status: 403, error: 'Project managers can add notes, but cannot edit existing notes' };
+  }
+
   if (!isOwner && !canOverride) {
     return { allowed: false, status: 403, error: 'You can only edit your own notes' };
   }

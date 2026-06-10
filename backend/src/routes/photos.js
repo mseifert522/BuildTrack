@@ -8,15 +8,18 @@ const { authenticate, authorizeProjectAccess } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
 const { recordWorkItemEvent } = require('../utils/workItemEvents');
 const { convertHeicUploadToJpeg } = require('../utils/mediaConversion');
+const { getNoteEditPermission } = require('../utils/projectNotes');
+const { getClientIp } = require('../utils/requestIp');
 
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
 router.use(authorizeProjectAccess);
 
-const PHOTO_TYPES = new Set(['general', 'progress', 'note', 'construction_plan', 'material']);
+const PHOTO_TYPES = new Set(['general', 'progress', 'scope', 'note', 'construction_plan', 'material']);
 const CAPTURE_SOURCES = new Set(['batch_camera', 'device_camera', 'library', 'desktop', 'unknown']);
-const MANAGEMENT_ROLES = new Set(['super_admin', 'operations_manager', 'project_manager']);
-const SELF_CORRECTION_DELETE_PHOTO_TYPES = new Set(['progress', 'note', 'construction_plan']);
+const PHOTO_ASSIGNMENT_TARGETS = new Set(['project_scope', 'punch_list_item', 'construction_plan_item', 'material', 'project_note']);
+const PHOTO_OVERRIDE_DELETE_ROLES = new Set(['super_admin', 'operations_manager']);
+const SELF_CORRECTION_DELETE_PHOTO_TYPES = new Set(['progress', 'scope', 'note', 'construction_plan']);
 const PHOTO_LABELS = new Set([
   'Before',
   'During',
@@ -90,6 +93,30 @@ function withCorrectionDeletePermission(photo, user) {
   };
 }
 
+function getPhotoWithNote(db, projectId, photoId, user) {
+  const photo = db.prepare(`
+    SELECT
+      ph.*,
+      u.name as uploader_name,
+      u.avatar_url as uploader_avatar_url,
+      pc.name as category_name,
+      n.note as note_text,
+      n.note_type as note_type,
+      n.created_at as note_created_at,
+      nu.name as note_user_name,
+      nu.avatar_url as note_user_avatar_url
+    FROM photos ph
+    LEFT JOIN users u ON u.id = ph.uploaded_by
+    LEFT JOIN photo_categories pc ON pc.id = ph.category_id
+    LEFT JOIN project_notes n ON n.id = ph.note_id
+    LEFT JOIN users nu ON nu.id = n.user_id
+    WHERE ph.id = ?
+      AND ph.project_id = ?
+      AND ${activePhotoSql('ph')}
+  `).get(photoId, projectId);
+  return photo ? withCorrectionDeletePermission(photo, user) : null;
+}
+
 function removeStoredPhotoFiles(photo, projectId) {
   const root = path.resolve(uploadRoot(), projectId);
   const candidates = [
@@ -142,6 +169,53 @@ function getBatchContext(req) {
 function normalizePhotoType(value) {
   const requested = String(value || 'general').trim();
   return PHOTO_TYPES.has(requested) ? requested : 'general';
+}
+
+function parsePhotoContexts(value, fallbackType = 'general') {
+  const contexts = new Set(['general']);
+  const addContext = raw => {
+    const context = String(raw || '').trim().toLowerCase();
+    if (context === 'progress') contexts.add('progress');
+    if (context === 'scope' || context === 'scope_of_work') contexts.add('scope');
+    if (context === 'general') contexts.add('general');
+  };
+
+  if (Array.isArray(value)) {
+    value.forEach(addContext);
+  } else if (value) {
+    try {
+      const parsed = JSON.parse(String(value));
+      if (Array.isArray(parsed)) parsed.forEach(addContext);
+      else addContext(parsed);
+    } catch {
+      String(value).split(',').forEach(addContext);
+    }
+  }
+
+  const type = normalizePhotoType(fallbackType);
+  if (type === 'progress' || type === 'note') contexts.add('progress');
+  if (type === 'scope' || type === 'construction_plan') contexts.add('scope');
+  return {
+    showInGeneral: 1,
+    showInProgress: contexts.has('progress') ? 1 : 0,
+    showInScope: contexts.has('scope') ? 1 : 0,
+    contexts: Array.from(contexts),
+  };
+}
+
+function appendPhotoTypeFilter(query, params, requestedType) {
+  const type = normalizePhotoType(requestedType);
+  if (type === 'progress') {
+    return `${query} AND COALESCE(ph.show_in_progress, 0) = 1`;
+  }
+  if (type === 'scope') {
+    return `${query} AND COALESCE(ph.show_in_scope, 0) = 1`;
+  }
+  if (type === 'general') {
+    return `${query} AND COALESCE(ph.show_in_general, 1) = 1`;
+  }
+  params.push(type);
+  return `${query} AND ph.photo_type = ?`;
 }
 
 function normalizeTakenAt(value) {
@@ -205,16 +279,126 @@ function normalizeNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
-function getClientIp(req) {
-  const forwardedFor = String(req.headers['x-forwarded-for'] || '')
-    .split(',')
-    .map(value => value.trim())
-    .filter(Boolean);
-  return forwardedFor[0]
-    || String(req.headers['x-real-ip'] || '').trim()
-    || req.ip
-    || req.socket?.remoteAddress
-    || '';
+function normalizeAssignmentTargetType(value) {
+  const requested = String(value || '').trim();
+  return PHOTO_ASSIGNMENT_TARGETS.has(requested) ? requested : null;
+}
+
+function normalizePhotoIds(value) {
+  const raw = Array.isArray(value) ? value : [value];
+  return Array.from(new Set(raw.map(id => String(id || '').trim()).filter(Boolean))).slice(0, 100);
+}
+
+function assertAssignmentTarget(db, projectId, targetType, targetId) {
+  const id = String(targetId || '').trim();
+  if (!targetType || !id) {
+    const err = new Error('Photo assignment target is required');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const targetQueries = {
+    project_scope: ['SELECT id, scope_title as title FROM project_scopes WHERE id = ? AND project_id = ?', 'Scope of work not found for this project'],
+    punch_list_item: ['SELECT id, title FROM punch_list_items WHERE id = ? AND project_id = ?', 'Punch list item not found for this project'],
+    construction_plan_item: ['SELECT id, title FROM construction_plan_items WHERE id = ? AND project_id = ?', 'Scope execution line not found for this project'],
+    material: ['SELECT id, material_name as title FROM construction_materials WHERE id = ? AND project_id = ?', 'Material not found for this project'],
+    project_note: ['SELECT id, note as title FROM project_notes WHERE id = ? AND project_id = ?', 'Project note not found for this project'],
+  };
+  const [query, message] = targetQueries[targetType] || [];
+  if (!query) {
+    const err = new Error('Unsupported photo assignment target');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const target = db.prepare(query).get(id, projectId);
+  if (!target) {
+    const err = new Error(message);
+    err.statusCode = 404;
+    throw err;
+  }
+  return target;
+}
+
+function assignedPhotoSelectSql() {
+  return `
+    SELECT
+      pa.id as assignment_id,
+      pa.target_type,
+      pa.target_id,
+      pa.note as assignment_note,
+      pa.created_at as assigned_at,
+      au.name as assigned_by_name,
+      ph.*,
+      u.name as uploader_name,
+      u.avatar_url as uploader_avatar_url,
+      pc.name as category_name,
+      n.note as note_text,
+      n.note_type as note_type,
+      n.created_at as note_created_at,
+      nu.name as note_user_name,
+      nu.avatar_url as note_user_avatar_url
+    FROM photo_assignments pa
+    JOIN photos ph ON ph.id = pa.photo_id
+    LEFT JOIN users au ON au.id = pa.created_by
+    LEFT JOIN users u ON u.id = ph.uploaded_by
+    LEFT JOIN photo_categories pc ON pc.id = ph.category_id
+    LEFT JOIN project_notes n ON n.id = ph.note_id
+    LEFT JOIN users nu ON nu.id = n.user_id
+    WHERE pa.project_id = ?
+      AND pa.target_type = ?
+      AND pa.target_id = ?
+      AND ph.project_id = pa.project_id
+      AND ${activePhotoSql('ph')}
+    ORDER BY datetime(pa.created_at) DESC, datetime(COALESCE(ph.captured_at, ph.taken_at, ph.uploaded_at, ph.created_at)) DESC
+  `;
+}
+
+function getPhotoAssignments(db, projectId, targetType, targetId, user) {
+  return db.prepare(assignedPhotoSelectSql())
+    .all(projectId, targetType, targetId)
+    .map(photo => withCorrectionDeletePermission(photo, user));
+}
+
+function createPhotoAssignments(db, { projectId, targetType, targetId, photoIds, note, user }) {
+  const target = assertAssignmentTarget(db, projectId, targetType, targetId);
+  const ids = normalizePhotoIds(photoIds);
+  if (!ids.length) {
+    const err = new Error('Select at least one photo');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const placeholders = ids.map(() => '?').join(',');
+  const validPhotos = db.prepare(`
+    SELECT id
+    FROM photos ph
+    WHERE ph.project_id = ?
+      AND ph.id IN (${placeholders})
+      AND ${activePhotoSql('ph')}
+  `).all(projectId, ...ids);
+  if (validPhotos.length !== ids.length) {
+    const err = new Error('One or more selected photos are not in this project');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const insert = db.prepare(`
+    INSERT OR IGNORE INTO photo_assignments (
+      id, project_id, photo_id, target_type, target_id, note, created_by
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  const cleanNote = String(note || '').trim().slice(0, 1000) || null;
+  const inserted = [];
+  const tx = db.transaction(() => {
+    for (const photoId of ids) {
+      const assignmentId = uuidv4();
+      const result = insert.run(assignmentId, projectId, photoId, targetType, targetId, cleanNote, user.id);
+      if (result.changes > 0) inserted.push(assignmentId);
+    }
+  });
+  tx();
+  return { target, inserted };
 }
 
 // Configure multer storage — photos go into uploads/{projectId}/progress/
@@ -338,7 +522,7 @@ router.get('/', (req, res) => {
   if (note_id) { query += ' AND ph.note_id = ?'; params.push(note_id); }
   if (construction_plan_item_id) { query += ' AND ph.construction_plan_item_id = ?'; params.push(construction_plan_item_id); }
   if (material_id) { query += ' AND ph.material_id = ?'; params.push(material_id); }
-  if (type || photo_type) { query += ' AND ph.photo_type = ?'; params.push(normalizePhotoType(type || photo_type)); }
+  if (type || photo_type) query = appendPhotoTypeFilter(query, params, type || photo_type);
   if (label) { query += ' AND ph.label = ?'; params.push(String(label)); }
   if (uploaded_by) { query += ' AND ph.uploaded_by = ?'; params.push(String(uploaded_by)); }
   if (date_from) {
@@ -375,6 +559,86 @@ router.post('/categories', (req, res) => {
   res.status(201).json({ id, name });
 });
 
+// GET /api/projects/:projectId/photos/assignments?target_type=project_scope&target_id=...
+router.get('/assignments', (req, res) => {
+  try {
+    const db = getDb();
+    const targetType = normalizeAssignmentTargetType(req.query.target_type);
+    const targetId = String(req.query.target_id || '').trim();
+    assertAssignmentTarget(db, req.params.projectId, targetType, targetId);
+    res.json({
+      photos: getPhotoAssignments(db, req.params.projectId, targetType, targetId, req.user),
+    });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message || 'Failed to load assigned photos' });
+  }
+});
+
+// POST /api/projects/:projectId/photos/assignments - reuse existing bucket photos on a project record
+router.post('/assignments', (req, res) => {
+  try {
+    const db = getDb();
+    const targetType = normalizeAssignmentTargetType(req.body?.target_type);
+    const targetId = String(req.body?.target_id || '').trim();
+    const result = createPhotoAssignments(db, {
+      projectId: req.params.projectId,
+      targetType,
+      targetId,
+      photoIds: req.body?.photo_ids,
+      note: req.body?.note,
+      user: req.user,
+    });
+
+    logActivity({
+      userId: req.user.id,
+      projectId: req.params.projectId,
+      action: 'photo_assigned',
+      entityType: targetType,
+      entityId: targetId,
+      details: {
+        target_title: result.target.title || null,
+        added_count: result.inserted.length,
+        selected_count: normalizePhotoIds(req.body?.photo_ids).length,
+      },
+    });
+
+    res.status(201).json({
+      added: result.inserted.length,
+      photos: getPhotoAssignments(db, req.params.projectId, targetType, targetId, req.user),
+    });
+  } catch (err) {
+    console.error('Failed to assign photos:', err);
+    res.status(err.statusCode || 500).json({ error: err.message || 'Failed to assign photos' });
+  }
+});
+
+// DELETE /api/projects/:projectId/photos/assignments/:assignmentId
+router.delete('/assignments/:assignmentId', (req, res) => {
+  try {
+    const db = getDb();
+    const assignment = db.prepare(`
+      SELECT *
+      FROM photo_assignments
+      WHERE id = ? AND project_id = ?
+    `).get(req.params.assignmentId, req.params.projectId);
+    if (!assignment) return res.status(404).json({ error: 'Photo assignment not found' });
+
+    db.prepare('DELETE FROM photo_assignments WHERE id = ? AND project_id = ?').run(req.params.assignmentId, req.params.projectId);
+    logActivity({
+      userId: req.user.id,
+      projectId: req.params.projectId,
+      action: 'photo_assignment_removed',
+      entityType: assignment.target_type,
+      entityId: assignment.target_id,
+      details: { photo_id: assignment.photo_id },
+    });
+    res.json({ message: 'Photo removed from this item' });
+  } catch (err) {
+    console.error('Failed to remove assigned photo:', err);
+    res.status(500).json({ error: 'Failed to remove assigned photo' });
+  }
+});
+
 // GET /api/projects/:projectId/photos/progress — progress photos only
 router.get('/progress', (req, res) => {
   const db = getDb();
@@ -392,7 +656,7 @@ router.get('/progress', (req, res) => {
     LEFT JOIN users u ON u.id = ph.uploaded_by
     LEFT JOIN project_notes n ON n.id = ph.note_id
     LEFT JOIN users nu ON nu.id = n.user_id
-    WHERE ph.project_id = ? AND ph.photo_type = 'progress'
+    WHERE ph.project_id = ? AND COALESCE(ph.show_in_progress, 0) = 1
       AND ${activePhotoSql('ph')}
     ORDER BY datetime(COALESCE(ph.captured_at, ph.taken_at, ph.uploaded_at, ph.created_at)) DESC, ph.created_at DESC
   `).all(req.params.projectId).map(photo => withCorrectionDeletePermission(photo, req.user));
@@ -435,9 +699,10 @@ router.post('/', uploadProjectPhotos, async (req, res) => {
       gps_accuracy,
       gps_latitude_values,
       gps_longitude_values,
-      gps_accuracy_values,
-      batch_sequence,
-    } = req.body;
+	      gps_accuracy_values,
+	      batch_sequence,
+	      photo_contexts,
+	    } = req.body;
     const photoType = construction_plan_item_id ? 'construction_plan'
       : material_id ? 'material'
       : normalizePhotoType(req.query.type || photo_type || (note_id ? 'note' : 'general'));
@@ -461,9 +726,10 @@ router.post('/', uploadProjectPhotos, async (req, res) => {
     const sessionId = String(upload_session_id || batchId).slice(0, 120);
     const uploadTimezone = normalizeTimezone(timezone);
     const uploadedAt = new Date().toISOString();
-    const sharedBatchNote = String(batch_note || '').trim().slice(0, 2000) || null;
-    const sharedLabel = normalizeLabel(label);
-    const projectRoot = path.resolve(uploadRoot(), req.params.projectId);
+	    const sharedBatchNote = String(batch_note || '').trim().slice(0, 2000) || null;
+	    const sharedLabel = normalizeLabel(label);
+	    const usage = parsePhotoContexts(photo_contexts, photoType);
+	    const projectRoot = path.resolve(uploadRoot(), req.params.projectId);
     const inserted = [];
 
     if (note_id) {
@@ -471,6 +737,13 @@ router.post('/', uploadProjectPhotos, async (req, res) => {
       if (!note) {
         cleanupUploadedFiles(req.files);
         return res.status(400).json({ error: 'Note not found for this project' });
+      }
+    }
+    if (punch_list_item_id) {
+      const punchItem = db.prepare('SELECT id FROM punch_list_items WHERE id = ? AND project_id = ?').get(punch_list_item_id, req.params.projectId);
+      if (!punchItem) {
+        cleanupUploadedFiles(req.files);
+        return res.status(400).json({ error: 'Punch list item not found for this project' });
       }
     }
     if (construction_plan_item_id) {
@@ -505,20 +778,22 @@ router.post('/', uploadProjectPhotos, async (req, res) => {
         ? Number(batch_sequence)
         : index + 1;
       db.prepare(`
-        INSERT INTO photos (
-          id, project_id, category_id, punch_list_item_id, note_id, construction_plan_item_id, material_id,
-          filename, original_name, mime_type, size, caption, uploaded_by, photo_type, taken_at,
-          upload_ip_address, upload_user_agent, capture_latitude, capture_longitude, capture_accuracy,
+	        INSERT INTO photos (
+	          id, project_id, category_id, punch_list_item_id, note_id, construction_plan_item_id, material_id,
+	          filename, original_name, mime_type, size, caption, uploaded_by, photo_type,
+	          show_in_general, show_in_progress, show_in_scope, taken_at,
+	          upload_ip_address, upload_user_agent, capture_latitude, capture_longitude, capture_accuracy,
           capture_recorded_at, capture_source, upload_session_id, batch_id, batch_sequence,
           stored_file_name, storage_path, thumbnail_path, captured_at, uploaded_at, timezone,
           label, batch_note, individual_note, gps_latitude, gps_longitude, gps_accuracy,
           upload_status, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        id, req.params.projectId, category_id || null, punch_list_item_id || null, note_id || null, construction_plan_item_id || null, material_id || null,
-        storedFilename, file.originalname, file.mimetype, file.size, note || sharedBatchNote || caption || null, req.user.id, photoType, takenAt,
-        uploadIpAddress, uploadUserAgent, gpsLatitude, gpsLongitude, gpsAccuracy, recordedAt, source, sessionId, batchId, sequence,
+	        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	      `).run(
+	        id, req.params.projectId, category_id || null, punch_list_item_id || null, note_id || null, construction_plan_item_id || null, material_id || null,
+	        storedFilename, file.originalname, file.mimetype, file.size, note || sharedBatchNote || caption || null, req.user.id, photoType,
+	        usage.showInGeneral, usage.showInProgress, usage.showInScope, takenAt,
+	        uploadIpAddress, uploadUserAgent, gpsLatitude, gpsLongitude, gpsAccuracy, recordedAt, source, sessionId, batchId, sequence,
         file.filename, storedFilename, null, capturedAt, uploadedAt, uploadTimezone,
         photoLabel, sharedBatchNote, note, gpsLatitude, gpsLongitude, gpsAccuracy,
         'uploaded', uploadedAt
@@ -539,8 +814,44 @@ router.post('/', uploadProjectPhotos, async (req, res) => {
         batch_id: batchId,
         batch_note: sharedBatchNote,
         individual_note: note,
-        upload_status: 'uploaded',
-        capture_source: source,
+	        upload_status: 'uploaded',
+	        capture_source: source,
+	        photo_type: photoType,
+	        show_in_general: usage.showInGeneral,
+	        show_in_progress: usage.showInProgress,
+	        show_in_scope: usage.showInScope,
+	      });
+    }
+
+    const uploadedPhotoIds = inserted.map(photo => photo.id);
+    if (punch_list_item_id) {
+      createPhotoAssignments(db, {
+        projectId: req.params.projectId,
+        targetType: 'punch_list_item',
+        targetId: punch_list_item_id,
+        photoIds: uploadedPhotoIds,
+        note: sharedBatchNote || caption || null,
+        user: req.user,
+      });
+    }
+    if (construction_plan_item_id) {
+      createPhotoAssignments(db, {
+        projectId: req.params.projectId,
+        targetType: 'construction_plan_item',
+        targetId: construction_plan_item_id,
+        photoIds: uploadedPhotoIds,
+        note: sharedBatchNote || caption || null,
+        user: req.user,
+      });
+    }
+    if (material_id) {
+      createPhotoAssignments(db, {
+        projectId: req.params.projectId,
+        targetType: 'material',
+        targetId: material_id,
+        photoIds: uploadedPhotoIds,
+        note: sharedBatchNote || caption || null,
+        user: req.user,
       });
     }
 
@@ -596,8 +907,9 @@ router.post('/', uploadProjectPhotos, async (req, res) => {
       entityType: 'photo',
       details: {
         count: req.files.length,
-        type: photoType,
-        note_id: note_id || null,
+	        type: photoType,
+	        contexts: usage.contexts,
+	        note_id: note_id || null,
         upload_ip_address: uploadIpAddress,
         has_capture_location: latitude !== null && longitude !== null,
         upload_session_id: sessionId,
@@ -613,6 +925,214 @@ router.post('/', uploadProjectPhotos, async (req, res) => {
   }
 });
 
+// PUT /api/projects/:projectId/photos/batch-note - update the note shown above a mobile media batch
+router.put('/batch-note', (req, res) => {
+  const db = getDb();
+  const rawIds = Array.isArray(req.body?.photo_ids) ? req.body.photo_ids : [];
+  const photoIds = Array.from(new Set(rawIds.map(id => String(id || '').trim()).filter(Boolean)));
+  if (!photoIds.length) return res.status(400).json({ error: 'Select at least one project picture' });
+  if (photoIds.length > MAX_PROGRESS_UPLOAD_FILES) return res.status(400).json({ error: 'Too many project pictures selected' });
+
+  const noteText = String(req.body?.note || '').trim().slice(0, 2000);
+  const now = new Date().toISOString();
+
+  try {
+    const placeholders = photoIds.map(() => '?').join(',');
+    const photos = db.prepare(`
+      SELECT id
+      FROM photos
+      WHERE project_id = ?
+        AND id IN (${placeholders})
+        AND ${activePhotoSql('photos')}
+    `).all(req.params.projectId, ...photoIds);
+    if (photos.length !== photoIds.length) return res.status(400).json({ error: 'One or more project pictures are invalid' });
+
+    db.prepare(`
+      UPDATE photos
+      SET batch_note = ?,
+          updated_at = ?
+      WHERE project_id = ?
+        AND id IN (${placeholders})
+        AND ${activePhotoSql('photos')}
+    `).run(noteText || null, now, req.params.projectId, ...photoIds);
+
+    logActivity({
+      userId: req.user.id,
+      projectId: req.params.projectId,
+      action: noteText ? 'project_media_batch_note_saved' : 'project_media_batch_note_cleared',
+      entityType: 'photo',
+      details: {
+        photo_count: photoIds.length,
+        has_note: Boolean(noteText),
+      },
+    });
+
+    const updatedPhotos = db.prepare(`
+      SELECT id, batch_note, updated_at
+      FROM photos
+      WHERE project_id = ?
+        AND id IN (${placeholders})
+        AND ${activePhotoSql('photos')}
+      ORDER BY datetime(COALESCE(captured_at, taken_at, uploaded_at, created_at)) DESC, created_at DESC
+    `).all(req.params.projectId, ...photoIds);
+
+    res.json({ photos: updatedPhotos, note: noteText });
+  } catch (err) {
+    console.error('Failed to save progress picture group note:', err);
+    res.status(500).json({ error: 'Failed to save progress picture group note' });
+  }
+});
+
+// PUT /api/projects/:projectId/photos/:id/contexts - reuse one uploaded photo in progress/scope views
+router.put('/:id/contexts', (req, res) => {
+  const db = getDb();
+  const photo = db.prepare(`
+    SELECT *
+    FROM photos
+    WHERE id = ? AND project_id = ? AND ${activePhotoSql('photos')}
+  `).get(req.params.id, req.params.projectId);
+  if (!photo) return res.status(404).json({ error: 'Photo not found' });
+
+  const requestedContexts = req.body?.photo_contexts ?? req.body?.contexts ?? [];
+  const explicitProgress = req.body?.show_in_progress;
+  const explicitScope = req.body?.show_in_scope;
+  const hasRequestedContexts = Array.isArray(requestedContexts)
+    ? requestedContexts.length > 0
+    : String(requestedContexts || '').trim().length > 0;
+  const usage = parsePhotoContexts(requestedContexts, hasRequestedContexts ? 'general' : (photo.photo_type || 'general'));
+  const showInProgress = explicitProgress === undefined ? usage.showInProgress : (explicitProgress ? 1 : 0);
+  const showInScope = explicitScope === undefined ? usage.showInScope : (explicitScope ? 1 : 0);
+
+  try {
+    db.prepare(`
+      UPDATE photos
+      SET show_in_general = 1,
+          show_in_progress = ?,
+          show_in_scope = ?,
+          updated_at = datetime('now')
+      WHERE id = ? AND project_id = ?
+    `).run(showInProgress, showInScope, req.params.id, req.params.projectId);
+
+    logActivity({
+      userId: req.user.id,
+      projectId: req.params.projectId,
+      action: 'photo_contexts_updated',
+      entityType: 'photo',
+      entityId: req.params.id,
+      details: {
+        show_in_progress: Boolean(showInProgress),
+        show_in_scope: Boolean(showInScope),
+      },
+    });
+
+    const updatedPhoto = getPhotoWithNote(db, req.params.projectId, req.params.id, req.user);
+    res.json({ photo: updatedPhoto });
+  } catch (err) {
+    console.error('Failed to update photo contexts:', err);
+    res.status(500).json({ error: 'Failed to update photo usage' });
+  }
+});
+
+// PUT /api/projects/:projectId/photos/:id/note - attach or update a descriptive photo note
+router.put('/:id/note', (req, res) => {
+  const db = getDb();
+  const photo = db.prepare(`
+    SELECT *
+    FROM photos
+    WHERE id = ? AND project_id = ? AND ${activePhotoSql('photos')}
+  `).get(req.params.id, req.params.projectId);
+  if (!photo) return res.status(404).json({ error: 'Photo not found' });
+
+  const noteText = String(req.body?.note || '').trim().slice(0, 2000);
+  const now = new Date().toISOString();
+  let noteId = photo.note_id || null;
+  let noteAction = 'photo_note_cleared';
+
+  try {
+    if (!noteText) {
+      db.prepare(`
+        UPDATE photos
+        SET note_id = NULL,
+            caption = NULL,
+            individual_note = NULL,
+            batch_note = NULL,
+            updated_at = ?
+        WHERE id = ? AND project_id = ?
+      `).run(now, req.params.id, req.params.projectId);
+      noteId = null;
+    } else {
+      let existingNote = noteId
+        ? db.prepare('SELECT * FROM project_notes WHERE id = ? AND project_id = ?').get(noteId, req.params.projectId)
+        : null;
+
+      if (existingNote) {
+        const permission = getNoteEditPermission(req.user, existingNote);
+        if (permission.allowed) {
+          db.prepare(`
+            UPDATE project_notes
+            SET note = ?,
+                note_type = ?,
+                visibility = ?,
+                edited_at = ?,
+                edited_by = ?,
+                edit_count = COALESCE(edit_count, 0) + 1
+            WHERE id = ? AND project_id = ?
+          `).run(
+            noteText,
+            existingNote.note_type || 'progress',
+            existingNote.visibility || 'private',
+            now,
+            req.user.id,
+            noteId,
+            req.params.projectId
+          );
+          noteAction = 'photo_note_updated';
+        } else {
+          noteId = null;
+          existingNote = null;
+        }
+      }
+
+      if (!existingNote) {
+        noteId = uuidv4();
+        db.prepare(`
+          INSERT INTO project_notes (id, project_id, user_id, note, note_type, visibility, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(noteId, req.params.projectId, req.user.id, noteText, 'progress', 'private', now);
+        noteAction = 'photo_note_added';
+      }
+
+      db.prepare(`
+        UPDATE photos
+        SET note_id = ?,
+            caption = ?,
+            individual_note = ?,
+            batch_note = NULL,
+            updated_at = ?
+        WHERE id = ? AND project_id = ?
+      `).run(noteId, noteText, noteText, now, req.params.id, req.params.projectId);
+    }
+
+    logActivity({
+      userId: req.user.id,
+      projectId: req.params.projectId,
+      action: noteAction,
+      entityType: 'photo',
+      entityId: req.params.id,
+      details: {
+        note_id: noteId,
+        has_note: Boolean(noteText),
+      },
+    });
+
+    const updatedPhoto = getPhotoWithNote(db, req.params.projectId, req.params.id, req.user);
+    res.json({ photo: updatedPhoto });
+  } catch (err) {
+    console.error('Failed to save photo note:', err);
+    res.status(500).json({ error: 'Failed to save photo note' });
+  }
+});
+
 // DELETE /api/projects/:projectId/photos/:id
 router.delete('/:id', (req, res) => {
   const db = getDb();
@@ -624,7 +1144,7 @@ router.delete('/:id', (req, res) => {
   if (!photo) return res.status(404).json({ error: 'Photo not found' });
 
   const selfCorrectionAllowed = canUseCorrectionDelete(photo, req.user);
-  const managementOverrideAllowed = MANAGEMENT_ROLES.has(req.user.role) && photo.uploaded_by !== req.user.id;
+  const managementOverrideAllowed = PHOTO_OVERRIDE_DELETE_ROLES.has(req.user.role) && photo.uploaded_by !== req.user.id;
   if (!selfCorrectionAllowed && !managementOverrideAllowed) {
     if (photo.uploaded_by === req.user.id && Number(photo.correction_delete_count || 0) >= 1) {
       return res.status(403).json({ error: 'This progress picture is locked because the one correction has already been used.' });

@@ -4,7 +4,8 @@ import { useAuthStore, roleLabels, canManageUsers, canAccessSettings, canAccessS
 import {
   LayoutDashboard, FolderOpen, ClipboardList, FileText,
   Users, Settings, LogOut, Menu, X, Bell, ChevronRight,
-  Camera, Search, Trash2, Truck, ShieldCheck, MessageSquare
+  Camera, Search, Trash2, Truck, ShieldCheck, MessageSquare,
+  ArrowLeft
 } from 'lucide-react';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
@@ -263,7 +264,6 @@ export default function Layout({ children }: LayoutProps) {
     { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/projects', icon: FolderOpen, label: 'Projects' },
     { to: '/invoices', icon: FileText, label: 'Invoices' },
-    { to: '/documents', icon: ClipboardList, label: 'Documents' },
     { to: '/contractors', icon: Users, label: 'Contractors' },
     { to: '/suppliers', icon: Truck, label: 'Suppliers' },
     ...(user && canAccessSecurity(user.role) ? [{ to: '/security', icon: ShieldCheck, label: 'Security' }] : []),
@@ -275,7 +275,6 @@ export default function Layout({ children }: LayoutProps) {
     '/dashboard': 'Dashboard',
     '/projects': 'Projects',
     '/invoices': 'Invoices',
-    '/documents': 'Documents',
     '/contractors': 'Contractors',
     '/suppliers': 'Suppliers',
     '/security': 'Security',
@@ -286,6 +285,7 @@ export default function Layout({ children }: LayoutProps) {
   const currentTitle = Object.entries(pageTitles).find(([path]) =>
     location.pathname.startsWith(path)
   )?.[1] || 'BuildTrack';
+  const showBackToDashboard = !location.pathname.startsWith('/dashboard');
 
   useEffect(() => {
     setProfileOpen(false);
@@ -321,10 +321,9 @@ export default function Layout({ children }: LayoutProps) {
         {!collapsed && (
           <button
             onClick={() => setSidebarCollapsed(true)}
-            className="p-1.5 rounded-lg transition-colors hidden lg:flex"
-            style={{ color: 'rgba(255,255,255,0.4)' }}
-            title="Collapse sidebar"
-            aria-label="Collapse sidebar"
+            className="hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border transition-colors hover:border-orange-400/70 hover:text-orange-300 lg:flex"
+            style={{ color: 'rgba(255,255,255,0.48)', background: '#0E1012', borderColor: '#242A31' }}
+            aria-label="Collapse navigation menu"
           >
             <ChevronRight className="w-4 h-4 rotate-180" />
           </button>
@@ -386,42 +385,47 @@ export default function Layout({ children }: LayoutProps) {
       {/* User footer */}
       <div className="px-3 py-3 border-t" style={{ borderColor: 'rgba(255,255,255,0.07)' }}>
         <div
-          className="flex items-center gap-3 p-2.5 rounded-xl"
+          className="rounded-md border p-2"
           style={{
             background: 'rgba(255,255,255,0.05)',
-            justifyContent: collapsed ? 'center' : 'flex-start',
+            borderColor: 'rgba(255,255,255,0.06)',
           }}
         >
-          <Avatar src={user?.avatar_url} name={user?.name} size={32} />
-          {!collapsed && (
-            <>
-              <div className="flex-1 min-w-0">
-                <p className="text-white text-sm font-semibold truncate leading-tight">{user?.name}</p>
-                <p className="text-xs truncate" style={{ color: 'rgba(255,255,255,0.4)' }}>
+          <div className="flex items-start gap-2">
+            <Avatar src={user?.avatar_url} name={user?.name} size={32} />
+            {!collapsed && (
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-semibold leading-snug text-white break-words">{user?.name}</p>
+                <p className="mt-0.5 text-[11px] leading-tight" style={{ color: 'rgba(255,255,255,0.52)' }}>
                   {user ? roleLabels[user.role] : ''}
                 </p>
               </div>
+            )}
+          </div>
+          {!collapsed && (
+            <div className="mt-2 flex justify-end">
               <button
                 onClick={handleLogout}
-                className="p-1.5 rounded-lg transition-colors flex-shrink-0"
-                style={{ color: 'rgba(255,255,255,0.35)' }}
-                title="Sign out"
-                aria-label="Sign out"
+                className="inline-flex h-6 items-center justify-center gap-1 rounded-md border px-2 text-[9px] font-black uppercase tracking-wide transition-colors"
+                style={{ color: '#FCA5A5', background: 'rgba(127,29,29,0.12)', borderColor: 'rgba(127,29,29,0.42)' }}
+                title="Log off"
+                aria-label="Log off"
               >
-                <LogOut className="w-4 h-4" />
+                <LogOut className="w-3 h-3" />
+                Log off
               </button>
-            </>
+            </div>
           )}
         </div>
         {collapsed && (
           <button
             onClick={handleLogout}
-            className="w-full flex items-center justify-center p-2 rounded-xl mt-1 transition-colors"
-            style={{ color: 'rgba(255,255,255,0.35)' }}
-            title="Sign out"
-            aria-label="Sign out"
+            className="mt-1 flex h-7 w-full items-center justify-center rounded-md border transition-colors"
+            style={{ color: '#FCA5A5', background: 'rgba(127,29,29,0.18)', borderColor: 'rgba(127,29,29,0.52)' }}
+            title="Log off"
+            aria-label="Log off"
           >
-            <LogOut className="w-4 h-4" />
+            <LogOut className="w-3 h-3" />
           </button>
         )}
       </div>
@@ -431,10 +435,9 @@ export default function Layout({ children }: LayoutProps) {
         <div className="px-3 pb-3">
           <button
             onClick={() => setSidebarCollapsed(false)}
-            className="w-full flex items-center justify-center p-2 rounded-xl transition-colors"
-            style={{ color: 'rgba(255,255,255,0.3)', background: 'rgba(255,255,255,0.04)' }}
-            title="Expand sidebar"
-            aria-label="Expand sidebar"
+            className="flex h-8 w-full items-center justify-center rounded-md border transition-colors"
+            style={{ color: '#FFD0A8', background: '#1E1610', borderColor: '#E78B4A' }}
+            aria-label="Expand navigation menu"
           >
             <ChevronRight className="w-4 h-4" />
           </button>
@@ -514,6 +517,17 @@ export default function Layout({ children }: LayoutProps) {
             >
               <Menu className="w-5 h-5" />
             </button>
+            {showBackToDashboard && (
+              <Link
+                to="/dashboard"
+                className="hidden min-h-9 flex-shrink-0 items-center gap-2 rounded-md border px-3 py-2 text-xs font-black uppercase tracking-wide transition-colors sm:inline-flex"
+                style={{ background: '#1E1610', borderColor: '#E78B4A', color: '#FFD0A8' }}
+                aria-label="Back to Dashboard"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Back to Dashboard
+              </Link>
+            )}
             <div className="flex min-w-0 items-center gap-2 text-sm">
               <span className="flex-shrink-0 font-medium" style={{ color: 'var(--bt-text-muted)' }}>BuildTrack</span>
               <ChevronRight className="w-3.5 h-3.5" style={{ color: '#D1D5DB' }} />
@@ -846,7 +860,7 @@ export default function Layout({ children }: LayoutProps) {
                         style={{ color: '#FCA5A5' }}
                       >
                         <LogOut className="w-4 h-4" />
-                        Sign Out
+                        Log off
                       </button>
                     </div>
                   </div>

@@ -14,8 +14,9 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../lib/api';
-import { useAuthStore, canManageProjects } from '../store/authStore';
+import { useAuthStore, canChangeProjectStatus } from '../store/authStore';
 import { mobilePath } from '../lib/appUrls';
+import { notifyMobileDataChanged } from '../lib/mobileEvents';
 
 interface PunchItem {
   id: string;
@@ -92,7 +93,7 @@ export default function MobilePunchList() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuthStore();
-  const canManage = user ? canManageProjects(user.role) : false;
+  const canManage = user ? canChangeProjectStatus(user.role) : false;
   const canCreatePunchItems = Boolean(user);
   const canAttachPhotos = Boolean(user);
 
@@ -238,6 +239,7 @@ export default function MobilePunchList() {
 
       await loadPunchList();
       resetBatch();
+      notifyMobileDataChanged({ entity: 'punch_list', action: 'saved', projectId: id });
       toast.success(`Saved ${readyDrafts.length} item${readyDrafts.length === 1 ? '' : 's'}${photoCount ? ` and ${photoCount} photo${photoCount === 1 ? '' : 's'}` : ''}`);
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to save field punch list');
@@ -250,6 +252,7 @@ export default function MobilePunchList() {
     try {
       await api.put(`/projects/${id}/punch-list/${item.id}`, { status: newStatus });
       setItems(prev => prev.map(p => p.id === item.id ? { ...p, status: newStatus as PunchItem['status'] } : p));
+      notifyMobileDataChanged({ entity: 'punch_list', action: 'status_updated', projectId: id });
       toast.success('Status updated');
     } catch {
       toast.error('Failed to update status');
@@ -315,6 +318,7 @@ export default function MobilePunchList() {
       setPreviewUrls([]);
       setUploadCaption('');
       if (fileInputRef.current) fileInputRef.current.value = '';
+      notifyMobileDataChanged({ entity: 'punch_list_photo', action: 'uploaded', projectId: id });
       toast.success('Photos attached');
     } catch {
       toast.error('Photo upload failed');
