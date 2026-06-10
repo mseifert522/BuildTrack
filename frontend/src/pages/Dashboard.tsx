@@ -7,7 +7,7 @@ import Avatar from '../components/Avatar';
 import {
   Activity,
   Plus, MapPin, CalendarDays,
-  Mail, Send, Edit2, ChevronLeft, ChevronRight
+  Mail, Send, Edit2, ChevronLeft, ChevronRight, ChevronDown
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { EASTERN_TIME_ZONE, formatEasternDate, formatEasternDateTime, formatEasternRelative, formatEasternTime, parseBuildTrackTimestamp } from '../lib/time';
@@ -465,6 +465,15 @@ const sortCalendarEventsForDay = (events: OperationsCalendarEvent[]) =>
     return String(a.title || '').localeCompare(String(b.title || ''));
   });
 
+const sortCalendarEventsForRange = (events: OperationsCalendarEvent[]) =>
+  [...events].sort((a, b) => {
+    const dateCompare = String(calendarDateKeyForEvent(a) || '').localeCompare(String(calendarDateKeyForEvent(b) || ''));
+    if (dateCompare !== 0) return dateCompare;
+    const timeCompare = String(a.due_time || '99:99').localeCompare(String(b.due_time || '99:99'));
+    if (timeCompare !== 0) return timeCompare;
+    return String(a.title || '').localeCompare(String(b.title || ''));
+  });
+
 const getCalendarProjectLabel = (event: OperationsCalendarEvent) =>
   event.project_address || event.project_job_name || event.project_id || 'BuildTrack';
 
@@ -510,6 +519,7 @@ export default function Dashboard() {
   const [calendarQueueFilter, setCalendarQueueFilter] = useState<CalendarQueueFilter>('upcoming');
   const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>('today');
   const [calendarAnchorDateKey, setCalendarAnchorDateKey] = useState(() => formatLocalDateInput());
+  const [calendarExpanded, setCalendarExpanded] = useState(false);
   const [editingCalendarEvent, setEditingCalendarEvent] = useState<OperationsCalendarEvent | null>(null);
   const [calendarEditForm, setCalendarEditForm] = useState<CalendarEditForm>(blankCalendarEditForm);
   const [savingCalendarEdit, setSavingCalendarEdit] = useState(false);
@@ -1253,6 +1263,101 @@ export default function Dashboard() {
     </div>
   );
 
+  const renderCollapsedCalendarPreview = () => {
+    const previewEvents = sortCalendarEventsForRange(displayedCalendarEvents).slice(0, 4);
+    const hiddenCount = Math.max(displayedCalendarEvents.length - previewEvents.length, 0);
+    const selectedLabel = calendarViewMode === 'today'
+      ? formatCalendarBadgeDate(calendarAnchorDateKey).label
+      : calendarViewTitle;
+
+    return (
+      <div className="border-t border-slate-800/80 bg-[#060A14] p-4">
+        <div className="grid gap-3 xl:grid-cols-[220px_minmax(0,1fr)_auto] xl:items-stretch">
+          <div className="rounded-2xl border border-slate-700/70 bg-slate-950/70 p-4">
+            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-200">Compact schedule</p>
+            <h4 className="mt-2 text-2xl font-black text-white">{calendarViewEventCount}</h4>
+            <p className="mt-1 text-xs font-bold text-slate-300">{calendarViewEventCount === 1 ? 'calendar item' : 'calendar items'}</p>
+            <p className="mt-3 text-xs font-semibold leading-5 text-slate-400">{selectedLabel}</p>
+          </div>
+
+          <div className="min-w-0 rounded-2xl border border-slate-700/70 bg-slate-950/45 p-3">
+            {previewEvents.length ? (
+              <div className="grid gap-2 xl:grid-cols-2">
+                {previewEvents.map(event => {
+                  const complete = event.status === 'completed';
+                  const projectLabel = getCalendarProjectLabel(event);
+                  const dateKey = calendarDateKeyForEvent(event) || calendarAnchorDateKey;
+                  const badgeDate = formatCalendarBadgeDate(dateKey);
+                  const tone = calendarEventTone(event);
+
+                  return (
+                    <button
+                      key={event.id}
+                      type="button"
+                      onClick={() => {
+                        setCalendarAnchorDateKey(dateKey);
+                        setCalendarViewMode('today');
+                        setCalendarExpanded(true);
+                        openCalendarEntryEditor(event);
+                      }}
+                      className={`group relative min-w-0 overflow-hidden rounded-xl border px-3 py-2.5 text-left shadow-[0_10px_24px_rgba(2,6,23,0.22)] transition focus:outline-none focus:ring-2 focus:ring-cyan-300/50 ${tone.card}`}
+                    >
+                      <span className={`absolute bottom-2 left-0 top-2 w-1 rounded-r-full ${tone.rail}`} />
+                      <span className="block pl-2">
+                        <span className="flex items-center justify-between gap-2">
+                          <span className={`min-w-0 truncate text-sm font-black leading-5 ${complete ? 'text-emerald-100 line-through decoration-emerald-200/70' : 'text-slate-50'}`}>
+                            {event.title}
+                          </span>
+                          <span className={`flex-shrink-0 rounded-md px-2 py-1 text-[10px] font-black leading-none ring-1 ${tone.time}`}>
+                            {formatCalendarDueTimeLabel(event.due_time)}
+                          </span>
+                        </span>
+                        <span className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
+                          <span className="truncate text-[11px] font-bold text-slate-300">{projectLabel}</span>
+                          <span className={`rounded-md border px-1.5 py-0.5 text-[9px] font-black uppercase leading-none ${tone.chip}`}>
+                            {calendarTypeLabel(event.event_type)}
+                          </span>
+                          {calendarViewMode !== 'today' ? (
+                            <span className="rounded-md bg-slate-950/65 px-1.5 py-0.5 text-[9px] font-black uppercase text-slate-300 ring-1 ring-slate-600/60">
+                              {badgeDate.month} {badgeDate.day}
+                            </span>
+                          ) : null}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              renderCalendarEmptyState(calendarAnchorDateKey, selectedLabel)
+            )}
+            {hiddenCount > 0 ? (
+              <button
+                type="button"
+                onClick={() => setCalendarExpanded(true)}
+                className="mt-3 inline-flex min-h-9 items-center rounded-lg border border-sky-300/40 bg-sky-500/15 px-3 text-xs font-black text-sky-50 transition hover:border-sky-200 hover:bg-sky-500/25 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
+              >
+                View {hiddenCount} more
+              </button>
+            ) : null}
+          </div>
+
+          <div className="flex min-w-[170px] flex-col justify-between gap-2 rounded-2xl border border-slate-700/70 bg-slate-950/70 p-3">
+            <button
+              type="button"
+              onClick={() => setCalendarExpanded(true)}
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-cyan-300/50 bg-cyan-500/15 px-3 text-sm font-black text-cyan-50 transition hover:border-cyan-200 hover:bg-cyan-500/25 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
+              aria-expanded={calendarExpanded}
+            >
+              Expand calendar
+              <ChevronDown className="h-4 w-4 rotate-180" />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderSelectedCalendarView = () => {
     if (calendarViewMode === 'today') return renderCalendarTodayView();
     if (calendarViewMode === 'week') return renderCalendarWeekView();
@@ -1568,9 +1673,21 @@ export default function Dashboard() {
                 <span className="rounded-lg border border-sky-300/40 bg-sky-500/20 px-2.5 py-1 text-xs font-black text-sky-50">
                   {calendarViewEventCount} {calendarViewEventCount === 1 ? 'item' : 'items'}
                 </span>
+                <button
+                  type="button"
+                  onClick={() => setCalendarExpanded(current => !current)}
+                  className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-cyan-300/40 bg-cyan-500/15 px-2.5 text-xs font-black text-cyan-50 transition hover:border-cyan-200 hover:bg-cyan-500/25 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
+                  aria-expanded={calendarExpanded}
+                  aria-controls="jobsite-operations-calendar-body"
+                >
+                  {calendarExpanded ? 'Collapse' : 'Expand'}
+                  <ChevronDown className={`h-4 w-4 transition-transform ${calendarExpanded ? '' : 'rotate-180'}`} />
+                </button>
               </div>
             </div>
-            {renderSelectedCalendarView()}
+            <div id="jobsite-operations-calendar-body">
+              {calendarExpanded ? renderSelectedCalendarView() : renderCollapsedCalendarPreview()}
+            </div>
           </div>
         </section>
 
