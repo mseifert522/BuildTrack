@@ -624,7 +624,7 @@ export default function Dashboard() {
   const calendarEventTone = (event: OperationsCalendarEvent) => {
     if (event.status === 'completed') {
       return {
-        card: 'border-emerald-300/40 bg-emerald-950/40 hover:border-emerald-200/60',
+        card: 'border-emerald-300/35 bg-emerald-950/35 hover:border-emerald-200/60',
         rail: 'bg-emerald-400',
         chip: 'border-emerald-300/50 bg-emerald-400/20 text-emerald-50',
         time: 'bg-emerald-400/20 text-emerald-50 ring-emerald-300/40',
@@ -675,6 +675,55 @@ export default function Dashboard() {
 
     return tones[event.event_type || 'other'] || tones.other;
   };
+  const calendarProjectTone = (index: number) => {
+    const tones = [
+      {
+        header: 'bg-gradient-to-r from-cyan-700 to-sky-800 text-cyan-50',
+        body: 'border-cyan-300/20 bg-cyan-950/25',
+        count: 'bg-cyan-200/20 text-cyan-50',
+      },
+      {
+        header: 'bg-gradient-to-r from-violet-700 to-indigo-800 text-violet-50',
+        body: 'border-violet-300/20 bg-violet-950/25',
+        count: 'bg-violet-200/20 text-violet-50',
+      },
+      {
+        header: 'bg-gradient-to-r from-slate-700 to-blue-900 text-blue-50',
+        body: 'border-blue-300/20 bg-blue-950/20',
+        count: 'bg-blue-200/20 text-blue-50',
+      },
+      {
+        header: 'bg-gradient-to-r from-amber-700 to-orange-800 text-amber-50',
+        body: 'border-amber-300/20 bg-amber-950/20',
+        count: 'bg-amber-200/20 text-amber-50',
+      },
+    ];
+
+    return tones[index % tones.length];
+  };
+  const buildCalendarProjectGroups = (events: OperationsCalendarEvent[]) => {
+    const groups: { key: string; label: string; events: OperationsCalendarEvent[] }[] = [];
+    const groupIndexes = new Map<string, number>();
+
+    sortCalendarEventsForDay(events).forEach(event => {
+      const label = getCalendarProjectLabel(event);
+      const key = label.toLowerCase();
+      let index = groupIndexes.get(key);
+
+      if (index === undefined) {
+        index = groups.length;
+        groupIndexes.set(key, index);
+        groups.push({ key, label, events: [] });
+      }
+
+      groups[index].events.push(event);
+    });
+
+    return groups.map((group, index) => ({
+      ...group,
+      tone: calendarProjectTone(index),
+    }));
+  };
   const calendarEventsByDate = displayedCalendarEvents.reduce<Record<string, OperationsCalendarEvent[]>>((groups, event) => {
     const dateKey = calendarDateKeyForEvent(event) || todayKey;
     if (!groups[dateKey]) groups[dateKey] = [];
@@ -693,16 +742,16 @@ export default function Dashboard() {
     return (
       <article
         key={event.id}
-        className={`group relative overflow-hidden rounded-xl border px-2.5 py-2 text-left shadow-[0_10px_24px_rgba(2,6,23,0.20)] transition-colors ${
+        className={`group relative overflow-hidden rounded-md border px-1.5 py-1.5 text-left shadow-[0_6px_14px_rgba(2,6,23,0.20)] transition-colors ${
           complete
             ? tone.card
             : noteExpanded
-              ? 'border-white/45 bg-slate-950/86'
+              ? 'border-white/40 bg-slate-950/90'
               : tone.card
         }`}
       >
-        <span className={`absolute bottom-2 left-0 top-2 w-1 rounded-r-full ${tone.rail}`} />
-        <div className="flex items-start gap-2 pl-1">
+        <span className={`absolute bottom-1.5 left-0 top-1.5 w-0.5 rounded-r-full ${tone.rail}`} />
+        <div className="flex items-center gap-1.5 pl-1">
           <input
             type="checkbox"
             checked={complete}
@@ -713,7 +762,7 @@ export default function Dashboard() {
                 completion_note: noteDraft,
               });
             }}
-            className="mt-0.5 h-4 w-4 flex-shrink-0 rounded border-slate-500 bg-slate-950 accent-emerald-500"
+            className="h-3.5 w-3.5 flex-shrink-0 rounded border-slate-500 bg-slate-950 accent-emerald-500"
             aria-label={`${complete ? 'Mark incomplete' : 'Mark complete'}: ${projectLabel} - ${event.title}`}
           />
           <button
@@ -722,32 +771,34 @@ export default function Dashboard() {
             className="min-w-0 flex-1 text-left"
             aria-expanded={noteExpanded}
           >
-            <div className="flex min-w-0 items-center gap-1.5">
-              {event.due_time ? (
-                <span className={`flex-shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-black leading-none ring-1 ${tone.time}`}>
-                  {event.due_time}
-                </span>
-              ) : null}
-              <p className={`min-w-0 truncate text-xs font-black leading-5 ${complete ? 'text-emerald-100 line-through decoration-emerald-200/70' : 'text-slate-50'}`} title={event.title}>
+            <div className="flex min-w-0 items-center gap-1">
+              <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${tone.rail}`} />
+              <p className={`min-w-0 truncate text-[10px] font-black leading-4 ${complete ? 'text-emerald-100 line-through decoration-emerald-200/70' : 'text-slate-50'}`} title={event.title}>
                 {event.title}
               </p>
             </div>
-            <div className="mt-1 flex min-w-0 items-center gap-1.5">
-              <span className="min-w-0 truncate text-[11px] font-bold leading-4 text-slate-200" title={projectLabel}>
-                {projectLabel}
-              </span>
-              <span className={`flex-shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-black uppercase leading-none ${tone.chip}`}>
+            <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
+              {event.due_time ? (
+                <span className={`flex-shrink-0 rounded px-1 py-0.5 text-[8px] font-black leading-none ring-1 ${tone.time}`}>
+                  {event.due_time}
+                </span>
+              ) : (
+                <span className="flex-shrink-0 rounded bg-slate-950/60 px-1 py-0.5 text-[8px] font-black leading-none text-slate-300 ring-1 ring-slate-600/60">
+                  Anytime
+                </span>
+              )}
+              <span className={`min-w-0 truncate rounded border px-1 py-0.5 text-[8px] font-black uppercase leading-none ${tone.chip}`}>
                 {calendarTypeLabel(event.event_type)}
                 {Number(event.email_reminder_count || 0) > 0 ? ' / Email' : ''}
               </span>
             </div>
           </button>
-          <span className="inline-flex flex-shrink-0 items-center gap-1 opacity-70 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+          <span className="inline-flex flex-shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
             <button
               type="button"
               onClick={() => openCalendarEntryEditor(event)}
               disabled={saving}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-600 bg-slate-900 text-slate-200 transition hover:border-cyan-300 hover:bg-cyan-500/15 hover:text-cyan-100 disabled:opacity-60"
+              className="inline-flex h-6 w-6 items-center justify-center rounded border border-slate-600 bg-slate-950 text-slate-200 transition hover:border-cyan-300 hover:bg-cyan-500/15 hover:text-cyan-100 disabled:opacity-60"
               title="Edit calendar entry"
               aria-label={`Edit calendar entry: ${projectLabel} - ${event.title}`}
             >
@@ -757,7 +808,7 @@ export default function Dashboard() {
               type="button"
               onClick={() => setExpandedCalendarNoteId(noteExpanded ? null : event.id)}
               disabled={saving}
-              className={`inline-flex h-7 w-7 items-center justify-center rounded-md border transition disabled:opacity-60 ${
+              className={`inline-flex h-6 w-6 items-center justify-center rounded border transition disabled:opacity-60 ${
                 hasCompletionNote
                   ? 'border-amber-300/45 bg-amber-500/10 text-amber-100 hover:bg-amber-500/15'
                   : noteExpanded
@@ -772,7 +823,7 @@ export default function Dashboard() {
           </span>
         </div>
         {noteExpanded && (
-          <div className="mt-2 grid gap-1.5 border-t border-slate-800 pt-2">
+          <div className="mt-1.5 grid gap-1.5 border-t border-slate-800 pt-1.5">
             {event.description ? (
               <p className="line-clamp-3 whitespace-pre-wrap rounded border border-slate-700/70 bg-slate-950/55 px-2 py-1.5 text-[10px] font-semibold leading-4 text-slate-300">
                 {event.description}
@@ -1057,8 +1108,8 @@ export default function Dashboard() {
               );
             })}
           </div>
-          <div className="mt-4 overflow-hidden rounded-[22px] border border-slate-600/60 bg-slate-950/70 shadow-[0_24px_60px_rgba(2,6,23,0.34)]">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-700/70 px-4 py-3" style={{ background: 'linear-gradient(90deg, rgba(30,41,59,0.98), rgba(15,23,42,0.98) 55%, rgba(12,74,110,0.32))' }}>
+          <div className="mt-4 overflow-hidden rounded-[18px] border border-slate-700/70 bg-[#070B16] shadow-[0_24px_60px_rgba(2,6,23,0.38)]">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-700/70 px-4 py-3" style={{ background: 'linear-gradient(90deg, rgba(15,23,42,0.98), rgba(17,24,39,0.98) 55%, rgba(12,74,110,0.24))' }}>
               <div className="min-w-0">
                 <p className="text-[11px] font-black uppercase tracking-wide text-sky-200">{calendarWeekPositionLabel}</p>
                 <h3 className="mt-0.5 text-base font-black text-slate-50">Sunday - Saturday, {calendarWeekLabel}</h3>
@@ -1105,27 +1156,32 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="overflow-x-auto bg-slate-950/40">
-              <div className="grid min-w-[1120px] grid-cols-7 gap-2 p-3">
+            <div className="overflow-x-auto bg-[#060A14]">
+              <div className="grid min-w-[1220px] grid-cols-7 gap-2 p-2.5">
                 {calendarVisibleDays.map(day => {
                   const dayEvents = sortCalendarEventsForDay(calendarEventsByDate[day.key] || []);
+                  const dayGroups = buildCalendarProjectGroups(dayEvents);
                   const badgeDate = formatCalendarBadgeDate(day.key);
+                  const dayYear = day.key.slice(0, 4);
 
                   return (
-                    <section key={day.key} className={`flex min-h-[390px] min-w-0 flex-col overflow-hidden rounded-2xl border shadow-[0_14px_32px_rgba(2,6,23,0.28)] ${day.isToday ? 'border-sky-300/70 bg-sky-950/50 ring-1 ring-sky-300/30' : 'border-slate-700/75 bg-slate-900/80'}`}>
-                      <header className={`border-b px-3 py-2.5 ${day.isToday ? 'border-sky-300/40 bg-sky-500/20' : 'border-slate-700/70 bg-slate-800/90'}`}>
-                        <div className="flex items-center justify-between gap-2">
+                    <section key={day.key} className={`flex min-h-[520px] min-w-0 flex-col overflow-hidden rounded-lg border shadow-[0_14px_30px_rgba(2,6,23,0.30)] ${day.isToday ? 'border-cyan-300/70 bg-[#0B213B] ring-1 ring-cyan-300/25' : 'border-slate-700/80 bg-[#111827]'}`}>
+                      <header className={`border-b px-2.5 py-2 ${day.isToday ? 'border-cyan-300/40 bg-cyan-500/10' : 'border-slate-700/70 bg-[#182235]'}`}>
+                        <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
-                            <p className={`text-xs font-black uppercase tracking-wide ${day.isToday ? 'text-sky-100' : 'text-slate-300'}`}>
+                            <p className={`text-[8px] font-black uppercase tracking-[0.16em] ${day.isToday ? 'text-cyan-100' : 'text-slate-400'}`}>
                               {day.weekday}
                             </p>
-                            <p className="mt-1 text-sm font-black text-white">
-                              {badgeDate.month} {day.dayNumber}
+                            <p className="mt-0.5 text-xl font-black leading-none text-white">
+                              {day.dayNumber}
+                            </p>
+                            <p className="mt-1 text-[8px] font-bold uppercase tracking-wide text-slate-500">
+                              {badgeDate.month} {dayYear}
                             </p>
                           </div>
-                          <div className="flex items-center gap-1.5">
-                            <span className={`rounded-full px-2.5 py-1 text-[11px] font-black shadow-sm ${day.isToday ? 'bg-white text-slate-950 ring-1 ring-white/90' : dayEvents.length > 0 ? 'bg-blue-500/25 text-blue-50 ring-1 ring-blue-300/50' : 'bg-slate-950/70 text-slate-100 ring-1 ring-slate-600/80'}`}>
-                              {dayEvents.length} {dayEvents.length === 1 ? 'task' : 'tasks'}
+                          <div className="flex items-start gap-1">
+                            <span className={`rounded px-1.5 py-0.5 text-[8px] font-black uppercase leading-none ${day.isToday ? 'bg-cyan-100 text-slate-950' : dayEvents.length > 0 ? 'bg-sky-400/20 text-sky-100 ring-1 ring-sky-300/35' : 'bg-slate-950/70 text-slate-300 ring-1 ring-slate-600/60'}`}>
+                              {dayEvents.length}
                             </span>
                             <AddToCalendarButton
                               label={`Add calendar item on ${badgeDate.label}`}
@@ -1139,15 +1195,30 @@ export default function Dashboard() {
                               sourceType="dashboard_day"
                               contextLabel={`Calendar space: ${badgeDate.label}`}
                               modalTitle={`Add Item - ${badgeDate.label}`}
-                              buttonClassName={`inline-flex h-7 w-7 min-w-7 items-center justify-center rounded-lg border text-xs font-black transition focus:outline-none focus:ring-2 focus:ring-sky-300/50 ${day.isToday ? 'border-white/70 bg-slate-950/50 text-white hover:bg-slate-900 hover:border-white' : 'border-slate-600 bg-slate-950/70 text-slate-100 hover:border-sky-300 hover:bg-sky-500/20 hover:text-sky-50'}`}
+                              buttonClassName={`inline-flex h-6 w-6 min-w-6 items-center justify-center rounded-md border text-xs font-black transition focus:outline-none focus:ring-2 focus:ring-cyan-300/50 ${day.isToday ? 'border-cyan-100/70 bg-cyan-200/20 text-cyan-50 hover:bg-cyan-200/30 hover:border-cyan-50' : 'border-slate-600 bg-slate-950/70 text-slate-300 hover:border-cyan-300 hover:bg-cyan-500/20 hover:text-cyan-50'}`}
                               onSaved={() => refreshCalendarEvents(calendarWeekStartKey)}
                             />
                           </div>
                         </div>
                       </header>
-                      <div className="flex-1 space-y-2 p-2.5">
-                        {dayEvents.length > 0 ? (
+                      <div className="flex-1 space-y-2 overflow-hidden p-1.5">
+                        {dayGroups.length > 0 ? (
                           <>
+                            {dayGroups.map(group => (
+                              <div key={group.key} className={`overflow-hidden rounded-md border ${group.tone.body}`}>
+                                <div className={`flex min-h-7 items-center justify-between gap-2 px-2 py-1 ${group.tone.header}`}>
+                                  <span className="min-w-0 truncate text-[8px] font-black uppercase tracking-[0.14em]" title={group.label}>
+                                    {group.label}
+                                  </span>
+                                  <span className={`flex-shrink-0 rounded px-1.5 py-0.5 text-[8px] font-black leading-none ${group.tone.count}`}>
+                                    {group.events.length}
+                                  </span>
+                                </div>
+                                <div className="space-y-1 p-1.5">
+                                  {group.events.map(renderCalendarDayTask)}
+                                </div>
+                              </div>
+                            ))}
                             <AddToCalendarButton
                               label="Add task"
                               ariaLabel={`Add task or event on ${badgeDate.label}`}
@@ -1159,10 +1230,9 @@ export default function Dashboard() {
                               sourceType="dashboard_day"
                               contextLabel={`Calendar space: ${badgeDate.label}`}
                               modalTitle={`Add Item - ${badgeDate.label}`}
-                              buttonClassName="flex min-h-9 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-slate-600/80 bg-slate-950/40 text-xs font-black text-slate-200 transition hover:border-sky-300 hover:bg-sky-500/20 hover:text-sky-50 focus:outline-none focus:ring-2 focus:ring-sky-300/50"
+                              buttonClassName="flex min-h-7 w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-slate-700 bg-slate-950/40 text-[10px] font-black text-slate-400 transition hover:border-cyan-300 hover:bg-cyan-500/10 hover:text-cyan-50 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
                               onSaved={() => refreshCalendarEvents(calendarWeekStartKey)}
                             />
-                            {dayEvents.map(renderCalendarDayTask)}
                           </>
                         ) : (
                           <AddToCalendarButton
@@ -1176,7 +1246,7 @@ export default function Dashboard() {
                             sourceType="dashboard_day"
                             contextLabel={`Calendar space: ${badgeDate.label}`}
                             modalTitle={`Add Item - ${badgeDate.label}`}
-                            buttonClassName="flex min-h-[154px] w-full flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-600/80 bg-slate-950/30 px-2 text-xs font-black text-slate-300 transition hover:border-sky-300 hover:bg-sky-500/20 hover:text-sky-50 focus:outline-none focus:ring-2 focus:ring-sky-300/50"
+                            buttonClassName="flex min-h-[118px] w-full flex-col items-center justify-center gap-2 rounded-md border border-dashed border-slate-700 bg-slate-950/40 px-2 text-[10px] font-black text-slate-500 transition hover:border-cyan-300 hover:bg-cyan-500/10 hover:text-cyan-50 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
                             onSaved={() => refreshCalendarEvents(calendarWeekStartKey)}
                           />
                         )}
