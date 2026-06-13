@@ -144,7 +144,7 @@ export default function MobileFieldWork() {
         formData.append('photo_type', 'scope');
         formData.append('photo_contexts', JSON.stringify(['general', 'scope']));
         formData.append('caption', 'Field work evidence attached to field note');
-        await appendProgressUploadAudit(formData, files, files.map(() => 'device_camera'));
+        await appendProgressUploadAudit(formData, files, files.map(() => 'device_camera'), { projectId });
         await api.post(`/projects/${projectId}/photos?type=scope`, formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
         });
@@ -181,6 +181,7 @@ export default function MobileFieldWork() {
       await appendProgressUploadAudit(formData, selected, selected.map(() => 'device_camera'), {
         batchNote: evidenceNote,
         individualNotes: selected.map(() => evidenceNote),
+        projectId,
       });
       await api.post(`/projects/${projectId}/photos`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       toast.success(evidenceNote ? 'Photo and note uploaded for review' : 'Evidence uploaded for review');

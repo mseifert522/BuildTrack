@@ -30,12 +30,15 @@ const BRAND = {
   color: '#D99D26',
   url: process.env.APP_URL || 'https://buildtrack.newurbandev.com',
   mobileUrl: process.env.MOBILE_APP_URL || 'https://mobile.buildtrack.newurbandev.com',
+  logoUrl: process.env.EMAIL_LOGO_URL || `${(process.env.APP_URL || 'https://buildtrack.newurbandev.com').replace(/\/+$/, '')}/nud-logo.jpg`,
+  quoteInbox: process.env.QUOTE_REQUEST_VISIBLE_TO || process.env.COMPANY_EMAIL || process.env.SMTP_USER || 'info@newurbandev.com',
 };
 
 function emailWrapper(content) {
   return `
     <div style="font-family: 'Helvetica Neue', Arial, sans-serif; max-width: 560px; margin: 0 auto; background: #ffffff;">
       <div style="background: linear-gradient(135deg, #0D1117, #181D25); padding: 32px 24px; text-align: center; border-radius: 12px 12px 0 0;">
+        <img src="${BRAND.logoUrl}" alt="${BRAND.name}" width="88" style="display:block; width:88px; max-width:88px; height:auto; margin:0 auto 14px; border-radius:10px;" />
         <h1 style="color: white; font-size: 22px; font-weight: 800; margin: 0;">${BRAND.name}</h1>
         <p style="color: ${BRAND.color}; font-size: 12px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; margin: 6px 0 0;">BuildTrack Platform</p>
       </div>
@@ -57,6 +60,25 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function scopeLineItems(value) {
+  const normalized = String(value || '')
+    .replace(/\r/g, '\n')
+    .replace(/[•·]/g, '\n')
+    .replace(/(?:^|\n)\s*(?:[-*]|\d+[.)])\s+/g, '\n')
+    .replace(/([.!?])\s+(?=[A-Z0-9])/g, '$1\n')
+    .split(/\n+/)
+    .map(item => item.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  return normalized.length ? normalized : [];
+}
+
+function absoluteUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return `${String(BRAND.url || '').replace(/\/+$/, '')}/${raw.replace(/^\/+/, '')}`;
 }
 
 function safeFileName(value) {
@@ -476,7 +498,7 @@ async function sendInvoiceEmail({ invoice, project, contractor, pdfBuffer }) {
 
 async function sendApprovedPayNotificationEmail({ approvedInvoices, approvedInvoice, approvedBy }) {
   const transporter = createTransporter();
-  const operationsEmail = process.env.APPROVED_INVOICE_NOTIFY_EMAIL || process.env.OFFICE_EMAIL || 'info@newurbandev.com';
+  const operationsEmail = process.env.APPROVED_INVOICE_NOTIFY_EMAIL || 'info@newurbandev.com';
   const appUrl = (process.env.APP_URL || BRAND.url || 'https://buildtrack.newurbandev.com').replace(/\/$/, '');
   const rows = Array.isArray(approvedInvoices) ? approvedInvoices : [];
   const total = rows.reduce((sum, invoice) => sum + Number(invoice.quickbooks_balance ?? invoice.total ?? 0), 0);
@@ -593,10 +615,121 @@ async function sendCalendarReminderEmail({ recipients, subject, message, event, 
   });
 }
 
+async function sendVendorQuoteRequestEmail({ vendorName, vendorEmail, project, requestUrl, expiresAt, message, scopes, includePhotos, requestedBy }) {
+  const transporter = createTransporter();
+  const safeUrl = escapeHtml(requestUrl);
+  const displayName = escapeHtml(vendorName || 'there');
+  const rawProjectLabel = project?.public_label || project?.city || 'BuildTrack project';
+  const subjectProjectLabel = project?.job_name || project?.address || rawProjectLabel;
+  const projectLabel = escapeHtml(rawProjectLabel);
+  const scopedItems = Array.isArray(scopes) ? scopes : [];
+  const scopeRows = scopedItems.map((scope, scopeIndex) => {
+    const details = scopeLineItems(scope.scope_of_work);
+    const executionItems = Array.isArray(scope.execution_items) ? scope.execution_items : [];
+    const lines = details.length
+      ? details
+      : executionItems.map(item => [item.title, item.description].filter(Boolean).join(' - ')).filter(Boolean);
+    const fallbackLines = lines.length ? lines : [scope.scope_title || 'Selected scope item'];
+    return `
+      <tr>
+        <td style="padding:14px 0; border-top:${scopeIndex === 0 ? 'none' : '1px solid #E5E7EB'};">
+          <p style="font-size:12px; color:#92400E; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin:0 0 5px;">${escapeHtml(scope.section_name || 'Scope')}</p>
+          <p style="font-size:15px; color:#111827; font-weight:800; margin:0 0 8px;">${scopeIndex + 1}. ${escapeHtml(scope.scope_title || 'Scope item')}</p>
+          <ol style="margin:0; padding-left:22px; color:#374151; font-size:13px; line-height:1.55;">
+            ${fallbackLines.map(item => `<li style="margin:0 0 6px;">${escapeHtml(item)}</li>`).join('')}
+          </ol>
+        </td>
+      </tr>
+    `;
+  }).join('');
+  const scopePhotos = scopedItems.flatMap(scope => (
+    Array.isArray(scope.photos)
+      ? scope.photos.map(photo => ({
+          ...photo,
+          scope_title: scope.scope_title,
+          url: absoluteUrl(photo.url),
+        }))
+      : []
+  )).filter(photo => photo.url);
+  const photoRows = [];
+  for (let index = 0; index < scopePhotos.length; index += 3) {
+    const row = scopePhotos.slice(index, index + 3);
+    photoRows.push(`
+      <tr>
+        ${row.map(photo => `
+          <td style="width:33.333%; padding:4px; vertical-align:top;">
+            <a href="${escapeHtml(photo.url)}" style="display:block; text-decoration:none;">
+              <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.original_name || photo.scope_title || 'Scope photo')}" width="160" height="108" style="display:block; width:100%; height:108px; object-fit:cover; border-radius:10px; border:1px solid #E5E7EB;" />
+            </a>
+          </td>
+        `).join('')}
+        ${Array.from({ length: 3 - row.length }).map(() => '<td style="width:33.333%; padding:4px;"></td>').join('')}
+      </tr>
+    `);
+  }
+  const expirationLabel = expiresAt ? new Date(expiresAt).toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  }) : 'the date shown on the quote page';
+
+  const html = emailWrapper(`
+    <h2 style="color:#111827; font-size:20px; font-weight:800; margin:0 0 8px;">Quote requested for ${projectLabel}</h2>
+    <p style="color:#6B7280; font-size:14px; line-height:1.6; margin:0 0 18px;">
+      Hi ${displayName}, New Urban Development is requesting pricing for the selected scope of work in BuildTrack.
+    </p>
+    ${message ? `
+      <div style="background:#F9FAFB; border:1px solid #E5E7EB; border-radius:12px; padding:16px; margin-bottom:18px;">
+        <p style="font-size:12px; color:#92400E; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin:0 0 8px;">Message</p>
+        <p style="font-size:13px; color:#374151; line-height:1.6; margin:0;">${escapeHtml(message).replace(/\n/g, '<br />')}</p>
+      </div>
+    ` : ''}
+    <div style="background:#F9FAFB; border:1px solid #E5E7EB; border-radius:12px; padding:16px; margin-bottom:18px;">
+      <p style="font-size:12px; color:#6B7280; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin:0 0 10px;">Scope included</p>
+      <table role="presentation" style="width:100%; border-collapse:collapse;">
+        <tbody>${scopeRows || '<tr><td style="font-size:13px; color:#374151;">Selected project scope of work</td></tr>'}</tbody>
+      </table>
+      <p style="font-size:12px; color:#6B7280; line-height:1.5; margin:12px 0 0;">
+        Contractors can enter a price for each scope line item or enter one total amount at the bottom of the secure quote link.
+      </p>
+    </div>
+    ${includePhotos ? `
+      <div style="background:#FFFFFF; border:1px solid #E5E7EB; border-radius:12px; padding:12px; margin-bottom:18px;">
+        <p style="font-size:12px; color:#6B7280; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin:0 0 8px;">Scope photos</p>
+        ${photoRows.length ? `
+          <table role="presentation" style="width:100%; border-collapse:collapse;">
+            <tbody>${photoRows.join('')}</tbody>
+          </table>
+        ` : '<p style="font-size:12px; color:#6B7280; line-height:1.5; margin:0;">No photos were attached to this request.</p>'}
+      </div>
+    ` : ''}
+    <a href="${safeUrl}" style="display:block; text-align:center; background:${BRAND.color}; color:white; padding:14px 24px; border-radius:12px; text-decoration:none; font-weight:800; font-size:14px; margin-bottom:14px;">
+      Review Scope And Submit Price
+    </a>
+    <p style="color:#6B7280; font-size:12px; line-height:1.5; margin:0 0 12px;">
+      If the button does not open, copy and paste this link into your browser:<br />
+      <span style="word-break:break-all; color:#111827;">${safeUrl}</span>
+    </p>
+    <p style="color:#9CA3AF; font-size:11px; text-align:center; line-height:1.5; margin:0;">
+      Requested by ${escapeHtml(requestedBy || 'BuildTrack')}. This quote link expires on ${escapeHtml(expirationLabel)}.
+    </p>
+  `);
+
+  await transporter.sendMail({
+    from: process.env.EMAIL_FROM || `BuildTrack <noreply@newurbandev.com>`,
+    to: BRAND.quoteInbox,
+    bcc: vendorEmail,
+    replyTo: process.env.EMAIL_REPLY_TO || 'info@newurbandev.com',
+    subject: `Quote requested from New Urban Development - ${subjectProjectLabel}`,
+    html,
+  });
+}
+
 module.exports = {
   sendInvoiceEmail,
   sendApprovedPayNotificationEmail,
   sendCalendarReminderEmail,
+  sendVendorQuoteRequestEmail,
   sendInviteEmail,
   sendContractorPinEmail,
   sendPasswordResetEmail,

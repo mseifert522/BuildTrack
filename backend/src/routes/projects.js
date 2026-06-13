@@ -15,8 +15,18 @@ router.use(authenticate);
 
 const MANAGEMENT_ROLES = ['super_admin', 'operations_manager', 'project_manager'];
 const PROJECT_STATUS_ADMIN_ROLES = ['super_admin', 'operations_manager'];
-const PROJECT_STATUSES = ['not_started', 'active_rehab', 'rehab_completed', 'long_term_holding', 'commercial'];
+const PROJECT_STATUSES = ['not_started', 'active_rehab', 'rehab_completed', 'long_term_holding', 'commercial', 'wholesale'];
 const PROJECT_MARKET_STATUSES = ['not_on_market', 'on_market'];
+
+function canViewProjectBudget(user) {
+  return MANAGEMENT_ROLES.includes(String(user?.role || ''));
+}
+
+function sanitizeProjectForUser(project, user) {
+  if (!project || canViewProjectBudget(user)) return project;
+  const { budget, ...safeProject } = project;
+  return safeProject;
+}
 
 function toFlag(value) {
   if (value === true || value === 1) return 1;
@@ -233,6 +243,8 @@ function lifecycleFromStatus(status, fallback = 'under_construction') {
       return 'long_term_holding';
     case 'commercial':
       return 'commercial';
+    case 'wholesale':
+      return 'wholesale';
     default:
       return fallback && fallback !== 'acquired' ? fallback : 'under_construction';
   }
@@ -508,13 +520,13 @@ router.get('/', (req, res) => {
     const openItems = db.prepare("SELECT COUNT(*) as cnt FROM punch_list_items WHERE project_id = ? AND status != 'completed'").get(p.id);
     const activeScopes = db.prepare("SELECT COUNT(*) as cnt FROM project_scopes WHERE project_id = ? AND status = 'active'").get(p.id);
     const activeFieldWork = db.prepare("SELECT COUNT(*) as cnt FROM construction_plan_items WHERE project_id = ? AND status != 'completed'").get(p.id);
-    return {
+    return sanitizeProjectForUser({
       ...p,
       assigned_count: assignedCount.cnt,
       open_punch_items: openItems.cnt,
       active_scope_count: activeScopes.cnt,
       field_work_task_count: activeFieldWork.cnt,
-    };
+    }, req.user);
   });
 
   logDataAccess(req, {
@@ -638,7 +650,7 @@ router.get('/:id', authorizeProjectAccess, (req, res) => {
     details: { address: project.address, job_name: project.job_name },
   });
 
-  res.json({
+  res.json(sanitizeProjectForUser({
     ...project,
     assignments,
     punch_stats: punchStats,
@@ -646,7 +658,7 @@ router.get('/:id', authorizeProjectAccess, (req, res) => {
     recent_invoices: recentInvoices,
     active_scope_count: activeScopeCount.cnt,
     field_work_task_count: fieldWorkTaskCount.cnt,
-  });
+  }, req.user));
 });
 
 const PROJECT_SCOPE_STATUSES = ['draft', 'active', 'on_hold', 'completed'];
@@ -657,6 +669,24 @@ const FIELD_INVOICE_STATUSES = ['not_received', 'received', 'approval_needed', '
 function normalizeFieldStatus(value, allowed, fallback) {
   const requested = String(value || '').trim();
   return allowed.includes(requested) ? requested : fallback;
+}
+
+function normalizeScopeTimelineDate(value, fieldLabel) {
+  if (value === undefined) return undefined;
+  if (value === null || String(value).trim() === '') return null;
+  const text = String(value).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) throw projectRouteError(`${fieldLabel} must be a valid date`);
+  const parsed = new Date(`${text}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== text) {
+    throw projectRouteError(`${fieldLabel} must be a valid date`);
+  }
+  return text;
+}
+
+function assertScopeTimelineRange(startDate, endDate) {
+  if (startDate && endDate && endDate < startDate) {
+    throw projectRouteError('Timeline completion date cannot be before timeline start date');
+  }
 }
 
 // GET /api/projects/:id/scopes - multiple scope-of-work sections for the project
@@ -686,6 +716,9 @@ router.post('/:id/scopes', authorize(...MANAGEMENT_ROLES), authorizeProjectAcces
     const title = String(scope_title || '').trim();
     const body = String(scope_of_work || '').trim();
     const scopeStatus = PROJECT_SCOPE_STATUSES.includes(String(status || 'active')) ? String(status || 'active') : 'active';
+    const timelineStart = normalizeScopeTimelineDate(req.body.timeline_start, 'Timeline start date') ?? null;
+    const timelineEnd = normalizeScopeTimelineDate(req.body.timeline_end, 'Timeline completion date') ?? null;
+    assertScopeTimelineRange(timelineStart, timelineEnd);
     if (!title) return res.status(400).json({ error: 'Scope title is required' });
 
     const db = getDb();
@@ -695,8 +728,8 @@ router.post('/:id/scopes', authorize(...MANAGEMENT_ROLES), authorizeProjectAcces
     const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) as max FROM project_scopes WHERE project_id = ?').get(req.params.id);
     const scopeId = uuidv4();
     db.prepare(`
-      INSERT INTO project_scopes (id, project_id, section_name, scope_title, scope_of_work, status, sort_order, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO project_scopes (id, project_id, section_name, scope_title, scope_of_work, status, timeline_start, timeline_end, sort_order, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       scopeId,
       req.params.id,
@@ -704,15 +737,17 @@ router.post('/:id/scopes', authorize(...MANAGEMENT_ROLES), authorizeProjectAcces
       title,
       body,
       scopeStatus,
+      timelineStart,
+      timelineEnd,
       maxOrder.max + 1,
       req.user.id
     );
     db.prepare("UPDATE projects SET updated_at = datetime('now') WHERE id = ?").run(req.params.id);
-    logActivity({ userId: req.user.id, projectId: req.params.id, action: 'project_scope_created', entityType: 'project_scope', entityId: scopeId, details: { scope_title: title, section_name } });
+    logActivity({ userId: req.user.id, projectId: req.params.id, action: 'project_scope_created', entityType: 'project_scope', entityId: scopeId, details: { scope_title: title, section_name, timeline_start: timelineStart, timeline_end: timelineEnd } });
     res.status(201).json({ id: scopeId });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to create scope of work' });
+    res.status(err.statusCode || 500).json({ error: err.statusCode ? err.message : 'Failed to create scope of work' });
   }
 });
 
@@ -724,21 +759,26 @@ router.post('/:id/scopes/bulk', authorize(...MANAGEMENT_ROLES), authorizeProject
     if (rows.length > 100) return res.status(400).json({ error: 'Bulk scope import is limited to 100 items at a time' });
 
     const scopes = rows.map((row, index) => {
+      const rowNumber = Number(row?.row_number || index + 1);
       const title = String(row?.scope_title || '').trim();
       if (!title) {
-        const rowNumber = Number(row?.row_number || index + 1);
         const message = rowNumber ? `Scope title is required on row ${rowNumber}` : 'Scope title is required';
         const err = new Error(message);
         err.statusCode = 400;
         throw err;
       }
       const requestedStatus = String(row?.status || 'active');
+      const timelineStart = normalizeScopeTimelineDate(row?.timeline_start, `Timeline start date on row ${rowNumber || index + 1}`) ?? null;
+      const timelineEnd = normalizeScopeTimelineDate(row?.timeline_end, `Timeline completion date on row ${rowNumber || index + 1}`) ?? null;
+      assertScopeTimelineRange(timelineStart, timelineEnd);
       return {
         id: uuidv4(),
         section_name: String(row?.section_name || 'General').trim() || 'General',
         scope_title: title,
         scope_of_work: String(row?.scope_of_work || '').trim(),
         status: PROJECT_SCOPE_STATUSES.includes(requestedStatus) ? requestedStatus : 'active',
+        timeline_start: timelineStart,
+        timeline_end: timelineEnd,
       };
     });
 
@@ -749,8 +789,8 @@ router.post('/:id/scopes/bulk', authorize(...MANAGEMENT_ROLES), authorizeProject
     const insertBulkScopes = db.transaction(scopeRows => {
       const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) as max FROM project_scopes WHERE project_id = ?').get(req.params.id);
       const insert = db.prepare(`
-        INSERT INTO project_scopes (id, project_id, section_name, scope_title, scope_of_work, status, sort_order, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO project_scopes (id, project_id, section_name, scope_title, scope_of_work, status, timeline_start, timeline_end, sort_order, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       scopeRows.forEach((scope, index) => {
         insert.run(
@@ -760,6 +800,8 @@ router.post('/:id/scopes/bulk', authorize(...MANAGEMENT_ROLES), authorizeProject
           scope.scope_title,
           scope.scope_of_work,
           scope.status,
+          scope.timeline_start,
+          scope.timeline_end,
           maxOrder.max + index + 1,
           req.user.id
         );
@@ -775,13 +817,60 @@ router.post('/:id/scopes/bulk', authorize(...MANAGEMENT_ROLES), authorizeProject
         action: 'project_scope_created',
         entityType: 'project_scope',
         entityId: scope.id,
-        details: { scope_title: scope.scope_title, section_name: scope.section_name, bulk_created: true },
+        details: { scope_title: scope.scope_title, section_name: scope.section_name, timeline_start: scope.timeline_start, timeline_end: scope.timeline_end, bulk_created: true },
       });
     });
     res.status(201).json({ ids: scopes.map(scope => scope.id), count: scopes.length });
   } catch (err) {
     console.error(err);
     res.status(err.statusCode || 500).json({ error: err.statusCode ? err.message : 'Failed to create bulk scope of work' });
+  }
+});
+
+// POST /api/projects/:id/scopes/reorder
+router.post('/:id/scopes/reorder', authorize(...MANAGEMENT_ROLES), authorizeProjectAccess, blockProjectManagerMutation, (req, res) => {
+  try {
+    const scopeIds = Array.isArray(req.body?.scope_ids)
+      ? req.body.scope_ids.map(id => String(id || '').trim()).filter(Boolean)
+      : [];
+    if (!scopeIds.length) return res.status(400).json({ error: 'Scope order is required' });
+    if (new Set(scopeIds).size !== scopeIds.length) return res.status(400).json({ error: 'Scope order contains duplicate scope IDs' });
+
+    const db = getDb();
+    const existingScopes = db.prepare(`
+      SELECT id
+      FROM project_scopes
+      WHERE project_id = ?
+      ORDER BY sort_order ASC, datetime(created_at) ASC
+    `).all(req.params.id);
+    if (!existingScopes.length) return res.status(404).json({ error: 'No scope of work sections found' });
+    if (existingScopes.length !== scopeIds.length) return res.status(400).json({ error: 'Scope order must include every scope section' });
+
+    const existingIds = new Set(existingScopes.map(scope => String(scope.id)));
+    const unknownId = scopeIds.find(id => !existingIds.has(id));
+    if (unknownId) return res.status(400).json({ error: 'Scope order contains a scope that is not on this project' });
+
+    const reorderScopes = db.transaction(ids => {
+      const update = db.prepare("UPDATE project_scopes SET sort_order = ?, updated_at = datetime('now') WHERE id = ? AND project_id = ?");
+      ids.forEach((scopeId, index) => {
+        update.run(index + 1, scopeId, req.params.id);
+      });
+      db.prepare("UPDATE projects SET updated_at = datetime('now') WHERE id = ?").run(req.params.id);
+    });
+
+    reorderScopes(scopeIds);
+    logActivity({
+      userId: req.user.id,
+      projectId: req.params.id,
+      action: 'project_scopes_reordered',
+      entityType: 'project_scope',
+      entityId: req.params.id,
+      details: { scope_ids: scopeIds },
+    });
+    res.json({ message: 'Scope order updated', scopes: getProjectScopes(db, req.params.id) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to reorder scope of work' });
   }
 });
 
@@ -797,26 +886,35 @@ router.put('/:id/scopes/:scopeId', authorize(...MANAGEMENT_ROLES), authorizeProj
       : scope.status;
     const nextTitle = req.body.scope_title !== undefined ? String(req.body.scope_title || '').trim() : scope.scope_title;
     const nextScope = req.body.scope_of_work !== undefined ? String(req.body.scope_of_work || '').trim() : scope.scope_of_work;
+    const nextTimelineStart = req.body.timeline_start !== undefined
+      ? normalizeScopeTimelineDate(req.body.timeline_start, 'Timeline start date')
+      : scope.timeline_start;
+    const nextTimelineEnd = req.body.timeline_end !== undefined
+      ? normalizeScopeTimelineDate(req.body.timeline_end, 'Timeline completion date')
+      : scope.timeline_end;
+    assertScopeTimelineRange(nextTimelineStart, nextTimelineEnd);
     if (!nextTitle) return res.status(400).json({ error: 'Scope title is required' });
 
     db.prepare(`
       UPDATE project_scopes
-      SET section_name = ?, scope_title = ?, scope_of_work = ?, status = ?, updated_at = datetime('now')
+      SET section_name = ?, scope_title = ?, scope_of_work = ?, status = ?, timeline_start = ?, timeline_end = ?, updated_at = datetime('now')
       WHERE id = ? AND project_id = ?
     `).run(
       req.body.section_name !== undefined ? (String(req.body.section_name || '').trim() || 'General') : scope.section_name,
       nextTitle,
       nextScope,
       nextStatus,
+      nextTimelineStart || null,
+      nextTimelineEnd || null,
       req.params.scopeId,
       req.params.id
     );
     db.prepare("UPDATE projects SET updated_at = datetime('now') WHERE id = ?").run(req.params.id);
-    logActivity({ userId: req.user.id, projectId: req.params.id, action: 'project_scope_updated', entityType: 'project_scope', entityId: req.params.scopeId, details: { scope_title: nextTitle, status: nextStatus } });
+    logActivity({ userId: req.user.id, projectId: req.params.id, action: 'project_scope_updated', entityType: 'project_scope', entityId: req.params.scopeId, details: { scope_title: nextTitle, status: nextStatus, timeline_start: nextTimelineStart || null, timeline_end: nextTimelineEnd || null } });
     res.json({ message: 'Scope of work updated' });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to update scope of work' });
+    res.status(err.statusCode || 500).json({ error: err.statusCode ? err.message : 'Failed to update scope of work' });
   }
 });
 
@@ -1314,10 +1412,13 @@ router.post('/', authorizeUpperManagement, (req, res) => {
     if (!PROJECT_STATUSES.includes(projectStatus)) {
       return res.status(400).json({ error: 'Invalid project status' });
     }
-    const projectLifecycle = lifecycle_status && lifecycle_status !== 'acquired'
+    const projectLifecycle = projectStatus === 'wholesale'
+      ? lifecycleFromStatus(projectStatus)
+      : lifecycle_status && lifecycle_status !== 'acquired'
       ? lifecycle_status
       : lifecycleFromStatus(projectStatus);
-    const projectMarketStatus = normalizeProjectMarketStatus(market_status);
+    const normalizedMarketStatus = normalizeProjectMarketStatus(market_status);
+    const projectMarketStatus = projectStatus === 'wholesale' ? 'on_market' : normalizedMarketStatus;
     const projectWorkPriority = normalizeProjectPriority(work_priority);
     assertWorkPriorityAvailable(db, projectWorkPriority);
     db.prepare(`
@@ -1339,13 +1440,6 @@ router.post('/', authorizeUpperManagement, (req, res) => {
       sale_price || null, purchase_price || null, arv || null, closing_costs || null, lockbox_code || null,
       toFlag(punchlist_stage), projectMarketStatus, projectWorkPriority
     );
-
-    // Create default photo categories
-    const defaultCategories = ['Demo', 'Framing', 'Electrical', 'Plumbing', 'Drywall', 'Flooring', 'Painting', 'Exterior', 'Final'];
-    const insertCat = db.prepare('INSERT INTO photo_categories (id, project_id, name, created_by) VALUES (?, ?, ?, ?)');
-    for (const cat of defaultCategories) {
-      insertCat.run(uuidv4(), id, cat, req.user.id);
-    }
 
     if (scope_of_work && String(scope_of_work).trim()) {
       db.prepare(`
@@ -1408,12 +1502,15 @@ router.put('/:id', authorizeUpperManagement, authorizeProjectAccess, (req, res) 
     if (punchlist_stage !== undefined && nextPunchlistStage !== Number(project.punchlist_stage || 0) && !PROJECT_STATUS_ADMIN_ROLES.includes(req.user.role)) {
       return res.status(403).json({ error: 'Only an operations manager or super admin can change punchlist stage' });
     }
-    const newLifecycle = lifecycle_status && lifecycle_status !== 'acquired'
+    const newLifecycle = nextStatus === 'wholesale'
+      ? lifecycleFromStatus(nextStatus)
+      : lifecycle_status && lifecycle_status !== 'acquired'
       ? lifecycle_status
       : lifecycleFromStatus(nextStatus, project.lifecycle_status);
-    const nextMarketStatus = market_status !== undefined
+    const requestedMarketStatus = market_status !== undefined
       ? normalizeProjectMarketStatus(market_status, prevMarketStatus)
       : prevMarketStatus;
+    const nextMarketStatus = nextStatus === 'wholesale' ? 'on_market' : requestedMarketStatus;
     const nextWorkPriority = work_priority !== undefined
       ? normalizeProjectPriority(work_priority, prevWorkPriority)
       : prevWorkPriority;

@@ -228,6 +228,8 @@ export default function MobilePunchList() {
         if (createdId && draft.photos.length) {
           const formData = new FormData();
           draft.photos.forEach(file => formData.append('photos', file));
+          formData.append('capture_project_id', id);
+          formData.append('client_project_id', id);
           formData.append('punch_list_item_id', String(createdId));
           formData.append('caption', `Punch list: ${draft.title}`);
           await api.post(`/projects/${id}/photos`, formData, {
@@ -303,6 +305,8 @@ export default function MobilePunchList() {
     try {
       const formData = new FormData();
       previewFiles.forEach(file => formData.append('photos', file));
+      formData.append('capture_project_id', id);
+      formData.append('client_project_id', id);
       formData.append('punch_list_item_id', photoItemId);
       if (uploadCaption.trim()) formData.append('caption', uploadCaption.trim());
 

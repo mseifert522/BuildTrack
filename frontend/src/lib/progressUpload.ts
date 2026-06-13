@@ -54,7 +54,7 @@ export const PROGRESS_IMAGE_QUALITY = 0.86;
 
 export type ProgressCaptureSource = 'batch_camera' | 'device_camera' | 'library' | 'desktop' | 'unknown';
 
-const GEOLOCATION_TIMEOUT_MS = 1400;
+const GEOLOCATION_TIMEOUT_MS = 6500;
 const IMAGE_TYPES_TO_RESIZE = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp']);
 const PROGRESS_MEDIA_EXTENSION_SET = new Set(PROGRESS_MEDIA_EXTENSIONS);
 
@@ -77,6 +77,7 @@ export interface ProgressUploadAuditOptions {
   batchSequenceStart?: number;
   location?: ProgressUploadLocation | null;
   skipDeviceLocation?: boolean;
+  projectId?: string;
 }
 
 export interface ProgressUploadLocation {
@@ -90,6 +91,24 @@ interface ImageMetadata {
   latitude?: number;
   longitude?: number;
   accuracy?: number;
+}
+
+function isValidGpsPair(latitude: unknown, longitude: unknown) {
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return false;
+  return !(Math.abs(lat) < 0.00001 && Math.abs(lng) < 0.00001);
+}
+
+function normalizeUploadLocation(value?: Partial<ProgressUploadLocation> | null): ProgressUploadLocation | null {
+  if (!value || !isValidGpsPair(value.latitude, value.longitude)) return null;
+  const accuracy = Number(value.accuracy);
+  return {
+    latitude: Number(value.latitude),
+    longitude: Number(value.longitude),
+    ...(Number.isFinite(accuracy) && accuracy >= 0 ? { accuracy } : {}),
+  };
 }
 
 function getUploadPosition(): Promise<GeolocationPosition | null> {
@@ -127,10 +146,14 @@ async function readImageMetadata(file: File): Promise<ImageMetadata> {
       translateValues: false,
     });
     if (!metadata) return {};
+    const latitude = typeof metadata.GPSLatitude === 'number' ? metadata.GPSLatitude : undefined;
+    const longitude = typeof metadata.GPSLongitude === 'number' ? metadata.GPSLongitude : undefined;
+    const exifLocation = normalizeUploadLocation({ latitude, longitude });
     return {
       capturedAt: normalizeExifDate(metadata.DateTimeOriginal || metadata.CreateDate || metadata.ModifyDate) || undefined,
-      latitude: typeof metadata.GPSLatitude === 'number' ? metadata.GPSLatitude : undefined,
-      longitude: typeof metadata.GPSLongitude === 'number' ? metadata.GPSLongitude : undefined,
+      latitude: exifLocation?.latitude,
+      longitude: exifLocation?.longitude,
+      accuracy: exifLocation?.accuracy,
     };
   } catch {
     return {};
@@ -187,11 +210,21 @@ export async function appendProgressUploadAudit(
   options: ProgressUploadAuditOptions = {}
 ) {
   const now = new Date();
+  const projectId = String(options.projectId || '').trim();
+  if (projectId) {
+    formData.set('capture_project_id', projectId);
+    formData.set('client_project_id', projectId);
+  }
   const metadata = await Promise.all(files.map(readImageMetadata));
   const capturedValues = files.map((file, index) => metadata[index]?.capturedAt || getFallbackCapturedAt(file, now));
-  const latitudes = metadata.map(item => item.latitude ?? null);
-  const longitudes = metadata.map(item => item.longitude ?? null);
-  const accuracies = metadata.map(item => item.accuracy ?? null);
+  const metadataLocations = metadata.map(item => normalizeUploadLocation(item));
+  const needsLiveDeviceLocation = sources.some(source => source === 'device_camera' || source === 'batch_camera' || source === 'library');
+  const optionLocation = normalizeUploadLocation(options.location);
+  const position = optionLocation || options.skipDeviceLocation || !needsLiveDeviceLocation ? null : await getUploadPosition();
+  const liveLocation = optionLocation || normalizeUploadLocation(position?.coords);
+  const latitudes = metadataLocations.map(item => item?.latitude ?? liveLocation?.latitude ?? null);
+  const longitudes = metadataLocations.map(item => item?.longitude ?? liveLocation?.longitude ?? null);
+  const accuracies = metadataLocations.map(item => item?.accuracy ?? liveLocation?.accuracy ?? null);
 
   formData.append('taken_at_values', JSON.stringify(capturedValues));
   formData.append('captured_at_values', JSON.stringify(capturedValues));
@@ -210,17 +243,13 @@ export async function appendProgressUploadAudit(
   if (longitudes.some(value => value !== null)) formData.append('gps_longitude_values', JSON.stringify(longitudes));
   if (accuracies.some(value => value !== null)) formData.append('gps_accuracy_values', JSON.stringify(accuracies));
 
-  const position = options.location || options.skipDeviceLocation ? null : await getUploadPosition();
-  const firstMetadata = metadata[0];
-  const latitude = firstMetadata?.latitude ?? options.location?.latitude ?? position?.coords.latitude;
-  const longitude = firstMetadata?.longitude ?? options.location?.longitude ?? position?.coords.longitude;
-  const accuracy = firstMetadata?.accuracy ?? options.location?.accuracy ?? position?.coords.accuracy;
-  if (latitude === undefined || longitude === undefined) return;
+  const firstLocation = metadataLocations[0] || liveLocation;
+  if (!firstLocation) return;
 
-  formData.append('capture_latitude', String(latitude));
-  formData.append('capture_longitude', String(longitude));
-  if (accuracy !== undefined) formData.append('capture_accuracy', String(accuracy));
-  formData.append('gps_latitude', String(latitude));
-  formData.append('gps_longitude', String(longitude));
-  if (accuracy !== undefined) formData.append('gps_accuracy', String(accuracy));
+  formData.append('capture_latitude', String(firstLocation.latitude));
+  formData.append('capture_longitude', String(firstLocation.longitude));
+  if (firstLocation.accuracy !== undefined) formData.append('capture_accuracy', String(firstLocation.accuracy));
+  formData.append('gps_latitude', String(firstLocation.latitude));
+  formData.append('gps_longitude', String(firstLocation.longitude));
+  if (firstLocation.accuracy !== undefined) formData.append('gps_accuracy', String(firstLocation.accuracy));
 }

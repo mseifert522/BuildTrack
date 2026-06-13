@@ -18,8 +18,12 @@ const DEFAULT_EXCLUDED_BILL_VENDORS = ['great lakes mortgage fund'];
 const PAYMENT_APPROVAL_STATUS = 'approved_for_payment';
 const PAYMENT_APPROVAL_DEFAULT_STATUS = 'not_approved';
 const PAYDAY_ANCHOR_UTC_MS = Date.UTC(2026, 5, 12, 12, 0, 0);
+const PAYMENT_QUEUE_NOTIFY_DEFAULT_HOUR_ET = 8;
+const PAYMENT_QUEUE_NOTIFY_DEFAULT_POLL_MS = 5 * 60 * 1000;
 let autoSyncStarted = false;
 let activeSyncPromise = null;
+let paymentQueueSchedulerStarted = false;
+let paymentQueueSchedulerRunning = false;
 
 function qboEnvironment() {
   return String(process.env.QBO_ENVIRONMENT || process.env.QUICKBOOKS_ENVIRONMENT || 'production').toLowerCase() === 'sandbox'
@@ -136,6 +140,52 @@ function nextPaymentRunDate(value = new Date()) {
     candidate.setUTCDate(candidate.getUTCDate() + 7);
   }
   return candidate.toISOString().slice(0, 10);
+}
+
+function easternDateParts(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value || Date.now());
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    weekday: 'short',
+    hour: '2-digit',
+    hour12: false,
+  }).formatToParts(Number.isFinite(date.getTime()) ? date : new Date());
+  const byType = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return {
+    isoDate: `${byType.year}-${byType.month}-${byType.day}`,
+    weekday: byType.weekday,
+    hour: Number(byType.hour === '24' ? 0 : byType.hour),
+  };
+}
+
+function getPaymentQueueNotifyHourEt() {
+  const requested = Number(process.env.QBO_PAYMENT_QUEUE_NOTIFY_HOUR_ET || process.env.PAYMENT_QUEUE_NOTIFY_HOUR_ET || PAYMENT_QUEUE_NOTIFY_DEFAULT_HOUR_ET);
+  if (!Number.isFinite(requested)) return PAYMENT_QUEUE_NOTIFY_DEFAULT_HOUR_ET;
+  return Math.max(0, Math.min(23, Math.floor(requested)));
+}
+
+function getPaymentQueueNotifyPollMs() {
+  const requested = Number(process.env.QBO_PAYMENT_QUEUE_NOTIFY_POLL_MS || process.env.PAYMENT_QUEUE_NOTIFY_POLL_MS || PAYMENT_QUEUE_NOTIFY_DEFAULT_POLL_MS);
+  if (!Number.isFinite(requested) || requested <= 0) return PAYMENT_QUEUE_NOTIFY_DEFAULT_POLL_MS;
+  return Math.max(60 * 1000, Math.floor(requested));
+}
+
+function isBiweeklyPaymentQueueDate(isoDate) {
+  const date = new Date(`${isoDate}T12:00:00Z`);
+  if (!Number.isFinite(date.getTime())) return false;
+  const diffDays = Math.round((date.getTime() - PAYDAY_ANCHOR_UTC_MS) / 86400000);
+  return diffDays >= 0 && diffDays % 14 === 0;
+}
+
+function scheduledPaymentQueueRunDate(value = new Date()) {
+  const parts = easternDateParts(value);
+  if (parts.weekday !== 'Fri') return null;
+  if (parts.hour < getPaymentQueueNotifyHourEt()) return null;
+  if (!isBiweeklyPaymentQueueDate(parts.isoDate)) return null;
+  return parts.isoDate;
 }
 
 function getActiveConnection(db) {
@@ -874,6 +924,69 @@ function attachQuickBooksBillLines(db, rows) {
   return Array.isArray(rows) ? withLines : withLines[0];
 }
 
+function parseQuickBooksPaymentBillIds(value) {
+  try {
+    const parsed = JSON.parse(value || '[]');
+    return Array.isArray(parsed) ? parsed.map(id => String(id || '').trim()).filter(Boolean) : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function paymentDateRank(value) {
+  const time = Date.parse(value || '');
+  return Number.isFinite(time) ? time : 0;
+}
+
+function attachQuickBooksBillPaymentDates(db, rows) {
+  const list = Array.isArray(rows) ? rows : [rows].filter(Boolean);
+  if (!list.length) return rows;
+  const wantedIds = new Set(list.map(row => String(row.qbo_id || '').trim()).filter(Boolean));
+  const latestByBillId = new Map();
+  const payments = db.prepare(`
+    SELECT qbo_id, txn_date, qbo_updated_at, last_seen_at, linked_bill_ids_json
+    FROM quickbooks_bill_payments
+  `).all();
+
+  for (const payment of payments) {
+    const linkedBillIds = parseQuickBooksPaymentBillIds(payment.linked_bill_ids_json);
+    if (!linkedBillIds.length) continue;
+    const paidAt = payment.txn_date || payment.qbo_updated_at || payment.last_seen_at || '';
+    const observedAt = payment.qbo_updated_at || payment.last_seen_at || payment.txn_date || '';
+    const paidRank = paymentDateRank(paidAt);
+    const observedRank = paymentDateRank(observedAt);
+
+    for (const billId of linkedBillIds) {
+      if (!wantedIds.has(billId)) continue;
+      const current = latestByBillId.get(billId);
+      if (
+        !current
+        || paidRank > current.paidRank
+        || (paidRank === current.paidRank && observedRank > current.observedRank)
+      ) {
+        latestByBillId.set(billId, {
+          last_paid_at: paidAt || null,
+          last_paid_seen_at: observedAt || null,
+          last_paid_payment_id: payment.qbo_id || null,
+          paidRank,
+          observedRank,
+        });
+      }
+    }
+  }
+
+  const withPaymentDates = list.map(row => {
+    const payment = latestByBillId.get(String(row.qbo_id || '').trim());
+    return payment ? {
+      ...row,
+      last_paid_at: payment.last_paid_at,
+      last_paid_seen_at: payment.last_paid_seen_at,
+      last_paid_payment_id: payment.last_paid_payment_id,
+    } : row;
+  });
+  return Array.isArray(rows) ? withPaymentDates : withPaymentDates[0];
+}
+
 function quickBooksBillLineSummary(db, qboId) {
   return db.prepare(`
     SELECT
@@ -899,7 +1012,7 @@ function getQuickBooksBillRow(db, qboId) {
     WHERE qb.qbo_id = ?
     LIMIT 1
   `).get(String(qboId || ''));
-  return attachQuickBooksBillLines(db, row);
+  return attachQuickBooksBillLines(db, attachQuickBooksBillPaymentDates(db, row));
 }
 
 function approvedPaymentQueueRows(db, paymentRunDate = null) {
@@ -938,6 +1051,108 @@ function paymentQueueEmailRows(rows) {
     total: normalizeMoney(row.total_amt),
     quickbooks_balance: normalizeMoney(row.balance),
   }));
+}
+
+function paymentQueueTotal(rows) {
+  return rows.reduce((sum, row) => sum + normalizeMoney(row.balance), 0);
+}
+
+function paymentQueueAutomationUserId(db) {
+  const row = db.prepare(`
+    SELECT id
+    FROM users
+    WHERE role IN ('super_admin', 'operations_manager')
+    ORDER BY CASE role WHEN 'super_admin' THEN 0 WHEN 'operations_manager' THEN 1 ELSE 2 END,
+      datetime(created_at) ASC
+    LIMIT 1
+  `).get();
+  return row?.id || null;
+}
+
+function paymentQueueAutoEmailAlreadySent(db, paymentRunDate) {
+  const row = db.prepare(`
+    SELECT id
+    FROM activity_log
+    WHERE action = 'quickbooks_payment_queue_auto_notified'
+      AND entity_type = 'quickbooks_payment_queue'
+      AND entity_id = ?
+    LIMIT 1
+  `).get(paymentRunDate);
+  return Boolean(row);
+}
+
+function recordPaymentQueueAutoEmail(db, { paymentRunDate, rows, total, userId }) {
+  if (!userId) return;
+  db.prepare(`
+    INSERT INTO activity_log (id, project_id, user_id, action, entity_type, entity_id, details)
+    VALUES (?, NULL, ?, 'quickbooks_payment_queue_auto_notified', 'quickbooks_payment_queue', ?, ?)
+  `).run(
+    uuidv4(),
+    userId,
+    paymentRunDate,
+    JSON.stringify({
+      bill_count: rows.length,
+      total_balance: normalizeMoney(total),
+      payment_run_date: paymentRunDate,
+      recipient: process.env.APPROVED_INVOICE_NOTIFY_EMAIL || 'info@newurbandev.com',
+      schedule: 'biweekly_friday_morning',
+      anchor_date: '2026-06-12',
+    })
+  );
+}
+
+function markPaymentQueueRowsNotified(db, rows, userId) {
+  if (!rows.length) return;
+  const updateNotified = db.prepare(`
+    UPDATE quickbooks_bills
+    SET payment_approval_notified_at = datetime('now'),
+        payment_approval_notified_by = ?,
+        updated_at = datetime('now')
+    WHERE qbo_id = ?
+  `);
+  const write = db.transaction(() => {
+    for (const row of rows) updateNotified.run(userId || null, row.qbo_id);
+  });
+  write();
+}
+
+async function sendScheduledPaymentQueueEmail(now = new Date()) {
+  if (paymentQueueSchedulerRunning) return { skipped: true, reason: 'already_running' };
+  const paymentRunDate = scheduledPaymentQueueRunDate(now);
+  if (!paymentRunDate) return { skipped: true, reason: 'not_payday_window' };
+
+  paymentQueueSchedulerRunning = true;
+  try {
+    const db = getDb();
+    if (paymentQueueAutoEmailAlreadySent(db, paymentRunDate)) {
+      return { skipped: true, reason: 'already_sent', payment_run_date: paymentRunDate };
+    }
+
+    const rows = approvedPaymentQueueRows(db, paymentRunDate);
+    const total = paymentQueueTotal(rows);
+    const automationUserId = paymentQueueAutomationUserId(db);
+    await sendApprovedPayNotificationEmail({
+      approvedInvoices: paymentQueueEmailRows(rows),
+      approvedBy: 'BuildTrack automatic Friday payment queue',
+    });
+
+    markPaymentQueueRowsNotified(db, rows, automationUserId);
+    recordPaymentQueueAutoEmail(db, {
+      paymentRunDate,
+      rows,
+      total,
+      userId: automationUserId,
+    });
+    console.log(`[QBO] Scheduled Friday payment queue email sent for ${paymentRunDate}: ${rows.length} bills, $${normalizeMoney(total).toFixed(2)}.`);
+    return {
+      ok: true,
+      payment_run_date: paymentRunDate,
+      bill_count: rows.length,
+      total_balance: normalizeMoney(total),
+    };
+  } finally {
+    paymentQueueSchedulerRunning = false;
+  }
 }
 
 function getAutoSyncIntervalMs() {
@@ -1309,7 +1524,7 @@ router.get('/bills', authorize(...QUICKBOOKS_ADMIN_ROLES), (req, res) => {
       CAST(COALESCE(qb.doc_number, qb.qbo_id) AS TEXT) ASC
     LIMIT ?
   `).all(...params, limit);
-  res.json(attachQuickBooksBillLines(db, rows));
+  res.json(attachQuickBooksBillLines(db, attachQuickBooksBillPaymentDates(db, rows)));
 });
 
 router.put('/bills/:qboId/approve-for-pay', authorize(...QUICKBOOKS_ADMIN_ROLES), (req, res) => {
@@ -1409,7 +1624,7 @@ router.post('/payment-queue/notify', authorize(...QUICKBOOKS_ADMIN_ROLES), async
     write();
 
     const updatedRows = requestedRunDate ? approvedPaymentQueueRows(db, requestedRunDate) : approvedPaymentQueueRows(db);
-    const total = rows.reduce((sum, row) => sum + normalizeMoney(row.balance), 0);
+    const total = paymentQueueTotal(rows);
     logActivity({
       userId: req.user.id,
       action: 'quickbooks_payment_queue_notified',
@@ -1419,7 +1634,7 @@ router.post('/payment-queue/notify', authorize(...QUICKBOOKS_ADMIN_ROLES), async
         bill_count: rows.length,
         total_balance: normalizeMoney(total),
         payment_run_date: requestedRunDate,
-        recipient: process.env.APPROVED_INVOICE_NOTIFY_EMAIL || process.env.OFFICE_EMAIL || 'info@newurbandev.com',
+        recipient: process.env.APPROVED_INVOICE_NOTIFY_EMAIL || 'info@newurbandev.com',
       },
     });
 
@@ -1461,6 +1676,32 @@ function startQuickBooksAutoSync() {
   console.log(`[QBO] Automatic Bill sync enabled every ${Math.round(intervalMs / 1000)} seconds.`);
 }
 
+function startQuickBooksPaymentQueueScheduler() {
+  if (paymentQueueSchedulerStarted) return;
+  if (process.env.QBO_PAYMENT_QUEUE_NOTIFY_ENABLED === 'false' || process.env.PAYMENT_QUEUE_NOTIFY_ENABLED === 'false') {
+    console.log('[QBO] Friday payment queue email scheduler disabled by environment.');
+    return;
+  }
+  paymentQueueSchedulerStarted = true;
+  const intervalMs = getPaymentQueueNotifyPollMs();
+  const run = async () => {
+    try {
+      const result = await sendScheduledPaymentQueueEmail();
+      if (result?.ok) return;
+      if (result?.reason && !['not_payday_window', 'already_sent', 'already_running'].includes(result.reason)) {
+        console.log('[QBO] Friday payment queue email skipped:', result.reason);
+      }
+    } catch (err) {
+      console.error('[QBO] Friday payment queue email failed:', err.message);
+    }
+  };
+  setTimeout(run, 10 * 1000).unref?.();
+  setInterval(run, intervalMs).unref?.();
+  console.log(`[QBO] Friday payment queue email scheduler enabled: every other Friday from 2026-06-12 after ${getPaymentQueueNotifyHourEt()}:00 ET.`);
+}
+
 router.startQuickBooksAutoSync = startQuickBooksAutoSync;
+router.startQuickBooksPaymentQueueScheduler = startQuickBooksPaymentQueueScheduler;
+router.sendScheduledPaymentQueueEmail = sendScheduledPaymentQueueEmail;
 
 module.exports = router;

@@ -1,12 +1,11 @@
-import { type ChangeEvent, type Dispatch, type KeyboardEvent, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ChangeEvent, type Dispatch, type DragEvent, type KeyboardEvent, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link, useLocation, useNavigate } from 'react-router-dom';
-import { useDropzone, type FileRejection } from 'react-dropzone';
 import { useAuthStore, canChangeProjectStatus, canManageProjects, isAdminRole } from '../store/authStore';
 import api from '../lib/api';
 import { Loading, StatusBadge, Modal } from '../components/ui';
 import Avatar from '../components/Avatar';
 import VoiceTextarea from '../components/VoiceTextarea';
-import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, ClipboardList, Activity, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle, Send, Phone, Building2, AlertTriangle, Check, Paperclip, ChevronLeft, ChevronRight, CalendarDays, Search } from 'lucide-react';
+import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, ClipboardList, Activity, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle, Send, Phone, Mail, Building2, AlertTriangle, Check, Paperclip, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, CalendarDays, Search, GripVertical, CheckCircle2, XCircle, Database, ListFilter } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useForm } from 'react-hook-form';
 import { format } from 'date-fns';
@@ -23,7 +22,7 @@ import {
 } from '../lib/progressUpload';
 import { getProgressMediaKind, isVideoMedia } from '../lib/progressMedia';
 
-type Tab = 'overview' | 'progress-history' | 'construction-plan' | 'quotes' | 'punch-list' | 'photos' | 'invoices' | 'activity' | 'notes' | 'team' | 'texts';
+type Tab = 'overview' | 'progress-history' | 'construction-plan' | 'project-timeline' | 'quotes' | 'punch-list' | 'photos' | 'invoices' | 'activity' | 'notes' | 'team' | 'texts';
 
 type ProgressLightboxItem = {
   id: string;
@@ -77,12 +76,35 @@ type ContractorTextMessage = {
 };
 
 type DictationStatus = 'idle' | 'starting' | 'listening';
+const PROJECT_BUDGET_ROLES = new Set(['super_admin', 'operations_manager', 'project_manager']);
+
+function canViewProjectBudget(role?: string | null) {
+  return PROJECT_BUDGET_ROLES.has(String(role || ''));
+}
 
 function appendDictationText(base: string, spokenText: string) {
   const cleanSpoken = spokenText.replace(/\s+/g, ' ').trim();
   if (!cleanSpoken) return base;
   if (!base.trim()) return cleanSpoken;
   return `${base}${/\s$/.test(base) ? '' : ' '}${cleanSpoken}`;
+}
+
+function scopeLineItemText(value: string) {
+  return String(value || '')
+    .replace(/\r/g, '\n')
+    .replace(/[•·]/g, '\n')
+    .replace(/(?:^|\n)\s*(?:[-*]|\d+[.)])\s+/g, '\n')
+    .replace(/([.!?])\s+(?=[A-Z0-9])/g, '$1\n')
+    .split(/\n+/)
+    .map(item => item.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n');
+}
+
+function cityFromProjectAddress(address?: string | null) {
+  const parts = String(address || '').split(',').map(part => part.trim()).filter(Boolean);
+  if (parts.length >= 2) return parts[1].replace(/\s+\d{5}(?:-\d{4})?\b.*$/, '').trim();
+  return '';
 }
 
 function getRecognitionTranscript(results: any) {
@@ -107,6 +129,7 @@ const PROJECT_STATUS_OPTIONS = [
   { value: 'rehab_completed', label: 'Completed Projects' },
   { value: 'long_term_holding', label: 'Long-Term Holdings' },
   { value: 'commercial', label: 'Commercial' },
+  { value: 'wholesale', label: 'Wholesale' },
 ];
 
 function isPunchlistStageEnabled(value: any) {
@@ -151,7 +174,7 @@ const progressPhotoKey = (photo: any) => String(photo?.id || photo?.filename || 
 const progressPhotoSrc = (projectId: string, photo: any) => `/uploads/${projectId}/${photo.filename}`;
 
 const getProgressPhotoNoteText = (photo: any) =>
-  String(photo?.note_text || photo?.individual_note || '').trim();
+  String(photo?.individual_note || photo?.caption || photo?.note_text || '').trim();
 
 const getProgressPhotoGroupNoteText = (photo: any) =>
   String(photo?.batch_note || '').trim();
@@ -172,6 +195,76 @@ const buildProgressLightboxItems = (projectId: string, photos: any[]): ProgressL
       ].filter(Boolean).join(' - '),
       noteText: getProgressPhotoNoteText(photo),
     }));
+
+const scopePhotoLightboxKey = (photo: any) => String(photo?.assignment_id || progressPhotoKey(photo));
+
+const buildScopePhotoLightboxItems = (projectId: string, photos: any[]): ProgressLightboxItem[] =>
+  photos
+    .filter(photo => getProgressMediaKind(photo) !== 'file')
+    .map(photo => ({
+      id: scopePhotoLightboxKey(photo),
+      src: progressPhotoSrc(projectId, photo),
+      isVideo: getProgressMediaKind(photo) === 'video',
+      name: photo.original_name || photo.filename || 'Scope photo',
+      meta: [
+        photo.uploader_name || null,
+        getProgressTimestamp(photo)
+          ? formatEasternDateTime(getProgressTimestamp(photo), { hour: 'numeric', minute: '2-digit' })
+          : null,
+      ].filter(Boolean).join(' - '),
+      noteText: getProgressPhotoNoteText(photo),
+    }));
+
+const projectPhotoRecordLabel = (project: any, projectId: string) =>
+  project?.job_name || project?.address || `Project ${projectId}`;
+
+const photoBelongsToProject = (photo: any, projectId: string) =>
+  String(photo?.project_id || '') === String(projectId || '');
+
+const filterPhotosForProject = (photos: any[], projectId: string) =>
+  photos.filter(photo => photoBelongsToProject(photo, projectId));
+
+const sortProjectPhotosNewestFirst = (photos: any[]) =>
+  [...photos].sort((left, right) => {
+    const leftTime = Date.parse(getProgressTimestamp(left) || '');
+    const rightTime = Date.parse(getProgressTimestamp(right) || '');
+    const safeLeft = Number.isFinite(leftTime) ? leftTime : 0;
+    const safeRight = Number.isFinite(rightTime) ? rightTime : 0;
+    return safeRight - safeLeft;
+  });
+
+const filterScopesForProjectPhotos = (scopes: any[], projectId: string) =>
+  scopes.map(scope => ({
+    ...scope,
+    photos: Array.isArray(scope.photos)
+      ? filterPhotosForProject(scope.photos, projectId)
+      : [],
+  }));
+
+const formatProjectPhotoTimestamp = (photo: any) => {
+  const timestamp = getProgressTimestamp(photo);
+  if (!timestamp) return 'Time not recorded';
+  return formatEasternDateTime(timestamp, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+};
+
+const formatProjectPhotoGps = (photo: any) => {
+  const latitude = Number(photo?.gps_latitude ?? photo?.capture_latitude);
+  const longitude = Number(photo?.gps_longitude ?? photo?.capture_longitude);
+  const hasValidCoordinates = Number.isFinite(latitude)
+    && Number.isFinite(longitude)
+    && Math.abs(latitude) <= 90
+    && Math.abs(longitude) <= 180
+    && !(Math.abs(latitude) < 0.00001 && Math.abs(longitude) < 0.00001);
+  if (!hasValidCoordinates) return 'GPS not verified';
+  const accuracy = Number(photo?.gps_accuracy ?? photo?.capture_accuracy);
+  const accuracyLabel = Number.isFinite(accuracy) ? ` +/- ${Math.round(accuracy)}m` : '';
+  return `GPS verified: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}${accuracyLabel}`;
+};
+
+const formatProjectPhotoIp = (photo: any) => {
+  const ipAddress = String(photo?.upload_ip_address || '').trim();
+  return ipAddress ? `IP: ${ipAddress}` : 'IP not recorded';
+};
 
 const groupProgressRecordsByDay = (records: any[]) =>
   records.reduce<{ date: string; records: any[] }[]>((groups, record) => {
@@ -336,13 +429,14 @@ export default function ProjectDetail() {
   }, [load, tab]);
 
   useEffect(() => {
-    const hashTabMap: Record<string, Tab> = {
-      '#progress-history': 'progress-history',
-      '#construction-plan': 'construction-plan',
-      '#quotes': 'quotes',
-      '#punch-list': 'punch-list',
-      '#assigned-contractors': 'team',
-      '#notes': 'notes',
+      const hashTabMap: Record<string, Tab> = {
+        '#progress-history': 'photos',
+        '#construction-plan': 'construction-plan',
+        '#project-timeline': 'project-timeline',
+        '#quotes': 'quotes',
+        '#punch-list': 'punch-list',
+        '#assigned-contractors': 'team',
+        '#notes': 'notes',
     };
     if (hashTabMap[location.hash]) setTab(hashTabMap[location.hash]);
   }, [location.hash]);
@@ -405,7 +499,20 @@ export default function ProjectDetail() {
 
   const onEditProject = async (data: any) => {
     try {
-      const payload = { ...data, address: editAddress || data.address, budget: editBudget ? parseFloat(editBudget) : null, purchase_price: editPurchasePrice ? parseFloat(editPurchasePrice) : null, arv: editArv ? parseFloat(editArv) : null, closing_costs: editClosingCosts ? parseFloat(editClosingCosts) : null, punchlist_stage: data.punchlist_stage ? 1 : 0 };
+      const projectFields = { ...data };
+      delete projectFields.scope_of_work;
+      delete projectFields.office_notes;
+      delete projectFields.field_notes;
+      delete projectFields.budget;
+      const payload = {
+        ...projectFields,
+        address: editAddress || data.address,
+        ...(canViewProjectBudget(user?.role) ? { budget: editBudget ? parseFloat(editBudget) : null } : {}),
+        purchase_price: editPurchasePrice ? parseFloat(editPurchasePrice) : null,
+        arv: editArv ? parseFloat(editArv) : null,
+        closing_costs: editClosingCosts ? parseFloat(editClosingCosts) : null,
+        punchlist_stage: data.punchlist_stage ? 1 : 0,
+      };
       if (!canChangeStatus) delete payload.status;
       if (!canChangeStatus) delete payload.punchlist_stage;
       await api.put(`/projects/${id}`, payload);
@@ -456,7 +563,7 @@ export default function ProjectDetail() {
     formData.append('note_id', noteId);
     formData.append('photo_type', 'progress');
     formData.append('caption', 'Photos attached to project note');
-    await appendProgressUploadAudit(formData, files, files.map(() => source));
+    await appendProgressUploadAudit(formData, files, files.map(() => source), { projectId: id });
     await api.post(`/projects/${id}/photos?type=progress`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
@@ -649,29 +756,20 @@ export default function ProjectDetail() {
   const canEdit = user && canManageProjects(user.role);
   const punchlistStageActive = isPunchlistStageEnabled(project.punchlist_stage);
   const canAssign = user && isAdminRole(user.role);
+  const canSeeBudget = Boolean(user && canViewProjectBudget(user.role));
   const fieldWork = project.field_work || { counts: {}, tasks: [], invoice_holds: [] };
 
   const tabs: { id: Tab; label: string; icon: any }[] = [
-    { id: 'overview', label: 'Overview', icon: MapPin },
-    { id: 'progress-history', label: 'Progress, Pictures & Notes', icon: Activity },
+    { id: 'notes', label: 'Notes', icon: MessageSquare },
     { id: 'construction-plan', label: 'Scope of Work', icon: FileText },
-    { id: 'quotes', label: 'Upload Quotes', icon: FileText },
+    { id: 'project-timeline', label: 'Project Timeline', icon: CalendarDays },
+    { id: 'quotes', label: 'Quotes', icon: FileText },
     { id: 'punch-list', label: punchlistStageActive ? 'Punch List Active' : 'Start Punch List', icon: ClipboardList },
-    { id: 'photos', label: 'Photos', icon: Camera },
+    { id: 'photos', label: 'Photos Bucket', icon: Camera },
     { id: 'team', label: 'Assign Contractors', icon: Users },
     { id: 'texts', label: 'Text Contractors', icon: MessageSquare },
     { id: 'activity', label: 'Activity', icon: Activity },
   ];
-
-  const openProjectPhotoCapture = () => {
-    const projectId = id || project?.id;
-    if (!projectId) return;
-    if (isMobileCaptureContext()) {
-      navigate(`/mobile/photos?projectId=${projectId}&camera=1`);
-      return;
-    }
-    navigate(`/photos?projectId=${projectId}`);
-  };
 
   const updateFieldWorkTask = async (taskId: string, patch: Record<string, any>) => {
     try {
@@ -743,7 +841,7 @@ export default function ProjectDetail() {
             onClick={() => setTab('notes')}
             className="text-xs font-bold text-cyan-100 hover:text-white hover:underline"
           >
-            View all
+            Open notes
           </button>
           )}
         </div>
@@ -825,7 +923,7 @@ export default function ProjectDetail() {
           className="inline-flex min-h-[46px] items-center justify-center gap-1.5 rounded-lg border border-amber-400 bg-amber-50 px-3 py-2 text-sm font-black text-amber-800 shadow-sm transition-colors hover:bg-amber-100"
         >
           <CalendarDays className="w-4 h-4" />
-          Add to Calenda
+          Add to Calendar
         </button>
         <button
           type="button"
@@ -966,12 +1064,12 @@ export default function ProjectDetail() {
         </div>
       )}
       </div>
-      <div className={`bt-project-notes-list space-y-4 rounded-xl border border-blue-300/30 bg-gradient-to-br from-slate-950/85 via-slate-900/90 to-cyan-950/70 p-3 shadow-inner ${compact ? 'max-h-[620px] overflow-y-auto pr-2' : ''}`}>
+      <div className="bt-project-notes-list space-y-2 rounded-xl border border-blue-300/30 bg-gradient-to-br from-slate-950/85 via-slate-900/90 to-cyan-950/70 p-2.5 shadow-inner">
         {notes.map(note => (
-          <div key={note.id} className="bt-project-note-card flex items-start gap-3 rounded-2xl border border-blue-300/35 bg-gradient-to-br from-slate-900 via-slate-950 to-blue-950 p-4 shadow-[0_14px_36px_rgba(15,23,42,0.32)] ring-1 ring-cyan-300/10">
+          <div key={note.id} className={`bt-project-note-card bt-project-note-card-${note.note_type || 'general'} flex items-start gap-3 rounded-xl border border-blue-300/35 bg-gradient-to-br from-slate-900 via-slate-950 to-blue-950 p-3 shadow-[0_14px_36px_rgba(15,23,42,0.32)] ring-1 ring-cyan-300/10`}>
             <Avatar src={note.user_avatar_url} name={note.user_name} size={36} />
             <div className="flex-1 min-w-0">
-              <div className="bt-project-note-meta-bar mb-2 flex items-start justify-between gap-3 border-b border-blue-300/20 pb-2">
+              <div className="bt-project-note-meta-bar mb-2 flex items-start justify-between gap-3 border-b border-blue-300/20 pb-1.5">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="text-sm font-black text-white truncate">{note.user_name}</span>
@@ -1013,13 +1111,13 @@ export default function ProjectDetail() {
                 </div>
               ) : (
                 <>
-                  <p className="bt-project-note-body rounded-xl border border-white/10 bg-black/20 px-3 py-3 text-sm leading-6 text-slate-100 whitespace-pre-wrap">{note.note}</p>
+                  <p className="bt-project-note-body rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-sm leading-6 text-slate-100 whitespace-pre-wrap">{note.note}</p>
                   <span className={`inline-flex mt-2 rounded-full border px-2 py-0.5 text-xs font-bold ${note.visibility === 'public' ? 'border-emerald-300/40 bg-emerald-500/15 text-emerald-100' : 'border-slate-500 bg-slate-800 text-slate-200'}`}>
                     {note.visibility === 'public' ? 'Public to contractors' : 'Private management note'}
                   </span>
                   {getNotePhotos(note).length > 0 && (
-                    <div className="bt-project-note-media-panel mt-3 rounded-xl border border-cyan-300/25 bg-slate-950/70 p-2 shadow-inner">
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    <div className="bt-project-note-media-panel mt-2 rounded-lg border border-cyan-300/25 bg-slate-950/70 p-2 shadow-inner">
+                      <div className="bt-project-note-media-grid grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
                         {getNotePhotos(note).map((photo: any) => {
                           const src = `/uploads/${note.project_id}/${photo.filename}`;
                           const mediaKind = getProgressMediaKind(photo);
@@ -1027,7 +1125,7 @@ export default function ProjectDetail() {
                           return (
                             <div
                               key={photo.id}
-                              className={`relative aspect-square overflow-hidden rounded-lg border border-slate-300 bg-white shadow-sm ${mediaKind === 'file' ? 'cursor-pointer' : ''}`}
+                              className={`bt-project-note-media-tile relative aspect-square overflow-hidden rounded-lg border border-slate-300 bg-white shadow-sm ${mediaKind === 'file' ? 'cursor-pointer' : ''}`}
                               onClick={() => {
                                 if (mediaKind === 'file') window.open(src, '_blank', 'noopener,noreferrer');
                               }}
@@ -1133,17 +1231,21 @@ export default function ProjectDetail() {
               </div>
               <p className="text-sm text-gray-500 truncate">{project.job_name}</p>
             </div>
-            <button
-              type="button"
-              onClick={openProjectPhotoCapture}
-              className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-amber-500 px-3 py-2 text-xs font-black text-white shadow-sm transition hover:bg-amber-600"
-              title="Upload timestamped photos for this project"
-              aria-label="Upload photos"
-            >
-              <Camera className="h-4 w-4" />
-              <span className="hidden md:inline">Upload Photos</span>
-              <span className="md:hidden">Take Pictures</span>
-            </button>
+          </div>
+
+          {/* Tabs */}
+          <div className="bt-project-tabs grid grid-cols-2 items-stretch gap-1.5 overflow-visible sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-10">
+            {tabs.map(({ id: tabId, label, icon: Icon }) => (
+              <button
+                key={tabId}
+                onClick={() => setTab(tabId)}
+                aria-pressed={tab === tabId}
+                className={`bt-project-tab-button inline-flex min-h-10 min-w-0 items-center justify-center gap-1 rounded-lg border px-1.5 py-1.5 text-center text-[10px] font-black leading-tight transition-all duration-150 sm:px-2 ${tab === tabId ? 'is-active border-cyan-200 bg-gradient-to-br from-blue-500 via-indigo-600 to-cyan-500 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_10px_20px_rgba(37,99,235,0.42)] ring-1 ring-cyan-200/50' : 'border-slate-600 bg-gradient-to-br from-slate-800 via-slate-950 to-blue-950 text-slate-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.11),0_8px_16px_rgba(2,6,23,0.36)] hover:border-cyan-300 hover:from-slate-700 hover:via-blue-950 hover:to-cyan-950 hover:text-white hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_10px_22px_rgba(14,165,233,0.24)]'}`}
+              >
+                <Icon className="h-3.5 w-3.5 flex-shrink-0" />
+                <span className="min-w-0 leading-tight">{label}</span>
+              </button>
+            ))}
             <AddToCalendarButton
               label="Add to Calendar"
               defaultTitle={`Project reminder - ${project.address || project.job_name || 'project'}`}
@@ -1153,34 +1255,14 @@ export default function ProjectDetail() {
               sourceType="project"
               sourceId={id || project.id}
               contextLabel={[project.address, project.job_name].filter(Boolean).join(' - ')}
-              buttonClassName="inline-flex min-h-10 items-center gap-2 rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs font-black text-cyan-800 shadow-sm transition hover:bg-cyan-100"
+              buttonClassName="bt-project-tab-button inline-flex min-h-10 min-w-0 items-center justify-center gap-1 rounded-lg border border-amber-400/65 bg-gradient-to-br from-slate-800 via-slate-950 to-amber-950 px-1.5 py-1.5 text-center text-[10px] font-black leading-tight text-amber-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.13),0_8px_16px_rgba(2,6,23,0.36)] transition-all duration-150 hover:border-amber-300 hover:from-amber-500 hover:via-amber-700 hover:to-slate-950 hover:text-white hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_10px_22px_rgba(245,158,11,0.26)] sm:px-2"
             />
-            {canEdit && (
-              <button type="button" onClick={openEditProject} className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-blue-500/40 bg-blue-600 text-white shadow-sm transition hover:bg-blue-500" aria-label="Edit project details" title="Edit project details">
-                <Edit2 className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-
-          {/* Tabs */}
-          <div className="bt-project-tabs flex flex-wrap items-center gap-1.5 overflow-hidden pb-1">
-            {tabs.map(({ id: tabId, label, icon: Icon }) => (
-              <button
-                key={tabId}
-                onClick={() => setTab(tabId)}
-                aria-pressed={tab === tabId}
-                className={`bt-project-tab-button inline-flex min-h-9 flex-none items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-black leading-none whitespace-nowrap transition-colors sm:px-3 sm:text-xs ${tab === tabId ? 'is-active' : ''}`}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                {label}
-              </button>
-            ))}
           </div>
         </div>
       </div>
 
       {/* Tab Content */}
-      <div className="p-4 md:p-6 max-w-5xl mx-auto">
+      <div className={`p-4 md:p-6 mx-auto ${tab === 'project-timeline' ? 'max-w-[1480px]' : 'max-w-5xl'}`}>
         {/* Overview */}
         {tab === 'overview' && (
           <div className="space-y-4">
@@ -1223,13 +1305,12 @@ export default function ProjectDetail() {
                 {[
                   { label: 'Status', value: <StatusBadge status={project.status} /> },
                   ...(punchlistStageActive ? [{ label: 'Punch List', value: <span className="inline-flex items-center rounded-full border border-yellow-300 bg-yellow-400 px-2.5 py-1 text-xs font-black uppercase tracking-wide text-yellow-950">Active</span> }] : []),
-                  { label: 'Est. Closing Costs', value: project.closing_costs ? `$${Number(project.closing_costs).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—' },
                   { label: 'Start Date', value: project.start_date ? format(new Date(project.start_date), 'MMM d, yyyy') : '—' },
                   { label: 'Target Completion', value: project.target_completion ? format(new Date(project.target_completion), 'MMM d, yyyy') : '—' },
                   { label: 'Budget', value: project.budget ? `$${Number(project.budget).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—' },
                   { label: 'Lockbox Code', value: project.lockbox_code || 'Not entered' },
                   { label: 'Created By', value: project.created_by_name || '—' },
-                ].map(({ label, value }) => (
+                ].filter(item => canSeeBudget || item.label !== 'Budget').map(({ label, value }) => (
                   <div key={label}>
                     <p className="text-xs text-gray-500 mb-0.5">{label}</p>
                     <div className="font-medium text-gray-900">{value}</div>
@@ -1242,7 +1323,7 @@ export default function ProjectDetail() {
               <RecentFieldPhotosCard
                 projectId={id!}
                 photos={Array.isArray(project.recent_photos) ? project.recent_photos : []}
-                onViewAll={() => setTab('progress-history')}
+                onViewAll={() => setTab('photos')}
                 onPhotoNoteSaved={load}
               />
 
@@ -1250,8 +1331,12 @@ export default function ProjectDetail() {
                 <h3 className="font-semibold text-gray-900 mb-2 text-sm">Scope of Work</h3>
                 <p className="text-sm text-gray-600">Open project scope sections by house area, plus the execution plan, materials, costs, and step photos.</p>
               </button>
+              <button id="project-timeline" type="button" onClick={() => setTab('project-timeline')} className="w-full rounded-xl border border-blue-300/40 bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 p-4 text-left text-white shadow-[0_14px_36px_rgba(15,23,42,0.22)] transition-colors hover:border-cyan-300/70">
+                <h3 className="font-semibold text-white mb-2 text-sm">Project Timeline</h3>
+                <p className="text-sm font-semibold text-blue-100">View the rehab stages, task dates, material deliveries, and near-term lookahead for this house.</p>
+              </button>
               <button id="quotes" type="button" onClick={() => setTab('quotes')} className="w-full bg-white rounded-xl border border-gray-200 p-4 text-left hover:border-blue-300 hover:bg-blue-50 transition-colors">
-                <h3 className="font-semibold text-gray-900 mb-2 text-sm">Upload Quotes</h3>
+                <h3 className="font-semibold text-gray-900 mb-2 text-sm">Quotes</h3>
                 <p className="text-sm text-gray-600">Store contractor quotes directly against this property.</p>
               </button>
               </div>
@@ -1266,6 +1351,10 @@ export default function ProjectDetail() {
 
         {tab === 'construction-plan' && (
           <ScopeOfWorkTab projectId={id!} project={project} canManage={!!canEdit} />
+        )}
+
+        {tab === 'project-timeline' && (
+          <ProjectTimelineTab projectId={id!} project={project} />
         )}
 
         {tab === 'quotes' && (
@@ -1286,7 +1375,7 @@ export default function ProjectDetail() {
 
         {/* Photos Tab */}
         {tab === 'photos' && (
-          <PhotosTab projectId={id!} user={user} />
+          <PhotosTab projectId={id!} project={project} user={user} />
         )}
 
         {/* Invoices Tab */}
@@ -1412,26 +1501,12 @@ export default function ProjectDetail() {
               <label className="block text-sm font-medium text-gray-700 mb-1">Target Completion</label>
               <input type="date" {...register('target_completion')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Est. Closing Costs</label>
-              <CurrencyInput value={editClosingCosts} onChange={setEditClosingCosts} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Budget</label>
-              <CurrencyInput value={editBudget} onChange={setEditBudget} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div className="sm:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Scope of Work</label>
-              <textarea {...register('scope_of_work')} rows={3} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
-            </div>
-            <div className="sm:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Office Notes</label>
-              <VoiceTextarea {...register('office_notes')} rows={2} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
-            </div>
-            <div className="sm:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Field Notes</label>
-              <VoiceTextarea {...register('field_notes')} rows={2} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
-            </div>
+            {canSeeBudget && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Budget</label>
+                <CurrencyInput value={editBudget} onChange={setEditBudget} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            )}
           </div>
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={() => setShowEdit(false)} className="flex-1 py-2.5 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50">Cancel</button>
@@ -2019,7 +2094,7 @@ function FieldWorkStatusPanel({
                 <div className="mt-3 grid gap-2">
                   {task.latest_photo_note && (
                     <div className="rounded-md border border-blue-100 bg-white px-3 py-2 text-xs font-semibold text-slate-700">
-                      <span className="block font-black uppercase tracking-wide text-blue-700">Latest photo note</span>
+                      <span className="block font-black uppercase tracking-wide text-blue-700">Latest photo description</span>
                       <span className="mt-1 block leading-5">{task.latest_photo_note}</span>
                     </div>
                   )}
@@ -2102,15 +2177,663 @@ function FieldWorkStatusPanel({
   );
 }
 
+type ProjectTimelineRow = {
+  id: string;
+  kind: 'stage' | 'task' | 'material' | 'milestone';
+  label: string;
+  shortLabel: string;
+  category: string;
+  status: string;
+  statusLabel: string;
+  start: Date;
+  end: Date;
+  durationDays: number;
+  owner?: string;
+  detail?: string;
+  progress: number;
+  barClass: string;
+  statusClass: string;
+  children: ProjectTimelineRow[];
+};
+
+const TIMELINE_DAY_MS = 24 * 60 * 60 * 1000;
+
+const standardRehabTimelineTemplate = [
+  { id: 'scope', label: 'Scope, Walkthrough, and Final Bid Review', category: 'Planning', startOffset: 0, durationDays: 5, status: 'in_progress' },
+  { id: 'procurement', label: 'Order Windows, Appliances, Cabinets, and Long-Lead Materials', category: 'Procurement', startOffset: 2, durationDays: 14, status: 'waiting_materials' },
+  { id: 'demo', label: 'Demo, Trash Out, Site Protection, and Safety Setup', category: 'Site Work', startOffset: 4, durationDays: 7, status: 'not_started' },
+  { id: 'rough', label: 'Rough Mechanical: Plumbing, Electrical, HVAC', category: 'MEP', startOffset: 10, durationDays: 12, status: 'not_started' },
+  { id: 'exterior', label: 'Exterior, Windows, Doors, Roof, and Weather Tight Work', category: 'Exterior', startOffset: 15, durationDays: 14, status: 'not_started' },
+  { id: 'drywall', label: 'Insulation, Drywall, Prime, and Paint', category: 'Interior Buildout', startOffset: 23, durationDays: 14, status: 'not_started' },
+  { id: 'finishes', label: 'Flooring, Cabinets, Trim, Fixtures, and Appliances', category: 'Finishes', startOffset: 34, durationDays: 18, status: 'not_started' },
+  { id: 'punch', label: 'Final Punch List, Clean, Photos, and Market Ready', category: 'Closeout', startOffset: 49, durationDays: 7, status: 'not_started' },
+];
+
+function parseTimelineDate(value: any) {
+  if (!value) return null;
+  if (value instanceof Date) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    date.setHours(0, 0, 0, 0);
+    return date;
+  }
+  const text = String(value);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(text)
+    ? new Date(`${text}T00:00:00`)
+    : new Date(text);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function addTimelineDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  next.setHours(0, 0, 0, 0);
+  return next;
+}
+
+function daysBetween(start: Date, end: Date) {
+  return Math.round((end.getTime() - start.getTime()) / TIMELINE_DAY_MS);
+}
+
+function clampTimelineValue(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function timelineDurationDays(start: Date, end: Date) {
+  return Math.max(1, daysBetween(start, end) + 1);
+}
+
+function formatTimelineDate(date: Date, options: Intl.DateTimeFormatOptions = {}) {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    ...options,
+  }).format(date);
+}
+
+const timelineStatusMeta: Record<string, { label: string; statusClass: string; barClass: string; progress: number }> = {
+  draft: {
+    label: 'Draft',
+    statusClass: 'border-slate-500/60 bg-slate-800 text-slate-100',
+    barClass: 'border-slate-400/50 bg-gradient-to-r from-slate-700 via-slate-500 to-slate-400 text-white',
+    progress: 5,
+  },
+  active: {
+    label: 'Active',
+    statusClass: 'border-sky-300/50 bg-sky-500/15 text-sky-100',
+    barClass: 'border-sky-200/70 bg-gradient-to-r from-sky-700 via-cyan-500 to-blue-400 text-white',
+    progress: 45,
+  },
+  not_started: {
+    label: 'Not Started',
+    statusClass: 'border-slate-500/60 bg-slate-800 text-slate-100',
+    barClass: 'border-slate-400/50 bg-gradient-to-r from-slate-700 via-slate-500 to-slate-400 text-white',
+    progress: 5,
+  },
+  in_progress: {
+    label: 'In Progress',
+    statusClass: 'border-cyan-300/50 bg-cyan-500/15 text-cyan-100',
+    barClass: 'border-cyan-200/70 bg-gradient-to-r from-blue-700 via-cyan-500 to-sky-300 text-white',
+    progress: 55,
+  },
+  waiting_materials: {
+    label: 'Waiting Materials',
+    statusClass: 'border-amber-300/60 bg-amber-500/15 text-amber-100',
+    barClass: 'border-amber-200/80 bg-gradient-to-r from-amber-700 via-orange-500 to-amber-300 text-slate-950',
+    progress: 35,
+  },
+  needs_review: {
+    label: 'Needs Review',
+    statusClass: 'border-fuchsia-300/50 bg-fuchsia-500/15 text-fuchsia-100',
+    barClass: 'border-fuchsia-200/70 bg-gradient-to-r from-fuchsia-800 via-purple-500 to-fuchsia-300 text-white',
+    progress: 85,
+  },
+  on_hold: {
+    label: 'On Hold',
+    statusClass: 'border-orange-300/60 bg-orange-500/15 text-orange-100',
+    barClass: 'border-orange-200/80 bg-gradient-to-r from-orange-800 via-orange-500 to-amber-300 text-slate-950',
+    progress: 30,
+  },
+  completed: {
+    label: 'Complete',
+    statusClass: 'border-emerald-300/50 bg-emerald-500/15 text-emerald-100',
+    barClass: 'border-emerald-200/80 bg-gradient-to-r from-emerald-800 via-emerald-500 to-lime-300 text-slate-950',
+    progress: 100,
+  },
+  delivered: {
+    label: 'Delivered',
+    statusClass: 'border-emerald-300/50 bg-emerald-500/15 text-emerald-100',
+    barClass: 'border-emerald-200/80 bg-gradient-to-r from-emerald-800 via-emerald-500 to-lime-300 text-slate-950',
+    progress: 100,
+  },
+  installed: {
+    label: 'Installed',
+    statusClass: 'border-emerald-300/50 bg-emerald-500/15 text-emerald-100',
+    barClass: 'border-emerald-200/80 bg-gradient-to-r from-emerald-800 via-emerald-500 to-lime-300 text-slate-950',
+    progress: 100,
+  },
+  ordered: {
+    label: 'Ordered',
+    statusClass: 'border-indigo-300/50 bg-indigo-500/15 text-indigo-100',
+    barClass: 'border-indigo-200/70 bg-gradient-to-r from-indigo-800 via-indigo-500 to-sky-300 text-white',
+    progress: 45,
+  },
+  quote_requested: {
+    label: 'Quote Requested',
+    statusClass: 'border-blue-300/50 bg-blue-500/15 text-blue-100',
+    barClass: 'border-blue-200/70 bg-gradient-to-r from-blue-800 via-blue-500 to-cyan-300 text-white',
+    progress: 20,
+  },
+  waiting: {
+    label: 'Waiting',
+    statusClass: 'border-amber-300/60 bg-amber-500/15 text-amber-100',
+    barClass: 'border-amber-200/80 bg-gradient-to-r from-amber-700 via-orange-500 to-amber-300 text-slate-950',
+    progress: 55,
+  },
+  planned: {
+    label: 'Planned',
+    statusClass: 'border-slate-500/60 bg-slate-800 text-slate-100',
+    barClass: 'border-slate-400/50 bg-gradient-to-r from-slate-700 via-slate-500 to-slate-400 text-white',
+    progress: 8,
+  },
+  cancelled: {
+    label: 'Cancelled',
+    statusClass: 'border-red-300/60 bg-red-500/15 text-red-100',
+    barClass: 'border-red-200/70 bg-gradient-to-r from-red-900 via-red-600 to-red-400 text-white',
+    progress: 0,
+  },
+};
+
+function timelineMeta(status?: string) {
+  return timelineStatusMeta[String(status || '').trim()] || timelineStatusMeta.not_started;
+}
+
+function makeTimelineRow(input: Omit<ProjectTimelineRow, 'durationDays' | 'statusLabel' | 'statusClass' | 'barClass' | 'progress' | 'children'> & { children?: ProjectTimelineRow[]; progress?: number }) {
+  const meta = timelineMeta(input.status);
+  const start = input.start;
+  const end = input.end < input.start ? input.start : input.end;
+  return {
+    ...input,
+    end,
+    durationDays: timelineDurationDays(start, end),
+    statusLabel: meta.label,
+    statusClass: meta.statusClass,
+    barClass: meta.barClass,
+    progress: input.progress ?? meta.progress,
+    children: input.children || [],
+  };
+}
+
+function timelineStatusFromChildren(stageStatus: string, children: ProjectTimelineRow[]) {
+  if (stageStatus === 'completed' || children.length && children.every(child => ['completed', 'delivered', 'installed'].includes(child.status))) return 'completed';
+  if (stageStatus === 'on_hold' || children.some(child => ['waiting_materials', 'waiting', 'ordered'].includes(child.status))) return 'waiting_materials';
+  if (children.some(child => ['needs_review'].includes(child.status))) return 'needs_review';
+  if (stageStatus === 'active' || children.some(child => child.status === 'in_progress')) return 'in_progress';
+  return stageStatus || 'not_started';
+}
+
+function buildProjectTimelineRows(project: any, scopes: any[], planItems: any[], materials: any[]) {
+  const anchorDate = parseTimelineDate(project?.start_date || project?.acquisition_date || project?.created_at) || parseTimelineDate(new Date())!;
+  const orderedScopes = [...scopes].sort((left, right) => Number(left.sort_order || 0) - Number(right.sort_order || 0));
+  const linkedItemIds = new Set<string>();
+  const linkedMaterialIds = new Set<string>();
+
+  if (!orderedScopes.length && !planItems.length && !materials.length) {
+    return standardRehabTimelineTemplate.map((template, index) => makeTimelineRow({
+      id: `template-${template.id}`,
+      kind: 'stage',
+      label: template.label,
+      shortLabel: `Phase ${index + 1}`,
+      category: template.category,
+      status: template.status,
+      start: addTimelineDays(anchorDate, template.startOffset),
+      end: addTimelineDays(anchorDate, template.startOffset + template.durationDays - 1),
+      owner: 'Project Manager',
+      detail: 'Template stage. Add Scope of Work line items to turn this into a live project schedule.',
+    }));
+  }
+
+  const stages: ProjectTimelineRow[] = orderedScopes.map((scope, scopeIndex) => {
+    const scopeItems = planItems
+      .filter(item => String(item.project_scope_id || '') === String(scope.id))
+      .sort((left, right) => Number(left.sort_order || 0) - Number(right.sort_order || 0));
+    scopeItems.forEach(item => linkedItemIds.add(String(item.id)));
+    const fallbackStart = addTimelineDays(anchorDate, scopeIndex * 7);
+    const scopeTimelineStart = parseTimelineDate(scope.timeline_start);
+    const scopeTimelineEnd = parseTimelineDate(scope.timeline_end);
+
+    const taskRows = scopeItems.map((item, itemIndex) => {
+      const itemStart = parseTimelineDate(item.start_date || item.target_date) || addTimelineDays(fallbackStart, itemIndex * 3);
+      const itemEnd = parseTimelineDate(item.target_date || item.start_date) || addTimelineDays(itemStart, 2);
+      const row = makeTimelineRow({
+        id: `task-${item.id}`,
+        kind: 'task',
+        label: item.title || 'Construction task',
+        shortLabel: item.title || 'Task',
+        category: item.category || scope.section_name || 'Field Work',
+        status: item.status || 'not_started',
+        start: itemStart,
+        end: itemEnd,
+        owner: item.assigned_to_name || 'Unassigned',
+        detail: item.description || item.approval_notes || '',
+      });
+      return row;
+    });
+
+    const itemIds = new Set(scopeItems.map(item => String(item.id)));
+    const materialRows = materials
+      .filter(material => itemIds.has(String(material.plan_item_id || '')))
+      .map((material, materialIndex) => {
+        linkedMaterialIds.add(String(material.id));
+        const linkedTask = scopeItems.find(item => String(item.id) === String(material.plan_item_id));
+        const materialDate = parseTimelineDate(material.needed_by || material.expected_delivery || material.delivered_at || linkedTask?.target_date || linkedTask?.start_date) || addTimelineDays(fallbackStart, materialIndex * 2);
+        const materialEnd = parseTimelineDate(material.expected_delivery || material.delivered_at || material.needed_by) || addTimelineDays(materialDate, 1);
+        return makeTimelineRow({
+          id: `material-${material.id}`,
+          kind: 'material',
+          label: material.material_name || 'Material order',
+          shortLabel: material.material_name || 'Material',
+          category: material.category || 'Materials',
+          status: material.order_status || 'planned',
+          start: materialDate,
+          end: materialEnd,
+          owner: material.supplier || 'Supplier TBD',
+          detail: [material.plan_item_title, material.notes].filter(Boolean).join(' / '),
+        });
+      });
+
+    const children = [...taskRows, ...materialRows].sort((left, right) => left.start.getTime() - right.start.getTime());
+    const childStart = children.length ? new Date(Math.min(...children.map(child => child.start.getTime()))) : null;
+    const childEnd = children.length ? new Date(Math.max(...children.map(child => child.end.getTime()))) : null;
+    const stageStart = scopeTimelineStart || childStart || fallbackStart;
+    const requestedStageEnd = scopeTimelineEnd || childEnd || addTimelineDays(stageStart, 6);
+    const stageEnd = requestedStageEnd < stageStart ? stageStart : requestedStageEnd;
+    const stageStatus = timelineStatusFromChildren(scope.status || 'active', children);
+    const completeChildren = children.filter(child => ['completed', 'delivered', 'installed'].includes(child.status)).length;
+    const stageProgress = stageStatus === 'completed'
+      ? 100
+      : children.length ? Math.round((completeChildren / children.length) * 100) : timelineMeta(stageStatus).progress;
+
+    return makeTimelineRow({
+      id: `scope-${scope.id}`,
+      kind: 'stage',
+      label: scope.scope_title || scope.section_name || `Stage ${scopeIndex + 1}`,
+      shortLabel: scope.section_name || `Stage ${scopeIndex + 1}`,
+      category: scope.section_name || 'Scope of Work',
+      status: stageStatus,
+      start: stageStart,
+      end: stageEnd,
+      owner: 'Project Manager',
+      detail: scope.scope_of_work || '',
+      progress: stageProgress,
+      children,
+    });
+  });
+
+  const unassignedTasks = planItems
+    .filter(item => !linkedItemIds.has(String(item.id)))
+    .sort((left, right) => Number(left.sort_order || 0) - Number(right.sort_order || 0));
+  if (unassignedTasks.length) {
+    const taskRows = unassignedTasks.map((item, index) => {
+      const start = parseTimelineDate(item.start_date || item.target_date) || addTimelineDays(anchorDate, index * 3);
+      const end = parseTimelineDate(item.target_date || item.start_date) || addTimelineDays(start, 2);
+      return makeTimelineRow({
+        id: `task-unassigned-${item.id}`,
+        kind: 'task',
+        label: item.title || 'Construction task',
+        shortLabel: item.title || 'Task',
+        category: item.category || 'Field Work',
+        status: item.status || 'not_started',
+        start,
+        end,
+        owner: item.assigned_to_name || 'Unassigned',
+        detail: item.description || item.approval_notes || '',
+      });
+    });
+    const stageStatus = timelineStatusFromChildren('active', taskRows);
+    stages.push(makeTimelineRow({
+      id: 'unassigned-work',
+      kind: 'stage',
+      label: 'Unassigned Construction Line Items',
+      shortLabel: 'Unassigned Work',
+      category: 'Field Work',
+      status: stageStatus,
+      start: new Date(Math.min(...taskRows.map(row => row.start.getTime()))),
+      end: new Date(Math.max(...taskRows.map(row => row.end.getTime()))),
+      owner: 'Project Manager',
+      detail: 'Construction-plan items not connected to a scope section yet.',
+      children: taskRows,
+    }));
+  }
+
+  const unlinkedMaterials = materials.filter(material => !linkedMaterialIds.has(String(material.id)));
+  if (unlinkedMaterials.length) {
+    const materialRows = unlinkedMaterials.map((material, index) => {
+      const start = parseTimelineDate(material.needed_by || material.expected_delivery || material.delivered_at) || addTimelineDays(anchorDate, index * 2);
+      const end = parseTimelineDate(material.expected_delivery || material.delivered_at || material.needed_by) || addTimelineDays(start, 1);
+      return makeTimelineRow({
+        id: `material-unlinked-${material.id}`,
+        kind: 'material',
+        label: material.material_name || 'Material order',
+        shortLabel: material.material_name || 'Material',
+        category: material.category || 'Procurement',
+        status: material.order_status || 'planned',
+        start,
+        end,
+        owner: material.supplier || 'Supplier TBD',
+        detail: [material.plan_item_title, material.notes].filter(Boolean).join(' / '),
+      });
+    });
+    stages.unshift(makeTimelineRow({
+      id: 'procurement-materials',
+      kind: 'stage',
+      label: 'Procurement and Long-Lead Materials',
+      shortLabel: 'Procurement',
+      category: 'Materials',
+      status: timelineStatusFromChildren('active', materialRows),
+      start: new Date(Math.min(...materialRows.map(row => row.start.getTime()))),
+      end: new Date(Math.max(...materialRows.map(row => row.end.getTime()))),
+      owner: 'Project Manager',
+      detail: 'Project materials that are not attached to a specific construction line yet.',
+      children: materialRows,
+    }));
+  }
+
+  return stages.sort((left, right) => left.start.getTime() - right.start.getTime());
+}
+
+function timelineGridPosition(row: ProjectTimelineRow, windowStart: Date, weekCount: number) {
+  const rawStart = Math.floor(daysBetween(windowStart, row.start) / 7) + 1;
+  const rawEnd = Math.ceil((daysBetween(windowStart, row.end) + 1) / 7) + 1;
+  const start = clampTimelineValue(rawStart, 1, weekCount);
+  const end = clampTimelineValue(rawEnd, start + 1, weekCount + 1);
+  return { start, span: Math.max(1, end - start) };
+}
+
+function rowOverlapsWindow(row: ProjectTimelineRow, windowStart: Date, windowEnd: Date) {
+  return row.end >= windowStart && row.start <= windowEnd;
+}
+
+function ProjectTimelineTab({ projectId, project }: { projectId: string; project: any }) {
+  const [scopes, setScopes] = useState<any[]>([]);
+  const [planItems, setPlanItems] = useState<any[]>([]);
+  const [materials, setMaterials] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [timelineMode, setTimelineMode] = useState<'full' | 'lookahead'>('full');
+
+  useEffect(() => {
+    let active = true;
+    const loadTimeline = async () => {
+      setLoading(true);
+      try {
+        const [scopeRes, planRes, materialRes] = await Promise.all([
+          api.get(`/projects/${projectId}/scopes`),
+          api.get(`/projects/${projectId}/construction-plan`),
+          api.get(`/projects/${projectId}/materials`),
+        ]);
+        if (!active) return;
+        setScopes(Array.isArray(scopeRes.data?.scopes) ? scopeRes.data.scopes : []);
+        setPlanItems(Array.isArray(planRes.data?.items) ? planRes.data.items : []);
+        setMaterials(Array.isArray(materialRes.data) ? materialRes.data : []);
+      } catch (err: any) {
+        if (active) toast.error(err.response?.data?.error || 'Failed to load project timeline');
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    loadTimeline();
+    return () => { active = false; };
+  }, [projectId]);
+
+  const timelineRows = useMemo(
+    () => buildProjectTimelineRows(project, scopes, planItems, materials),
+    [project, scopes, planItems, materials]
+  );
+
+  const flatRows = useMemo(() => timelineRows.flatMap(row => [row, ...row.children]), [timelineRows]);
+  const today = useMemo(() => parseTimelineDate(new Date())!, []);
+  const fullWindowStart = useMemo(() => {
+    const dates = flatRows.flatMap(row => [row.start, row.end]);
+    const projectStart = parseTimelineDate(project?.start_date || project?.acquisition_date || project?.created_at);
+    if (projectStart) dates.push(projectStart);
+    return dates.length ? new Date(Math.min(...dates.map(date => date.getTime()))) : today;
+  }, [flatRows, project, today]);
+  const fullWindowEnd = useMemo(() => {
+    const dates = flatRows.flatMap(row => [row.start, row.end]);
+    const target = parseTimelineDate(project?.target_completion);
+    if (target) dates.push(target);
+    return dates.length ? new Date(Math.max(...dates.map(date => date.getTime()))) : addTimelineDays(fullWindowStart, 83);
+  }, [flatRows, fullWindowStart, project]);
+  const fullWeekCount = clampTimelineValue(Math.ceil((daysBetween(fullWindowStart, fullWindowEnd) + 1) / 7), 8, 16);
+  const windowStart = timelineMode === 'lookahead' ? today : fullWindowStart;
+  const weekCount = timelineMode === 'lookahead' ? 4 : fullWeekCount;
+  const windowEnd = addTimelineDays(windowStart, weekCount * 7 - 1);
+  const timelineWeeks = Array.from({ length: weekCount }, (_, index) => addTimelineDays(windowStart, index * 7));
+  const visibleRows = timelineMode === 'lookahead'
+    ? timelineRows
+        .map(stage => ({
+          ...stage,
+          children: stage.children.filter(child => rowOverlapsWindow(child, windowStart, windowEnd)),
+        }))
+        .filter(stage => rowOverlapsWindow(stage, windowStart, windowEnd) || stage.children.length)
+    : timelineRows;
+  const completedCount = flatRows.filter(row => ['completed', 'delivered', 'installed'].includes(row.status)).length;
+  const waitingCount = flatRows.filter(row => ['waiting_materials', 'waiting', 'ordered', 'quote_requested'].includes(row.status)).length;
+  const reviewCount = flatRows.filter(row => row.status === 'needs_review').length;
+  const upcomingRows = flatRows
+    .filter(row => row.kind !== 'stage' && !['completed', 'delivered', 'installed', 'cancelled'].includes(row.status))
+    .filter(row => row.start <= addTimelineDays(today, 28) || row.end <= addTimelineDays(today, 28))
+    .sort((left, right) => left.start.getTime() - right.start.getTime())
+    .slice(0, 8);
+  const projectStartLabel = project?.start_date
+    ? formatEasternDate(project.start_date, { month: 'short', day: 'numeric', year: 'numeric' })
+    : 'Start date not set';
+  const targetLabel = project?.target_completion
+    ? formatEasternDate(project.target_completion, { month: 'short', day: 'numeric', year: 'numeric' })
+    : 'Target date not set';
+  const gridTemplateColumns = `repeat(${weekCount}, minmax(82px, 1fr))`;
+
+  const renderTimelineRow = (row: ProjectTimelineRow, index: number, nested = false) => {
+    const position = timelineGridPosition(row, windowStart, weekCount);
+    const startLabel = formatTimelineDate(row.start);
+    const endLabel = formatTimelineDate(row.end);
+    const rowHeightClass = nested ? 'min-h-[46px]' : 'min-h-[58px]';
+    const isComplete = ['completed', 'delivered', 'installed'].includes(row.status) || row.progress >= 100;
+    return (
+      <div key={row.id} className={`grid grid-cols-[330px_minmax(760px,1fr)] ${nested ? 'bg-slate-950/55' : 'bg-slate-900/70'}`}>
+        <div className={`border-t border-cyan-300/15 px-3 py-2 ${rowHeightClass}`}>
+          <div className="flex min-w-0 items-start gap-2">
+            <span className={`inline-flex h-7 min-w-7 items-center justify-center rounded-lg border text-[11px] font-black ${nested ? 'border-white/10 bg-white/10 text-slate-200' : 'border-cyan-300/40 bg-cyan-400/15 text-cyan-100'}`}>
+              {nested ? row.kind === 'material' ? 'M' : 'T' : index + 1}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className={`truncate font-black ${nested ? 'text-xs text-slate-100' : 'text-sm text-white'}`}>{row.label}</p>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                <span className={`rounded-full border px-2 py-0.5 text-[10px] font-black capitalize ${row.statusClass}`}>{row.statusLabel}</span>
+                {isComplete && (
+                  <span className="rounded-full border border-emerald-200/80 bg-emerald-300 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-slate-950 shadow-sm">100% Complete</span>
+                )}
+                <span className="rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[10px] font-black text-slate-200">{row.category}</span>
+                <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{startLabel} - {endLabel}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className={`relative border-t border-cyan-300/15 px-2 py-2 ${rowHeightClass}`}>
+          <div className="absolute inset-0 grid" style={{ gridTemplateColumns }}>
+            {timelineWeeks.map(week => (
+              <div key={`${row.id}-${week.toISOString()}`} className="border-l border-cyan-300/10 first:border-l-0" />
+            ))}
+          </div>
+          <div className="relative grid h-full items-center" style={{ gridTemplateColumns }}>
+            <div
+              className={`flex h-7 min-w-0 items-center overflow-hidden rounded-lg border px-2 text-[11px] font-black shadow-[0_10px_24px_rgba(2,6,23,0.35)] ${row.barClass}`}
+              style={{ gridColumn: `${position.start} / span ${position.span}` }}
+              title={`${row.label} / ${startLabel} - ${endLabel} / ${row.statusLabel} / ${row.progress}% complete`}
+            >
+              <span className="truncate">{row.shortLabel}</span>
+              {isComplete && <span className="ml-auto rounded-full bg-white/85 px-1.5 py-0.5 text-[10px] font-black text-emerald-950">100%</span>}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  if (loading) return <Loading message="Loading project timeline..." />;
+
+  return (
+    <div className="space-y-4">
+      <section className="overflow-hidden rounded-2xl border border-cyan-300/35 bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 text-white shadow-[0_22px_60px_rgba(2,6,23,0.45)] ring-1 ring-cyan-300/10">
+        <div className="border-b border-cyan-300/20 bg-gradient-to-r from-slate-950 via-indigo-950 to-slate-950 p-4">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+            <div className="min-w-0">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-cyan-300/35 bg-cyan-400/15 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-cyan-100">
+                  <CalendarDays className="h-3.5 w-3.5" />
+                  Project Only
+                </span>
+                <span className="inline-flex rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-slate-200">Not connected to operations calendar</span>
+              </div>
+              <h3 className="text-2xl font-black tracking-tight text-white">Project Timeline</h3>
+              <p className="mt-1 max-w-4xl text-sm font-semibold leading-6 text-blue-100">
+                Rehab schedule for {project?.address || project?.job_name || 'this project'} showing stage sequence, construction line items, material ordering, and near-term work.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { id: 'full' as const, label: 'Full Timeline' },
+                { id: 'lookahead' as const, label: '4-Week Lookahead' },
+              ].map(option => (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => setTimelineMode(option.id)}
+                  className={`inline-flex min-h-10 items-center justify-center rounded-xl border px-4 text-sm font-black transition ${timelineMode === option.id ? 'border-cyan-200 bg-cyan-400 text-slate-950 shadow-[0_0_22px_rgba(34,211,238,0.28)]' : 'border-white/15 bg-white/10 text-slate-100 hover:bg-white/15'}`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-4">
+            {[
+              { label: 'Project Start', value: projectStartLabel, tone: 'from-blue-950 to-slate-950 border-blue-300/30 text-blue-100' },
+              { label: 'Target Completion', value: targetLabel, tone: 'from-emerald-950 to-slate-950 border-emerald-300/30 text-emerald-100' },
+              { label: 'Active Schedule Items', value: String(Math.max(0, flatRows.length - completedCount)), tone: 'from-cyan-950 to-slate-950 border-cyan-300/30 text-cyan-100' },
+              { label: 'Materials / Review Watch', value: String(waitingCount + reviewCount), tone: 'from-fuchsia-950 to-slate-950 border-fuchsia-300/30 text-fuchsia-100' },
+            ].map(tile => (
+              <div key={tile.label} className={`rounded-xl border bg-gradient-to-br p-3 shadow-inner ${tile.tone}`}>
+                <p className="text-[11px] font-black uppercase tracking-wide opacity-80">{tile.label}</p>
+                <p className="mt-1 truncate text-lg font-black text-white">{tile.value}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="min-w-0 overflow-hidden rounded-xl border border-cyan-300/25 bg-slate-950/45 shadow-[0_16px_42px_rgba(2,6,23,0.35)]">
+            <div className="overflow-x-auto">
+              <div className="min-w-[1120px]">
+                <div className="grid grid-cols-[330px_minmax(760px,1fr)] border-b border-cyan-300/20 bg-slate-950">
+                  <div className="px-3 py-3">
+                    <p className="text-[11px] font-black uppercase tracking-wide text-cyan-200">Stage / Task</p>
+                    <p className="mt-1 text-xs font-semibold text-slate-400">Status, dates, and responsibility</p>
+                  </div>
+                  <div className="grid" style={{ gridTemplateColumns }}>
+                    {timelineWeeks.map((week, index) => (
+                      <div key={week.toISOString()} className="border-l border-cyan-300/15 px-2 py-3 first:border-l-0">
+                        <p className="text-[10px] font-black uppercase tracking-wide text-cyan-200">Week {index + 1}</p>
+                        <p className="mt-1 text-xs font-black text-white">{formatTimelineDate(week)}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {visibleRows.length ? visibleRows.map((stage, index) => (
+                  <div key={stage.id}>
+                    {renderTimelineRow(stage, index)}
+                    {stage.children.map(child => renderTimelineRow(child, index, true))}
+                  </div>
+                )) : (
+                  <div className="px-4 py-12 text-center text-sm font-semibold text-slate-300">
+                    No tasks fall inside this lookahead window.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <aside className="space-y-3">
+            <div className="rounded-xl border border-cyan-300/25 bg-slate-950/65 p-3 shadow-inner">
+              <h4 className="text-sm font-black text-white">Next Work Window</h4>
+              <p className="mt-1 text-xs font-semibold text-blue-100/80">Construction items and material orders due in the next 28 days.</p>
+              <div className="mt-3 space-y-2">
+                {upcomingRows.map(row => (
+                  <div key={`upcoming-${row.id}`} className="rounded-lg border border-white/10 bg-white/10 p-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="line-clamp-2 text-xs font-black text-white">{row.label}</p>
+                      <span className={`flex-shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-black ${row.statusClass}`}>{row.statusLabel}</span>
+                    </div>
+                    <p className="mt-1 text-[11px] font-semibold text-slate-300">
+                      {formatTimelineDate(row.start)} - {formatTimelineDate(row.end)}
+                    </p>
+                    {row.owner && <p className="mt-1 truncate text-[11px] font-semibold text-cyan-100">{row.owner}</p>}
+                  </div>
+                ))}
+                {!upcomingRows.length && (
+                  <p className="rounded-lg border border-dashed border-white/15 bg-white/5 px-3 py-6 text-center text-xs font-semibold text-slate-300">No open timeline items in the next 28 days.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-emerald-300/25 bg-gradient-to-br from-slate-950 via-emerald-950 to-slate-950 p-3 shadow-inner">
+              <h4 className="text-sm font-black text-white">Rehab Stage Framework</h4>
+              <div className="mt-3 space-y-1.5">
+                {standardRehabTimelineTemplate.map((stage, index) => (
+                  <div key={stage.id} className="grid grid-cols-[28px_minmax(0,1fr)] items-center gap-2 rounded-lg border border-white/10 bg-white/10 px-2 py-1.5">
+                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-emerald-400 text-[10px] font-black text-slate-950">{index + 1}</span>
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-black text-white">{stage.category}</p>
+                      <p className="truncate text-[10px] font-semibold text-emerald-100/80">{stage.label}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </aside>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 type ProjectScopeForm = {
   section_name: string;
   scope_title: string;
   scope_of_work: string;
   status: string;
+  timeline_start: string;
+  timeline_end: string;
 };
 
 type BulkProjectScopeRow = ProjectScopeForm & {
   rowId: string;
+};
+
+type VendorQuoteForm = {
+  contractor_profile_id: string;
+  vendor_name: string;
+  vendor_email: string;
+  vendor_phone: string;
+  message: string;
+  expires_in_days: string;
+  include_photos: boolean;
+  send_email: boolean;
+  send_text: boolean;
 };
 
 const blankProjectScopeForm: ProjectScopeForm = {
@@ -2118,6 +2841,20 @@ const blankProjectScopeForm: ProjectScopeForm = {
   scope_title: '',
   scope_of_work: '',
   status: 'active',
+  timeline_start: '',
+  timeline_end: '',
+};
+
+const blankVendorQuoteForm: VendorQuoteForm = {
+  contractor_profile_id: '',
+  vendor_name: '',
+  vendor_email: '',
+  vendor_phone: '',
+  message: '',
+  expires_in_days: '7',
+  include_photos: true,
+  send_email: true,
+  send_text: false,
 };
 
 let bulkScopeRowCounter = 0;
@@ -2128,6 +2865,15 @@ const createBulkScopeRow = (): BulkProjectScopeRow => ({
 });
 
 const createBulkScopeRows = (count: number) => Array.from({ length: count }, createBulkScopeRow);
+
+function scopeTimelineRangeLabel(scope: any) {
+  const start = scope?.timeline_start ? formatEasternDate(scope.timeline_start, { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+  const end = scope?.timeline_end ? formatEasternDate(scope.timeline_end, { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+  if (start && end) return `${start} - ${end}`;
+  if (start) return `Starts ${start}`;
+  if (end) return `Due ${end}`;
+  return '';
+}
 
 function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; project: any; canManage: boolean }) {
   const [scopes, setScopes] = useState<any[]>([]);
@@ -2145,9 +2891,21 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
   const [selectedScopePhotoIds, setSelectedScopePhotoIds] = useState<string[]>([]);
   const [selectedScopePhotos, setSelectedScopePhotos] = useState<any[]>([]);
   const [scopePhotoPicker, setScopePhotoPicker] = useState<any | null>(null);
+  const [showVendorQuoteModal, setShowVendorQuoteModal] = useState(false);
+  const [vendorQuoteForm, setVendorQuoteForm] = useState<VendorQuoteForm>(() => blankVendorQuoteForm);
+  const [vendorQuoteContractorIds, setVendorQuoteContractorIds] = useState<string[]>([]);
+  const [vendorQuoteScopeIds, setVendorQuoteScopeIds] = useState<string[]>([]);
+  const [sendingVendorQuote, setSendingVendorQuote] = useState(false);
+  const [quoteContractors, setQuoteContractors] = useState<ContractorDirectoryRow[]>([]);
+  const [loadingQuoteContractors, setLoadingQuoteContractors] = useState(false);
+  const [quoteContractorSearch, setQuoteContractorSearch] = useState('');
   const [planItems, setPlanItems] = useState<any[]>([]);
   const [materials, setMaterials] = useState<any[]>([]);
   const [expandedScopeIds, setExpandedScopeIds] = useState<Set<string>>(() => new Set());
+  const [scopeLightbox, setScopeLightbox] = useState<ProgressLightboxState | null>(null);
+  const [draggingScopeId, setDraggingScopeId] = useState<string | null>(null);
+  const [scopeDropTarget, setScopeDropTarget] = useState<{ id: string; position: 'before' | 'after' } | null>(null);
+  const [reorderingScope, setReorderingScope] = useState(false);
   const [showStepEditor, setShowStepEditor] = useState(false);
   const [showMaterialEditor, setShowMaterialEditor] = useState(false);
   const [editingStep, setEditingStep] = useState<any | null>(null);
@@ -2197,6 +2955,10 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
   const updateBulkScopeRow = (rowId: string, field: keyof ProjectScopeForm) => (event: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const value = event.currentTarget.value;
     setBulkScopeRows(current => current.map(row => row.rowId === rowId ? { ...row, [field]: value } : row));
+  };
+
+  const normalizeScopeDetails = () => {
+    setScopeForm(current => ({ ...current, scope_of_work: scopeLineItemText(current.scope_of_work) }));
   };
 
   const keepScopeEditorTypingLocal = (event: KeyboardEvent<HTMLElement>) => {
@@ -2260,10 +3022,27 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
     }
   };
 
+  const loadQuoteContractors = async () => {
+    setLoadingQuoteContractors(true);
+    try {
+      const res = await api.get('/users/contractors/directory');
+      setQuoteContractors(Array.isArray(res.data?.contractors) ? res.data.contractors : []);
+    } catch {
+      toast.error('Failed to load contractor list');
+    } finally {
+      setLoadingQuoteContractors(false);
+    }
+  };
+
   useEffect(() => {
     setLoading(true);
     loadScopes();
   }, [projectId]);
+
+  useEffect(() => {
+    if (canManage) loadQuoteContractors();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canManage]);
 
   useEffect(() => () => {
     scopeRecognitionRef.current?.stop?.();
@@ -2309,6 +3088,114 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
     setBulkScopeRows(createBulkScopeRows(5));
   };
 
+  const openVendorQuoteModal = (targetScope?: any) => {
+    const defaultScopeIds = scopes
+      .filter(scope => String(scope.status || 'active') !== 'completed')
+      .map(scope => String(scope.id));
+    const targetScopeId = targetScope?.id ? String(targetScope.id) : '';
+    const publicProjectLabel = cityFromProjectAddress(project?.address) || 'this project';
+    setVendorQuoteScopeIds(targetScopeId ? [targetScopeId] : (defaultScopeIds.length ? defaultScopeIds : scopes.map(scope => String(scope.id))));
+    setVendorQuoteForm({
+      ...blankVendorQuoteForm,
+      message: targetScope
+        ? `Please review the scope of work for ${targetScope.scope_title || targetScope.section_name || publicProjectLabel} and submit your price through this link.`
+        : `Please review the selected scope of work for ${publicProjectLabel} and submit your price through this link.`,
+    });
+    setVendorQuoteContractorIds([]);
+    setQuoteContractorSearch('');
+    setShowVendorQuoteModal(true);
+    if (!quoteContractors.length) loadQuoteContractors();
+  };
+
+  const closeVendorQuoteModal = () => {
+    if (sendingVendorQuote) return;
+    setShowVendorQuoteModal(false);
+  };
+
+  const updateVendorQuoteForm = (field: keyof VendorQuoteForm) => (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const value = ['include_photos', 'send_email', 'send_text'].includes(field)
+      ? (event.currentTarget as HTMLInputElement).checked
+      : event.currentTarget.value;
+    setVendorQuoteForm(current => ({ ...current, [field]: value }));
+  };
+
+  const selectVendorQuoteContractor = (contractor: ContractorDirectoryRow) => {
+    setVendorQuoteContractorIds(current => {
+      const selected = current.includes(contractor.id);
+      return selected ? current.filter(id => id !== contractor.id) : [...current, contractor.id];
+    });
+    setVendorQuoteForm(current => ({
+      ...current,
+      contractor_profile_id: contractor.id,
+      vendor_name: contractorDisplayName(contractor),
+      vendor_email: String(contractor.email || ''),
+      vendor_phone: String(contractor.phone || ''),
+      send_email: true,
+      send_text: current.send_text || Boolean(contractor.phone),
+    }));
+  };
+
+  const toggleVendorQuoteScope = (scopeId: string) => {
+    setVendorQuoteScopeIds(current => {
+      const next = new Set(current);
+      if (next.has(scopeId)) next.delete(scopeId);
+      else next.add(scopeId);
+      return Array.from(next);
+    });
+  };
+
+  const selectAllVendorQuoteScopes = () => {
+    setVendorQuoteScopeIds(scopes.map(scope => String(scope.id)));
+  };
+
+  const clearVendorQuoteScopes = () => {
+    setVendorQuoteScopeIds([]);
+  };
+
+  const sendVendorQuoteRequest = async () => {
+    const selectedContractors = quoteContractors.filter(contractor => vendorQuoteContractorIds.includes(contractor.id));
+    if (!selectedContractors.length) return toast.error('Select at least one contractor');
+    if (!vendorQuoteForm.send_email && !vendorQuoteForm.send_text) return toast.error('Choose email, text, or both');
+    if (selectedContractors.some(contractor => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(contractor.email || '')))) {
+      return toast.error('Every selected contractor needs a valid email address');
+    }
+    if (vendorQuoteForm.send_text && selectedContractors.some(contractor => !String(contractor.phone || '').trim())) {
+      return toast.error('Every selected contractor needs a phone number for text delivery');
+    }
+    if (!vendorQuoteScopeIds.length) return toast.error('Select at least one scope section');
+
+    setSendingVendorQuote(true);
+    try {
+      const res = await api.post(`/vendor-quote-requests/projects/${projectId}`, {
+        contractor_profile_ids: selectedContractors.map(contractor => contractor.id),
+        message: vendorQuoteForm.message.trim(),
+        expires_in_days: 7,
+        include_photos: vendorQuoteForm.include_photos,
+        send_email: vendorQuoteForm.send_email,
+        send_text: vendorQuoteForm.send_text,
+        scope_ids: vendorQuoteScopeIds,
+      });
+      const scopeCount = res.data?.request?.scope_count || vendorQuoteScopeIds.length;
+      const delivery = res.data?.delivery || {};
+      const recipientCount = res.data?.requests?.length || selectedContractors.length;
+      const sentBy = [
+        delivery.email_sent ? 'email' : '',
+        vendorQuoteForm.send_text ? 'text' : '',
+      ].filter(Boolean).join(' and ') || 'quote link';
+      if (vendorQuoteForm.send_text && delivery.text_status === 'provider_not_configured') {
+        toast.success(`Quote links created for ${recipientCount} contractor${recipientCount === 1 ? '' : 's'}; text provider is not configured, so texts were saved in history.`);
+      } else {
+        toast.success(`Quote links sent by ${sentBy} to ${recipientCount} contractor${recipientCount === 1 ? '' : 's'} with ${scopeCount} scope section${scopeCount === 1 ? '' : 's'}`);
+      }
+      setShowVendorQuoteModal(false);
+      setVendorQuoteContractorIds([]);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to send vendor quote link');
+    } finally {
+      setSendingVendorQuote(false);
+    }
+  };
+
   const addBulkScopeRows = (count = 5) => {
     setBulkScopeRows(current => [...current, ...createBulkScopeRows(count)]);
   };
@@ -2328,6 +3215,8 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
       scope_title: scope.scope_title || '',
       scope_of_work: scope.scope_of_work || '',
       status: scope.status || 'active',
+      timeline_start: scope.timeline_start || '',
+      timeline_end: scope.timeline_end || '',
     });
     setSelectedScopePhotos([]);
     setSelectedScopePhotoIds([]);
@@ -2376,7 +3265,7 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
       if (!spokenText) return;
       setScopeForm(current => ({
         ...current,
-        scope_of_work: appendDictationText(scopeDictationBaseRef.current, spokenText),
+        scope_of_work: scopeLineItemText(appendDictationText(scopeDictationBaseRef.current, spokenText)),
       }));
     };
     scopeRecognitionRef.current = recognition;
@@ -2474,11 +3363,19 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
   };
 
   const saveScope = async () => {
+    if ((scopeForm.timeline_start && !scopeForm.timeline_end) || (!scopeForm.timeline_start && scopeForm.timeline_end)) {
+      return toast.error('Enter both timeline start and completion dates');
+    }
+    if (scopeForm.timeline_start && scopeForm.timeline_end && scopeForm.timeline_end < scopeForm.timeline_start) {
+      return toast.error('Timeline completion date cannot be before the start date');
+    }
     const payload = {
       section_name: scopeForm.section_name.trim() || 'General',
       scope_title: scopeForm.scope_title.trim(),
-      scope_of_work: scopeForm.scope_of_work.trim(),
+      scope_of_work: scopeLineItemText(scopeForm.scope_of_work),
       status: scopeForm.status || 'active',
+      timeline_start: scopeForm.timeline_start || null,
+      timeline_end: scopeForm.timeline_end || null,
     };
     if (!payload.scope_title) return toast.error('Enter a scope title');
 
@@ -2514,10 +3411,14 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
   const saveBulkScopes = async () => {
     const enteredRows = bulkScopeRows
       .map((row, index) => ({ ...row, rowNumber: index + 1 }))
-      .filter(row => row.scope_title.trim() || row.section_name.trim() || row.scope_of_work.trim() || row.status !== 'active');
+      .filter(row => row.scope_title.trim() || row.section_name.trim() || row.scope_of_work.trim() || row.timeline_start || row.timeline_end || row.status !== 'active');
     if (!enteredRows.length) return toast.error('Enter at least one scope title');
     const missingTitle = enteredRows.find(row => !row.scope_title.trim());
     if (missingTitle) return toast.error(`Enter a scope title on row ${missingTitle.rowNumber}`);
+    const missingTimelinePair = enteredRows.find(row => (row.timeline_start && !row.timeline_end) || (!row.timeline_start && row.timeline_end));
+    if (missingTimelinePair) return toast.error(`Enter both timeline dates on row ${missingTimelinePair.rowNumber}`);
+    const invalidTimelineRow = enteredRows.find(row => row.timeline_start && row.timeline_end && row.timeline_end < row.timeline_start);
+    if (invalidTimelineRow) return toast.error(`Timeline completion date cannot be before the start date on row ${invalidTimelineRow.rowNumber}`);
 
     setSavingBulkScopes(true);
     try {
@@ -2526,8 +3427,10 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
           row_number: row.rowNumber,
           scope_title: row.scope_title.trim(),
           section_name: row.section_name.trim() || 'General',
-          scope_of_work: row.scope_of_work.trim(),
+          scope_of_work: scopeLineItemText(row.scope_of_work),
           status: row.status || 'active',
+          timeline_start: row.timeline_start || null,
+          timeline_end: row.timeline_end || null,
         })),
       };
       const res = await api.post(`/projects/${projectId}/scopes/bulk`, payload);
@@ -2562,6 +3465,101 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
     } catch {
       toast.error('Failed to reorder scope of work');
     }
+  };
+
+  const resetScopeDrag = () => {
+    setDraggingScopeId(null);
+    setScopeDropTarget(null);
+  };
+
+  const scopeDropPosition = (event: DragEvent<HTMLElement>): 'before' | 'after' => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    return event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after';
+  };
+
+  const dragScopeToPosition = async (sourceId: string, targetId: string, position: 'before' | 'after') => {
+    if (!canManage || reorderingScope || sourceId === targetId) {
+      resetScopeDrag();
+      return;
+    }
+    const sourceIndex = scopes.findIndex(scope => String(scope.id) === sourceId);
+    const targetIndex = scopes.findIndex(scope => String(scope.id) === targetId);
+    if (sourceIndex < 0 || targetIndex < 0) {
+      resetScopeDrag();
+      return;
+    }
+
+    const originalScopes = scopes;
+    const movingScope = scopes[sourceIndex];
+    const withoutMoving = scopes.filter(scope => String(scope.id) !== sourceId);
+    let insertIndex = withoutMoving.findIndex(scope => String(scope.id) === targetId);
+    if (insertIndex < 0) {
+      resetScopeDrag();
+      return;
+    }
+    if (position === 'after') insertIndex += 1;
+
+    const reorderedScopes = [
+      ...withoutMoving.slice(0, insertIndex),
+      movingScope,
+      ...withoutMoving.slice(insertIndex),
+    ].map((scope, index) => ({ ...scope, sort_order: index + 1 }));
+    const originalOrder = originalScopes.map(scope => String(scope.id)).join('|');
+    const nextOrder = reorderedScopes.map(scope => String(scope.id)).join('|');
+    if (originalOrder === nextOrder) {
+      resetScopeDrag();
+      return;
+    }
+
+    setScopes(reorderedScopes);
+    setReorderingScope(true);
+    try {
+      const res = await api.post(`/projects/${projectId}/scopes/reorder`, {
+        scope_ids: reorderedScopes.map(scope => String(scope.id)),
+      });
+      if (Array.isArray(res.data?.scopes)) setScopes(res.data.scopes);
+      toast.success('Scope order updated');
+    } catch (err: any) {
+      setScopes(originalScopes);
+      toast.error(err.response?.data?.error || 'Failed to reorder scope of work');
+    } finally {
+      setReorderingScope(false);
+      resetScopeDrag();
+    }
+  };
+
+  const handleScopeDragStart = (event: DragEvent<HTMLElement>, scopeId: string) => {
+    if (!canManage || reorderingScope) {
+      event.preventDefault();
+      return;
+    }
+    const nextScopeId = String(scopeId);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', nextScopeId);
+    setDraggingScopeId(nextScopeId);
+  };
+
+  const handleScopeDragOver = (event: DragEvent<HTMLElement>, targetId: string) => {
+    if (!canManage || !draggingScopeId || String(targetId) === draggingScopeId) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    const position = scopeDropPosition(event);
+    setScopeDropTarget(current => (
+      current?.id === String(targetId) && current.position === position
+        ? current
+        : { id: String(targetId), position }
+    ));
+  };
+
+  const handleScopeDrop = (event: DragEvent<HTMLElement>, targetId: string) => {
+    if (!canManage) return;
+    event.preventDefault();
+    const sourceId = draggingScopeId || event.dataTransfer.getData('text/plain');
+    if (!sourceId) {
+      resetScopeDrag();
+      return;
+    }
+    dragScopeToPosition(String(sourceId), String(targetId), scopeDropPosition(event));
   };
 
   const toggleScopeExpansion = (scopeId: string) => {
@@ -2688,6 +3686,26 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
     }
   };
 
+  const toggleScopeCompleted = async (scope: any) => {
+    if (!canManage) return;
+    const isComplete = String(scope.status || 'active') === 'completed';
+    const payload = {
+      section_name: scope.section_name || 'General',
+      scope_title: scope.scope_title || 'Scope of Work',
+      scope_of_work: scopeLineItemText(scope.scope_of_work || ''),
+      status: isComplete ? 'active' : 'completed',
+      timeline_start: scope.timeline_start || null,
+      timeline_end: scope.timeline_end || null,
+    };
+    try {
+      await api.put(`/projects/${projectId}/scopes/${scope.id}`, payload);
+      toast.success(isComplete ? 'Scope reopened on project timeline' : 'Scope marked 100% complete on project timeline');
+      await loadScopes();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to update scope completion');
+    }
+  };
+
   const uploadStepPhoto = async (itemId: string, files?: FileList | null) => {
     if (!files || files.length === 0) return;
     setUploadingPhoto(itemId);
@@ -2791,6 +3809,30 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
   const completedCount = scopes.filter(scope => scope.status === 'completed').length;
   const activeCount = scopes.filter(scope => scope.status === 'active').length;
   const bulkEnteredCount = bulkScopeRows.filter(row => row.scope_title.trim() || row.section_name.trim() || row.scope_of_work.trim() || row.status !== 'active').length;
+  const vendorQuoteSelectedScopes = scopes.filter(scope => vendorQuoteScopeIds.includes(String(scope.id)));
+  const vendorQuotePhotoCount = vendorQuoteSelectedScopes.reduce((sum, scope) => sum + (Array.isArray(scope.photos) ? scope.photos.length : 0), 0);
+  const selectedQuoteContractors = quoteContractors.filter(contractor => vendorQuoteContractorIds.includes(contractor.id));
+  const visibleQuoteContractors = useMemo(() => {
+    const search = quoteContractorSearch.trim().toLowerCase();
+    return [...quoteContractors]
+      .sort((left, right) => {
+        const leftConnected = contractorProjectIds(left).has(projectId) ? 0 : 1;
+        const rightConnected = contractorProjectIds(right).has(projectId) ? 0 : 1;
+        if (leftConnected !== rightConnected) return leftConnected - rightConnected;
+        return contractorDisplayName(left).localeCompare(contractorDisplayName(right));
+      })
+      .filter(contractor => {
+        if (!search) return true;
+        return [
+          contractorDisplayName(contractor),
+          contractor.contact_name,
+          contractor.email,
+          contractor.phone,
+          contractorTypeLabel(contractor),
+        ].filter(Boolean).some(value => String(value).toLowerCase().includes(search));
+      })
+      .slice(0, 24);
+  }, [quoteContractors, quoteContractorSearch, projectId]);
   const scopeAttachmentSummary = useMemo(() => {
     if (!scopeAttachments.length) return 'Attach agreed estimate, bid, or approval file';
     const names = scopeAttachments.slice(0, 2).map(file => file.name).join(', ');
@@ -2819,6 +3861,9 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
               />
             {canManage && (
               <>
+              <button type="button" onClick={() => openVendorQuoteModal()} disabled={scopes.length === 0} className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-amber-300 bg-amber-50 text-amber-800 text-sm font-black hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50">
+                <Send className="w-4 h-4" /> Request Quote
+              </button>
               <button type="button" onClick={openBulkScopes} className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-800 text-sm font-black hover:bg-emerald-100">
                 <ClipboardList className="w-4 h-4" /> Add Bulk Scope of Work
               </button>
@@ -2873,7 +3918,7 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
               )}
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               {scopes.map((scope, index) => {
                 const estimateDocuments = Array.isArray(scope.estimate_documents) ? scope.estimate_documents : [];
                 const scopeCardStyle = scopeCardStyles[index % scopeCardStyles.length];
@@ -2884,21 +3929,48 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                 const scopeMaterialCost = materialCost(executionMaterials);
                 const waitingMaterials = executionMaterials.filter(material => ['ordered', 'waiting'].includes(material.order_status)).length;
                 const scopePhotos = Array.isArray(scope.photos) ? scope.photos : [];
+                const scopeLightboxItems = buildScopePhotoLightboxItems(projectId, scopePhotos);
+                const scopeTimelineLabel = scopeTimelineRangeLabel(scope);
+                const scopeId = String(scope.id);
+                const dropPosition = scopeDropTarget?.id === scopeId ? scopeDropTarget.position : null;
+                const isDraggingScope = draggingScopeId === scopeId;
                 return (
-                <div key={scope.id} className={`relative overflow-hidden rounded-xl border text-slate-100 transition-all duration-150 hover:border-white/25 ${scopeCardStyle.card}`}>
+                <div
+                  key={scope.id}
+                  draggable={canManage && !reorderingScope}
+                  onDragStart={event => handleScopeDragStart(event, scopeId)}
+                  onDragOver={event => handleScopeDragOver(event, scopeId)}
+                  onDrop={event => handleScopeDrop(event, scopeId)}
+                  onDragEnd={resetScopeDrag}
+                  aria-grabbed={isDraggingScope}
+                  className={`relative overflow-hidden rounded-lg border text-slate-100 transition-all duration-150 hover:-translate-y-0.5 hover:border-cyan-200/90 hover:brightness-110 hover:ring-2 hover:ring-cyan-300/70 hover:shadow-[0_0_0_1px_rgba(34,211,238,0.55),0_18px_42px_rgba(8,47,73,0.45)] focus-within:border-cyan-200/90 focus-within:ring-2 focus-within:ring-cyan-300/70 ${scopeCardStyle.card} ${canManage ? 'cursor-grab active:cursor-grabbing' : ''} ${isDraggingScope ? 'scale-[0.995] opacity-45 ring-2 ring-white/30' : ''} ${dropPosition ? 'ring-2 ring-amber-300/80' : ''}`}
+                >
+                  {dropPosition === 'before' && <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-1.5 bg-amber-300 shadow-[0_0_20px_rgba(251,191,36,0.8)]" />}
+                  {dropPosition === 'after' && <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-1.5 bg-amber-300 shadow-[0_0_20px_rgba(251,191,36,0.8)]" />}
                   <div className={`absolute inset-y-0 left-0 w-1 ${scopeCardStyle.accent}`} />
-                  <div className="p-3 pl-4">
-                  <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-                    <button type="button" onClick={() => toggleScopeExpansion(scope.id)} className="group flex min-w-0 flex-1 items-start gap-3 text-left">
-                      <span className={`inline-flex h-9 min-w-9 items-center justify-center rounded-lg px-2.5 text-sm font-black shadow-sm ring-1 ${scopeCardStyle.number}`}>{scopeNumber}</span>
+                  <div className="p-2 pl-3">
+                  <div className="flex flex-col gap-2 xl:flex-row xl:items-start xl:justify-between">
+                    <button type="button" onClick={() => toggleScopeExpansion(scope.id)} className="group flex min-w-0 flex-1 items-start gap-2 text-left">
+                      {canManage && (
+                        <span className="mt-0.5 inline-flex h-6 w-5 flex-shrink-0 items-center justify-center rounded-md border border-white/10 bg-white/10 text-slate-300 transition-colors group-hover:text-white" title="Drag scope to reorder">
+                          <GripVertical className="h-4 w-4" />
+                        </span>
+                      )}
+                      <span className={`inline-flex h-8 min-w-8 items-center justify-center rounded-lg px-2 text-sm font-black shadow-sm ring-1 ${scopeCardStyle.number}`}>{scopeNumber}</span>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
-                          <h4 className={`min-w-0 truncate text-base font-black leading-6 text-white transition-colors ${scopeCardStyle.hoverTitle}`}>{scope.scope_title}</h4>
+                          <h4 className={`min-w-0 truncate text-sm font-black leading-5 text-white transition-colors ${scopeCardStyle.hoverTitle}`}>{scope.scope_title}</h4>
                           <ChevronRight className={`h-4 w-4 flex-shrink-0 text-slate-300 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
                         </div>
-                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        <div className="mt-0.5 flex flex-wrap items-center gap-1">
                           <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-black uppercase tracking-wide ${scopeCardStyle.section}`}>{scope.section_name || 'General'}</span>
                           <span className={`rounded-full px-2 py-0.5 text-[11px] font-black capitalize shadow-sm ${scopeStatusColors[scope.status] || scopeStatusColors.active}`}>{String(scope.status || 'active').replace(/_/g, ' ')}</span>
+                          {scopeTimelineLabel && (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-cyan-300/35 bg-cyan-400/15 px-2 py-0.5 text-[11px] font-black text-cyan-100">
+                              <CalendarDays className="h-3 w-3" />
+                              Timeline {scopeTimelineLabel}
+                            </span>
+                          )}
                           <span className="inline-flex items-center rounded-full border border-white/15 bg-white/10 px-2 py-0.5 text-[11px] font-black text-slate-100">
                             {executionItems.length} line{executionItems.length === 1 ? '' : 's'}
                           </span>
@@ -2907,52 +3979,73 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                           </span>
                         </div>
                         {scope.scope_of_work ? (
-                          <p className="mt-1 line-clamp-1 whitespace-pre-wrap text-xs font-semibold leading-5 text-slate-300">{scope.scope_of_work}</p>
+                          <p className="mt-0.5 line-clamp-1 whitespace-pre-wrap text-xs font-semibold leading-4 text-slate-300">{scope.scope_of_work}</p>
                         ) : null}
-                        <div className="mt-2 space-y-1">
-                          {executionItems.length === 0 ? (
-                            <p className="rounded-lg border border-dashed border-white/12 bg-black/15 px-3 py-2 text-xs font-semibold text-slate-400">No execution line items yet.</p>
-                          ) : (
-                            executionItems.map((item, lineIndex) => (
-                              <div key={item.id} className="flex min-w-0 items-center gap-2 rounded-lg border border-white/10 bg-slate-950/45 px-2.5 py-1.5">
-                                <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-md bg-white/10 px-1.5 text-[11px] font-black text-white">{item.sort_order || lineIndex + 1}</span>
-                                <span className="min-w-0 flex-1 truncate text-sm font-black text-slate-50">{item.title}</span>
+                        {executionItems.length > 0 && (
+                          <div className="mt-1 space-y-1">
+                            {executionItems.map((item, lineIndex) => (
+                              <div key={item.id} className="flex min-w-0 items-center gap-2 rounded-md border border-white/10 bg-slate-950/45 px-2 py-1">
+                                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded bg-white/10 px-1 text-[10px] font-black text-white">{item.sort_order || lineIndex + 1}</span>
+                                <span className="min-w-0 flex-1 truncate text-xs font-black text-slate-50">{item.title}</span>
                                 {item.category && <span className="hidden rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-slate-200 md:inline-flex">{item.category}</span>}
                                 <span className={`rounded-full border px-2 py-0.5 text-[10px] font-black capitalize ${statusColors[item.status] || statusColors.not_started}`}>{String(item.status || 'not_started').replace(/_/g, ' ')}</span>
                               </div>
-                            ))
-                          )}
-                        </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </button>
                     <div className="flex flex-wrap items-center gap-1.5 flex-shrink-0 xl:justify-end">
-                      <button type="button" onClick={() => toggleScopeExpansion(scope.id)} className="rounded-lg border border-slate-600 bg-slate-950/45 px-2.5 py-2 text-xs font-black text-slate-100 transition-colors hover:bg-slate-800" aria-label={isExpanded ? 'Collapse scope details' : 'Expand scope details'}>
+                      {canManage && String(scope.status || 'active') !== 'completed' && (
+                        <button
+                          type="button"
+                          onClick={() => toggleScopeCompleted(scope)}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-red-300/70 bg-gradient-to-br from-red-600 via-red-700 to-red-950 px-2.5 py-1.5 text-xs font-black text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_8px_18px_rgba(185,28,28,0.28)] transition-all hover:border-red-200 hover:from-red-500 hover:via-red-600 hover:to-red-900"
+                          title="Mark this scope 100% complete on the project timeline"
+                        >
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          Mark Completed
+                        </button>
+                      )}
+                      {String(scope.status || 'active') === 'completed' && (
+                        <span className="inline-flex items-center justify-center gap-1.5 rounded-full border border-emerald-200/80 bg-gradient-to-br from-emerald-300 via-lime-300 to-emerald-500 px-3 py-1.5 text-xs font-black uppercase tracking-wide text-slate-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_8px_18px_rgba(16,185,129,0.26)]">
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          Completed
+                        </span>
+                      )}
+                      <button type="button" onClick={() => toggleScopeExpansion(scope.id)} className="rounded-lg border border-slate-600 bg-slate-950/45 px-2.5 py-1.5 text-xs font-black text-slate-100 transition-colors hover:bg-slate-800" aria-label={isExpanded ? 'Collapse scope details' : 'Expand scope details'}>
                         {isExpanded ? 'Hide' : 'Details'}
                       </button>
+                      {canManage && (
+                        <button type="button" onClick={() => openVendorQuoteModal(scope)} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-300/45 bg-emerald-500/15 px-2.5 py-1.5 text-xs font-black text-emerald-100 transition-colors hover:bg-emerald-500/25" aria-label="Request quote for this scope">
+                          <Send className="h-3.5 w-3.5" />
+                          Request Quote
+                        </button>
+                      )}
                       <AddToCalendarButton
                         label="Calendar"
                         defaultTitle={`Scope: ${scope.scope_title || scope.section_name || 'Scope of work'}`}
                         defaultDescription={[scope.section_name, scope.scope_of_work].filter(Boolean).join('\n\n')}
-                        defaultDate={project?.target_completion || project?.start_date || null}
+                        defaultDate={scope.timeline_end || scope.timeline_start || project?.target_completion || project?.start_date || null}
                         projectId={projectId}
                         sourceType="scope"
                         sourceId={scope.id}
                         contextLabel={[project?.address, scope.scope_title].filter(Boolean).join(' - ')}
-                        buttonClassName="inline-flex items-center justify-center gap-1.5 rounded-lg border border-cyan-300/40 bg-cyan-500/15 px-2 py-2 text-xs font-black text-cyan-100 transition-colors hover:bg-cyan-500/25"
+                        buttonClassName="inline-flex items-center justify-center gap-1.5 rounded-lg border border-cyan-300/40 bg-cyan-500/15 px-2 py-1.5 text-xs font-black text-cyan-100 transition-colors hover:bg-cyan-500/25"
                       />
-                      <button type="button" onClick={() => openScopeAssignmentPhotoPicker(scope)} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-amber-300/40 bg-amber-500/15 px-2 py-2 text-xs font-black text-amber-100 transition-colors hover:bg-amber-500/25" aria-label="Attach photos to scope">
+                      <button type="button" onClick={() => openScopeAssignmentPhotoPicker(scope)} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-amber-300/40 bg-amber-500/15 px-2 py-1.5 text-xs font-black text-amber-100 transition-colors hover:bg-amber-500/25" aria-label="Attach photos to scope">
                         <Camera className="h-3.5 w-3.5" />
                         Photos
                       </button>
                       {canManage && (
                         <>
-                        <button type="button" onClick={() => openEditScope(scope)} className="rounded-lg border border-slate-600 bg-slate-950/40 p-2 text-slate-200 transition-colors hover:bg-slate-800" aria-label="Edit scope">
+                        <button type="button" onClick={() => openEditScope(scope)} className="rounded-lg border border-slate-600 bg-slate-950/40 p-1.5 text-slate-200 transition-colors hover:bg-slate-800" aria-label="Edit scope">
                           <Edit2 className="w-4 h-4" />
                         </button>
-                        <button type="button" disabled={index === 0} onClick={() => moveScope(scope.id, 'up')} className="rounded-lg border border-slate-600 bg-slate-950/40 p-2 text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-30" aria-label="Move scope up">
+                        <button type="button" disabled={index === 0} onClick={() => moveScope(scope.id, 'up')} className="rounded-lg border border-slate-600 bg-slate-950/40 p-1.5 text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-30" aria-label="Move scope up">
                           <ArrowUp className="w-4 h-4" />
                         </button>
-                        <button type="button" disabled={index === scopes.length - 1} onClick={() => moveScope(scope.id, 'down')} className="rounded-lg border border-slate-600 bg-slate-950/40 p-2 text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-30" aria-label="Move scope down">
+                        <button type="button" disabled={index === scopes.length - 1} onClick={() => moveScope(scope.id, 'down')} className="rounded-lg border border-slate-600 bg-slate-950/40 p-1.5 text-slate-200 transition-colors hover:bg-slate-800 disabled:opacity-30" aria-label="Move scope down">
                           <ArrowDown className="w-4 h-4" />
                         </button>
                         </>
@@ -2986,32 +4079,45 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                         </p>
                         <span className="rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[11px] font-black text-slate-100">{scopePhotos.length}</span>
                       </div>
-                      <div className="flex gap-2 overflow-x-auto pb-1">
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-6">
                         {scopePhotos.map((photo: any) => {
                           const mediaKind = getProgressMediaKind(photo);
                           const src = progressPhotoSrc(projectId, photo);
+                          const lightboxIndex = scopeLightboxItems.findIndex(item => item.id === scopePhotoLightboxKey(photo));
+                          const canPreview = lightboxIndex >= 0;
                           return (
-                            <div key={photo.assignment_id || photo.id} className="group relative h-20 w-24 flex-shrink-0 overflow-hidden rounded-lg border border-white/10 bg-slate-900">
-                              {mediaKind === 'video' ? (
-                                <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
-                              ) : mediaKind === 'image' ? (
-                                <img src={src} alt={photo.original_name || 'Scope photo'} className="h-full w-full object-cover" loading="lazy" />
-                              ) : (
-                                <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
-                              )}
+                            <div key={photo.assignment_id || photo.id} className="group relative aspect-[4/3] min-h-32 overflow-hidden rounded-xl border border-white/10 bg-slate-900 shadow-[0_14px_30px_rgba(2,6,23,0.28)]">
+                              <button
+                                type="button"
+                                disabled={!canPreview}
+                                onClick={() => canPreview && setScopeLightbox({ items: scopeLightboxItems, index: lightboxIndex })}
+                                className="block h-full w-full text-left transition duration-150 hover:scale-[1.015] focus:outline-none focus:ring-2 focus:ring-amber-300 disabled:cursor-default"
+                                aria-label={`View ${photo.original_name || 'scope photo'} full size`}
+                              >
+                                {mediaKind === 'video' ? (
+                                  <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+                                ) : mediaKind === 'image' ? (
+                                  <img src={src} alt={photo.original_name || 'Scope photo'} className="h-full w-full object-cover" loading="lazy" />
+                                ) : (
+                                  <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
+                                )}
+                                <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-2.5 py-2 text-[11px] font-black text-white">
+                                  <span className="line-clamp-2">{photo.individual_note || photo.batch_note || photo.caption || photo.original_name || 'Photo'}</span>
+                                </div>
+                              </button>
                               {photo.assignment_id && (
                                 <button
                                   type="button"
-                                  onClick={() => removeScopePhotoAssignment(photo.assignment_id)}
-                                  className="absolute right-1 top-1 hidden rounded-md border border-red-300/60 bg-red-600 px-1.5 py-1 text-[10px] font-black text-white shadow-sm group-hover:inline-flex"
+                                  onClick={event => {
+                                    event.stopPropagation();
+                                    removeScopePhotoAssignment(photo.assignment_id);
+                                  }}
+                                  className="absolute right-2 top-2 hidden rounded-md border border-red-300/60 bg-red-600 px-2 py-1 text-[10px] font-black text-white shadow-sm group-hover:inline-flex"
                                   aria-label="Remove photo from scope"
                                 >
                                   Remove
                                 </button>
                               )}
-                              <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-1.5 py-1 text-[10px] font-black text-white">
-                                {photo.individual_note || photo.batch_note || photo.caption || photo.original_name || 'Photo'}
-                              </div>
                             </div>
                           );
                         })}
@@ -3070,13 +4176,7 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                         </div>
                       )}
 
-                      {executionItems.length === 0 ? (
-                        <div className="mt-4 rounded-xl border border-dashed border-white/15 bg-black/20 p-5 text-center">
-                          <FileText className="mx-auto mb-2 h-7 w-7 text-slate-400" />
-                          <p className="text-sm font-black text-slate-200">No execution plan lines under this scope yet</p>
-                          <p className="mt-1 text-xs font-semibold text-slate-400">Add tile selections, supplier details, costs, work steps, and approval checks here.</p>
-                        </div>
-                      ) : (
+                      {executionItems.length > 0 && (
                         <div className="mt-4 space-y-3">
                           {executionItems.map((item, itemIndex) => {
                             const itemMaterials = materials.filter(material => material.plan_item_id === item.id);
@@ -3298,6 +4398,159 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
         </div>
       </Modal>
 
+      <Modal isOpen={showVendorQuoteModal} onClose={closeVendorQuoteModal} title="Request Quote" size="xl">
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-emerald-300 bg-gradient-to-br from-slate-950 via-emerald-950 to-blue-950 p-4 shadow-[0_18px_42px_rgba(16,185,129,0.16)]">
+            <p className="text-sm font-black text-white">Send selected scope sections to one or more contractors for pricing.</p>
+            <p className="mt-1 text-xs font-semibold leading-5 text-emerald-100/85">
+              BuildTrack sends a private secure quote link to each contractor by email, text, or both. Each contractor only sees the selected scope details{vendorQuoteForm.include_photos ? ` and ${vendorQuotePhotoCount} attached photo${vendorQuotePhotoCount === 1 ? '' : 's'}` : ''}.
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-sm font-black text-slate-950">Pick one or more contractors from the contractor list</p>
+                <p className="mt-1 text-xs font-semibold text-slate-500">Email and phone come from each contractor profile. Email recipients are hidden from one another.</p>
+              </div>
+              <div className="relative w-full md:w-72">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={quoteContractorSearch}
+                  onChange={event => setQuoteContractorSearch(event.currentTarget.value)}
+                  className="w-full rounded-xl border border-slate-300 bg-slate-50 py-2.5 pl-9 pr-3 text-sm font-bold text-slate-900 outline-none focus:border-emerald-400 focus:bg-white"
+                  placeholder="Search contractor..."
+                />
+              </div>
+            </div>
+
+            <div className="mt-3 grid max-h-52 gap-2 overflow-y-auto pr-1 md:grid-cols-2">
+              {loadingQuoteContractors ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-bold text-slate-500">Loading contractors...</div>
+              ) : visibleQuoteContractors.length === 0 ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-bold text-slate-500">No contractors found.</div>
+              ) : visibleQuoteContractors.map(contractor => {
+                const selected = vendorQuoteContractorIds.includes(contractor.id);
+                const connected = contractorProjectIds(contractor).has(projectId);
+                return (
+                  <button
+                    key={contractor.id}
+                    type="button"
+                    onClick={() => selectVendorQuoteContractor(contractor)}
+                    className={`rounded-xl border p-3 text-left transition ${selected ? 'border-emerald-400 bg-emerald-50 ring-4 ring-emerald-100' : 'border-slate-200 bg-slate-50 hover:border-emerald-200 hover:bg-white'}`}
+                    aria-pressed={selected}
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className={`mt-0.5 inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg border text-xs font-black ${selected ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-300 bg-white text-transparent'}`}>
+                        <Check className="h-4 w-4" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="truncate text-sm font-black text-slate-950">{contractorDisplayName(contractor)}</p>
+                          {connected && <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-blue-700">Project</span>}
+                        </div>
+                        <p className="mt-1 truncate text-xs font-semibold text-slate-500">{contractorTypeLabel(contractor)}</p>
+                        <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-bold text-slate-600">
+                          <span className="inline-flex items-center gap-1"><Mail className="h-3 w-3" /> {contractor.email || 'No email'}</span>
+                          <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" /> {contractor.phone || 'No phone'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            {selectedQuoteContractors.length > 0 && (
+              <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-800">
+                Selected {selectedQuoteContractors.length} contractor{selectedQuoteContractors.length === 1 ? '' : 's'}: {selectedQuoteContractors.slice(0, 4).map(contractorDisplayName).join(', ')}{selectedQuoteContractors.length > 4 ? `, +${selectedQuoteContractors.length - 4} more` : ''}
+              </div>
+            )}
+          </div>
+
+          <div className="grid gap-3">
+            <div>
+              <label className="block text-xs font-black uppercase tracking-wide text-gray-500 mb-1">Message To Contractor</label>
+              <textarea value={vendorQuoteForm.message} onChange={updateVendorQuoteForm('message')} rows={3} className={`${scopeEditorFieldClass} resize-y`} />
+            </div>
+            <div className="rounded-2xl border border-amber-300/70 bg-amber-50 p-3 text-xs font-black leading-5 text-amber-900">
+              Quote links expire automatically after 7 business days.
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className={`flex min-h-16 items-center gap-3 rounded-2xl border p-4 ${vendorQuoteForm.send_email ? 'border-blue-300 bg-blue-50' : 'border-slate-200 bg-white'}`}>
+              <input type="checkbox" checked={vendorQuoteForm.send_email} onChange={updateVendorQuoteForm('send_email')} className="h-4 w-4 rounded border-blue-300 text-blue-600 focus:ring-blue-500" />
+              <span>
+                <span className="block text-sm font-black text-slate-950">Email quote link</span>
+                <span className="mt-0.5 block text-xs font-semibold text-slate-500">Send as private hidden-recipient email. Contractors cannot see other contractor emails.</span>
+              </span>
+            </label>
+            <label className={`flex min-h-16 items-center gap-3 rounded-2xl border p-4 ${vendorQuoteForm.send_text ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 bg-white'}`}>
+              <input type="checkbox" checked={vendorQuoteForm.send_text} onChange={updateVendorQuoteForm('send_text')} className="h-4 w-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500" />
+              <span>
+                <span className="block text-sm font-black text-slate-950">Text quote link</span>
+                <span className="mt-0.5 block text-xs font-semibold text-slate-500">Send SMS to each selected contractor phone.</span>
+              </span>
+            </label>
+          </div>
+
+          <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-sm font-black text-slate-900">{vendorQuoteSelectedScopes.length} of {scopes.length} scope sections selected</p>
+              <p className="mt-1 text-xs font-semibold text-slate-500">Choose the entire scope or only the parts this vendor should price.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={selectAllVendorQuoteScopes} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-100">Select All</button>
+              <button type="button" onClick={clearVendorQuoteScopes} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-100">Clear</button>
+              <label className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-cyan-200 bg-cyan-50 px-3 text-xs font-black text-cyan-800">
+                <input type="checkbox" checked={vendorQuoteForm.include_photos} onChange={updateVendorQuoteForm('include_photos')} className="h-4 w-4 rounded border-cyan-300 text-cyan-600 focus:ring-cyan-500" />
+                Include photos
+              </label>
+            </div>
+          </div>
+
+          <div className="grid max-h-[42vh] gap-2 overflow-y-auto pr-1 md:grid-cols-2">
+            {scopes.map(scope => {
+              const selected = vendorQuoteScopeIds.includes(String(scope.id));
+              const photoCount = Array.isArray(scope.photos) ? scope.photos.length : 0;
+              return (
+                <button
+                  key={scope.id}
+                  type="button"
+                  onClick={() => toggleVendorQuoteScope(String(scope.id))}
+                  className={`rounded-2xl border p-3 text-left transition ${selected ? 'border-amber-400 bg-amber-50 ring-4 ring-amber-100' : 'border-slate-200 bg-white hover:border-amber-200'}`}
+                  aria-pressed={selected}
+                >
+                  <div className="flex items-start gap-3">
+                    <span className={`mt-0.5 inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg border text-xs font-black ${selected ? 'border-amber-500 bg-amber-500 text-white' : 'border-slate-300 bg-white text-white'}`}>
+                      {selected ? <Check className="h-4 w-4" /> : ''}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-black text-slate-950">{scope.scope_title}</p>
+                      <p className="mt-1 text-xs font-semibold text-slate-500">{scope.section_name || 'General'} - {photoCount} photo{photoCount === 1 ? '' : 's'}</p>
+                      {scope.scope_of_work && <p className="mt-2 line-clamp-2 text-xs font-semibold leading-5 text-slate-600">{scope.scope_of_work}</p>}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-3">
+            <button type="button" disabled={sendingVendorQuote} onClick={closeVendorQuoteModal} className="px-4 py-2.5 rounded-xl border border-gray-300 text-sm font-black text-gray-700 hover:bg-gray-50 disabled:opacity-60">Cancel</button>
+            <button
+              type="button"
+              disabled={sendingVendorQuote || !vendorQuoteScopeIds.length || !vendorQuoteContractorIds.length}
+              onClick={sendVendorQuoteRequest}
+              className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-black text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Send className="h-4 w-4" />
+              {sendingVendorQuote ? 'Sending...' : 'Send Quote Links'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
       <Modal isOpen={showBulkEditor} onClose={closeBulkScopes} title="Add Bulk Scope of Work Items" size="xl">
         <div className="space-y-4 bt-scope-editor" onKeyDown={keepScopeEditorTypingLocal}>
           <div className="rounded-2xl border border-emerald-400/40 bg-gradient-to-br from-slate-950 via-emerald-950 to-blue-950 p-4 shadow-[0_18px_42px_rgba(16,185,129,0.16)]">
@@ -3317,11 +4570,13 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
             </div>
           </div>
 
-          <div className="hidden gap-3 px-3 text-[11px] font-black uppercase tracking-wide text-gray-500 md:grid md:grid-cols-[3rem_minmax(12rem,1fr)_minmax(9rem,.65fr)_minmax(8rem,.55fr)_minmax(14rem,1fr)_3rem]">
+          <div className="hidden gap-3 px-3 text-[11px] font-black uppercase tracking-wide text-gray-500 md:grid md:grid-cols-[3rem_minmax(11rem,1fr)_minmax(8rem,.6fr)_minmax(7rem,.48fr)_minmax(8rem,.55fr)_minmax(8rem,.55fr)_minmax(13rem,1fr)_3rem]">
             <span>#</span>
             <span>Scope Title *</span>
             <span>House / Section</span>
             <span>Status</span>
+            <span>Timeline Start</span>
+            <span>Timeline Done</span>
             <span>Scope Details</span>
             <span className="sr-only">Remove</span>
           </div>
@@ -3329,7 +4584,7 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
           <div className="space-y-3">
             {bulkScopeRows.map((row, index) => (
               <div key={row.rowId} className="rounded-2xl border border-slate-700 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-3 shadow-sm">
-                <div className="grid gap-3 md:grid-cols-[3rem_minmax(12rem,1fr)_minmax(9rem,.65fr)_minmax(8rem,.55fr)_minmax(14rem,1fr)_3rem] md:items-start">
+                <div className="grid gap-3 md:grid-cols-[3rem_minmax(11rem,1fr)_minmax(8rem,.6fr)_minmax(7rem,.48fr)_minmax(8rem,.55fr)_minmax(8rem,.55fr)_minmax(13rem,1fr)_3rem] md:items-start">
                   <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-900 text-sm font-black text-white">
                     {index + 1}
                   </div>
@@ -3362,10 +4617,29 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                     </select>
                   </label>
                   <label>
+                    <span className="bt-scope-editor-label mb-1 block text-xs font-black uppercase tracking-wide text-gray-500 md:sr-only">Timeline Start</span>
+                    <input
+                      type="date"
+                      value={row.timeline_start}
+                      onChange={updateBulkScopeRow(row.rowId, 'timeline_start')}
+                      className={scopeEditorFieldClass}
+                    />
+                  </label>
+                  <label>
+                    <span className="bt-scope-editor-label mb-1 block text-xs font-black uppercase tracking-wide text-gray-500 md:sr-only">Timeline Done</span>
+                    <input
+                      type="date"
+                      value={row.timeline_end}
+                      onChange={updateBulkScopeRow(row.rowId, 'timeline_end')}
+                      className={scopeEditorFieldClass}
+                    />
+                  </label>
+                  <label>
                     <span className="bt-scope-editor-label mb-1 block text-xs font-black uppercase tracking-wide text-gray-500 md:sr-only">Scope Details</span>
                     <textarea
                       value={row.scope_of_work}
                       onChange={updateBulkScopeRow(row.rowId, 'scope_of_work')}
+                      onBlur={() => setBulkScopeRows(current => current.map(item => item.rowId === row.rowId ? { ...item, scope_of_work: scopeLineItemText(item.scope_of_work) } : item))}
                       rows={2}
                       placeholder="Enter work details..."
                       className={`${scopeEditorFieldClass} min-h-[44px] resize-y`}
@@ -3403,8 +4677,8 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
 
       <Modal isOpen={showEditor} onClose={closeScopeEditor} title={editingScope ? 'Edit Scope of Work' : 'Add Scope of Work'} size="lg">
         <div className="space-y-4 bt-scope-editor" onKeyDown={keepScopeEditorTypingLocal}>
-          <div className="grid md:grid-cols-2 gap-3">
-            <div className="md:col-span-2">
+          <div className="grid gap-3 md:grid-cols-4">
+            <div className="md:col-span-4">
               <label className="bt-scope-editor-label block text-sm font-medium text-gray-700 mb-1">Scope Title *</label>
               <input type="text" autoComplete="off" value={scopeForm.scope_title} onChange={updateScopeFormField('scope_title')} placeholder="Kitchen cabinet and countertop replacement" className={scopeEditorFieldClass} />
             </div>
@@ -3418,9 +4692,24 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                 {['draft', 'active', 'on_hold', 'completed'].map(status => <option key={status} value={status}>{status.replace(/_/g, ' ')}</option>)}
               </select>
             </div>
-            <div className="md:col-span-2">
+            <div>
+              <label className="bt-scope-editor-label block text-sm font-medium text-gray-700 mb-1">Timeline Start Date</label>
+              <input type="date" value={scopeForm.timeline_start} onChange={updateScopeFormField('timeline_start')} className={scopeEditorFieldClass} />
+            </div>
+            <div>
+              <label className="bt-scope-editor-label block text-sm font-medium text-gray-700 mb-1">Timeline Completion Date</label>
+              <input type="date" value={scopeForm.timeline_end} onChange={updateScopeFormField('timeline_end')} className={scopeEditorFieldClass} />
+            </div>
+            <div className="md:col-span-4">
               <label className="bt-scope-editor-label block text-sm font-medium text-gray-700 mb-1">Scope of Work</label>
-              <textarea value={scopeForm.scope_of_work} onChange={updateScopeFormField('scope_of_work')} rows={8} placeholder="Enter the full scope for this section..." className={`${scopeEditorFieldClass} resize-none`} />
+              <textarea
+                value={scopeForm.scope_of_work}
+                onChange={updateScopeFormField('scope_of_work')}
+                onBlur={normalizeScopeDetails}
+                rows={8}
+                placeholder="Enter one scope item per line. Pasted paragraphs and dictated sentences will be formatted into line items."
+                className={`${scopeEditorFieldClass} resize-none`}
+              />
             </div>
           </div>
           <div className="flex flex-col gap-3 border-t border-gray-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
@@ -3514,6 +4803,7 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
         onClose={() => setScopePhotoPicker(null)}
         onSave={saveScopePhotoPickerSelection}
       />
+      <ProgressMediaLightbox state={scopeLightbox} onChange={setScopeLightbox} />
     </div>
   );
 }
@@ -4457,22 +5747,22 @@ function PunchListTab({
 
   return (
     <div className="space-y-4">
-      <div className={`rounded-2xl border p-4 shadow-[0_16px_38px_rgba(15,23,42,0.16)] ${isActive ? 'border-yellow-300 bg-gradient-to-br from-yellow-50 via-white to-blue-50' : 'border-slate-300 bg-gradient-to-br from-slate-50 via-white to-blue-50'}`}>
+      <div className={`rounded-2xl border p-4 shadow-[0_18px_44px_rgba(2,6,23,0.34)] ${isActive ? 'border-amber-300/60 bg-gradient-to-br from-slate-950 via-amber-950/50 to-blue-950' : 'border-cyan-300/40 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950'}`}>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-lg font-black text-slate-950">{isActive ? 'Punch List Active' : 'Start Punch List'}</h3>
-              {isActive && <span className="rounded-full border border-yellow-400 bg-yellow-300 px-3 py-1 text-xs font-black uppercase tracking-wide text-yellow-950">Punch List Active</span>}
-              <span className="rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-black uppercase tracking-wide text-emerald-800">Active Rehab</span>
+              <h3 className="text-xl font-black tracking-normal text-white">{isActive ? 'Punch List Active' : 'Start Punch List'}</h3>
+              {isActive && <span className="rounded-full border border-amber-200/70 bg-amber-300 px-3 py-1 text-xs font-black uppercase tracking-wide text-slate-950 shadow-sm">Punch List Active</span>}
+              <span className="rounded-full border border-emerald-300/55 bg-emerald-400/18 px-3 py-1 text-xs font-black uppercase tracking-wide text-emerald-50">Active Rehab</span>
             </div>
-            <p className="mt-1 text-sm font-semibold text-slate-600">Punch list is the final 90% completion workflow. It stays separate from scope of work and only opens when management activates it.</p>
+            <p className="mt-2 text-sm font-semibold leading-6 text-slate-100">Punch list is the final 90% completion workflow. It stays separate from scope of work and only opens when management activates it.</p>
           </div>
           {!isActive && (
             <button
               type="button"
               onClick={onActivate}
               disabled={!canActivate || activating}
-              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-yellow-500 px-4 py-2.5 text-sm font-black text-yellow-950 shadow-sm transition hover:bg-yellow-400 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-amber-200/70 bg-gradient-to-br from-amber-300 to-amber-500 px-4 py-2.5 text-sm font-black text-slate-950 shadow-[0_10px_24px_rgba(245,158,11,0.25)] transition hover:from-amber-200 hover:to-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
               title={canActivate ? 'Activate punch list for this project' : 'Only management can activate punch list'}
             >
               <ClipboardList className="h-4 w-4" />
@@ -4485,10 +5775,10 @@ function PunchListTab({
       <div className="flex gap-2">
         <div className="flex gap-1 flex-1 overflow-x-auto">
           {[['', 'All'], ['not_started', 'Open'], ['in_progress', 'In Progress'], ['completed', 'Done'], ['urgent', 'Urgent']].map(([val, label]) => (
-            <button key={val} onClick={() => setFilter(val)} className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${filter === val ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50'}`}>{label}</button>
+            <button key={val} onClick={() => setFilter(val)} className={`px-3 py-1.5 rounded-lg text-xs font-black whitespace-nowrap transition-colors ${filter === val ? 'border border-blue-300 bg-blue-600 text-white shadow-[0_0_14px_rgba(37,99,235,0.28)]' : 'border border-slate-600 bg-slate-950 text-slate-100 hover:border-cyan-300 hover:bg-slate-900 hover:text-cyan-50'}`}>{label}</button>
           ))}
         </div>
-        <button disabled={!isActive} onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 transition-colors flex-shrink-0 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600" title={isActive ? 'Add punch list item' : 'Activate punch list before adding items'}>
+        <button disabled={!isActive} onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-blue-300/55 bg-blue-600 text-xs font-black text-white shadow-sm transition-colors flex-shrink-0 hover:bg-blue-500 disabled:cursor-not-allowed disabled:border-slate-600 disabled:bg-slate-900 disabled:text-slate-400" title={isActive ? 'Add punch list item' : 'Activate punch list before adding items'}>
           <Plus className="w-3.5 h-3.5" /> Add
         </button>
       </div>
@@ -4762,15 +6052,15 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
   const saveProgressGroupNote = async (record: any, note: string) => {
     const photoIds = (record.photos || []).map((photo: any) => photo.id).filter(Boolean);
     if (!photoIds.length) {
-      toast.error('No photos are available for this note');
+      toast.error('No photos are available for this description');
       return;
     }
     try {
       await api.put(`/projects/${projectId}/photos/batch-note`, { photo_ids: photoIds, note });
-      toast.success(note.trim() ? 'Progress picture group note entered' : 'Progress picture group note cleared');
+      toast.success(note.trim() ? 'Progress picture group description saved' : 'Progress picture group description cleared');
       await load();
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Failed to save progress picture group note');
+      toast.error(err.response?.data?.error || 'Failed to save progress picture group description');
     }
   };
 
@@ -4951,19 +6241,19 @@ function ProgressGroupNoteEditor({
             <MessageSquare className="h-4 w-4" />
           </div>
           <div>
-            <p>Picture group note</p>
-            <span>{photoCount} progress picture{photoCount === 1 ? '' : 's'} share this note</span>
+            <p>Picture group description</p>
+            <span>{photoCount} progress picture{photoCount === 1 ? '' : 's'} share this description</span>
           </div>
         </div>
         <div className="bt-progress-group-note-chips">
-          <span>{normalizedInitial ? 'Saved note' : 'No saved note'}</span>
+          <span>{normalizedInitial ? 'Saved description' : 'No saved description'}</span>
           {changed ? <span className="is-warning">Unsaved changes</span> : null}
         </div>
       </div>
 
       {normalizedInitial ? (
-        <div className="bt-progress-group-note-preview" aria-label="Saved picture group note">
-          <span>Combined group note</span>
+        <div className="bt-progress-group-note-preview" aria-label="Saved picture group description">
+          <span>Combined group description</span>
           <p>{normalizedInitial}</p>
         </div>
       ) : null}
@@ -4975,7 +6265,7 @@ function ProgressGroupNoteEditor({
           rows={4}
           disabled={saving}
           stopSignal={voiceStopSignal}
-          placeholder="Add one clean note that applies to this full picture group..."
+          placeholder="Add one clean description that applies to this full picture group..."
           wrapperClassName="bt-progress-group-note-input-wrap"
           className="bt-progress-group-note-field"
           buttonClassName="bt-progress-group-note-mic"
@@ -4988,7 +6278,7 @@ function ProgressGroupNoteEditor({
             className="bt-progress-group-note-save"
           >
             <MessageSquare className="h-4 w-4" />
-            {saving ? 'Saving...' : normalizedInitial ? 'Update note' : 'Enter note'}
+            {saving ? 'Saving...' : normalizedInitial ? 'Update description' : 'Save description'}
           </button>
           {(normalizedInitial || normalizedNote) && (
             <button
@@ -4997,7 +6287,7 @@ function ProgressGroupNoteEditor({
               disabled={saving || (!normalizedInitial && !normalizedNote)}
               className="bt-progress-group-note-clear"
             >
-              Clear note
+              Clear description
             </button>
           )}
         </div>
@@ -5158,11 +6448,11 @@ function ProgressMediaGrid({
                   event.stopPropagation();
                   setNotePhoto(photo);
                 }}
-                className={`absolute right-1 top-1 z-0 inline-flex min-h-7 items-center justify-center gap-1 rounded-md border px-1.5 text-[10px] font-black shadow-sm transition ${hasNote ? 'border-amber-300 bg-amber-500 text-slate-950 hover:bg-amber-400' : 'border-white/70 bg-black/65 text-white hover:border-amber-300 hover:text-amber-200'}`}
-                aria-label={`${hasNote ? 'Edit' : 'Add'} note for ${photo.original_name || 'progress picture'}`}
+                className={`absolute right-1 top-1 z-30 inline-flex min-h-7 items-center justify-center gap-1 rounded-md border px-1.5 text-[10px] font-black shadow-sm transition ${hasNote ? 'border-amber-300 bg-amber-500 text-slate-950 hover:bg-amber-400' : 'border-white/70 bg-black/65 text-white hover:border-amber-300 hover:text-amber-200'}`}
+                aria-label={`${hasNote ? 'Edit' : 'Add'} description for ${photo.original_name || 'progress picture'}`}
               >
                 <MessageSquare className="h-3 w-3" />
-                {hasNote ? 'Note' : 'Add'}
+                {hasNote ? 'Desc' : 'Add desc'}
               </button>
             )}
             {timestamp && (
@@ -5253,7 +6543,7 @@ function ProgressMediaLightbox({
 
           {activeItem.noteText && (
             <div className="absolute bottom-4 left-4 right-4 max-h-36 overflow-y-auto rounded-xl border border-amber-300/40 bg-slate-950/90 p-3 shadow-2xl backdrop-blur">
-              <p className="text-[11px] font-black uppercase tracking-wide text-amber-300">Picture note</p>
+              <p className="text-[11px] font-black uppercase tracking-wide text-amber-300">Picture description</p>
               <p className="mt-1 whitespace-pre-wrap text-sm font-semibold leading-6 text-white">{activeItem.noteText}</p>
             </div>
           )}
@@ -5316,11 +6606,11 @@ function PhotoNoteModal({
     try {
       const res = await api.put(`/projects/${projectId}/photos/${photo.id}/note`, { note: nextNote });
       const updatedPhoto = res.data?.photo || res.data;
-      toast.success(nextNote.trim() ? 'Photo note entered' : 'Photo note cleared');
+      toast.success(nextNote.trim() ? 'Photo description entered' : 'Photo description cleared');
       setSaving(false);
       await onSaved(updatedPhoto);
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Failed to save photo note');
+      toast.error(err.response?.data?.error || 'Failed to save photo description');
       setSaving(false);
     }
   };
@@ -5333,14 +6623,14 @@ function PhotoNoteModal({
           style={{ background: 'linear-gradient(135deg, rgba(15,23,42,0.98), rgba(69,26,3,0.72))' }}
         >
           <div className="min-w-0">
-            <p className="text-[11px] font-black uppercase tracking-wide text-amber-300">Picture note</p>
+            <p className="text-[11px] font-black uppercase tracking-wide text-amber-300">Picture description</p>
             <h3 className="truncate text-sm font-black text-white">{photo.original_name || photo.filename || 'Project picture'}</h3>
           </div>
           <button
             type="button"
             onClick={onClose}
             className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-white/20 bg-white/10 text-white transition hover:border-amber-300 hover:text-amber-200"
-            aria-label="Close picture note"
+            aria-label="Close picture description"
           >
             <XIcon />
           </button>
@@ -5361,7 +6651,7 @@ function PhotoNoteModal({
 
           <div className="space-y-3">
             <label className="block">
-              <span className="mb-2 block text-xs font-black uppercase tracking-wide text-slate-300">Descriptive note</span>
+              <span className="mb-2 block text-xs font-black uppercase tracking-wide text-slate-300">Photo description</span>
               <VoiceTextarea
                 value={noteText}
                 onChange={event => setNoteText(event.target.value)}
@@ -5389,7 +6679,7 @@ function PhotoNoteModal({
                 className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-amber-300 bg-amber-500 px-4 text-sm font-black text-slate-950 shadow-lg shadow-amber-950/25 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:border-slate-500 disabled:bg-slate-700 disabled:text-slate-300"
               >
                 <MessageSquare className="h-4 w-4" />
-                {saving ? 'Saving...' : 'Enter Note'}
+                {saving ? 'Saving...' : 'Save Description'}
               </button>
               {(existingNote || noteText.trim()) && (
                 <button
@@ -5398,7 +6688,7 @@ function PhotoNoteModal({
                   disabled={saving || (!existingNote && !noteText.trim())}
                   className="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-600 bg-slate-900 px-4 text-sm font-black text-slate-200 transition hover:border-red-300 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Clear note
+                  Clear description
                 </button>
               )}
             </div>
@@ -5420,7 +6710,11 @@ function RecentFieldPhotosCard({
   onViewAll: () => void;
   onPhotoNoteSaved: (photo: any) => Promise<void> | void;
 }) {
-  const visiblePhotos = photos.slice(0, 4);
+  const projectPhotos = useMemo(
+    () => filterPhotosForProject(photos, projectId),
+    [photos, projectId]
+  );
+  const visiblePhotos = projectPhotos;
   const [notePhoto, setNotePhoto] = useState<any | null>(null);
 
   return (
@@ -5430,7 +6724,7 @@ function RecentFieldPhotosCard({
           <div>
             <h3 className="text-sm font-semibold text-gray-900">Recent Field Photos</h3>
             <p className="mt-1 text-xs font-semibold text-gray-500">
-              {photos.length ? `${photos.length} latest project media item${photos.length === 1 ? '' : 's'}` : 'No field photos yet'}
+              {projectPhotos.length ? `${projectPhotos.length} latest project media item${projectPhotos.length === 1 ? '' : 's'}` : 'No field photos yet'}
             </p>
           </div>
           <button
@@ -5443,13 +6737,14 @@ function RecentFieldPhotosCard({
         </div>
 
         {visiblePhotos.length ? (
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid max-h-[440px] grid-cols-2 gap-2 overflow-y-auto pr-1">
             {visiblePhotos.map(photo => {
               const src = `/uploads/${projectId}/${photo.filename}`;
               const mediaKind = getProgressMediaKind(photo);
               const isVideo = mediaKind === 'video';
               const timestamp = getProgressTimestamp(photo);
               const noteText = getProgressPhotoNoteText(photo);
+              const uploaderName = photo.uploader_name || photo.uploaded_by_name || 'Unknown user';
 
               return (
                 <article
@@ -5460,7 +6755,7 @@ function RecentFieldPhotosCard({
                     type="button"
                     onClick={() => setNotePhoto(photo)}
                     className="block w-full text-left"
-                    aria-label={`${noteText ? 'View or edit' : 'Add'} note for ${photo.original_name || 'field photo'}`}
+                    aria-label={`${noteText ? 'View or edit' : 'Add'} description for ${photo.original_name || 'field photo'}`}
                   >
                     <div className="relative aspect-[4/3] bg-gray-100">
                       {isVideo ? (
@@ -5479,14 +6774,28 @@ function RecentFieldPhotosCard({
                       {noteText && (
                         <span className="absolute right-1.5 top-1.5 inline-flex items-center gap-1 rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-black text-slate-950 shadow-sm">
                           <MessageSquare className="h-3 w-3" />
-                          Note
+                          Description
                         </span>
                       )}
+                      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/80 to-black/20 px-2.5 py-2 text-left text-white shadow-[0_-8px_18px_rgba(0,0,0,0.35)]">
+                        <p className="truncate text-[11px] font-black leading-4 text-white">
+                          {formatProjectPhotoTimestamp(photo)}
+                        </p>
+                        <p className="truncate text-[10px] font-extrabold leading-4 text-white/90">
+                          Inserted by {uploaderName}
+                        </p>
+                        <p className="truncate text-[9px] font-bold leading-3 text-cyan-100">
+                          {formatProjectPhotoGps(photo)}
+                        </p>
+                        <p className="truncate text-[9px] font-bold leading-3 text-white/75">
+                          {formatProjectPhotoIp(photo)}
+                        </p>
+                      </div>
                     </div>
                   </button>
                   <div className="space-y-1.5 p-2">
                     <p className="truncate text-xs font-black text-gray-900">
-                      {photo.uploader_name || 'Unknown user'}
+                      {uploaderName}
                     </p>
                     <p className="text-[11px] font-semibold text-gray-500">
                       {timestamp ? formatEasternDateTime(timestamp, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'No timestamp'}
@@ -5498,7 +6807,7 @@ function RecentFieldPhotosCard({
                       className="inline-flex min-h-7 items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 text-[11px] font-black text-amber-800 transition hover:bg-amber-100"
                     >
                       <MessageSquare className="h-3 w-3" />
-                      {noteText ? 'Edit note' : 'Add note'}
+                      {noteText ? 'Edit Description' : 'Add Description'}
                     </button>
                   </div>
                 </article>
@@ -5701,108 +7010,218 @@ function PhotoBucketPickerModal({
   );
 }
 
-function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
+type PhotoBucketAssignmentTargetType = 'project_scope' | 'punch_list_item' | 'construction_plan_item' | 'material' | 'project_note';
+
+type PhotoBucketAssignmentTargetOption = {
+  id: string;
+  title: string;
+  subtitle: string;
+};
+
+const PHOTO_BUCKET_ASSIGNMENT_TARGETS: Array<{
+  type: PhotoBucketAssignmentTargetType;
+  label: string;
+  shortLabel: string;
+  emptyLabel: string;
+}> = [
+  { type: 'project_scope', label: 'Scope of Work', shortLabel: 'Scopes', emptyLabel: 'No scope sections are available yet.' },
+  { type: 'punch_list_item', label: 'Punch List', shortLabel: 'Punch List', emptyLabel: 'No punch list items are available yet.' },
+  { type: 'construction_plan_item', label: 'Construction Plan', shortLabel: 'Plan', emptyLabel: 'No construction plan line items are available yet.' },
+  { type: 'material', label: 'Materials', shortLabel: 'Materials', emptyLabel: 'No materials are available yet.' },
+  { type: 'project_note', label: 'Project Notes', shortLabel: 'Notes', emptyLabel: 'No project notes are available yet.' },
+];
+
+function PhotosTab({ projectId, project, user }: { projectId: string; project: any; user: any }) {
   const [photos, setPhotos] = useState<any[]>([]);
-  const [categories, setCategories] = useState<any[]>([]);
+  const [scopes, setScopes] = useState<any[]>([]);
+  const [punchItems, setPunchItems] = useState<any[]>([]);
+  const [planItems, setPlanItems] = useState<any[]>([]);
+  const [materials, setMaterials] = useState<any[]>([]);
+  const [projectNotes, setProjectNotes] = useState<any[]>([]);
+  const activeProjectIdRef = useRef(projectId);
   const [loading, setLoading] = useState(true);
-  const [selectedCategory, setSelectedCategory] = useState('');
-  const [uploading, setUploading] = useState(false);
   const [lightbox, setLightbox] = useState<ProgressLightboxState | null>(null);
   const [notePhoto, setNotePhoto] = useState<any | null>(null);
+  const [scopeAssignPhoto, setScopeAssignPhoto] = useState<any | null>(null);
+  const [scopeAssignIds, setScopeAssignIds] = useState<Set<string>>(new Set());
+  const [photoAssignTargetType, setPhotoAssignTargetType] = useState<PhotoBucketAssignmentTargetType>('project_scope');
+  const [assigningScopes, setAssigningScopes] = useState(false);
   const [deletingPhotoId, setDeletingPhotoId] = useState('');
   const [deleteMode, setDeleteMode] = useState(false);
   const [selectedDeleteIds, setSelectedDeleteIds] = useState<Set<string>>(new Set());
-  const [showNewCat, setShowNewCat] = useState(false);
-  const [newCatName, setNewCatName] = useState('');
   const groupedPhotos = groupMediaByDay(photos);
+  const projectLabel = projectPhotoRecordLabel(project, projectId);
   const lightboxItems = useMemo(() => buildProgressLightboxItems(projectId, photos), [projectId, photos]);
   const deletablePhotos = useMemo(() => photos.filter(photo => photo.can_delete_correction), [photos]);
   const selectedDeletePhotos = useMemo(
     () => deletablePhotos.filter(photo => selectedDeleteIds.has(progressPhotoKey(photo))),
     [deletablePhotos, selectedDeleteIds]
   );
+  const photoDescriptionCount = useMemo(
+    () => photos.filter(photo => getProgressPhotoNoteText(photo)).length,
+    [photos]
+  );
+  const assignedScopeCount = useMemo(
+    () => scopes.reduce((count, scope) => count + (Array.isArray(scope.photos) ? scope.photos.length : 0), 0),
+    [scopes]
+  );
+  const assignmentTargetOptions = useMemo<Record<PhotoBucketAssignmentTargetType, PhotoBucketAssignmentTargetOption[]>>(() => ({
+    project_scope: scopes.map(scope => ({
+      id: String(scope.id),
+      title: scope.scope_title || 'Scope of work',
+      subtitle: scope.section_name || 'General',
+    })),
+    punch_list_item: punchItems.map(item => ({
+      id: String(item.id),
+      title: item.title || item.description || 'Punch list item',
+      subtitle: [item.status, item.priority].filter(Boolean).join(' - ') || 'Punch list',
+    })),
+    construction_plan_item: planItems.map(item => ({
+      id: String(item.id),
+      title: item.title || item.task_name || item.description || 'Construction line item',
+      subtitle: [item.stage || item.category, item.status].filter(Boolean).join(' - ') || 'Construction plan',
+    })),
+    material: materials.map(material => ({
+      id: String(material.id),
+      title: material.material_name || material.name || 'Material',
+      subtitle: [material.category, material.order_status || material.status].filter(Boolean).join(' - ') || 'Material',
+    })),
+    project_note: projectNotes.map(note => ({
+      id: String(note.id),
+      title: String(note.note || 'Project note').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Project note',
+      subtitle: [note.note_type || 'Note', note.user_name].filter(Boolean).join(' - '),
+    })),
+  }), [materials, planItems, projectNotes, punchItems, scopes]);
+  const activeAssignmentConfig = PHOTO_BUCKET_ASSIGNMENT_TARGETS.find(target => target.type === photoAssignTargetType) || PHOTO_BUCKET_ASSIGNMENT_TARGETS[0];
+  const activeAssignmentOptions = assignmentTargetOptions[photoAssignTargetType] || [];
+  const hasPhotoAssignmentTargets = PHOTO_BUCKET_ASSIGNMENT_TARGETS.some(target => (assignmentTargetOptions[target.type]?.length || 0) > 0);
+  const scopeAssignmentMap = useMemo(() => {
+    const map = new Map<string, any[]>();
+    scopes.forEach(scope => {
+      const scopePhotos = Array.isArray(scope.photos) ? scope.photos : [];
+      scopePhotos.forEach((photo: any) => {
+        const photoId = String(photo?.id || '').trim();
+        if (!photoId) return;
+        const rows = map.get(photoId) || [];
+        rows.push({
+          scopeId: String(scope.id),
+          scopeTitle: scope.scope_title || 'Scope of work',
+          sectionName: scope.section_name || 'General',
+          assignmentId: photo.assignment_id || null,
+        });
+        map.set(photoId, rows);
+      });
+    });
+    return map;
+  }, [scopes]);
 
   const load = useCallback(async () => {
     try {
-      const [photosRes, catsRes] = await Promise.all([
-        api.get(`/projects/${projectId}/photos${selectedCategory ? `?category_id=${selectedCategory}` : ''}`),
-        api.get(`/projects/${projectId}/photos/categories`),
+      const requestProjectId = projectId;
+      const [photosRes, scopesRes, punchRes, planRes, materialRes, notesRes] = await Promise.all([
+        api.get(`/projects/${requestProjectId}/photos`),
+        api.get(`/projects/${requestProjectId}/scopes`).catch(() => ({ data: { scopes: [] } })),
+        api.get(`/projects/${requestProjectId}/punch-list`).catch(() => ({ data: [] })),
+        api.get(`/projects/${requestProjectId}/construction-plan`).catch(() => ({ data: [] })),
+        api.get(`/projects/${requestProjectId}/materials`).catch(() => ({ data: [] })),
+        api.get(`/projects/${requestProjectId}/notes`).catch(() => ({ data: [] })),
       ]);
-      setPhotos(photosRes.data);
-      setCategories(catsRes.data);
+      if (activeProjectIdRef.current !== requestProjectId) return;
+      setPhotos(sortProjectPhotosNewestFirst(filterPhotosForProject(Array.isArray(photosRes.data) ? photosRes.data : [], requestProjectId)));
+      setScopes(filterScopesForProjectPhotos(Array.isArray(scopesRes.data?.scopes) ? scopesRes.data.scopes : [], requestProjectId));
+      setPunchItems(Array.isArray(punchRes.data) ? punchRes.data : []);
+      setPlanItems(Array.isArray(planRes.data) ? planRes.data : []);
+      setMaterials(Array.isArray(materialRes.data) ? materialRes.data : []);
+      setProjectNotes(Array.isArray(notesRes.data) ? notesRes.data : []);
     } catch (err) { } finally { setLoading(false); }
-  }, [projectId, selectedCategory]);
+  }, [projectId]);
+
+  useEffect(() => {
+    activeProjectIdRef.current = projectId;
+    setPhotos([]);
+    setScopes([]);
+    setPunchItems([]);
+    setPlanItems([]);
+    setMaterials([]);
+    setProjectNotes([]);
+    setLightbox(null);
+    setNotePhoto(null);
+    setScopeAssignPhoto(null);
+    setScopeAssignIds(new Set());
+    setPhotoAssignTargetType('project_scope');
+    setSelectedDeleteIds(new Set());
+    setDeleteMode(false);
+    setLoading(true);
+  }, [projectId]);
 
   useEffect(() => { load(); }, [load]);
 
-  const uploadFiles = useCallback(async (incomingFiles: File[]) => {
-    if (incomingFiles.length === 0) return;
-    if (incomingFiles.length > MAX_PROGRESS_UPLOAD_BATCH_FILES) {
-      toast.error(`Upload up to ${MAX_PROGRESS_UPLOAD_BATCH_FILES} files at once. Remove ${incomingFiles.length - MAX_PROGRESS_UPLOAD_BATCH_FILES} and try again.`);
-      return;
-    }
+  const assignPhotoIdsToTargets = useCallback(async (photoIds: string[], targetType: PhotoBucketAssignmentTargetType, targetIds: string[]) => {
+    const cleanPhotoIds = Array.from(new Set(photoIds.map(id => String(id || '').trim()).filter(Boolean)));
+    const cleanTargetIds = Array.from(new Set(targetIds.map(id => String(id || '').trim()).filter(Boolean)));
+    if (!cleanPhotoIds.length || !cleanTargetIds.length) return 0;
 
-    const unsupportedFiles = incomingFiles.filter(file => !isSupportedProgressMediaFile(file));
-    if (unsupportedFiles.length > 0) {
-      toast.error(`${unsupportedFiles.length} unsupported file${unsupportedFiles.length === 1 ? '' : 's'} skipped. Use photo or video media files.`);
-    }
+    const results = await Promise.all(cleanTargetIds.map(targetId =>
+      api.post(`/projects/${projectId}/photos/assignments`, {
+        target_type: targetType,
+        target_id: targetId,
+        photo_ids: cleanPhotoIds,
+      })
+    ));
+    return results.reduce((sum, result) => sum + Number(result.data?.assigned_photos?.length || result.data?.added || 0), 0);
+  }, [projectId]);
 
-    const files = incomingFiles.filter(isSupportedProgressMediaFile);
-    if (files.length === 0) return;
-
-    setUploading(true);
-    const formData = new FormData();
-    files.forEach(f => formData.append('photos', f));
-    if (selectedCategory) formData.append('category_id', selectedCategory);
-    formData.append('photo_type', 'progress');
-    await appendProgressUploadAudit(formData, files, files.map(() => 'desktop'));
-    try {
-      await api.post(`/projects/${projectId}/photos?type=progress`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
-      toast.success(`${files.length} photo${files.length === 1 ? '' : 's'} uploaded`);
-      load();
-    } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Upload failed');
-    } finally {
-      setUploading(false);
-    }
-  }, [load, projectId, selectedCategory]);
-
-  const handleRejectedFiles = useCallback((fileRejections: FileRejection[]) => {
-    if (!fileRejections.length) return;
-    const tooMany = fileRejections.some(rejection =>
-      rejection.errors.some(error => error.code === 'too-many-files')
-    );
-    if (tooMany) {
-      toast.error(`Upload up to ${MAX_PROGRESS_UPLOAD_BATCH_FILES} files at once.`);
-      return;
-    }
-    toast.error('Some files were not accepted. Use photos or videos only.');
-  }, []);
-
-  const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
-    multiple: true,
-    noClick: true,
-    noKeyboard: true,
-    disabled: uploading,
-    maxFiles: MAX_PROGRESS_UPLOAD_BATCH_FILES,
-    validator: file => isSupportedProgressMediaFile(file)
-      ? null
-      : { code: 'unsupported-media-type', message: 'Only photo or video media files are allowed' },
-    onDropAccepted: acceptedFiles => {
-      void uploadFiles(acceptedFiles);
-    },
-    onDropRejected: handleRejectedFiles,
-  });
-
-  const addCategory = async () => {
-    if (!newCatName.trim()) return;
-    try {
-      await api.post(`/projects/${projectId}/photos/categories`, { name: newCatName });
-      setNewCatName('');
-      setShowNewCat(false);
-      load();
-    } catch (err) { toast.error('Failed to add category'); }
+  const openScopeAssignment = (photo: any) => {
+    const assignedScopes = scopeAssignmentMap.get(String(photo?.id || '')) || [];
+    setPhotoAssignTargetType('project_scope');
+    setScopeAssignIds(new Set(assignedScopes.map(scope => String(scope.scopeId))));
+    setScopeAssignPhoto(photo);
   };
+
+  const changePhotoAssignTargetType = (targetType: PhotoBucketAssignmentTargetType) => {
+    setPhotoAssignTargetType(targetType);
+    if (targetType === 'project_scope' && scopeAssignPhoto) {
+      const assignedScopes = scopeAssignmentMap.get(String(scopeAssignPhoto?.id || '')) || [];
+      setScopeAssignIds(new Set(assignedScopes.map(scope => String(scope.scopeId))));
+      return;
+    }
+    setScopeAssignIds(new Set());
+  };
+
+  const toggleScopeAssignment = (scopeId: string) => {
+    setScopeAssignIds(current => {
+      const next = new Set(current);
+      if (next.has(scopeId)) next.delete(scopeId);
+      else next.add(scopeId);
+      return next;
+    });
+  };
+
+  const savePhotoScopeAssignments = async () => {
+    if (!scopeAssignPhoto || assigningScopes) return;
+    const selectedScopeIds = Array.from(scopeAssignIds);
+    if (!selectedScopeIds.length) {
+      toast.error(`Select at least one ${activeAssignmentConfig.label.toLowerCase()} record`);
+      return;
+    }
+
+    setAssigningScopes(true);
+    try {
+      const added = await assignPhotoIdsToTargets([scopeAssignPhoto.id], photoAssignTargetType, selectedScopeIds);
+      toast.success(added > 0
+        ? `Photo assigned to ${selectedScopeIds.length} ${activeAssignmentConfig.label.toLowerCase()} record${selectedScopeIds.length === 1 ? '' : 's'}`
+        : `Photo is already assigned to the selected ${activeAssignmentConfig.label.toLowerCase()} record${selectedScopeIds.length === 1 ? '' : 's'}`);
+      setScopeAssignPhoto(null);
+      await load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to assign photo');
+    } finally {
+      setAssigningScopes(false);
+    }
+  };
+
+  const scopeAssignPreviewSrc = scopeAssignPhoto ? progressPhotoSrc(projectId, scopeAssignPhoto) : '';
+  const scopeAssignPreviewKind = scopeAssignPhoto ? getProgressMediaKind(scopeAssignPhoto) : 'image';
 
   const closeDeleteMode = () => {
     setDeleteMode(false);
@@ -5843,64 +7262,43 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
   };
 
   return (
-    <div className="space-y-4">
-      <div
-        {...getRootProps({
-          className: `rounded-2xl border-2 border-dashed p-4 transition-colors ${
-            uploading
-              ? 'border-blue-300 bg-blue-50'
-              : isDragActive
-                ? 'border-blue-500 bg-blue-50 shadow-sm'
-                : 'border-slate-300 bg-white hover:border-blue-400 hover:bg-slate-50'
-          }`,
-        })}
-      >
-        <input {...getInputProps({ accept: PROGRESS_MEDIA_ACCEPT })} />
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+    <div className="bt-photos-tab space-y-4">
+      <section className="bt-photos-bucket-summary rounded-2xl border border-blue-400/50 bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 p-4 text-white shadow-lg shadow-blue-950/30">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex items-start gap-3">
-            <div className={`flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl ${isDragActive ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-600'}`}>
-              <ImagePlus className="h-6 w-6" />
+            <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl border border-blue-300/50 bg-blue-500/20 text-blue-100 shadow-inner">
+              <FileImage className="h-6 w-6" />
             </div>
             <div>
-              <p className="text-sm font-black text-slate-900">
-                {uploading ? 'Uploading photos...' : isDragActive ? 'Drop photos or videos here' : 'Drag and drop photos here'}
+              <p className="text-sm font-black uppercase tracking-wide text-blue-100">Project Photo Bucket</p>
+              <p className="mt-1 text-xs font-semibold text-slate-200">
+                {projectLabel} photos are kept in one dated project record, newest first.
               </p>
-              <p className="mt-1 text-xs font-semibold text-slate-500">
-                Upload up to {MAX_PROGRESS_UPLOAD_BATCH_FILES} items at once. HEIC, JPG, PNG, WebP, MP4, and MOV files are supported.
-              </p>
-              <p className="mt-1 text-xs text-slate-400">
-                Files are saved to this project with timestamp and uploader metadata.
+              <p className="mt-1 text-xs text-slate-300">
+                Bucket photos can be reused on scope of work, quotes, notes, punch list, and other project records without duplicating the original file.
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={open}
-            disabled={uploading}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-500 px-4 py-2.5 text-sm font-black text-white shadow-sm transition-colors hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <Camera className="h-4 w-4" />
-            {uploading ? 'Uploading...' : 'Choose Files'}
-          </button>
+          <span className="inline-flex min-h-9 items-center justify-center rounded-lg border border-cyan-300/40 bg-cyan-500/15 px-3 text-xs font-black uppercase tracking-wide text-cyan-100">
+            Newest photos on top
+          </span>
+        </div>
+      </section>
+
+      <div className="grid gap-2 sm:grid-cols-3">
+        <div className="bt-photos-stat-card rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+          <p className="text-xl font-black text-slate-950">{photos.length}</p>
+          <p className="text-xs font-black uppercase tracking-wide text-slate-500">Project photos</p>
+        </div>
+        <div className="bt-photos-stat-card bt-photos-stat-card-blue rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 shadow-sm">
+          <p className="text-xl font-black text-blue-800">{photoDescriptionCount}</p>
+          <p className="text-xs font-black uppercase tracking-wide text-blue-700">Descriptions</p>
+        </div>
+        <div className="bt-photos-stat-card bt-photos-stat-card-green rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 shadow-sm">
+          <p className="text-xl font-black text-emerald-800">{assignedScopeCount}</p>
+          <p className="text-xs font-black uppercase tracking-wide text-emerald-700">Scope assignments</p>
         </div>
       </div>
-
-      {/* Categories */}
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        <button onClick={() => setSelectedCategory('')} className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap flex-shrink-0 transition-colors ${!selectedCategory ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50'}`}>All Photos ({photos.length})</button>
-        {categories.map(cat => (
-          <button key={cat.id} onClick={() => setSelectedCategory(cat.id)} className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap flex-shrink-0 transition-colors ${selectedCategory === cat.id ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50'}`}>{cat.name} ({cat.photo_count})</button>
-        ))}
-        <button onClick={() => setShowNewCat(true)} className="px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap flex-shrink-0 bg-white border border-dashed border-gray-300 text-gray-500 hover:border-blue-400 hover:text-blue-600 transition-colors">+ Category</button>
-      </div>
-
-      {showNewCat && (
-        <div className="flex gap-2">
-          <input value={newCatName} onChange={e => setNewCatName(e.target.value)} placeholder="Category name" className="flex-1 px-3.5 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" onKeyDown={e => e.key === 'Enter' && addCategory()} />
-          <button onClick={addCategory} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">Add</button>
-          <button onClick={() => setShowNewCat(false)} className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50">Cancel</button>
-        </div>
-      )}
 
       {deletablePhotos.length > 0 && (
         <div className="flex flex-wrap items-center justify-center gap-2 rounded-xl border border-red-500/40 bg-red-950/25 px-3 py-3 shadow-inner">
@@ -5958,6 +7356,10 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
                   const lightboxIndex = lightboxItems.findIndex(item => item.id === key);
                   const isSelected = selectedDeleteIds.has(key);
                   const noteText = getProgressPhotoNoteText(photo);
+                  const assignedScopes = scopeAssignmentMap.get(String(photo.id)) || [];
+                  const photoTimestamp = formatProjectPhotoTimestamp(photo);
+                  const photoGps = formatProjectPhotoGps(photo);
+                  const photoIp = formatProjectPhotoIp(photo);
                   return (
                     <div
                       key={key}
@@ -5993,13 +7395,21 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
                       ) : mediaKind === 'image' ? (
                         <img src={src} alt={photo.original_name} className="w-full h-full object-cover transition-transform group-hover:scale-105" loading="lazy" />
                       ) : (
-                        <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
+                          <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
                       )}
                       {noteText && (
-                        <span className="absolute left-2 top-2 z-0 inline-flex items-center gap-1 rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-black text-slate-950 shadow-sm">
+                        <button
+                          type="button"
+                          onClick={event => {
+                            event.stopPropagation();
+                            setNotePhoto(photo);
+                          }}
+                          className={`absolute left-2 ${!deleteMode && hasPhotoAssignmentTargets ? 'top-11' : 'top-2'} z-30 inline-flex min-h-8 items-center gap-1 rounded-lg bg-amber-500 px-2 text-[10px] font-black text-slate-950 shadow-sm transition hover:bg-amber-400`}
+                          aria-label={`Edit description for ${photo.original_name || 'photo'}`}
+                        >
                           <MessageSquare className="h-3 w-3" />
-                          Note
-                        </span>
+                          Edit Description
+                        </button>
                       )}
                       {deleteMode && (
                         <div className={`absolute right-2 top-2 z-0 inline-flex h-8 w-8 items-center justify-center rounded-lg border text-xs font-black shadow-sm ${isSelected ? 'border-red-500 bg-red-600 text-white' : photo.can_delete_correction ? 'border-white/80 bg-black/60 text-white' : 'border-slate-400 bg-slate-700 text-slate-300'}`}>
@@ -6007,18 +7417,36 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
                         </div>
                       )}
                       {!deleteMode && (
-                        <button
-                          type="button"
-                          onClick={event => {
-                            event.stopPropagation();
-                            setNotePhoto(photo);
-                          }}
-                          className={`absolute right-2 top-2 z-0 inline-flex min-h-8 items-center justify-center gap-1 rounded-lg border px-2 text-[11px] font-black shadow-sm transition ${noteText ? 'border-amber-300 bg-amber-500 text-slate-950 hover:bg-amber-400' : 'border-white/70 bg-black/65 text-white hover:border-amber-300 hover:text-amber-200'}`}
-                          aria-label={`${noteText ? 'Edit' : 'Add'} note for ${photo.original_name || 'photo'}`}
-                        >
-                          <MessageSquare className="h-3.5 w-3.5" />
-                          {noteText ? 'Note' : 'Add note'}
-                        </button>
+                        <>
+                        {hasPhotoAssignmentTargets && (
+                          <button
+                            type="button"
+                            onClick={event => {
+                              event.stopPropagation();
+                              openScopeAssignment(photo);
+                            }}
+                            className="absolute left-2 top-2 z-20 inline-flex min-h-8 items-center justify-center gap-1 rounded-lg border border-white/70 bg-blue-700/90 px-2 text-[11px] font-black text-white shadow-sm transition hover:border-blue-200 hover:bg-blue-600"
+                            aria-label={`Assign ${photo.original_name || 'photo'} to project records`}
+                          >
+                            <ClipboardList className="h-3.5 w-3.5" />
+                            {assignedScopes.length ? `${assignedScopes.length} scope${assignedScopes.length === 1 ? '' : 's'}` : 'Assign'}
+                          </button>
+                        )}
+                        {!noteText && (
+                          <button
+                            type="button"
+                            onClick={event => {
+                              event.stopPropagation();
+                              setNotePhoto(photo);
+                            }}
+                            className="absolute right-2 top-2 z-30 inline-flex min-h-8 items-center justify-center gap-1 rounded-lg border border-white/70 bg-black/65 px-2 text-[11px] font-black text-white shadow-sm transition hover:border-amber-300 hover:text-amber-200"
+                            aria-label={`Add description for ${photo.original_name || 'photo'}`}
+                          >
+                            <MessageSquare className="h-3.5 w-3.5" />
+                            Add Description
+                          </button>
+                        )}
+                        </>
                       )}
                       {!deleteMode && mediaKind !== 'file' && (
                         <div className="absolute inset-x-0 top-0 z-0 bg-gradient-to-b from-black/45 to-transparent px-2 py-1.5 text-[10px] font-black uppercase tracking-wide text-white opacity-0 transition-opacity group-hover:opacity-100">
@@ -6026,10 +7454,12 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
                         </div>
                       )}
                       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent opacity-100 transition-opacity" />
-                      <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-10 p-2">
-                        <p className="text-white text-xs font-bold truncate">{photo.uploader_name || 'Unknown user'}</p>
-                        <p className="text-white/80 text-xs">{formatEasternDateTime(photo.taken_at || photo.created_at, { hour: 'numeric', minute: '2-digit' })}</p>
-                        <p className="text-white/70 text-[10px] truncate">{photo.capture_latitude ? 'GPS recorded' : 'IP recorded'}{photo.upload_ip_address ? ` / ${photo.upload_ip_address}` : ''}</p>
+                      <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-black/95 via-black/82 to-black/18 p-2 shadow-[0_-8px_18px_rgba(0,0,0,0.35)]">
+                        <p className="text-white text-xs font-bold truncate">{projectLabel}</p>
+                        <p className="text-white/85 text-[11px] font-semibold truncate">{photoTimestamp}</p>
+                        <p className="text-white/75 text-[10px] font-semibold truncate">{photoGps}</p>
+                        <p className="text-white/70 text-[10px] font-semibold truncate">{photoIp}</p>
+                        <p className="text-white/70 text-[10px] truncate">Inserted by {photo.uploader_name || photo.uploaded_by_name || 'Unknown user'}</p>
                       </div>
                     </div>
                   );
@@ -6057,6 +7487,113 @@ function PhotosTab({ projectId, user }: { projectId: string; user: any }) {
           await load();
         }}
       />
+      <Modal
+        isOpen={Boolean(scopeAssignPhoto)}
+        onClose={() => {
+          setScopeAssignPhoto(null);
+          setScopeAssignIds(new Set());
+          setPhotoAssignTargetType('project_scope');
+        }}
+        title="Assign Photo to Project Records"
+      >
+        {scopeAssignPhoto && (
+          <div className="space-y-4">
+            <div className="flex gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <div className="h-20 w-20 flex-shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-white">
+                {scopeAssignPreviewKind === 'video' ? (
+                  <video src={scopeAssignPreviewSrc} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+                ) : scopeAssignPreviewKind === 'image' ? (
+                  <img src={scopeAssignPreviewSrc} alt={scopeAssignPhoto.original_name || 'Selected photo'} className="h-full w-full object-cover" />
+                ) : (
+                  <UnsupportedProgressMediaTile name={scopeAssignPhoto.original_name || scopeAssignPhoto.filename} />
+                )}
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-black text-slate-950">{scopeAssignPhoto.original_name || scopeAssignPhoto.filename || 'Project photo'}</p>
+                <p className="mt-1 text-xs font-semibold text-slate-500">
+                  {formatEasternDateTime(scopeAssignPhoto.taken_at || scopeAssignPhoto.created_at, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                </p>
+                <p className="mt-1 text-xs font-semibold text-blue-700">{scopeAssignIds.size} selected {activeAssignmentConfig.label.toLowerCase()} record{scopeAssignIds.size === 1 ? '' : 's'}</p>
+              </div>
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-5">
+              {PHOTO_BUCKET_ASSIGNMENT_TARGETS.map(target => {
+                const active = target.type === photoAssignTargetType;
+                const count = assignmentTargetOptions[target.type]?.length || 0;
+                return (
+                  <button
+                    key={target.type}
+                    type="button"
+                    onClick={() => changePhotoAssignTargetType(target.type)}
+                    disabled={assigningScopes}
+                    className={`min-h-11 rounded-xl border px-2 text-left text-xs font-black transition ${active ? 'border-blue-400 bg-blue-600 text-white shadow-md shadow-blue-900/20' : 'border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50'}`}
+                  >
+                    <span className="block truncate">{target.shortLabel}</span>
+                    <span className={`mt-0.5 block text-[10px] font-black ${active ? 'text-blue-100' : 'text-slate-400'}`}>{count} records</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {activeAssignmentOptions.length > 0 ? (
+              <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+                {activeAssignmentOptions.map(option => {
+                  const checked = scopeAssignIds.has(option.id);
+                  const alreadyAssigned = photoAssignTargetType === 'project_scope'
+                    && (scopeAssignmentMap.get(String(scopeAssignPhoto.id)) || []).some(row => String(row.scopeId) === option.id);
+                  return (
+                    <label
+                      key={`${photoAssignTargetType}-${option.id}`}
+                      className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition ${checked ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white hover:border-blue-300'}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleScopeAssignment(option.id)}
+                        className="mt-1 h-4 w-4 rounded border-blue-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-black text-slate-950">{option.title}</span>
+                        <span className="mt-0.5 block truncate text-xs font-semibold text-slate-500">{option.subtitle}</span>
+                        {alreadyAssigned && <span className="mt-1 inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-black text-emerald-700">Already assigned</span>}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-center text-sm font-semibold text-slate-500">
+                {activeAssignmentConfig.emptyLabel}
+              </div>
+            )}
+
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setScopeAssignPhoto(null);
+                  setScopeAssignIds(new Set());
+                  setPhotoAssignTargetType('project_scope');
+                }}
+                disabled={assigningScopes}
+                className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-300 bg-white px-4 text-sm font-black text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void savePhotoScopeAssignments()}
+                disabled={assigningScopes || scopeAssignIds.size === 0}
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-black text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+              >
+                <ClipboardList className="h-4 w-4" />
+                {assigningScopes ? 'Assigning...' : 'Save Photo Assignments'}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
@@ -6137,7 +7674,10 @@ type ProjectQuoteForm = {
   total_quote_amount: string;
 };
 
+type QuoteFilterKey = 'review' | 'approved' | 'database';
+
 const projectQuoteStatuses = ['draft', 'submitted', 'approved', 'rejected', 'paid', 'completed', 'historical'];
+const approvedQuoteStatuses = ['approved', 'paid', 'completed'];
 
 const blankProjectQuoteForm = (): ProjectQuoteForm => ({
   contractor_name: '',
@@ -6176,8 +7716,50 @@ const quoteMoney = (value: number | string | null | undefined) =>
     maximumFractionDigits: 2,
   });
 
-const quoteStatusLabel = (status: string) =>
-  String(status || '').replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+const quoteStatusLabel = (status: string) => {
+  const labelMap: Record<string, string> = {
+    submitted: 'For Review',
+    rejected: 'Denied',
+    historical: 'In Database',
+  };
+  const normalized = String(status || '').toLowerCase();
+  return labelMap[normalized] || normalized.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+};
+
+const compactQuoteDateTime = (value: string | null | undefined) => {
+  if (!value) return 'Not recorded';
+  try {
+    return formatEasternDateTime(value, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+  } catch {
+    return String(value);
+  }
+};
+
+const quoteScopeTitle = (quote: any) => {
+  const scope = String(quote.scope_description || '')
+    .replace(/\r/g, '\n')
+    .split(/\n+/)
+    .map(line => line.replace(/\s+/g, ' ').trim())
+    .find(Boolean);
+  if (scope) return scope;
+  const firstLine = Array.isArray(quote.line_items) ? quote.line_items[0] : null;
+  return firstLine?.description || firstLine?.subcategory || firstLine?.category || 'Scope title not entered';
+};
+
+const quoteAttachmentIsImage = (quote: any) =>
+  Boolean(quote.document_download_url && /^image\//i.test(String(quote.source_file_mime_type || '')));
+
+const quotePanelStyle = {
+  background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.98) 0%, rgba(30, 58, 138, 0.86) 56%, rgba(49, 46, 129, 0.86) 100%)',
+  border: '1px solid rgba(147, 197, 253, 0.34)',
+  boxShadow: '0 18px 38px rgba(2, 6, 23, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.08)',
+};
+
+const quoteInsetStyle = {
+  background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(17, 24, 39, 0.92) 100%)',
+  border: '1px solid rgba(125, 211, 252, 0.22)',
+  boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.06)',
+};
 
 function QuotesTab({ projectId, project }: { projectId: string; project: any }) {
   const navigate = useNavigate();
@@ -6192,6 +7774,9 @@ function QuotesTab({ projectId, project }: { projectId: string; project: any }) 
   const [quoteFile, setQuoteFile] = useState<File | null>(null);
   const [quoteForm, setQuoteForm] = useState<ProjectQuoteForm>(() => blankProjectQuoteForm());
   const [quoteLineItems, setQuoteLineItems] = useState<ProjectQuoteLineForm[]>(() => [blankProjectQuoteLineItem()]);
+  const [quoteFilter, setQuoteFilter] = useState<QuoteFilterKey>('review');
+  const [expandedQuoteIds, setExpandedQuoteIds] = useState<Record<string, boolean>>({});
+  const [updatingQuoteId, setUpdatingQuoteId] = useState<string | null>(null);
 
   const load = async () => {
     try {
@@ -6223,6 +7808,10 @@ function QuotesTab({ projectId, project }: { projectId: string; project: any }) 
   }, [projectId]);
 
   useEffect(() => {
+    setExpandedQuoteIds({});
+  }, [projectId, quoteFilter]);
+
+  useEffect(() => {
     if (quoteOptions.categories.length === 0) return;
     setQuoteLineItems(current => {
       if (current.length !== 1 || current[0].category) return current;
@@ -6239,34 +7828,63 @@ function QuotesTab({ projectId, project }: { projectId: string; project: any }) 
     return Array.from(groups.entries());
   }, [quoteOptions.categories]);
 
+  const reviewQuotes = useMemo(() => quotes.filter(quote => quote.status === 'submitted'), [quotes]);
+  const approvedQuotes = useMemo(() => quotes.filter(quote => approvedQuoteStatuses.includes(quote.status)), [quotes]);
+  const databaseQuotes = quotes;
+  const visibleQuotes = useMemo(() => {
+    if (quoteFilter === 'review') return reviewQuotes;
+    if (quoteFilter === 'approved') return approvedQuotes;
+    return databaseQuotes;
+  }, [approvedQuotes, databaseQuotes, quoteFilter, reviewQuotes]);
   const totalQuoted = quotes.reduce((sum, quote) => sum + quoteNumberValue(quote.total_quote_amount), 0);
-  const contractors = new Set(quotes.map(quote => quote.contractor_company || quote.contractor_name).filter(Boolean));
-  const categories = new Set(quotes.flatMap(quote => (quote.line_items || []).map((item: any) => item.category)).filter(Boolean));
+  const visibleQuoted = visibleQuotes.reduce((sum, quote) => sum + quoteNumberValue(quote.total_quote_amount), 0);
+  const contractors = new Set(visibleQuotes.map(quote => quote.contractor_company || quote.contractor_name).filter(Boolean));
+  const categories = new Set(visibleQuotes.flatMap(quote => (quote.line_items || []).map((item: any) => item.category)).filter(Boolean));
   const calculatedLineTotal = quoteLineItems.reduce((sum, item) => sum + quoteNumberValue(item.total_line_item_price), 0);
   const defaultCategory = quoteOptions.categories[0]?.name || '';
   const statusColors: Record<string, string> = {
-    draft: 'bg-gray-100 text-gray-600',
-    submitted: 'bg-blue-100 text-blue-700',
-    approved: 'bg-green-100 text-green-700',
-    rejected: 'bg-red-100 text-red-700',
-    paid: 'bg-emerald-100 text-emerald-700',
-    completed: 'bg-purple-100 text-purple-700',
-    historical: 'bg-amber-100 text-amber-700',
+    draft: 'bg-slate-700/80 text-slate-100 border border-slate-400/40',
+    submitted: 'bg-blue-500/25 text-blue-50 border border-blue-300/50',
+    approved: 'bg-emerald-500/20 text-emerald-50 border border-emerald-300/50',
+    rejected: 'bg-rose-500/20 text-rose-50 border border-rose-300/50',
+    paid: 'bg-teal-500/20 text-teal-50 border border-teal-300/50',
+    completed: 'bg-violet-500/20 text-violet-50 border border-violet-300/50',
+    historical: 'bg-cyan-500/20 text-cyan-50 border border-cyan-300/40',
   };
-
-  const categoryTotals = useMemo(() => {
-    const totals = new Map<string, { category: string; total: number; count: number }>();
-    for (const quote of quotes) {
-      for (const item of quote.line_items || []) {
-        const category = item.category || 'Uncategorized';
-        const current = totals.get(category) || { category, total: 0, count: 0 };
-        current.total += quoteNumberValue(item.total_line_item_price);
-        current.count += 1;
-        totals.set(category, current);
-      }
-    }
-    return Array.from(totals.values()).sort((a, b) => b.total - a.total);
-  }, [quotes]);
+  const quoteFilters: Array<{
+    key: QuoteFilterKey;
+    label: string;
+    count: number;
+    value: string;
+    description: string;
+    Icon: typeof FileText;
+  }> = [
+    {
+      key: 'review',
+      label: 'Quotes for Review',
+      count: reviewQuotes.length,
+      value: quoteMoney(reviewQuotes.reduce((sum, quote) => sum + quoteNumberValue(quote.total_quote_amount), 0)),
+      description: 'New submitted quotes waiting for approve or deny',
+      Icon: ListFilter,
+    },
+    {
+      key: 'approved',
+      label: 'Approved Quotes',
+      count: approvedQuotes.length,
+      value: quoteMoney(approvedQuotes.reduce((sum, quote) => sum + quoteNumberValue(quote.total_quote_amount), 0)),
+      description: 'Quotes selected for the project',
+      Icon: CheckCircle2,
+    },
+    {
+      key: 'database',
+      label: 'Quote Database',
+      count: databaseQuotes.length,
+      value: quoteMoney(totalQuoted),
+      description: 'Complete project quote history, including denied quotes',
+      Icon: Database,
+    },
+  ];
+  const currentFilter = quoteFilters.find(filter => filter.key === quoteFilter) || quoteFilters[0];
 
   const resetQuoteForm = () => {
     setQuoteForm(blankProjectQuoteForm());
@@ -6331,245 +7949,235 @@ function QuotesTab({ projectId, project }: { projectId: string; project: any }) 
     }
   };
 
+  const toggleQuoteExpanded = (quoteId: string) => {
+    setExpandedQuoteIds(current => ({
+      ...current,
+      [quoteId]: !current[quoteId],
+    }));
+  };
+
+  const reviewQuote = async (quote: any, decision: 'approve' | 'deny') => {
+    setUpdatingQuoteId(quote.id);
+    try {
+      await api.post(`/projects/${projectId}/quotes/${quote.id}/${decision}`);
+      toast.success(decision === 'approve'
+        ? `${quote.quote_number} moved to Approved Quotes`
+        : `${quote.quote_number} moved to Quote Database`);
+      await load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to update quote');
+    } finally {
+      setUpdatingQuoteId(null);
+    }
+  };
+
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div className="space-y-4 text-slate-100">
+      <div className="grid gap-3 md:grid-cols-3">
+        {quoteFilters.map(filter => {
+          const Icon = filter.Icon;
+          const active = quoteFilter === filter.key;
+          return (
+            <button
+              key={filter.key}
+              type="button"
+              onClick={() => setQuoteFilter(filter.key)}
+              className={`rounded-lg p-4 text-left transition hover:-translate-y-0.5 ${active ? 'ring-2 ring-cyan-300/60' : 'opacity-90 hover:opacity-100'}`}
+              style={active ? quotePanelStyle : quoteInsetStyle}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className={`flex h-10 w-10 items-center justify-center rounded-lg border ${active ? 'border-cyan-200/60 bg-cyan-400/20 text-cyan-100' : 'border-slate-500/60 bg-slate-900/60 text-slate-200'}`}>
+                    <Icon className="h-5 w-5" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-black text-white">{filter.label}</p>
+                    <p className="mt-0.5 text-xs font-semibold text-cyan-100/80">{filter.description}</p>
+                  </div>
+                </div>
+                <span className="rounded-lg border border-white/20 bg-white/10 px-2.5 py-1 text-sm font-black text-white">{filter.count}</span>
+              </div>
+              <p className="mt-3 text-xl font-black text-white">{filter.value}</p>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {[
-          { label: 'Quotes Uploaded', value: quotes.length },
-          { label: 'Quoted Value', value: quoteMoney(totalQuoted) },
+          { label: currentFilter.label, value: visibleQuotes.length },
+          { label: 'Value In View', value: quoteMoney(visibleQuoted) },
           { label: 'Contractors', value: contractors.size },
           { label: 'Categories', value: categories.size },
         ].map(item => (
-          <div key={item.label} className="bg-white rounded-xl border border-gray-200 p-4">
-            <p className="text-2xl font-bold text-blue-600">{item.value}</p>
-            <p className="text-xs text-gray-500 mt-0.5">{item.label}</p>
+          <div key={item.label} className="rounded-lg p-4" style={quoteInsetStyle}>
+            <p className="text-2xl font-black text-white">{item.value}</p>
+            <p className="mt-0.5 text-xs font-bold uppercase tracking-wide text-cyan-100/75">{item.label}</p>
           </div>
         ))}
       </div>
 
-      <div>
-        <button
-          type="button"
-          onClick={() => setShowAddQuote(current => !current)}
-          className="w-full flex items-center justify-center gap-2 py-3.5 bg-blue-600 text-white rounded-xl font-semibold text-sm hover:bg-blue-700 transition-colors shadow-sm"
-        >
-          <Plus className="w-5 h-5" /> ADD QUOTE TO THIS PROJECT
-        </button>
-      </div>
-
-      {showAddQuote && (
-        <div className="bg-white rounded-xl border border-blue-100 p-4" style={{ boxShadow: '0 8px 28px rgba(37,99,235,0.08)' }}>
-          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3 mb-4">
-            <div>
-              <h3 className="text-base font-black text-gray-900">Upload Quote For This Project</h3>
-              <p className="text-sm text-gray-500 mt-1">{project?.address} - quote data will be saved with this project record.</p>
-            </div>
-            <button type="button" onClick={() => { resetQuoteForm(); setShowAddQuote(false); }} className="px-3 py-2 rounded-xl text-xs font-black bg-gray-100 text-gray-600 hover:bg-gray-200">
-              Close
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
-            <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-black uppercase tracking-wide text-gray-500 mb-1">Contractor Name *</label>
-                <input value={quoteForm.contractor_name} onChange={e => setQuoteForm(current => ({ ...current, contractor_name: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div>
-                <label className="block text-xs font-black uppercase tracking-wide text-gray-500 mb-1">Phone Number</label>
-                <input value={quoteForm.contractor_phone} onChange={e => setQuoteForm(current => ({ ...current, contractor_phone: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-xs font-black uppercase tracking-wide text-gray-500 mb-1">Contractor Address</label>
-                <input value={quoteForm.contractor_address} onChange={e => setQuoteForm(current => ({ ...current, contractor_address: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div>
-                <label className="block text-xs font-black uppercase tracking-wide text-gray-500 mb-1">Email Address</label>
-                <input type="email" value={quoteForm.contractor_email} onChange={e => setQuoteForm(current => ({ ...current, contractor_email: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div>
-                <label className="block text-xs font-black uppercase tracking-wide text-gray-500 mb-1">Quote Date</label>
-                <input type="date" value={quoteForm.quote_date} onChange={e => setQuoteForm(current => ({ ...current, quote_date: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-black uppercase tracking-wide text-gray-500 mb-1">Status</label>
-              <select value={quoteForm.status} onChange={e => setQuoteForm(current => ({ ...current, status: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-                {quoteOptions.statuses.map(status => <option key={status} value={status}>{quoteStatusLabel(status)}</option>)}
-              </select>
-              <label className="block text-xs font-black uppercase tracking-wide text-gray-500 mt-3 mb-1">Total Quote</label>
-              <input value={quoteForm.total_quote_amount} onChange={e => setQuoteForm(current => ({ ...current, total_quote_amount: e.target.value }))} placeholder={quoteMoney(calculatedLineTotal)} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              <label className="mt-3 flex items-center justify-center gap-2 px-3 py-3 rounded-xl border border-dashed border-gray-300 text-sm font-black text-gray-600 cursor-pointer hover:bg-gray-50">
-                <FileText className="w-4 h-4" />
-                {quoteFile ? quoteFile.name : 'Attach quote document'}
-                <input type="file" className="hidden" onChange={e => setQuoteFile(e.target.files?.[0] || null)} />
-              </label>
-            </div>
-
-            <div>
-              <label className="block text-xs font-black uppercase tracking-wide text-gray-500 mb-1">Scope</label>
-              <textarea value={quoteForm.scope_description} onChange={e => setQuoteForm(current => ({ ...current, scope_description: e.target.value }))} rows={3} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              <label className="block text-xs font-black uppercase tracking-wide text-gray-500 mt-3 mb-1">Notes</label>
-              <VoiceTextarea value={quoteForm.notes} onChange={e => setQuoteForm(current => ({ ...current, notes: e.target.value }))} rows={3} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-          </div>
-
-          <div className="mt-5">
-            <div className="flex items-center justify-between gap-3 mb-3">
-              <div>
-                <h4 className="text-sm font-black text-gray-900">Quote Categories And Prices</h4>
-                <p className="text-xs text-gray-500">Add one row per category, scope, or line item in the contractor quote.</p>
-              </div>
-              <button type="button" onClick={() => setQuoteLineItems(current => [...current, blankProjectQuoteLineItem(defaultCategory)])} className="px-3 py-2 rounded-xl text-xs font-black text-blue-700 bg-blue-50 hover:bg-blue-100">
-                Add Category
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              {quoteLineItems.map((item, index) => (
-                <div key={index} className="grid grid-cols-1 md:grid-cols-12 gap-2">
-                  <select value={item.category} onChange={e => updateQuoteLineItem(index, { category: e.target.value })} className="md:col-span-3 px-3 py-2.5 rounded-lg border border-gray-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <option value="">Category *</option>
-                    {categoriesByGroup.map(([group, groupCategories]) => (
-                      <optgroup key={group} label={group}>
-                        {groupCategories.map(category => <option key={category.id} value={category.name}>{category.name}</option>)}
-                      </optgroup>
-                    ))}
-                  </select>
-                  <input value={item.description} onChange={e => updateQuoteLineItem(index, { description: e.target.value })} placeholder="Line item description" className="md:col-span-3 px-3 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  <input value={item.quantity} onChange={e => updateQuoteLineItem(index, { quantity: e.target.value })} placeholder="Qty" className="md:col-span-1 px-3 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  <input value={item.unit} onChange={e => updateQuoteLineItem(index, { unit: e.target.value })} placeholder="Unit" className="md:col-span-1 px-3 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  <input value={item.unit_price} onChange={e => updateQuoteLineItem(index, { unit_price: e.target.value })} placeholder="Unit price" className="md:col-span-2 px-3 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  <div className="md:col-span-2 flex gap-2">
-                    <input value={item.total_line_item_price} onChange={e => updateQuoteLineItem(index, { total_line_item_price: e.target.value })} placeholder="Line price *" className="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                    {quoteLineItems.length > 1 && (
-                      <button type="button" onClick={() => setQuoteLineItems(current => current.filter((_, itemIndex) => itemIndex !== index))} className="px-3 rounded-lg bg-red-50 text-red-700 hover:bg-red-100">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mt-5 pt-4 border-t border-gray-100">
-            <p className="text-sm text-gray-600">Line item total: <span className="font-black text-gray-900">{quoteMoney(calculatedLineTotal)}</span></p>
-            <div className="flex gap-2">
-              <button type="button" onClick={resetQuoteForm} className="px-4 py-2.5 rounded-xl text-sm font-black bg-gray-100 text-gray-700 hover:bg-gray-200">Clear</button>
-              <button type="button" disabled={savingQuote} onClick={submitProjectQuote} className="px-4 py-2.5 rounded-xl text-sm font-black bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-60">
-                {savingQuote ? 'Saving...' : 'Save Quote To Project'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {categoryTotals.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <div className="flex items-center justify-between gap-3 mb-3">
-            <div>
-              <h3 className="text-sm font-black text-gray-900">Category Pricing On This Project</h3>
-              <p className="text-xs text-gray-500">Aggregated from the quote line items below.</p>
-            </div>
-            <span className="text-xs font-black text-gray-400">{categoryTotals.length} categories</span>
-          </div>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2">
-            {categoryTotals.slice(0, 12).map(item => (
-              <div key={item.category} className="rounded-lg border border-gray-100 bg-gray-50 p-3">
-                <p className="text-sm font-black text-gray-900 truncate">{item.category}</p>
-                <p className="text-lg font-black text-blue-700 mt-1">{quoteMoney(item.total)}</p>
-                <p className="text-xs text-gray-500">{item.count} line items</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {loading ? <Loading /> : (
-        <div className="space-y-3">
-          {quotes.map(quote => {
+        <div className="space-y-2">
+          {visibleQuotes.map(quote => {
             const lineItems = Array.isArray(quote.line_items) ? quote.line_items : [];
+            const isExpanded = Boolean(expandedQuoteIds[quote.id]);
+            const canReview = quote.status === 'submitted';
+            const contractorLabel = quote.contractor_company || quote.contractor_name || 'Unknown contractor';
+            const contactLine = [quote.contractor_phone, quote.contractor_email].filter(Boolean).join(' - ') || 'No contact stored';
+            const scopeTitle = quoteScopeTitle(quote);
+            const sentLabel = quote.quote_request_sent_at
+              ? compactQuoteDateTime(quote.quote_request_sent_at)
+              : quote.imported_from === 'vendor_link'
+                ? 'Sent time not recorded'
+                : 'Manual upload';
+            const returnedLabel = quote.quote_returned_at
+              ? compactQuoteDateTime(quote.quote_returned_at)
+              : compactQuoteDateTime(quote.created_at);
+            const hasImageAttachment = quoteAttachmentIsImage(quote);
             return (
-              <div key={quote.id} className="bg-white rounded-xl border border-gray-200 p-4">
-                <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+              <div key={quote.id} className="rounded-lg p-2.5" style={quotePanelStyle}>
+                <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-black text-gray-900 text-sm">{quote.quote_number}</p>
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-black ${statusColors[quote.status] || 'bg-gray-100 text-gray-700'}`}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-black text-white">{quote.quote_number || 'Quote # pending'}</p>
+                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-black ${statusColors[quote.status] || 'bg-slate-700/80 text-slate-100 border border-slate-400/40'}`}>
                         {quoteStatusLabel(quote.status)}
                       </span>
-                      <span className="text-xs text-gray-400">{quote.quote_date}</span>
+                      <span className="text-xs font-semibold text-cyan-100/75">Sent: {sentLabel}</span>
+                      <span className="text-xs font-semibold text-cyan-100/75">Returned: {returnedLabel}</span>
+                      <span className="text-xs font-semibold text-slate-300">{lineItems.length} lines</span>
                     </div>
-                    <div className="grid md:grid-cols-2 gap-2 mt-3 text-sm">
-                      <div>
-                        <p className="text-xs font-black uppercase tracking-wide text-gray-400">Contractor</p>
-                        <p className="font-black text-gray-900">{quote.contractor_company || quote.contractor_name}</p>
-                        {quote.contractor_name && quote.contractor_company && quote.contractor_name !== quote.contractor_company && <p className="text-xs text-gray-500">{quote.contractor_name}</p>}
+                    <div className="mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
+                      <div className="min-w-0">
+                        <p className="text-xs font-black uppercase tracking-wide text-cyan-100/70">Contractor</p>
+                        <p className="truncate text-base font-black text-white">{contractorLabel}</p>
+                        {quote.contractor_name && quote.contractor_company && quote.contractor_name !== quote.contractor_company && (
+                          <p className="truncate text-xs font-semibold text-slate-300">{quote.contractor_name}</p>
+                        )}
                       </div>
-                      <div>
-                        <p className="text-xs font-black uppercase tracking-wide text-gray-400">Contact</p>
-                        <p className="text-gray-700">{quote.contractor_phone || 'No phone'} - {quote.contractor_email || 'No email'}</p>
-                        {quote.contractor_address && <p className="text-xs text-gray-500 mt-0.5">{quote.contractor_address}</p>}
+                      <div className="min-w-0">
+                        <p className="text-xs font-black uppercase tracking-wide text-cyan-100/70">Scope Title</p>
+                        <p className="truncate text-sm font-semibold text-slate-100">{scopeTitle}</p>
                       </div>
                     </div>
-                    {(quote.scope_description || quote.notes) && (
-                      <div className="mt-3 rounded-lg bg-gray-50 p-3">
-                        {quote.scope_description && <p className="text-sm text-gray-800">{quote.scope_description}</p>}
-                        {quote.notes && <p className="text-xs text-gray-500 mt-1">{quote.notes}</p>}
-                      </div>
-                    )}
                   </div>
-                  <div className="text-left lg:text-right flex-shrink-0">
-                    <p className="text-2xl font-black text-gray-900">{quoteMoney(quote.total_quote_amount)}</p>
-                    <p className="text-xs text-gray-500 mt-1">Total quote price</p>
-                    {quote.document_download_url && (
-                      <a href={quote.document_download_url} className="inline-flex mt-2 text-xs font-bold text-blue-700 hover:underline">
-                        Download quote
-                      </a>
-                    )}
+
+                  <div className="flex flex-col gap-2 xl:items-end">
+                    <div className="xl:text-right">
+                      <p className="text-lg font-black text-white">{quoteMoney(quote.total_quote_amount)}</p>
+                      <p className="text-xs font-bold uppercase tracking-wide text-cyan-100/75">Total quote price</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {isExpanded && canReview && (
+                        <>
+                          <button
+                            type="button"
+                            disabled={updatingQuoteId === quote.id}
+                            onClick={() => reviewQuote(quote, 'approve')}
+                            className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-emerald-200/60 bg-emerald-500/25 px-2.5 py-1.5 text-xs font-black text-emerald-50 shadow-lg shadow-emerald-950/30 transition hover:bg-emerald-500/30 disabled:opacity-50"
+                          >
+                            <CheckCircle2 className="h-4 w-4" />
+                            Approve Quote
+                          </button>
+                          <button
+                            type="button"
+                            disabled={updatingQuoteId === quote.id}
+                            onClick={() => reviewQuote(quote, 'deny')}
+                            className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-rose-200/60 bg-rose-500/25 px-2.5 py-1.5 text-xs font-black text-rose-50 shadow-lg shadow-rose-950/30 transition hover:bg-rose-500/30 disabled:opacity-50"
+                          >
+                            <XCircle className="h-4 w-4" />
+                            Deny Quote
+                          </button>
+                        </>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => toggleQuoteExpanded(quote.id)}
+                        aria-expanded={isExpanded}
+                        className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-cyan-200/40 bg-cyan-400/10 px-2.5 py-1.5 text-xs font-black text-cyan-50 transition hover:bg-cyan-400/20"
+                      >
+                        {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                        {isExpanded ? 'Hide Details' : 'Details'}
+                      </button>
+                    </div>
                   </div>
                 </div>
 
-                <div className="mt-4 overflow-x-auto rounded-lg border border-gray-100">
-                  <table className="w-full min-w-[720px] text-sm">
-                    <thead className="bg-gray-50">
-                      <tr className="text-left text-xs uppercase tracking-wide text-gray-400">
-                        <th className="py-2.5 px-3">Category</th>
-                        <th className="py-2.5 px-3">Description</th>
-                        <th className="py-2.5 px-3 text-right">Qty</th>
-                        <th className="py-2.5 px-3">Unit</th>
-                        <th className="py-2.5 px-3 text-right">Unit Price</th>
-                        <th className="py-2.5 px-3 text-right">Line Price</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {lineItems.map((item: any, index: number) => (
-                        <tr key={item.id || `${quote.id}-${index}`}>
-                          <td className="py-2.5 px-3 font-black text-gray-900">{item.category || '-'}</td>
-                          <td className="py-2.5 px-3 text-gray-700">{item.description || item.subcategory || '-'}</td>
-                          <td className="py-2.5 px-3 text-right">{quoteNumberValue(item.quantity).toLocaleString('en-US')}</td>
-                          <td className="py-2.5 px-3 text-gray-600">{item.unit || '-'}</td>
-                          <td className="py-2.5 px-3 text-right">{quoteMoney(item.unit_price)}</td>
-                          <td className="py-2.5 px-3 text-right font-black text-gray-900">{quoteMoney(item.total_line_item_price)}</td>
-                        </tr>
-                      ))}
-                      {lineItems.length === 0 && (
-                        <tr>
-                          <td colSpan={6} className="py-6 text-center text-sm text-gray-400">No line items stored for this quote</td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                {isExpanded && (
+                  <div className="mt-2 space-y-2 rounded-lg p-2.5" style={quoteInsetStyle}>
+                    <div className="grid gap-2 md:grid-cols-2">
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-black uppercase tracking-wide text-cyan-100/70">Contact</p>
+                        <p className="truncate text-xs font-semibold text-slate-100">{contactLine}</p>
+                        {quote.contractor_address && <p className="truncate text-xs font-semibold text-slate-300">{quote.contractor_address}</p>}
+                      </div>
+                      <div className="min-w-0 md:text-right">
+                        <p className="text-[10px] font-black uppercase tracking-wide text-cyan-100/70">Quote Date</p>
+                        <p className="text-xs font-semibold text-slate-100">{quote.quote_date || 'No quote date'}</p>
+                      </div>
+                    </div>
+                    {(quote.scope_description || quote.notes || quote.document_download_url) && (
+                      <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto]">
+                        <div className="min-w-0">
+                          {quote.scope_description && (
+                            <p className="text-xs font-semibold leading-5 text-slate-100">{quote.scope_description}</p>
+                          )}
+                          {quote.notes && <p className="mt-1 text-xs font-semibold text-slate-300">{quote.notes}</p>}
+                        </div>
+                        {quote.document_download_url && (
+                          <div className="flex flex-col gap-2 lg:items-end">
+                            {hasImageAttachment && (
+                              <img src={quote.document_download_url} alt="Uploaded quote attachment" className="h-20 w-28 rounded-md border border-cyan-200/30 object-cover" />
+                            )}
+                            <a href={quote.document_download_url} className="inline-flex min-h-8 items-center justify-center rounded-md border border-cyan-200/50 bg-cyan-400/10 px-2.5 py-1.5 text-xs font-black text-cyan-50 transition hover:bg-cyan-400/25">
+                              {hasImageAttachment ? 'Open Attachment' : 'Download Quote'}
+                            </a>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="overflow-x-auto rounded-lg border border-cyan-200/20">
+                      <table className="w-full min-w-[680px] text-xs">
+                        <thead className="bg-slate-950/70">
+                          <tr className="text-left text-[11px] uppercase tracking-wide text-cyan-100/75">
+                            <th className="py-1.5 px-2">Category</th>
+                            <th className="py-1.5 px-2">Description</th>
+                            <th className="py-1.5 px-2 text-right">Qty</th>
+                            <th className="py-1.5 px-2">Unit</th>
+                            <th className="py-1.5 px-2 text-right">Unit Price</th>
+                            <th className="py-1.5 px-2 text-right">Line Price</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-cyan-200/10 bg-slate-950/40">
+                          {lineItems.map((item: any, index: number) => (
+                            <tr key={item.id || `${quote.id}-${index}`}>
+                              <td className="py-1.5 px-2 font-black text-white">{item.category || '-'}</td>
+                              <td className="py-1.5 px-2 font-semibold text-slate-100">{item.description || item.subcategory || '-'}</td>
+                              <td className="py-1.5 px-2 text-right font-semibold text-slate-100">{quoteNumberValue(item.quantity).toLocaleString('en-US')}</td>
+                              <td className="py-1.5 px-2 font-semibold text-slate-300">{item.unit || '-'}</td>
+                              <td className="py-1.5 px-2 text-right font-semibold text-slate-100">{quoteMoney(item.unit_price)}</td>
+                              <td className="py-1.5 px-2 text-right font-black text-white">{quoteMoney(item.total_line_item_price)}</td>
+                            </tr>
+                          ))}
+                          {lineItems.length === 0 && (
+                            <tr>
+                              <td colSpan={6} className="py-4 text-center text-xs font-semibold text-slate-300">No line items stored for this quote</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
-          {quotes.length === 0 && (
-            <div className="text-center py-12 bg-white rounded-xl border border-gray-200">
-              <FileText className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-              <p className="text-gray-400 text-sm">No quotes uploaded for this property yet</p>
+          {visibleQuotes.length === 0 && (
+            <div className="rounded-lg py-12 text-center" style={quoteInsetStyle}>
+              <FileText className="w-8 h-8 text-cyan-100/70 mx-auto mb-2" />
+              <p className="text-sm font-semibold text-slate-200">No quotes in {currentFilter.label}</p>
             </div>
           )}
         </div>

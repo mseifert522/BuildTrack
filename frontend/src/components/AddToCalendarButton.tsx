@@ -123,12 +123,15 @@ export default function AddToCalendarButton({
   };
 
   const ButtonIcon = icon === 'plus' ? Plus : CalendarPlus;
+  const buttonStyle = iconOnly
+    ? undefined
+    : { minWidth: 'max-content', whiteSpace: 'nowrap' } as const;
 
   return (
     <>
-      <button type="button" onClick={openComposer} className={buttonClassName} aria-label={ariaLabel || label}>
+      <button type="button" onClick={openComposer} className={buttonClassName} style={buttonStyle} aria-label={ariaLabel || label}>
         <ButtonIcon className="h-3.5 w-3.5 flex-shrink-0" />
-        <span className={iconOnly ? 'sr-only' : undefined}>{label}</span>
+        <span className={iconOnly ? 'sr-only' : 'flex-shrink-0 whitespace-nowrap'}>{label}</span>
       </button>
 
       <Modal

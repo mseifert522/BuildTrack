@@ -6,6 +6,7 @@ import {
   ChevronRight,
   FileText,
   FolderOpen,
+  KeyRound,
   LogOut,
   MapPin,
   Plus,
@@ -25,6 +26,7 @@ interface Project {
   open_punch_items?: number;
   active_scope_count?: number;
   field_work_task_count?: number;
+  lockbox_code?: string | null;
 }
 
 type Tab = 'projects' | 'photos' | 'invoices';
@@ -55,6 +57,10 @@ function statusMeta(status?: string) {
     label: String(status || 'Active').replace(/_/g, ' '),
     tone: 'neutral',
   };
+}
+
+function getLockboxCode(project: Project) {
+  return String(project.lockbox_code || '').trim();
 }
 
 function clearMobilePhotoProjectState() {
@@ -308,6 +314,7 @@ export default function MobileHome() {
   function ProjectCard({ project }: { project: Project }) {
     const meta = statusMeta(project.status);
     const openPunch = project.open_punch_items || 0;
+    const lockboxCode = getLockboxCode(project);
 
     return (
       <article className="btm-project-card">
@@ -325,6 +332,38 @@ export default function MobileHome() {
             <span className="btm-project-badges">
               <span className={`btm-status-pill btm-status-${meta.tone}`}>{meta.label}</span>
               {openPunch > 0 && <span className="btm-status-pill btm-status-danger">{openPunch} punch</span>}
+              {lockboxCode && (
+                <span
+                  className="btm-status-pill"
+                  style={{
+                    gap: 5,
+                    background: 'linear-gradient(135deg, #0F172A 0%, #1E3A8A 52%, #312E81 100%)',
+                    border: '1px solid #60A5FA',
+                    color: '#F8FAFC',
+                    boxShadow: '0 8px 18px rgba(15, 23, 42, 0.22)',
+                  }}
+                  title={`Lock Box ${lockboxCode}`}
+                >
+                  <KeyRound size={13} aria-hidden="true" />
+                  <span>Lock Box</span>
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      borderRadius: 999,
+                      padding: '3px 6px',
+                      background: '#F8FAFC',
+                      color: '#0F172A',
+                      width: 'auto',
+                      fontSize: 12,
+                      fontWeight: 950,
+                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                      lineHeight: 1,
+                    }}
+                  >
+                    {lockboxCode}
+                  </span>
+                </span>
+              )}
             </span>
           </span>
           <ChevronRight className="btm-project-chevron" size={22} />

@@ -197,14 +197,15 @@ function slugify(value) {
 
 function ensureProjectStatusConstraintSupportsCurrentStatuses(db) {
   const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'projects'").get();
-  const requiredStatuses = ["'not_started'", "'active_rehab'", "'rehab_completed'", "'long_term_holding'", "'commercial'", "'archived'"];
+  const requiredStatuses = ["'not_started'", "'active_rehab'", "'rehab_completed'", "'long_term_holding'", "'commercial'", "'wholesale'", "'archived'"];
   if (!row?.sql || requiredStatuses.every(status => row.sql.includes(status))) return;
 
   const columns = `
     id, address, job_name, status, start_date, target_completion, scope_of_work, budget,
     project_stage, office_notes, field_notes, lifecycle_status, is_occupied, construction_start_date,
     acquisition_date, sold_date, occupant_vacate_date, sale_price, purchase_price, arv, closing_costs,
-    main_photo_url, lockbox_code, punchlist_stage, created_by, created_at, updated_at
+    main_photo_url, lockbox_code, punchlist_stage, quickbooks_class_id, quickbooks_class_name,
+    market_status, work_priority, created_by, created_at, updated_at
   `;
   const foreignKeysEnabled = db.pragma('foreign_keys', { simple: true });
 
@@ -217,7 +218,7 @@ function ensureProjectStatusConstraintSupportsCurrentStatuses(db) {
           id TEXT PRIMARY KEY,
           address TEXT NOT NULL,
           job_name TEXT NOT NULL,
-          status TEXT NOT NULL DEFAULT 'not_started' CHECK(status IN ('not_started','active_rehab','rehab_completed','long_term_holding','commercial','archived')),
+          status TEXT NOT NULL DEFAULT 'not_started' CHECK(status IN ('not_started','active_rehab','rehab_completed','long_term_holding','commercial','wholesale','archived')),
           start_date TEXT,
           target_completion TEXT,
           scope_of_work TEXT,
@@ -240,6 +241,8 @@ function ensureProjectStatusConstraintSupportsCurrentStatuses(db) {
           main_photo_url TEXT,
           lockbox_code TEXT,
           punchlist_stage INTEGER NOT NULL DEFAULT 0,
+          market_status TEXT NOT NULL DEFAULT 'not_on_market' CHECK(market_status IN ('not_on_market','on_market')),
+          work_priority INTEGER CHECK(work_priority IS NULL OR (work_priority BETWEEN 1 AND 20)),
           created_by TEXT NOT NULL,
           created_at TEXT NOT NULL DEFAULT (datetime('now')),
           updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -251,14 +254,23 @@ function ensureProjectStatusConstraintSupportsCurrentStatuses(db) {
         SELECT
           id, address, job_name,
           CASE
-            WHEN status IN ('not_started','active_rehab','rehab_completed','long_term_holding','commercial','archived') THEN status
+            WHEN status IN ('not_started','active_rehab','rehab_completed','long_term_holding','commercial','wholesale','archived') THEN status
             WHEN status IN ('completed','closed_sold') THEN 'rehab_completed'
             ELSE 'active_rehab'
           END,
           start_date, target_completion, scope_of_work, budget,
           project_stage, office_notes, field_notes, lifecycle_status, is_occupied, construction_start_date,
           acquisition_date, sold_date, occupant_vacate_date, sale_price, purchase_price, arv, closing_costs,
-          main_photo_url, lockbox_code, COALESCE(punchlist_stage, 0), created_by, created_at, updated_at
+          main_photo_url, lockbox_code, COALESCE(punchlist_stage, 0), quickbooks_class_id, quickbooks_class_name,
+          CASE
+            WHEN market_status IN ('not_on_market','on_market') THEN market_status
+            ELSE 'not_on_market'
+          END,
+          CASE
+            WHEN work_priority BETWEEN 1 AND 20 THEN work_priority
+            ELSE NULL
+          END,
+          created_by, created_at, updated_at
         FROM projects
       `);
       db.exec('DROP TABLE projects');
@@ -312,7 +324,7 @@ function initializeSchema() {
       id TEXT PRIMARY KEY,
       address TEXT NOT NULL,
       job_name TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'not_started' CHECK(status IN ('not_started','active_rehab','rehab_completed','long_term_holding','commercial','archived')),
+      status TEXT NOT NULL DEFAULT 'not_started' CHECK(status IN ('not_started','active_rehab','rehab_completed','long_term_holding','commercial','wholesale','archived')),
       start_date TEXT,
       target_completion TEXT,
       scope_of_work TEXT,
@@ -426,6 +438,8 @@ function initializeSchema() {
       scope_title TEXT NOT NULL,
       scope_of_work TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('draft','active','on_hold','completed')),
+      timeline_start TEXT,
+      timeline_end TEXT,
       sort_order INTEGER NOT NULL DEFAULT 0,
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -1475,6 +1489,58 @@ function initializeSchema() {
     CREATE INDEX IF NOT EXISTS idx_historical_quote_records_year
       ON historical_quote_records(quote_year, created_at);
 
+    -- Tokenized public quote requests sent to outside vendors. Tokens are
+    -- stored as hashes only; selected scope sections live in the join table.
+    CREATE TABLE IF NOT EXISTS vendor_quote_requests (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      contractor_profile_id TEXT,
+      vendor_name TEXT NOT NULL,
+      vendor_email TEXT NOT NULL,
+      vendor_phone TEXT,
+      token_hash TEXT UNIQUE NOT NULL,
+      message TEXT,
+      include_photos INTEGER NOT NULL DEFAULT 1,
+      status TEXT NOT NULL DEFAULT 'sent' CHECK(status IN ('sent','opened','submitted','expired','revoked')),
+      expires_at TEXT NOT NULL,
+      sent_at TEXT,
+      opened_at TEXT,
+      submitted_at TEXT,
+      submitted_quote_id TEXT,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (contractor_profile_id) REFERENCES contractor_profiles(id) ON DELETE SET NULL,
+      FOREIGN KEY (submitted_quote_id) REFERENCES contractor_quotes(id) ON DELETE SET NULL,
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_vendor_quote_requests_project
+      ON vendor_quote_requests(project_id, status, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_vendor_quote_requests_token
+      ON vendor_quote_requests(token_hash);
+
+    CREATE TABLE IF NOT EXISTS vendor_quote_request_scopes (
+      id TEXT PRIMARY KEY,
+      request_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      scope_id TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (request_id) REFERENCES vendor_quote_requests(id) ON DELETE CASCADE,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (scope_id) REFERENCES project_scopes(id) ON DELETE CASCADE,
+      UNIQUE(request_id, scope_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_vendor_quote_request_scopes_request
+      ON vendor_quote_request_scopes(request_id, sort_order);
+
+    CREATE INDEX IF NOT EXISTS idx_vendor_quote_request_scopes_scope
+      ON vendor_quote_request_scopes(scope_id);
+
     -- Cached analytics snapshots can be populated by future scheduled jobs.
     CREATE TABLE IF NOT EXISTS quote_trend_snapshots (
       id TEXT PRIMARY KEY,
@@ -1587,6 +1653,7 @@ function initializeSchema() {
   try { db.exec(`ALTER TABLE projects ADD COLUMN quickbooks_class_name TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_projects_quickbooks_class_id ON projects(quickbooks_class_id)`); } catch (_) { /* best-effort */ }
   try { ensureProjectStatusConstraintSupportsCurrentStatuses(db); } catch (err) { console.error('[MIGRATION] Failed to update project status constraint:', err.message); }
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_projects_quickbooks_class_id ON projects(quickbooks_class_id)`); } catch (_) { /* best-effort */ }
   try { db.exec(`ALTER TABLE projects ADD COLUMN market_status TEXT NOT NULL DEFAULT 'not_on_market' CHECK(market_status IN ('not_on_market','on_market'))`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE projects ADD COLUMN work_priority INTEGER CHECK(work_priority IS NULL OR (work_priority BETWEEN 1 AND 20))`); } catch (_) { /* already exists */ }
   try { db.exec(`UPDATE projects SET market_status = 'not_on_market' WHERE market_status IS NULL OR market_status NOT IN ('not_on_market','on_market')`); } catch (_) { /* best-effort */ }
@@ -1598,6 +1665,9 @@ function initializeSchema() {
   try { db.exec(`ALTER TABLE project_notes ADD COLUMN edit_count INTEGER NOT NULL DEFAULT 0`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE project_notes ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'`); } catch (_) { /* already exists */ }
   try { db.exec(`UPDATE project_notes SET visibility = 'private' WHERE visibility IS NULL OR visibility NOT IN ('private','public')`); } catch (_) { /* best-effort */ }
+  try { db.exec(`ALTER TABLE project_scopes ADD COLUMN timeline_start TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE project_scopes ADD COLUMN timeline_end TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_project_scopes_timeline ON project_scopes(project_id, timeline_start, timeline_end)`); } catch (_) { /* best-effort */ }
   try {
     db.exec(`
       CREATE TABLE IF NOT EXISTS calendar_email_reminders (
@@ -2242,6 +2312,7 @@ function initializeSchema() {
         WHEN 'not_started' THEN 'pre_construction'
         WHEN 'active_rehab' THEN 'under_construction'
         WHEN 'rehab_completed' THEN 'completed'
+        WHEN 'wholesale' THEN 'wholesale'
         ELSE 'under_construction'
       END
       WHERE lifecycle_status IS NULL OR lifecycle_status = 'acquired'

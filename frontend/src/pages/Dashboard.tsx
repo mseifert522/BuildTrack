@@ -405,7 +405,7 @@ const calendarRangeForView = (viewMode: CalendarViewMode, anchorDateKey: string)
   }
 
   if (viewMode === 'week') {
-    return calendarRangeFromWeekStartKey(formatLocalDateInput(startOfCalendarWeek(anchorDate)));
+    return calendarRangeFromWeekStartKey(formatLocalDateInput(anchorDate));
   }
 
   const monthStart = startOfCalendarMonth(anchorDate);
@@ -428,7 +428,7 @@ const buildCalendarWeekDays = (weekStartDate: Date, todayKey: string): CalendarW
       dayNumber: date.getDate(),
       isToday: key === todayKey,
       label: formatCalendarBadgeDate(key).label,
-      weekday: calendarWeekdayLabels[index],
+      weekday: calendarWeekdayLabels[date.getDay()],
     };
   });
 
@@ -517,21 +517,38 @@ export default function Dashboard() {
   const [savingCalendarEventId, setSavingCalendarEventId] = useState('');
   const [expandedCalendarNoteId, setExpandedCalendarNoteId] = useState<string | null>(null);
   const [calendarQueueFilter, setCalendarQueueFilter] = useState<CalendarQueueFilter>('upcoming');
-  const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>('today');
+  const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>('week');
   const [calendarAnchorDateKey, setCalendarAnchorDateKey] = useState(() => formatLocalDateInput());
-  const [calendarExpanded, setCalendarExpanded] = useState(false);
+  const [calendarExpanded, setCalendarExpanded] = useState(true);
   const [editingCalendarEvent, setEditingCalendarEvent] = useState<OperationsCalendarEvent | null>(null);
   const [calendarEditForm, setCalendarEditForm] = useState<CalendarEditForm>(blankCalendarEditForm);
   const [savingCalendarEdit, setSavingCalendarEdit] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [liveNow, setLiveNow] = useState(() => new Date());
+  const liveTodayKey = formatLocalDateInput(liveNow);
+  const [lastCalendarTodayKey, setLastCalendarTodayKey] = useState(() => liveTodayKey);
   const calendarQueryRange = calendarRangeForView(calendarViewMode, calendarAnchorDateKey);
+  const canAccessOperationsCalendar = Boolean(user && ['super_admin', 'operations_manager', 'project_manager'].includes(user.role));
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setLiveNow(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (liveTodayKey === lastCalendarTodayKey) return;
+    setCalendarAnchorDateKey(current => current === lastCalendarTodayKey ? liveTodayKey : current);
+    setLastCalendarTodayKey(liveTodayKey);
+  }, [lastCalendarTodayKey, liveTodayKey]);
 
   useEffect(() => {
     const load = async () => {
       try {
         const [feedRes, calendarRes] = await Promise.all([
           api.get('/dashboard/activity-feed?limit=25').catch(() => ({ data: { items: [] } })),
-          api.get(`/calendar/events?start=${encodeURIComponent(calendarQueryRange.start)}&end=${encodeURIComponent(calendarQueryRange.end)}`).catch(() => ({ data: { events: [] } })),
+          canAccessOperationsCalendar
+            ? api.get(`/calendar/events?start=${encodeURIComponent(calendarQueryRange.start)}&end=${encodeURIComponent(calendarQueryRange.end)}`).catch(() => ({ data: { events: [] } }))
+            : Promise.resolve({ data: { events: [] } }),
         ]);
         const feedItems = Array.isArray(feedRes.data?.items)
           ? feedRes.data.items
@@ -547,12 +564,16 @@ export default function Dashboard() {
       }
     };
     load();
-  }, [user?.id, user?.role, calendarQueryRange.start, calendarQueryRange.end]);
+  }, [user?.id, user?.role, canAccessOperationsCalendar, calendarQueryRange.start, calendarQueryRange.end]);
 
   if (loading) return <Loading />;
 
   const firstName = user?.name?.split(' ')[0] || 'there';
-  const now = new Date();
+  const now = liveNow;
+  const liveNowIso = now.toISOString();
+  const liveEasternTimeLabel = `${formatEasternTime(liveNowIso)
+    .replace(/\sAM$/, ' A.M.')
+    .replace(/\sPM$/, ' P.M.')} Eastern Time`;
 
   const openCalendarReminderComposer = () => {
     setReminderTitle('BuildTrack reminder');
@@ -720,9 +741,9 @@ export default function Dashboard() {
     }
   };
 
-  const todayKey = formatLocalDateInput(now);
+  const todayKey = liveTodayKey;
   const calendarAnchorDate = localDateInputToNoonDate(calendarAnchorDateKey);
-  const currentWeekStartDate = startOfCalendarWeek(calendarAnchorDate);
+  const currentWeekStartDate = calendarAnchorDate;
   const currentWeekEndDate = addCalendarDays(currentWeekStartDate, 6);
   const calendarMonthStartDate = startOfCalendarMonth(calendarAnchorDate);
   const calendarVisibleWeekDays = buildCalendarWeekDays(currentWeekStartDate, todayKey);
@@ -759,7 +780,6 @@ export default function Dashboard() {
     setExpandedCalendarNoteId(null);
   };
   const jumpToTodayCalendarView = () => {
-    setCalendarViewMode('today');
     setCalendarAnchorDateKey(todayKey);
     setExpandedCalendarNoteId(null);
   };
@@ -773,6 +793,19 @@ export default function Dashboard() {
   const completedCalendarEvents = calendarEvents.filter(event => event.status === 'completed' && isCurrentViewEvent(event));
   const displayedCalendarEvents = calendarQueueFilter === 'completed' ? completedCalendarEvents : upcomingCalendarEvents;
   const calendarViewEventCount = displayedCalendarEvents.length;
+  const todayOpenCalendarEvents = calendarEvents.filter(event =>
+    event.status !== 'completed' && calendarDateKeyForEvent(event) === todayKey
+  );
+  const highPriorityCalendarEvents = displayedCalendarEvents.filter(event =>
+    event.priority === 'critical' || event.priority === 'high'
+  );
+  const timedCalendarEvents = displayedCalendarEvents.filter(event => Boolean(event.due_time));
+  const calendarSummaryCards = [
+    { label: 'Today', value: todayOpenCalendarEvents.length, detail: 'Open company items', tone: 'from-slate-950 via-blue-950 to-cyan-900 border-cyan-300/35 text-white' },
+    { label: calendarQueueFilter === 'completed' ? 'Completed' : 'In View', value: calendarViewEventCount, detail: calendarViewTitle, tone: 'from-slate-950 via-indigo-950 to-violet-900 border-violet-300/35 text-white' },
+    { label: 'High Priority', value: highPriorityCalendarEvents.length, detail: 'Critical or high', tone: 'from-slate-950 via-rose-950 to-fuchsia-950 border-rose-300/35 text-white' },
+    { label: 'Timed', value: timedCalendarEvents.length, detail: 'Scheduled by hour', tone: 'from-slate-950 via-teal-950 to-emerald-900 border-teal-300/35 text-white' },
+  ];
   const canCreateCalendarReminders = Boolean(user && isAdminRole(user.role));
   const calendarTypeLabel = (type?: string) => {
     const labels: Record<string, string> = {
@@ -787,52 +820,52 @@ export default function Dashboard() {
   const calendarEventTone = (event: OperationsCalendarEvent) => {
     if (event.status === 'completed') {
       return {
-        card: 'border-emerald-300/35 bg-emerald-950/35 hover:border-emerald-200/60',
-        rail: 'bg-emerald-400',
-        chip: 'border-emerald-300/50 bg-emerald-400/20 text-emerald-50',
-        time: 'bg-emerald-400/20 text-emerald-50 ring-emerald-300/40',
+        card: 'border-emerald-200/45 bg-gradient-to-br from-emerald-950 via-teal-900 to-green-800 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.20),inset_0_-2px_4px_rgba(0,0,0,0.32),0_8px_18px_rgba(16,185,129,0.18)] hover:border-emerald-100/70 hover:brightness-110',
+        rail: 'bg-emerald-300 shadow-[0_0_12px_rgba(110,231,183,0.45)]',
+        chip: 'border border-white/20 bg-white/14 text-white shadow-sm',
+        time: 'bg-black/22 text-white ring-white/24',
       };
     }
 
     if (event.priority === 'critical' || event.priority === 'high') {
       return {
-        card: 'border-rose-300/40 bg-rose-950/30 hover:border-rose-200/60',
-        rail: 'bg-rose-400',
-        chip: 'border-rose-300/50 bg-rose-400/20 text-rose-50',
-        time: 'bg-rose-400/20 text-rose-50 ring-rose-300/40',
+        card: 'border-rose-200/45 bg-gradient-to-br from-rose-950 via-fuchsia-950 to-purple-950 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.20),inset_0_-2px_4px_rgba(0,0,0,0.32),0_8px_18px_rgba(244,63,94,0.18)] hover:border-rose-100/70 hover:brightness-110',
+        rail: 'bg-rose-300 shadow-[0_0_12px_rgba(253,164,175,0.45)]',
+        chip: 'border border-white/20 bg-white/14 text-white shadow-sm',
+        time: 'bg-black/22 text-white ring-white/24',
       };
     }
 
     const tones: Record<string, { card: string; rail: string; chip: string; time: string }> = {
       task: {
-        card: 'border-sky-300/40 bg-sky-950/30 hover:border-sky-200/60',
-        rail: 'bg-sky-400',
-        chip: 'border-sky-300/50 bg-sky-400/20 text-sky-50',
-        time: 'bg-sky-400/20 text-sky-50 ring-sky-300/40',
+        card: 'border-sky-200/45 bg-gradient-to-br from-slate-950 via-blue-900 to-cyan-900 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.20),inset_0_-2px_4px_rgba(0,0,0,0.32),0_8px_18px_rgba(14,165,233,0.16)] hover:border-sky-100/70 hover:brightness-110',
+        rail: 'bg-cyan-300 shadow-[0_0_12px_rgba(103,232,249,0.45)]',
+        chip: 'border border-white/20 bg-white/14 text-white shadow-sm',
+        time: 'bg-black/22 text-white ring-white/24',
       },
       maintenance: {
-        card: 'border-amber-300/40 bg-amber-950/30 hover:border-amber-200/60',
-        rail: 'bg-amber-400',
-        chip: 'border-amber-300/50 bg-amber-400/20 text-amber-50',
-        time: 'bg-amber-400/20 text-amber-50 ring-amber-300/40',
+        card: 'border-amber-200/45 bg-gradient-to-br from-stone-950 via-amber-900 to-orange-900 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.20),inset_0_-2px_4px_rgba(0,0,0,0.32),0_8px_18px_rgba(245,158,11,0.16)] hover:border-amber-100/70 hover:brightness-110',
+        rail: 'bg-amber-300 shadow-[0_0_12px_rgba(252,211,77,0.45)]',
+        chip: 'border border-white/20 bg-white/14 text-white shadow-sm',
+        time: 'bg-black/22 text-white ring-white/24',
       },
       inspection: {
-        card: 'border-violet-300/40 bg-violet-950/30 hover:border-violet-200/60',
-        rail: 'bg-violet-400',
-        chip: 'border-violet-300/50 bg-violet-400/20 text-violet-50',
-        time: 'bg-violet-400/20 text-violet-50 ring-violet-300/40',
+        card: 'border-violet-200/45 bg-gradient-to-br from-slate-950 via-violet-950 to-indigo-900 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.20),inset_0_-2px_4px_rgba(0,0,0,0.32),0_8px_18px_rgba(99,102,241,0.16)] hover:border-violet-100/70 hover:brightness-110',
+        rail: 'bg-violet-300 shadow-[0_0_12px_rgba(196,181,253,0.45)]',
+        chip: 'border border-white/20 bg-white/14 text-white shadow-sm',
+        time: 'bg-black/22 text-white ring-white/24',
       },
       note: {
-        card: 'border-cyan-300/40 bg-cyan-950/30 hover:border-cyan-200/60',
-        rail: 'bg-cyan-300',
-        chip: 'border-cyan-300/50 bg-cyan-400/20 text-cyan-50',
-        time: 'bg-cyan-400/20 text-cyan-50 ring-cyan-300/40',
+        card: 'border-teal-200/45 bg-gradient-to-br from-slate-950 via-teal-950 to-cyan-900 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.20),inset_0_-2px_4px_rgba(0,0,0,0.32),0_8px_18px_rgba(6,182,212,0.16)] hover:border-teal-100/70 hover:brightness-110',
+        rail: 'bg-teal-300 shadow-[0_0_12px_rgba(94,234,212,0.45)]',
+        chip: 'border border-white/20 bg-white/14 text-white shadow-sm',
+        time: 'bg-black/22 text-white ring-white/24',
       },
       other: {
-        card: 'border-slate-500/50 bg-slate-900/75 hover:border-blue-300/50',
-        rail: 'bg-blue-400',
-        chip: 'border-blue-300/40 bg-blue-400/20 text-blue-50',
-        time: 'bg-blue-400/20 text-blue-50 ring-blue-300/40',
+        card: 'border-blue-200/45 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.20),inset_0_-2px_4px_rgba(0,0,0,0.32),0_8px_18px_rgba(59,130,246,0.15)] hover:border-blue-100/70 hover:brightness-110',
+        rail: 'bg-blue-300 shadow-[0_0_12px_rgba(147,197,253,0.45)]',
+        chip: 'border border-white/20 bg-white/14 text-white shadow-sm',
+        time: 'bg-black/22 text-white ring-white/24',
       },
     };
 
@@ -851,50 +884,99 @@ export default function Dashboard() {
     const projectLabel = getCalendarProjectLabel(event);
     const saving = savingCalendarEventId === event.id;
     const tone = calendarEventTone(event);
+    const timeLabel = formatCalendarDueTimeLabel(event.due_time);
 
     return (
       <article
         key={event.id}
-        className={`group relative overflow-hidden rounded-lg border px-3 py-3 text-left shadow-[0_10px_22px_rgba(2,6,23,0.24)] transition-colors ${
+        className={`bt-calendar-task-card group relative min-h-[74px] overflow-hidden rounded-[10px] border px-2.5 py-2 text-left transition-all hover:-translate-y-0.5 ${
           complete
             ? tone.card
             : noteExpanded
-              ? 'border-white/40 bg-slate-950/90'
+              ? 'border-cyan-100/70 bg-gradient-to-br from-slate-950 via-cyan-950 to-blue-950 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.20),inset_0_-2px_4px_rgba(0,0,0,0.32),0_10px_22px_rgba(14,165,233,0.22)] ring-1 ring-cyan-300/35'
               : tone.card
         }`}
       >
-        <span className={`absolute bottom-3 left-0 top-3 w-1 rounded-r-full ${tone.rail}`} />
-        <div className="flex items-start gap-2 pl-1.5">
-          <input
-            type="checkbox"
-            checked={complete}
-            disabled={saving}
-            onChange={inputEvent => {
-              void saveCalendarEventUpdate(event, {
-                status: inputEvent.currentTarget.checked ? 'completed' : 'scheduled',
-                completion_note: noteDraft,
-              });
-            }}
-            className="mt-1 h-4 w-4 flex-shrink-0 rounded border-slate-500 bg-slate-950 accent-emerald-500"
-            aria-label={`${complete ? 'Mark incomplete' : 'Mark complete'}: ${projectLabel} - ${event.title}`}
-          />
-          <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 items-start justify-between gap-2">
-              <button
-                type="button"
-                onClick={() => setExpandedCalendarNoteId(noteExpanded ? null : event.id)}
-                className="min-w-0 flex-1 rounded-md text-left focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
-                aria-expanded={noteExpanded}
-              >
-                <p className={`whitespace-normal break-words text-sm font-black leading-5 ${complete ? 'text-emerald-100 line-through decoration-emerald-200/70' : 'text-slate-50'}`} title={event.title}>
-                  {event.title}
-                </p>
-              </button>
+        <span className={`absolute bottom-2 left-0 top-2 w-1 rounded-r-full ${tone.rail}`} />
+        <div className="space-y-1.5 pl-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <input
+              type="checkbox"
+              checked={complete}
+              disabled={saving}
+              onChange={inputEvent => {
+                void saveCalendarEventUpdate(event, {
+                  status: inputEvent.currentTarget.checked ? 'completed' : 'scheduled',
+                  completion_note: noteDraft,
+                });
+              }}
+              className="h-3.5 w-3.5 flex-shrink-0 rounded border-white/60 bg-white/90 accent-emerald-500 shadow-sm"
+              aria-label={`${complete ? 'Mark incomplete' : 'Mark complete'}: ${projectLabel} - ${event.title}`}
+            />
+
+            <button
+              type="button"
+              onClick={() => setExpandedCalendarNoteId(noteExpanded ? null : event.id)}
+              className="min-w-0 flex-1 rounded-md text-left focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
+              aria-expanded={noteExpanded}
+            >
+              <p className={`truncate text-[13px] font-black leading-4 tracking-normal drop-shadow-sm ${complete ? 'text-white/80 line-through decoration-white/80' : 'text-white'}`} title={event.title}>
+                {event.title || 'Untitled calendar item'}
+              </p>
+              <p className="mt-0.5 truncate text-[10px] font-extrabold leading-3 text-white/82" title={projectLabel}>
+                {projectLabel}
+              </p>
+            </button>
+          </div>
+
+          <div className="flex min-w-0 flex-nowrap items-center gap-1.5">
+            <span className={`inline-flex h-6 items-center justify-center rounded-md px-2 text-[9px] font-black leading-none ring-1 shadow-sm ${event.due_time ? tone.time : 'bg-black/22 text-white ring-white/24'}`}>
+              {timeLabel}
+            </span>
+            <span className={`rounded-md px-2 py-1 text-[9px] font-black uppercase leading-none ${tone.chip}`}>
+              {calendarTypeLabel(event.event_type)}
+            </span>
+            {event.priority === 'critical' || event.priority === 'high' ? (
+              <span className="rounded-md border border-white/20 bg-white/14 px-2 py-1 text-[9px] font-black uppercase leading-none text-white shadow-sm">
+                {event.priority}
+              </span>
+            ) : null}
+            {Number(event.email_reminder_count || 0) > 0 ? (
+              <span className="rounded-md border border-white/20 bg-white/14 px-2 py-1 text-[9px] font-black uppercase leading-none text-white shadow-sm">
+                Email
+              </span>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => setExpandedCalendarNoteId(noteExpanded ? null : event.id)}
+              className="ml-auto inline-flex h-6 items-center rounded-md border border-white/24 bg-black/20 px-2 text-[9px] font-black uppercase tracking-wide text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_8px_rgba(2,6,23,0.18)] transition hover:bg-white/16"
+              aria-expanded={noteExpanded}
+            >
+              {noteExpanded ? 'Hide' : 'Details'}
+            </button>
+          </div>
+        </div>
+        {noteExpanded && (
+          <div className="mt-3 grid gap-2 border-t border-white/30 pt-3">
+            {event.description ? (
+              <p className="whitespace-pre-wrap rounded-md border border-white/20 bg-white/16 px-3 py-2 text-[12px] font-bold leading-5 text-white shadow-inner">
+                {event.description}
+              </p>
+            ) : null}
+            {event.vendor_name ? (
+              <p className="break-words text-[12px] font-bold leading-4 text-white/90">
+                Vendor: {event.vendor_name}
+              </p>
+            ) : null}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[11px] font-bold text-white/80">
+                Created for {projectLabel}
+              </span>
               <button
                 type="button"
                 onClick={() => openCalendarEntryEditor(event)}
                 disabled={saving}
-                className="inline-flex h-8 flex-shrink-0 items-center gap-1 rounded-md border border-slate-600 bg-slate-950/90 px-2 text-[10px] font-black uppercase tracking-wide text-slate-100 transition hover:border-cyan-300 hover:bg-cyan-500/15 hover:text-cyan-100 disabled:opacity-60"
+                className="inline-flex h-8 flex-shrink-0 items-center gap-1 rounded-md border border-white/30 bg-white/20 px-2 text-[10px] font-black uppercase tracking-wide text-white transition hover:bg-white/30 disabled:opacity-50"
                 title="Edit calendar entry"
                 aria-label={`Edit calendar entry: ${projectLabel} - ${event.title}`}
               >
@@ -902,54 +984,18 @@ export default function Dashboard() {
                 Edit
               </button>
             </div>
-            <p className="mt-1 whitespace-normal break-words text-[12px] font-bold leading-4 text-slate-200" title={projectLabel}>
-              {projectLabel}
-            </p>
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              {event.due_time ? (
-                <span className={`flex-shrink-0 rounded-md px-2 py-1 text-[10px] font-black leading-none ring-1 ${tone.time}`}>
-                  {event.due_time}
-                </span>
-              ) : (
-                <span className="flex-shrink-0 rounded-md bg-slate-950/60 px-2 py-1 text-[10px] font-black leading-none text-slate-300 ring-1 ring-slate-600/60">
-                  Anytime
-                </span>
-              )}
-              <span className={`rounded-md border px-2 py-1 text-[10px] font-black uppercase leading-none ${tone.chip}`}>
-                {calendarTypeLabel(event.event_type)}
-              </span>
-              {Number(event.email_reminder_count || 0) > 0 ? (
-                <span className="rounded-md border border-blue-300/40 bg-blue-400/15 px-2 py-1 text-[10px] font-black uppercase leading-none text-blue-50">
-                  Email
-                </span>
-              ) : null}
-            </div>
-          </div>
-        </div>
-        {noteExpanded && (
-          <div className="mt-3 grid gap-2 border-t border-slate-800 pt-3">
-            {event.description ? (
-              <p className="whitespace-pre-wrap rounded-md border border-slate-700/70 bg-slate-950/55 px-3 py-2 text-[12px] font-semibold leading-5 text-slate-300">
-                {event.description}
-              </p>
-            ) : null}
-            {event.vendor_name ? (
-              <p className="break-words text-[12px] font-semibold leading-4 text-slate-400">
-                Vendor: {event.vendor_name}
-              </p>
-            ) : null}
             <VoiceTextarea
               value={noteDraft}
               onChange={inputEvent => updateCalendarCompletionNote(event.id, inputEvent.target.value)}
               rows={2}
-              className="w-full resize-y rounded-md border border-slate-600 bg-slate-950 px-3 py-2 text-sm font-semibold leading-5 text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400"
+              className="w-full resize-y rounded-md border border-white/30 bg-white px-3 py-2 text-sm font-semibold leading-5 text-slate-950 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-white/70"
               placeholder="Add note..."
             />
             <span className="flex justify-end gap-1.5">
               <button
                 type="button"
                 onClick={() => setExpandedCalendarNoteId(null)}
-                className="rounded border border-slate-600 bg-slate-900 px-2 py-1 text-[10px] font-black text-slate-200 hover:bg-slate-800"
+                className="rounded border border-white/35 bg-white/18 px-2 py-1 text-[10px] font-black text-white hover:bg-white/28"
               >
                 Close
               </button>
@@ -957,7 +1003,7 @@ export default function Dashboard() {
                 type="button"
                 disabled={saving}
                 onClick={() => void saveCalendarEventUpdate(event, { status: complete ? 'completed' : event.status, completion_note: noteDraft })}
-                className="rounded border border-emerald-300/40 bg-emerald-500/15 px-2 py-1 text-[10px] font-black text-emerald-100 hover:bg-emerald-500/25 disabled:opacity-60"
+                className="rounded border border-white/40 bg-emerald-600 px-2 py-1 text-[10px] font-black text-white shadow-sm hover:bg-emerald-500 disabled:opacity-60"
               >
                 {saving ? 'Saving' : 'Save'}
               </button>
@@ -978,7 +1024,7 @@ export default function Dashboard() {
     return (
       <div
         key={event.id}
-        className={`group relative flex min-w-0 items-start gap-1.5 overflow-hidden rounded-md border px-1.5 py-1.5 shadow-[0_6px_14px_rgba(2,6,23,0.18)] ${tone.card}`}
+        className={`bt-calendar-month-pill group relative flex min-w-0 items-start gap-1.5 overflow-hidden rounded-lg border px-1.5 py-1.5 ${tone.card}`}
       >
         <span className={`absolute bottom-1.5 left-0 top-1.5 w-0.5 rounded-r-full ${tone.rail}`} />
         <input
@@ -991,7 +1037,7 @@ export default function Dashboard() {
               completion_note: noteDraft,
             });
           }}
-          className="ml-1 mt-0.5 h-3.5 w-3.5 flex-shrink-0 rounded border-slate-500 bg-slate-950 accent-emerald-500"
+          className="ml-1 mt-0.5 h-3.5 w-3.5 flex-shrink-0 rounded border-white/70 bg-white/95 accent-emerald-600 shadow-sm"
           aria-label={`${complete ? 'Mark incomplete' : 'Mark complete'}: ${projectLabel} - ${event.title}`}
         />
         <button
@@ -1000,10 +1046,10 @@ export default function Dashboard() {
           className="min-w-0 flex-1 rounded text-left focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
           title={`${formatCalendarDueTimeLabel(event.due_time)} - ${event.title}`}
         >
-          <span className={`block text-[10px] font-black leading-3 ${complete ? 'text-emerald-100 line-through decoration-emerald-200/70' : 'text-slate-50'}`}>
+          <span className={`block text-[10px] font-black leading-3 drop-shadow-sm ${complete ? 'text-white/90 line-through decoration-white/80' : 'text-white'}`}>
             {event.title}
           </span>
-          <span className="mt-0.5 block truncate text-[9px] font-bold text-slate-300">
+          <span className="mt-0.5 block truncate text-[9px] font-bold text-white/90">
             {formatCalendarDueTimeLabel(event.due_time)}
           </span>
         </button>
@@ -1011,7 +1057,7 @@ export default function Dashboard() {
           type="button"
           onClick={() => openCalendarEntryEditor(event)}
           disabled={saving}
-          className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border border-slate-600 bg-slate-950/80 text-slate-300 opacity-0 transition hover:border-cyan-300 hover:text-cyan-100 group-hover:opacity-100 group-focus-within:opacity-100 disabled:opacity-50"
+          className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border border-white/45 bg-white/20 text-white opacity-0 shadow-sm transition hover:bg-white/30 group-hover:opacity-100 group-focus-within:opacity-100 disabled:opacity-50"
           aria-label={`Edit calendar entry: ${projectLabel} - ${event.title}`}
           title="Edit"
         >
@@ -1022,11 +1068,11 @@ export default function Dashboard() {
   };
 
   const renderCalendarEmptyState = (dateKey: string, label: string) => (
-    <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/45 px-4 py-6 text-center">
-      <CalendarDays className="mx-auto h-7 w-7 text-slate-500" />
-      <p className="mt-2 text-sm font-black text-slate-200">No calendar items scheduled</p>
-      <p className="mt-1 text-xs font-semibold text-slate-500">{label}</p>
-      <div className="mt-4 flex justify-center">
+    <div className="bt-calendar-empty-state rounded-[10px] border border-white/10 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950/80 px-3 py-4 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_8px_18px_rgba(2,6,23,0.18)]">
+      <CalendarDays className="mx-auto h-6 w-6 text-slate-500" />
+      <p className="mt-2 text-xs font-black text-slate-200">No calendar items scheduled</p>
+      <p className="mt-1 text-[11px] font-bold text-slate-500">{label}</p>
+      <div className="mt-3 flex justify-center">
         <AddToCalendarButton
           label="Add calendar item"
           ariaLabel={`Add task or event on ${label}`}
@@ -1038,7 +1084,7 @@ export default function Dashboard() {
           sourceType="dashboard_day"
           contextLabel={`Calendar space: ${label}`}
           modalTitle={`Add Item - ${label}`}
-          buttonClassName="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-cyan-300/50 bg-cyan-500/15 px-3 text-xs font-black text-cyan-50 transition hover:border-cyan-200 hover:bg-cyan-500/25 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
+          buttonClassName="inline-flex min-h-8 items-center justify-center gap-2 rounded-md border border-cyan-300/35 bg-gradient-to-r from-slate-900 via-blue-900 to-cyan-900 px-3 text-[11px] font-black text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_6px_14px_rgba(14,165,233,0.16)] transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
           onSaved={() => refreshCalendarEvents(calendarAnchorDateKey, calendarViewMode)}
         />
       </div>
@@ -1050,8 +1096,8 @@ export default function Dashboard() {
     const schedule = buildCalendarDayScheduleBucket(todayEvents);
 
     return (
-      <div className="grid gap-4 p-4 xl:grid-cols-[280px_minmax(0,1fr)]">
-        <aside className="rounded-2xl border border-slate-700/70 bg-slate-950/70 p-4 shadow-[0_16px_34px_rgba(2,6,23,0.24)]">
+      <div className="grid gap-3 p-3 xl:grid-cols-[240px_minmax(0,1fr)]">
+        <aside className="rounded-2xl border border-cyan-300/20 bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_16px_34px_rgba(2,6,23,0.24)]">
           <p className="text-[11px] font-black uppercase tracking-wide text-cyan-200">Selected day</p>
           <h3 className="mt-2 text-3xl font-black leading-none text-white">
             {formatCalendarBadgeDate(calendarAnchorDateKey).day}
@@ -1060,12 +1106,12 @@ export default function Dashboard() {
             {formatEasternDate(`${calendarAnchorDateKey}T12:00:00`, { weekday: 'long', month: 'long', day: 'numeric' })}
           </p>
           <div className="mt-4 grid grid-cols-2 gap-2">
-            <div className="rounded-xl border border-sky-300/20 bg-sky-500/10 px-3 py-2">
-              <p className="text-[10px] font-black uppercase tracking-wide text-sky-200">Items</p>
+            <div className="rounded-xl border border-cyan-300/25 bg-gradient-to-br from-slate-950 via-blue-900 to-cyan-900 px-3 py-2 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.14),0_8px_16px_rgba(14,165,233,0.14)]">
+              <p className="text-[10px] font-black uppercase tracking-wide text-white/85">Items</p>
               <p className="mt-1 text-xl font-black text-white">{todayEvents.length}</p>
             </div>
-            <div className="rounded-xl border border-emerald-300/20 bg-emerald-500/10 px-3 py-2">
-              <p className="text-[10px] font-black uppercase tracking-wide text-emerald-200">Done</p>
+            <div className="rounded-xl border border-emerald-300/25 bg-gradient-to-br from-slate-950 via-teal-900 to-emerald-900 px-3 py-2 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.14),0_8px_16px_rgba(16,185,129,0.14)]">
+              <p className="text-[10px] font-black uppercase tracking-wide text-white/85">Done</p>
               <p className="mt-1 text-xl font-black text-white">{todayEvents.filter(event => event.status === 'completed').length}</p>
             </div>
           </div>
@@ -1081,40 +1127,37 @@ export default function Dashboard() {
               sourceType="dashboard_day"
               contextLabel={`Calendar space: ${formatCalendarBadgeDate(calendarAnchorDateKey).label}`}
               modalTitle={`Add Item - ${formatCalendarBadgeDate(calendarAnchorDateKey).label}`}
-              buttonClassName="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-cyan-300/50 bg-gradient-to-r from-cyan-500/22 via-blue-500/18 to-orange-500/18 px-3 text-sm font-black text-white transition hover:border-cyan-200 hover:from-cyan-400/28 hover:via-blue-500/22 hover:to-orange-400/22 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
+              buttonClassName="inline-flex min-h-9 w-full items-center justify-center gap-2 rounded-lg border border-cyan-300/35 bg-gradient-to-r from-slate-900 via-blue-900 to-cyan-900 px-3 text-xs font-black text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_8px_16px_rgba(14,165,233,0.16)] transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
               onSaved={() => refreshCalendarEvents(calendarAnchorDateKey, calendarViewMode)}
             />
           </div>
         </aside>
 
-        <div className="min-w-0 rounded-2xl border border-slate-700/70 bg-slate-950/45">
+        <div className="bt-calendar-day-agenda min-w-0 rounded-2xl border border-white/10 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_16px_34px_rgba(2,6,23,0.24)]">
           {todayEvents.length === 0 ? (
             <div className="p-4">{renderCalendarEmptyState(calendarAnchorDateKey, formatCalendarBadgeDate(calendarAnchorDateKey).label)}</div>
           ) : (
-            <div>
+            <div className="space-y-3 p-3">
               {schedule.untimed.length > 0 ? (
-                <div className="grid grid-cols-[90px_minmax(0,1fr)] border-b border-slate-800/90">
-                  <div className="border-r border-slate-800/90 px-3 py-3 text-right text-[11px] font-black uppercase tracking-wide text-slate-500">
+                <div className="bt-calendar-agenda-group grid gap-3 rounded-xl border border-white/10 bg-black/18 p-3 shadow-inner md:grid-cols-[88px_minmax(0,1fr)]">
+                  <div className="px-1 text-left text-[11px] font-black uppercase tracking-wide text-cyan-200 md:text-right">
                     No time
                   </div>
-                  <div className="space-y-2 p-3">
+                  <div className="space-y-2">
                     {schedule.untimed.map(renderCalendarDayTask)}
                   </div>
                 </div>
               ) : null}
               {calendarScheduleHours.map(hour => {
                 const hourEvents = schedule.byHour[hour] || [];
+                if (!hourEvents.length) return null;
                 return (
-                  <div key={hour} className="grid min-h-[72px] grid-cols-[90px_minmax(0,1fr)] border-b border-slate-800/80 last:border-b-0">
-                    <div className="border-r border-slate-800/90 bg-slate-950/40 px-3 py-3 text-right text-[11px] font-black text-slate-400">
+                  <div key={hour} className="bt-calendar-agenda-group grid gap-3 rounded-xl border border-white/10 bg-black/18 p-3 shadow-inner md:grid-cols-[88px_minmax(0,1fr)]">
+                    <div className="px-1 text-left text-[11px] font-black text-slate-300 md:text-right">
                       {formatCalendarHourLabel(hour)}
                     </div>
-                    <div className={`space-y-2 p-3 ${hourEvents.length ? 'bg-slate-900/25' : 'bg-slate-950/20'}`}>
-                      {hourEvents.length ? (
-                        hourEvents.map(renderCalendarDayTask)
-                      ) : (
-                        <div className="h-full min-h-[44px] rounded-lg border border-dashed border-slate-800/80 bg-slate-950/25" />
-                      )}
+                    <div className="space-y-2">
+                      {hourEvents.map(renderCalendarDayTask)}
                     </div>
                   </div>
                 );
@@ -1127,30 +1170,30 @@ export default function Dashboard() {
   };
 
   const renderCalendarWeekView = () => (
-    <div className="overflow-x-auto bg-[#060A14]">
-      <div className="grid min-w-[1180px] grid-cols-7 items-start gap-3 p-4">
+    <div className="overflow-x-auto bg-gradient-to-br from-[#050914] via-[#0B1224] to-[#101B34]">
+      <div className="grid min-w-[1620px] grid-cols-7 items-start gap-2.5 p-3">
         {calendarVisibleWeekDays.map(day => {
           const dayEvents = sortCalendarEventsForDay(calendarEventsByDate[day.key] || []);
           const badgeDate = formatCalendarBadgeDate(day.key);
           const dayYear = day.key.slice(0, 4);
 
           return (
-            <section key={day.key} className={`min-w-0 overflow-hidden rounded-2xl border shadow-[0_14px_30px_rgba(2,6,23,0.28)] ${day.isToday ? 'border-cyan-300/70 bg-[#0B213B] ring-1 ring-cyan-300/25' : 'border-slate-700/80 bg-[#111827]'}`}>
-              <header className={`border-b px-3 py-3 ${day.isToday ? 'border-cyan-300/40 bg-cyan-500/10' : 'border-slate-700/70 bg-[#182235]'}`}>
+            <section key={day.key} className={`min-w-0 overflow-hidden rounded-xl border shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_12px_26px_rgba(2,6,23,0.28)] ${day.isToday ? 'border-cyan-300/70 bg-gradient-to-br from-[#082F49] via-[#0F3B5F] to-[#172554] ring-1 ring-cyan-300/35' : 'border-slate-600/70 bg-gradient-to-br from-[#101827] via-[#111B2E] to-[#172033]'}`}>
+              <header className={`border-b px-3 py-2.5 ${day.isToday ? 'border-cyan-300/35 bg-gradient-to-r from-cyan-950 via-blue-950 to-slate-950 text-white' : 'border-white/10 bg-gradient-to-r from-slate-950 via-blue-950 to-indigo-950 text-white'}`}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className={`text-[10px] font-black uppercase tracking-[0.16em] ${day.isToday ? 'text-cyan-100' : 'text-slate-400'}`}>
+                    <p className="text-[10px] font-black uppercase tracking-[0.16em] text-white/85">
                       {day.weekday}
                     </p>
-                    <p className="mt-1 text-2xl font-black leading-none text-white">
+                    <p className="mt-1 text-2xl font-black leading-none text-white drop-shadow-sm">
                       {day.dayNumber}
                     </p>
-                    <p className="mt-1 text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                    <p className="mt-1 text-[9px] font-bold uppercase tracking-wide text-white/80">
                       {badgeDate.month} {dayYear}
                     </p>
                   </div>
                   <div className="flex items-start gap-1.5">
-                    <span className={`rounded-full px-2 py-1 text-[10px] font-black leading-none ${day.isToday ? 'bg-cyan-100 text-slate-950' : dayEvents.length > 0 ? 'bg-sky-400/20 text-sky-100 ring-1 ring-sky-300/35' : 'bg-slate-950/70 text-slate-300 ring-1 ring-slate-600/60'}`}>
+                    <span className={`rounded-full px-2 py-1 text-[10px] font-black leading-none shadow-sm ${dayEvents.length > 0 ? 'bg-cyan-300 text-slate-950 ring-1 ring-cyan-100/70' : 'bg-white/10 text-white ring-1 ring-white/18'}`}>
                       {dayEvents.length}
                     </span>
                     <AddToCalendarButton
@@ -1165,13 +1208,13 @@ export default function Dashboard() {
                       sourceType="dashboard_day"
                       contextLabel={`Calendar space: ${badgeDate.label}`}
                       modalTitle={`Add Item - ${badgeDate.label}`}
-                      buttonClassName={`inline-flex h-7 w-7 min-w-7 items-center justify-center rounded-md border text-xs font-black transition focus:outline-none focus:ring-2 focus:ring-cyan-300/50 ${day.isToday ? 'border-cyan-100/70 bg-cyan-200/20 text-cyan-50 hover:bg-cyan-200/30 hover:border-cyan-50' : 'border-slate-600 bg-slate-950/70 text-slate-300 hover:border-cyan-300 hover:bg-cyan-500/20 hover:text-cyan-50'}`}
+                      buttonClassName="inline-flex h-7 w-7 min-w-7 items-center justify-center rounded-md border border-white/20 bg-white/10 text-xs font-black text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.14),0_4px_10px_rgba(2,6,23,0.18)] transition hover:bg-white/18 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
                       onSaved={() => refreshCalendarEvents(calendarAnchorDateKey, calendarViewMode)}
                     />
                   </div>
                 </div>
               </header>
-              <div className="space-y-2.5 p-3">
+              <div className="space-y-2 p-2.5">
                 {dayEvents.length ? dayEvents.map(renderCalendarDayTask) : renderCalendarEmptyState(day.key, badgeDate.label)}
               </div>
             </section>
@@ -1182,26 +1225,23 @@ export default function Dashboard() {
   );
 
   const renderCalendarMonthView = () => (
-    <div className="overflow-x-auto bg-[#060A14]">
-      <div className="min-w-[1180px] p-4">
-        <div className="grid grid-cols-7 overflow-hidden rounded-t-2xl border border-b-0 border-slate-700/80 bg-[#182235]">
+    <div className="overflow-x-auto bg-gradient-to-br from-[#050914] via-[#0B1224] to-[#101B34]">
+      <div className="min-w-[1480px] p-3">
+        <div className="grid grid-cols-7 overflow-hidden rounded-t-xl border border-b-0 border-slate-600/70 bg-gradient-to-r from-slate-950 via-blue-950 to-indigo-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.10)]">
           {calendarWeekdayLabels.map(dayLabel => (
-            <div key={dayLabel} className="border-r border-slate-700/70 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-slate-300 last:border-r-0">
+            <div key={dayLabel} className="border-r border-white/10 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-white last:border-r-0">
               {dayLabel}
             </div>
           ))}
         </div>
-        <div className="grid grid-cols-7 overflow-hidden rounded-b-2xl border border-slate-700/80">
+        <div className="grid grid-cols-7 overflow-hidden rounded-b-xl border border-slate-600/70 shadow-[0_14px_30px_rgba(2,6,23,0.28)]">
           {calendarVisibleMonthDays.map(day => {
             const dayEvents = sortCalendarEventsForDay(calendarEventsByDate[day.key] || []);
             const badgeDate = formatCalendarBadgeDate(day.key);
-            const visibleEvents = dayEvents.slice(0, 3);
-            const hiddenCount = Math.max(dayEvents.length - visibleEvents.length, 0);
-
             return (
               <section
                 key={day.key}
-                className={`min-h-[154px] border-r border-b border-slate-800/85 p-2 last:border-r-0 ${day.isToday ? 'bg-cyan-950/35 ring-1 ring-inset ring-cyan-300/55' : day.isCurrentMonth ? 'bg-[#0D1424]' : 'bg-slate-950/55'}`}
+                className={`min-h-[132px] border-r border-b border-white/10 p-2 last:border-r-0 ${day.isToday ? 'bg-gradient-to-br from-cyan-950 via-blue-950 to-slate-950 ring-1 ring-inset ring-cyan-300/45' : day.isCurrentMonth ? 'bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950/70' : 'bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 opacity-70'}`}
               >
                 <header className="mb-2 flex items-center justify-between gap-2">
                   <button
@@ -1211,14 +1251,14 @@ export default function Dashboard() {
                       setCalendarAnchorDateKey(day.key);
                       setExpandedCalendarNoteId(null);
                     }}
-                    className={`rounded-lg px-2 py-1 text-left text-xs font-black transition focus:outline-none focus:ring-2 focus:ring-cyan-300/50 ${day.isCurrentMonth ? 'text-slate-100 hover:bg-slate-800/80' : 'text-slate-500 hover:bg-slate-900/80'}`}
+                    className={`rounded-lg px-2 py-1 text-left text-xs font-black transition focus:outline-none focus:ring-2 focus:ring-cyan-300/50 ${day.isCurrentMonth ? 'text-white hover:bg-white/10' : 'text-slate-500 hover:bg-white/5'}`}
                     title={`Open daily schedule for ${badgeDate.label}`}
                   >
                     {day.dayNumber}
                   </button>
                   <div className="flex items-center gap-1">
                     {dayEvents.length ? (
-                      <span className="rounded-full bg-sky-400/20 px-1.5 py-0.5 text-[9px] font-black text-sky-100 ring-1 ring-sky-300/30">
+                      <span className="rounded-full bg-gradient-to-r from-cyan-400 to-blue-500 px-1.5 py-0.5 text-[9px] font-black text-white ring-1 ring-cyan-100/40 shadow-sm">
                         {dayEvents.length}
                       </span>
                     ) : null}
@@ -1234,26 +1274,13 @@ export default function Dashboard() {
                       sourceType="dashboard_day"
                       contextLabel={`Calendar space: ${badgeDate.label}`}
                       modalTitle={`Add Item - ${badgeDate.label}`}
-                      buttonClassName="inline-flex h-6 w-6 min-w-6 items-center justify-center rounded-md border border-slate-700 bg-slate-950/70 text-[10px] font-black text-slate-400 transition hover:border-cyan-300 hover:bg-cyan-500/20 hover:text-cyan-50 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
+                      buttonClassName="inline-flex h-6 w-6 min-w-6 items-center justify-center rounded-md border border-white/20 bg-white/10 text-[10px] font-black text-white shadow-sm transition hover:bg-white/18 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
                       onSaved={() => refreshCalendarEvents(calendarAnchorDateKey, calendarViewMode)}
                     />
                   </div>
                 </header>
                 <div className="space-y-1.5">
-                  {visibleEvents.map(renderCalendarMonthEventPill)}
-                  {hiddenCount > 0 ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCalendarViewMode('today');
-                        setCalendarAnchorDateKey(day.key);
-                        setExpandedCalendarNoteId(null);
-                      }}
-                      className="w-full rounded-md border border-slate-700/80 bg-slate-950/60 px-2 py-1 text-left text-[10px] font-black text-slate-300 transition hover:border-cyan-300/50 hover:text-cyan-100 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
-                    >
-                      + {hiddenCount} more
-                    </button>
-                  ) : null}
+                  {dayEvents.map(renderCalendarMonthEventPill)}
                 </div>
               </section>
             );
@@ -1269,18 +1296,24 @@ export default function Dashboard() {
     const selectedLabel = calendarViewMode === 'today'
       ? formatCalendarBadgeDate(calendarAnchorDateKey).label
       : calendarViewTitle;
+    const previewKicker = calendarViewMode === 'today'
+      ? (calendarAnchorDateKey === todayKey ? "Today's schedule" : 'Selected day')
+      : calendarViewKicker;
 
     return (
-      <div className="border-t border-slate-800/80 bg-[#060A14] p-4">
-        <div className="grid gap-3 xl:grid-cols-[220px_minmax(0,1fr)_auto] xl:items-stretch">
-          <div className="rounded-2xl border border-slate-700/70 bg-slate-950/70 p-4">
-            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-200">Compact schedule</p>
-            <h4 className="mt-2 text-2xl font-black text-white">{calendarViewEventCount}</h4>
-            <p className="mt-1 text-xs font-bold text-slate-300">{calendarViewEventCount === 1 ? 'calendar item' : 'calendar items'}</p>
-            <p className="mt-3 text-xs font-semibold leading-5 text-slate-400">{selectedLabel}</p>
+      <div className="bt-calendar-preview bg-gradient-to-br from-[#050914] via-[#0B1224] to-[#101B34] p-3">
+        <div className="grid gap-3 xl:grid-cols-[260px_minmax(0,1fr)_auto] xl:items-stretch">
+          <div className="bt-calendar-day-card rounded-2xl border border-cyan-300/20 bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_12px_22px_rgba(2,6,23,0.22)]">
+            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-cyan-200">{previewKicker}</p>
+            <h4 className="mt-2 text-xl font-black leading-tight text-white">{calendarViewTitle}</h4>
+            <div className="mt-3 inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-slate-950 via-blue-950 to-cyan-950 px-3 py-1 text-xs font-black text-white ring-1 ring-cyan-300/25 shadow-sm">
+              <span className="h-1.5 w-1.5 rounded-full bg-cyan-300" />
+              {calendarViewEventCount} {calendarViewEventCount === 1 ? 'item' : 'items'}
+            </div>
+            <p className="mt-3 text-xs font-bold leading-5 text-slate-400">{selectedLabel}</p>
           </div>
 
-          <div className="min-w-0 rounded-2xl border border-slate-700/70 bg-slate-950/45 p-3">
+          <div className="bt-calendar-preview-list min-w-0 rounded-2xl border border-white/10 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_12px_22px_rgba(2,6,23,0.22)]">
             {previewEvents.length ? (
               <div className="grid gap-2 xl:grid-cols-2">
                 {previewEvents.map(event => {
@@ -1300,12 +1333,12 @@ export default function Dashboard() {
                         setCalendarExpanded(true);
                         openCalendarEntryEditor(event);
                       }}
-                      className={`group relative min-w-0 overflow-hidden rounded-xl border px-3 py-2.5 text-left shadow-[0_10px_24px_rgba(2,6,23,0.22)] transition focus:outline-none focus:ring-2 focus:ring-cyan-300/50 ${tone.card}`}
+                      className={`bt-calendar-preview-task group relative min-w-0 overflow-hidden rounded-[10px] border px-3 py-2 text-left transition focus:outline-none focus:ring-2 focus:ring-cyan-300/50 ${tone.card}`}
                     >
                       <span className={`absolute bottom-2 left-0 top-2 w-1 rounded-r-full ${tone.rail}`} />
                       <span className="block pl-2">
                         <span className="flex items-center justify-between gap-2">
-                          <span className={`min-w-0 truncate text-sm font-black leading-5 ${complete ? 'text-emerald-100 line-through decoration-emerald-200/70' : 'text-slate-50'}`}>
+                          <span className={`min-w-0 truncate text-sm font-black leading-5 ${complete ? 'text-white/90 line-through decoration-white/80' : 'text-white'}`}>
                             {event.title}
                           </span>
                           <span className={`flex-shrink-0 rounded-md px-2 py-1 text-[10px] font-black leading-none ring-1 ${tone.time}`}>
@@ -1313,12 +1346,12 @@ export default function Dashboard() {
                           </span>
                         </span>
                         <span className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
-                          <span className="truncate text-[11px] font-bold text-slate-300">{projectLabel}</span>
-                          <span className={`rounded-md border px-1.5 py-0.5 text-[9px] font-black uppercase leading-none ${tone.chip}`}>
+                          <span className="truncate text-[11px] font-bold text-white/90">{projectLabel}</span>
+                            <span className={`rounded-md px-1.5 py-0.5 text-[9px] font-black uppercase leading-none ${tone.chip}`}>
                             {calendarTypeLabel(event.event_type)}
                           </span>
                           {calendarViewMode !== 'today' ? (
-                            <span className="rounded-md bg-slate-950/65 px-1.5 py-0.5 text-[9px] font-black uppercase text-slate-300 ring-1 ring-slate-600/60">
+                            <span className="rounded-md bg-white/22 px-1.5 py-0.5 text-[9px] font-black uppercase text-white ring-1 ring-white/35">
                               {badgeDate.month} {badgeDate.day}
                             </span>
                           ) : null}
@@ -1335,18 +1368,18 @@ export default function Dashboard() {
               <button
                 type="button"
                 onClick={() => setCalendarExpanded(true)}
-                className="mt-3 inline-flex min-h-9 items-center rounded-lg border border-sky-300/40 bg-sky-500/15 px-3 text-xs font-black text-sky-50 transition hover:border-sky-200 hover:bg-sky-500/25 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
+                className="mt-3 inline-flex min-h-8 items-center rounded-lg border border-cyan-300/35 bg-gradient-to-r from-slate-950 via-blue-950 to-cyan-950 px-3 text-xs font-black text-white shadow-sm transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
               >
                 View {hiddenCount} more
               </button>
             ) : null}
           </div>
 
-          <div className="flex min-w-[170px] flex-col justify-between gap-2 rounded-2xl border border-slate-700/70 bg-slate-950/70 p-3">
+          <div className="flex min-w-[170px] flex-col justify-center gap-2 rounded-2xl border border-teal-300/20 bg-gradient-to-br from-slate-950 via-teal-950 to-cyan-950 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_12px_22px_rgba(2,6,23,0.22)]">
             <button
               type="button"
               onClick={() => setCalendarExpanded(true)}
-              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-cyan-300/50 bg-cyan-500/15 px-3 text-sm font-black text-cyan-50 transition hover:border-cyan-200 hover:bg-cyan-500/25 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
+              className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-cyan-300/35 bg-gradient-to-r from-slate-950 via-blue-950 to-cyan-950 px-3 text-sm font-black text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_8px_16px_rgba(14,165,233,0.16)] transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
               aria-expanded={calendarExpanded}
             >
               Expand calendar
@@ -1369,30 +1402,30 @@ export default function Dashboard() {
       id="recent-activity"
       className="bt-dashboard-notes-panel bt-dashboard-activity-panel relative overflow-hidden rounded-2xl border border-slate-700/70 shadow-[0_16px_40px_rgba(2,6,23,0.24)]"
       style={{
-        background: 'linear-gradient(180deg, rgba(17,31,52,0.92), rgba(12,22,38,0.92))',
+        background: 'linear-gradient(180deg, rgba(20,35,31,0.92), rgba(13,22,23,0.92))',
       }}
     >
-      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-blue-500 via-cyan-300 to-amber-300" />
+      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-400 via-lime-300 to-amber-300" />
       <div
-        className="bt-dashboard-notes-panel-header relative flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3"
+        className="bt-dashboard-notes-panel-header relative flex items-center justify-between gap-4 border-b border-white/10 px-5 py-4"
         style={{
-          background: 'linear-gradient(90deg, rgba(30,64,175,0.20) 0%, rgba(14,165,233,0.10) 52%, rgba(245,158,11,0.08) 100%)',
+          background: 'linear-gradient(90deg, rgba(22,101,52,0.22) 0%, rgba(132,204,22,0.10) 52%, rgba(245,158,11,0.08) 100%)',
         }}
       >
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-3.5">
           <div
-            className="flex h-9 w-9 items-center justify-center rounded-lg border shadow-[0_0_16px_rgba(96,165,250,0.14)]"
-            style={{ background: 'rgba(37,99,235,0.16)', borderColor: 'rgba(147,197,253,0.46)' }}
+            className="flex h-11 w-11 items-center justify-center rounded-xl border shadow-[0_0_16px_rgba(34,197,94,0.14)]"
+            style={{ background: 'rgba(34,197,94,0.16)', borderColor: 'rgba(134,239,172,0.46)' }}
           >
-            <Activity className="h-4 w-4" style={{ color: '#BFDBFE' }} />
+            <Activity className="h-5 w-5" style={{ color: '#BBF7D0' }} />
           </div>
           <div>
-            <p className="bt-section-kicker">Latest company notes</p>
-            <h2 className="text-lg font-black text-white">Latest Field & Office Notes</h2>
-            <p className="text-xs font-semibold text-slate-300">{activityFeed.length} recent notes across all projects</p>
+            <p className="bt-section-kicker text-[12px]">Latest company notes</p>
+            <h2 className="text-xl font-black text-white">Latest Field & Office Notes</h2>
+            <p className="text-sm font-semibold text-slate-300">{activityFeed.length} recent notes across all projects</p>
           </div>
         </div>
-        <span className="hidden rounded-full border border-cyan-300/30 bg-cyan-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-cyan-100 sm:inline-flex">
+        <span className="hidden rounded-full border border-lime-300/30 bg-emerald-500/10 px-4 py-1.5 text-xs font-black uppercase tracking-wide text-lime-100 sm:inline-flex">
           25 latest notes
         </span>
       </div>
@@ -1400,10 +1433,10 @@ export default function Dashboard() {
       {activityFeed.length === 0 ? (
         <div className="relative flex min-h-[96px] flex-col items-center justify-center px-4 py-6">
           <p className="text-sm font-bold text-white">No notes yet</p>
-          <p className="mt-1 text-xs text-blue-100">Recent field and office notes will appear here.</p>
+          <p className="mt-1 text-xs text-emerald-100">Recent field and office notes will appear here.</p>
         </div>
       ) : (
-        <div className="relative grid grid-cols-1 gap-2 p-3">
+        <div className="relative grid grid-cols-1 gap-3 p-4">
           {activityFeed.map((item) => {
             const activityStyle = getActivityTypeStyle(item);
             const statusStyle = getProjectStatusStyle(item.project_status || undefined);
@@ -1421,60 +1454,60 @@ export default function Dashboard() {
                 onKeyDown={event => {
                   if (projectTarget && event.key === 'Enter') navigate(projectTarget);
                 }}
-                className={`group relative flex items-start gap-3 rounded-lg border border-white/10 p-3 transition-all hover:border-cyan-300/55 ${projectTarget ? 'cursor-pointer' : 'cursor-default'}`}
+                className={`group relative flex min-h-[112px] items-start gap-4 rounded-xl border border-white/10 p-4 transition-all hover:border-cyan-300/55 sm:p-5 ${projectTarget ? 'cursor-pointer' : 'cursor-default'}`}
                 style={{
                   background: 'linear-gradient(135deg, rgba(15,23,42,0.88) 0%, rgba(30,41,59,0.76) 58%, rgba(8,47,73,0.42) 100%)',
                   boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
                 }}
               >
                 <span
-                  className="absolute bottom-2 left-0 top-2 w-1 rounded-r-full"
+                  className="absolute bottom-3 left-0 top-3 w-1.5 rounded-r-full"
                   style={{ background: activityStyle.accent }}
                 />
-                <div className="relative mt-0.5 flex-shrink-0 pl-1">
+                <div className="relative flex-shrink-0 pl-1">
                   <Avatar
                     src={item.user_avatar_url}
                     name={item.user_name}
-                    size={46}
+                    size={60}
                     className="border-2"
                     style={{ borderColor: 'rgba(191,219,254,0.72)' }}
                   />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
-                    <span className="truncate text-sm font-black text-white">{item.user_name}</span>
-                    <span className="text-[11px] font-semibold text-slate-300">
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
+                    <span className="truncate text-base font-black text-white">{item.user_name}</span>
+                    <span className="text-xs font-semibold text-slate-300">
                       {formatEasternDateTime(item.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                     </span>
                     <span
-                      className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-black uppercase"
+                      className="inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-black uppercase"
                       style={{ background: activityStyle.bg, color: activityStyle.color, borderColor: activityStyle.border }}
                     >
                       {activityStyle.label}
                     </span>
                     <span
-                      className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-black"
+                      className="inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-black"
                       style={{ background: statusStyle.bg, color: statusStyle.color, borderColor: statusStyle.border }}
                     >
                       {statusStyle.label}
                     </span>
                   </div>
-                  <p className="mt-1 line-clamp-1 whitespace-pre-wrap text-xs font-medium leading-5 text-slate-100">
+                  <p className="mt-2 whitespace-pre-wrap break-words rounded-lg border border-cyan-300/10 bg-slate-950/25 px-3 py-3 text-sm font-black leading-7 text-white shadow-inner sm:text-[15px]">
                     {summary}
                   </p>
                   {projectLabel && (
-                    <div className="mt-1 flex items-center gap-1.5">
-                      <MapPin className="h-3 w-3 flex-shrink-0 text-cyan-200" />
-                      <p className="truncate text-[10px] font-bold text-slate-200">{projectLabel}</p>
+                    <div className="mt-2 flex items-center gap-2">
+                      <MapPin className="h-4 w-4 flex-shrink-0 text-cyan-200" />
+                      <p className="truncate text-xs font-black text-slate-100">{projectLabel}</p>
                     </div>
                   )}
                 </div>
-                <div className="flex flex-shrink-0 flex-col items-end gap-1 text-right">
-                  <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-[10px] font-black text-blue-100 ring-1 ring-blue-300/25">
+                <div className="flex flex-shrink-0 flex-col items-end gap-2 text-right">
+                  <span className="rounded-full bg-blue-500/15 px-2.5 py-1 text-[11px] font-black text-blue-100 ring-1 ring-blue-300/25">
                     {formatEasternRelative(item.created_at)}
                   </span>
                   {projectTarget ? (
-                    <span className="hidden rounded-md border border-slate-600/70 bg-slate-900/80 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-slate-200 transition group-hover:border-cyan-300/60 group-hover:text-cyan-100 sm:inline">
+                    <span className="hidden rounded-md border border-slate-600/70 bg-slate-900/80 px-3 py-1.5 text-[11px] font-black uppercase tracking-wide text-slate-200 transition group-hover:border-cyan-300/60 group-hover:text-cyan-100 sm:inline">
                       Open
                     </span>
                   ) : null}
@@ -1493,11 +1526,11 @@ export default function Dashboard() {
       <div
         className="bt-dashboard-hero border-b px-4 py-4 md:px-6"
       >
-        <div className="relative z-10 mx-auto grid max-w-none gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+        <div className="bt-dashboard-hero-content relative z-10 mx-auto grid max-w-none gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
           <div className="min-w-0">
             <div className="mb-1 flex items-center gap-3">
               <span
-                className="inline-flex items-center gap-1.5 rounded-full border border-orange-300/45 bg-orange-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-orange-200"
+                className="bt-dashboard-hero-kicker inline-flex items-center gap-1.5 rounded-full border border-orange-300/45 bg-orange-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-orange-200"
               >
                 <span className="w-1.5 h-1.5 rounded-full bg-current" />
                 Operations Dashboard
@@ -1507,24 +1540,14 @@ export default function Dashboard() {
               {greeting()}, {firstName}
             </h1>
             <p className="mt-1 text-sm font-semibold text-slate-300">
-              {formatEasternDate(now.toISOString(), { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} - {roleLabels[user?.role || '']}
+              {formatEasternDate(liveNowIso, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+              {' - '}
+              {liveEasternTimeLabel}
+              {' - '}
+              {roleLabels[user?.role || '']}
             </p>
           </div>
-          <div className="hidden items-center gap-3 md:flex">
-            <div className="grid grid-cols-3 gap-2">
-              <div className="bt-dashboard-command-chip">
-                <span>Schedule</span>
-                <strong>{calendarViewEventCount}</strong>
-              </div>
-              <div className="bt-dashboard-command-chip">
-                <span>Upcoming</span>
-                <strong>{upcomingCalendarEvents.length}</strong>
-              </div>
-              <div className="bt-dashboard-command-chip">
-                <span>Notes</span>
-                <strong>{activityFeed.length}</strong>
-              </div>
-            </div>
+          <div className="bt-dashboard-hero-actions hidden items-center gap-3 md:flex">
             <Link
               to="/projects"
               className="bt-btn bt-btn-primary"
@@ -1538,6 +1561,7 @@ export default function Dashboard() {
 
       <div className="mx-auto max-w-none space-y-5 px-4 py-4 md:px-6">
         {/* Operations schedule */}
+        {canAccessOperationsCalendar && (
         <section
           className="bt-dashboard-ops-panel relative overflow-hidden"
           aria-label="Operations schedule"
@@ -1572,7 +1596,7 @@ export default function Dashboard() {
               )}
             </div>
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
+          <div className="bt-calendar-filter-row mt-2 flex flex-wrap items-center gap-2">
             {([
               { key: 'upcoming', label: 'Upcoming', count: upcomingCalendarEvents.length },
               { key: 'completed', label: 'Completed', count: completedCalendarEvents.length },
@@ -1588,8 +1612,8 @@ export default function Dashboard() {
                   }}
                     className="inline-flex min-h-10 items-center gap-2 rounded-full border px-4 py-2 text-sm font-black shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-300/60"
                     style={{
-                    background: active ? 'linear-gradient(135deg, #1D4ED8, #0E7490)' : 'rgba(30,41,59,0.92)',
-                    borderColor: active ? 'rgba(191,219,254,0.82)' : 'rgba(100,116,139,0.70)',
+                    background: active ? 'linear-gradient(135deg, #6D28D9, #0F766E)' : 'rgba(31,27,55,0.92)',
+                    borderColor: active ? 'rgba(196,181,253,0.50)' : 'transparent',
                     color: active ? '#FFFFFF' : '#E5E7EB',
                   }}
                   aria-pressed={active}
@@ -1598,7 +1622,7 @@ export default function Dashboard() {
                   <span
                     className="rounded-full px-2 py-0.5 text-[11px] font-black"
                     style={{
-                      background: active ? '#F8FAFC' : 'rgba(226,232,240,0.16)',
+                      background: active ? '#F8FAFC' : 'rgba(196,181,253,0.16)',
                       color: active ? '#0F172A' : '#F8FAFC',
                     }}
                   >
@@ -1608,14 +1632,30 @@ export default function Dashboard() {
               );
             })}
           </div>
-          <div className="mt-4 overflow-hidden rounded-[18px] border border-slate-700/70 bg-[#070B16] shadow-[0_24px_60px_rgba(2,6,23,0.38)]">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-700/70 px-4 py-3" style={{ background: 'linear-gradient(90deg, rgba(15,23,42,0.98), rgba(17,24,39,0.98) 55%, rgba(12,74,110,0.24))' }}>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            {calendarSummaryCards.map(card => (
+              <div
+                key={card.label}
+                className={`rounded-xl border bg-gradient-to-br px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.14),inset_0_-2px_5px_rgba(0,0,0,0.35),0_10px_28px_rgba(2,6,23,0.26)] ${card.tone}`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-black uppercase tracking-wide opacity-80">{card.label}</p>
+                    <p className="mt-1 truncate text-[11px] font-bold text-white/85">{card.detail}</p>
+                  </div>
+                  <p className="text-2xl font-black text-white">{card.value}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="bt-calendar-shell mt-4 overflow-hidden rounded-[18px] border border-cyan-300/20 bg-gradient-to-br from-[#040816] via-[#071226] to-[#0E1A33] shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_22px_52px_rgba(2,6,23,0.38)]">
+            <div className="bt-calendar-toolbar flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-3" style={{ background: 'linear-gradient(90deg, #071226, #123B72 50%, #0F3B46)' }}>
               <div className="min-w-0">
-                <p className="text-[11px] font-black uppercase tracking-wide text-sky-200">{calendarViewKicker}</p>
-                <h3 className="mt-0.5 text-lg font-black text-slate-50">{calendarViewTitle}</h3>
+                <p className="text-[11px] font-black uppercase tracking-wide text-white/80">{calendarViewKicker}</p>
+                <h3 className="mt-0.5 text-lg font-black text-white drop-shadow-sm">{calendarViewTitle}</h3>
               </div>
               <div className="flex flex-wrap items-center justify-end gap-1.5">
-                <div className="mr-1 inline-flex rounded-xl border border-slate-700 bg-slate-950/80 p-1">
+                <div className="mr-1 inline-flex rounded-xl border border-white/15 bg-black/25 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.10)]">
                   {([
                     { key: 'today', label: 'Today' },
                     { key: 'week', label: 'Week' },
@@ -1627,7 +1667,7 @@ export default function Dashboard() {
                         key={view.key}
                         type="button"
                         onClick={() => changeCalendarViewMode(view.key)}
-                        className={`min-h-8 rounded-lg px-3 text-xs font-black transition focus:outline-none focus:ring-2 focus:ring-cyan-300/50 ${active ? 'bg-sky-500/25 text-white ring-1 ring-sky-300/45' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'}`}
+                        className={`min-h-8 rounded-lg px-3 text-xs font-black transition focus:outline-none focus:ring-2 focus:ring-cyan-300/50 ${active ? 'bg-gradient-to-r from-slate-950 via-blue-950 to-cyan-950 text-white ring-1 ring-cyan-300/35 shadow-sm' : 'text-white/78 hover:bg-white/10 hover:text-white'}`}
                         aria-pressed={active}
                       >
                         {view.label}
@@ -1638,7 +1678,7 @@ export default function Dashboard() {
                 <button
                   type="button"
                   onClick={() => moveCalendarPeriod(-1)}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-600 bg-slate-800/90 text-slate-100 transition hover:border-sky-300 hover:bg-slate-700"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-black/25 text-white shadow-sm transition hover:bg-white/12"
                   title={`Previous ${calendarViewMode}`}
                   aria-label={`Previous ${calendarViewMode}`}
                 >
@@ -1647,36 +1687,36 @@ export default function Dashboard() {
                 <button
                   type="button"
                   onClick={jumpToTodayCalendarView}
-                  className="inline-flex min-h-8 items-center rounded-lg border border-sky-300/40 bg-sky-500/20 px-2.5 text-xs font-black text-sky-50 transition hover:border-sky-200 hover:bg-sky-500/30"
+                  className="inline-flex min-h-8 items-center rounded-lg border border-cyan-300/30 bg-gradient-to-r from-slate-950 via-blue-950 to-cyan-950 px-2.5 text-xs font-black text-white shadow-sm transition hover:brightness-110"
                 >
                   Today
                 </button>
-                <label className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-800/90 px-2 text-xs font-black text-slate-100">
+                <label className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-white/15 bg-black/25 px-2 text-xs font-black text-white shadow-sm">
                   <span>Date</span>
                   <input
                     type="date"
                     value={calendarAnchorDateKey}
                     onChange={event => jumpToCalendarDate(event.target.value)}
-                    className="h-6 rounded-md border border-slate-600 bg-slate-950 px-1.5 text-xs font-bold text-slate-100 outline-none focus:border-sky-300"
+                    className="h-6 rounded-md border border-white/15 bg-slate-950 px-1.5 text-xs font-bold text-white outline-none focus:border-cyan-300"
                     aria-label="Choose calendar date"
                   />
                 </label>
                 <button
                   type="button"
                   onClick={() => moveCalendarPeriod(1)}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-600 bg-slate-800/90 text-slate-100 transition hover:border-sky-300 hover:bg-slate-700"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-black/25 text-white shadow-sm transition hover:bg-white/12"
                   title={`Next ${calendarViewMode}`}
                   aria-label={`Next ${calendarViewMode}`}
                 >
                   <ChevronRight className="h-4 w-4" />
                 </button>
-                <span className="rounded-lg border border-sky-300/40 bg-sky-500/20 px-2.5 py-1 text-xs font-black text-sky-50">
+                <span className="rounded-lg border border-white/15 bg-black/25 px-2.5 py-1 text-xs font-black text-white shadow-sm">
                   {calendarViewEventCount} {calendarViewEventCount === 1 ? 'item' : 'items'}
                 </span>
                 <button
                   type="button"
                   onClick={() => setCalendarExpanded(current => !current)}
-                  className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-cyan-300/40 bg-cyan-500/15 px-2.5 text-xs font-black text-cyan-50 transition hover:border-cyan-200 hover:bg-cyan-500/25 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
+                  className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-teal-300/25 bg-gradient-to-r from-slate-950 via-teal-950 to-cyan-950 px-2.5 text-xs font-black text-white shadow-sm transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
                   aria-expanded={calendarExpanded}
                   aria-controls="jobsite-operations-calendar-body"
                 >
@@ -1690,13 +1730,14 @@ export default function Dashboard() {
             </div>
           </div>
         </section>
+        )}
 
         {renderActivityFeedPanel()}
 
         {/* Footer */}
         <div className="flex items-center justify-between py-2">
           <p className="text-xs text-gray-400">© 2026 New Urban Development · BuildTrack Platform</p>
-          <p className="text-xs text-gray-400">Last updated: {formatEasternTime(now.toISOString())} New York time</p>
+          <p className="text-xs text-gray-400">Live time: {liveEasternTimeLabel}</p>
         </div>
       </div>
 

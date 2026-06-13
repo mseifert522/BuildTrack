@@ -7,7 +7,10 @@ import { Loading } from './components/ui';
 import {
   isLegacyContractorAppPath,
   isLegacyMobilePath,
+  isBuildTrackAppHost,
+  isDesktopAppHost,
   isMobileAppHost,
+  desktopExternalUrl,
   legacyMobilePathToMobileHostPath,
   mobileExternalUrl,
   mobilePath,
@@ -31,6 +34,7 @@ const ChangePassword = lazy(() => import('./pages/ChangePassword'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const ContractorSetup = lazy(() => import('./pages/ContractorSetup'));
+const VendorQuoteRequest = lazy(() => import('./pages/VendorQuoteRequest'));
 const MobileHome = lazy(() => import('./pages/MobileHome'));
 const MobileProjects = lazy(() => import('./pages/MobileProjects'));
 const MobileProjectHub = lazy(() => import('./pages/MobileProjectHub'));
@@ -133,6 +137,16 @@ function isMobileDeviceSession() {
     || MOBILE_USER_AGENT_PATTERN.test(window.navigator.userAgent || '');
 }
 
+function isLikelyMobileDevice() {
+  if (typeof window === 'undefined') return false;
+  const userAgent = window.navigator.userAgent || '';
+  const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches || false;
+  const compactViewport = window.matchMedia?.('(max-width: 1024px)').matches || false;
+  const touchCapable = Number(window.navigator.maxTouchPoints || 0) > 1;
+
+  return MOBILE_USER_AGENT_PATTERN.test(userAgent) || (compactViewport && (coarsePointer || touchCapable));
+}
+
 function clearContractorSession() {
   localStorage.removeItem('contractor_token');
   localStorage.removeItem('contractor_user');
@@ -205,6 +219,37 @@ function DesktopMobileAppRedirect() {
   return <Loading message="Opening BuildTrack mobile app..." />;
 }
 
+function DeviceHostRedirect() {
+  const location = useLocation();
+
+  useEffect(() => {
+    if (!isBuildTrackAppHost()) return;
+
+    const requestedPath = `${location.pathname}${location.search}${location.hash}`;
+    const mobileDevice = isLikelyMobileDevice();
+    const onMobileHost = isMobileAppHost();
+    const onDesktopHost = isDesktopAppHost();
+    const legacyMobilePath = isLegacyMobilePath(location.pathname) || isLegacyContractorAppPath(location.pathname);
+    let destination = '';
+
+    if (mobileDevice && onDesktopHost) {
+      destination = mobileExternalUrl(requestedPath);
+    } else if (!mobileDevice && onMobileHost) {
+      destination = desktopExternalUrl(requestedPath);
+    } else if (!mobileDevice && onDesktopHost && legacyMobilePath) {
+      destination = desktopExternalUrl(requestedPath);
+    } else if (mobileDevice && onMobileHost && legacyMobilePath) {
+      destination = mobileExternalUrl(requestedPath);
+    }
+
+    if (destination && destination !== window.location.href) {
+      window.location.replace(destination);
+    }
+  }, [location.hash, location.pathname, location.search]);
+
+  return null;
+}
+
 /** Redirect contractors away from desktop — they should use mobile */
 function DesktopRoute({ children }: { children: ReactNode }) {
   const { user, token } = useAuthStore();
@@ -249,6 +294,10 @@ function AuthRoute({ children }: { children: ReactNode }) {
       : <Navigate to="/dashboard" replace />;
   }
   return <>{children}</>;
+}
+
+function MobileLoginDesignPreview() {
+  return <Login initialMode="pin" forceMobileLogin />;
 }
 
 function SessionTimeout() {
@@ -452,6 +501,7 @@ function MobileHostRoutes() {
   return (
     <Routes>
       <Route path="/approval/mobile-contractor-preview" element={<MobileContractorPreview />} />
+      <Route path="/approval/mobile-login-preview" element={<MobileLoginDesignPreview />} />
 
       {/* Auth */}
       <Route path="/login" element={<AuthRoute><Login initialMode="pin" /></AuthRoute>} />
@@ -459,6 +509,7 @@ function MobileHostRoutes() {
       <Route path="/forgot-password" element={<AuthRoute><ForgotPassword /></AuthRoute>} />
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/contractor-setup" element={<ContractorSetup />} />
+      <Route path="/vendor-quote/:token" element={<VendorQuoteRequest />} />
 
       {/* Mobile-first BuildTrack app on the dedicated mobile host */}
       <Route path="/" element={<MobileRoute><MobileHome /></MobileRoute>} />
@@ -524,6 +575,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <BuildTrackErrorBoundary>
+        <DeviceHostRedirect />
         <SessionTimeout />
         <MobileGestureShortcuts />
         <Toaster
@@ -548,6 +600,7 @@ export default function App() {
         ) : (
         <Routes>
         <Route path="/approval/mobile-contractor-preview" element={<MobileContractorPreview />} />
+        <Route path="/approval/mobile-login-preview" element={<MobileLoginDesignPreview />} />
 
         {/* Auth */}
         <Route path="/login" element={<AuthRoute><Login /></AuthRoute>} />
@@ -555,6 +608,7 @@ export default function App() {
         <Route path="/forgot-password" element={<AuthRoute><ForgotPassword /></AuthRoute>} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/contractor-setup" element={<ContractorSetup />} />
+        <Route path="/vendor-quote/:token" element={<VendorQuoteRequest />} />
 
         {/* Root redirect — smart device detection */}
         <Route path="/" element={<ProtectedRoute><SmartHomeRedirect /></ProtectedRoute>} />

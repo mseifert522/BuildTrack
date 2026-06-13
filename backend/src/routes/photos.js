@@ -8,7 +8,6 @@ const { authenticate, authorizeProjectAccess } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
 const { recordWorkItemEvent } = require('../utils/workItemEvents');
 const { convertHeicUploadToJpeg } = require('../utils/mediaConversion');
-const { getNoteEditPermission } = require('../utils/projectNotes');
 const { getClientIp } = require('../utils/requestIp');
 
 const router = express.Router({ mergeParams: true });
@@ -669,12 +668,13 @@ router.post('/', uploadProjectPhotos, async (req, res) => {
     if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No files uploaded' });
     const db = getDb();
     const {
-      category_id,
       punch_list_item_id,
       note_id,
       construction_plan_item_id,
       material_id,
       caption,
+      capture_project_id,
+      client_project_id,
       photo_type,
       taken_at,
       taken_at_values,
@@ -731,6 +731,12 @@ router.post('/', uploadProjectPhotos, async (req, res) => {
 	    const usage = parsePhotoContexts(photo_contexts, photoType);
 	    const projectRoot = path.resolve(uploadRoot(), req.params.projectId);
     const inserted = [];
+    const requestedProjectContext = String(capture_project_id || client_project_id || '').trim();
+
+    if (requestedProjectContext && requestedProjectContext !== String(req.params.projectId)) {
+      cleanupUploadedFiles(req.files);
+      return res.status(409).json({ error: 'Photo project context changed. Reopen this project and try again.' });
+    }
 
     if (note_id) {
       const note = db.prepare('SELECT id FROM project_notes WHERE id = ? AND project_id = ?').get(note_id, req.params.projectId);
@@ -790,7 +796,7 @@ router.post('/', uploadProjectPhotos, async (req, res) => {
         )
 	        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	      `).run(
-	        id, req.params.projectId, category_id || null, punch_list_item_id || null, note_id || null, construction_plan_item_id || null, material_id || null,
+	        id, req.params.projectId, null, punch_list_item_id || null, note_id || null, construction_plan_item_id || null, material_id || null,
 	        storedFilename, file.originalname, file.mimetype, file.size, note || sharedBatchNote || caption || null, req.user.id, photoType,
 	        usage.showInGeneral, usage.showInProgress, usage.showInScope, takenAt,
 	        uploadIpAddress, uploadUserAgent, gpsLatitude, gpsLongitude, gpsAccuracy, recordedAt, source, sessionId, batchId, sequence,
@@ -800,6 +806,7 @@ router.post('/', uploadProjectPhotos, async (req, res) => {
       );
       inserted.push({
         id,
+        project_id: req.params.projectId,
         filename: storedFilename,
         original_name: file.originalname,
         stored_file_name: file.filename,
@@ -814,13 +821,22 @@ router.post('/', uploadProjectPhotos, async (req, res) => {
         batch_id: batchId,
         batch_note: sharedBatchNote,
         individual_note: note,
-	        upload_status: 'uploaded',
-	        capture_source: source,
-	        photo_type: photoType,
-	        show_in_general: usage.showInGeneral,
-	        show_in_progress: usage.showInProgress,
-	        show_in_scope: usage.showInScope,
-	      });
+        upload_ip_address: uploadIpAddress,
+        upload_user_agent: uploadUserAgent,
+        capture_latitude: gpsLatitude,
+        capture_longitude: gpsLongitude,
+        capture_accuracy: gpsAccuracy,
+        capture_recorded_at: recordedAt,
+        gps_latitude: gpsLatitude,
+        gps_longitude: gpsLongitude,
+        gps_accuracy: gpsAccuracy,
+        upload_status: 'uploaded',
+        capture_source: source,
+        photo_type: photoType,
+        show_in_general: usage.showInGeneral,
+        show_in_progress: usage.showInProgress,
+        show_in_scope: usage.showInScope,
+      });
     }
 
     const uploadedPhotoIds = inserted.map(photo => photo.id);
@@ -1033,7 +1049,7 @@ router.put('/:id/contexts', (req, res) => {
   }
 });
 
-// PUT /api/projects/:projectId/photos/:id/note - attach or update a descriptive photo note
+// PUT /api/projects/:projectId/photos/:id/note - save the photo-only description text
 router.put('/:id/note', (req, res) => {
   const db = getDb();
   const photo = db.prepare(`
@@ -1045,91 +1061,33 @@ router.put('/:id/note', (req, res) => {
 
   const noteText = String(req.body?.note || '').trim().slice(0, 2000);
   const now = new Date().toISOString();
-  let noteId = photo.note_id || null;
-  let noteAction = 'photo_note_cleared';
 
   try {
-    if (!noteText) {
-      db.prepare(`
-        UPDATE photos
-        SET note_id = NULL,
-            caption = NULL,
-            individual_note = NULL,
-            batch_note = NULL,
-            updated_at = ?
-        WHERE id = ? AND project_id = ?
-      `).run(now, req.params.id, req.params.projectId);
-      noteId = null;
-    } else {
-      let existingNote = noteId
-        ? db.prepare('SELECT * FROM project_notes WHERE id = ? AND project_id = ?').get(noteId, req.params.projectId)
-        : null;
-
-      if (existingNote) {
-        const permission = getNoteEditPermission(req.user, existingNote);
-        if (permission.allowed) {
-          db.prepare(`
-            UPDATE project_notes
-            SET note = ?,
-                note_type = ?,
-                visibility = ?,
-                edited_at = ?,
-                edited_by = ?,
-                edit_count = COALESCE(edit_count, 0) + 1
-            WHERE id = ? AND project_id = ?
-          `).run(
-            noteText,
-            existingNote.note_type || 'progress',
-            existingNote.visibility || 'private',
-            now,
-            req.user.id,
-            noteId,
-            req.params.projectId
-          );
-          noteAction = 'photo_note_updated';
-        } else {
-          noteId = null;
-          existingNote = null;
-        }
-      }
-
-      if (!existingNote) {
-        noteId = uuidv4();
-        db.prepare(`
-          INSERT INTO project_notes (id, project_id, user_id, note, note_type, visibility, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `).run(noteId, req.params.projectId, req.user.id, noteText, 'progress', 'private', now);
-        noteAction = 'photo_note_added';
-      }
-
-      db.prepare(`
-        UPDATE photos
-        SET note_id = ?,
-            caption = ?,
-            individual_note = ?,
-            batch_note = NULL,
-            updated_at = ?
-        WHERE id = ? AND project_id = ?
-      `).run(noteId, noteText, noteText, now, req.params.id, req.params.projectId);
-    }
+    db.prepare(`
+      UPDATE photos
+      SET caption = ?,
+          individual_note = ?,
+          batch_note = NULL,
+          updated_at = ?
+      WHERE id = ? AND project_id = ?
+    `).run(noteText || null, noteText || null, now, req.params.id, req.params.projectId);
 
     logActivity({
       userId: req.user.id,
       projectId: req.params.projectId,
-      action: noteAction,
+      action: noteText ? 'photo_description_saved' : 'photo_description_cleared',
       entityType: 'photo',
       entityId: req.params.id,
       details: {
-        note_id: noteId,
-        has_note: Boolean(noteText),
+        has_description: Boolean(noteText),
       },
     });
 
     const updatedPhoto = getPhotoWithNote(db, req.params.projectId, req.params.id, req.user);
     res.json({ photo: updatedPhoto });
   } catch (err) {
-    console.error('Failed to save photo note:', err);
-    res.status(500).json({ error: 'Failed to save photo note' });
+    console.error('Failed to save photo description:', err);
+    res.status(500).json({ error: 'Failed to save photo description' });
   }
 });
 

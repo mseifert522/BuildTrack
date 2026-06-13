@@ -56,6 +56,9 @@ interface ProjectPhoto {
   note_text?: string | null;
   note_user_name?: string | null;
   upload_ip_address?: string | null;
+  gps_latitude?: number | null;
+  gps_longitude?: number | null;
+  gps_accuracy?: number | null;
   capture_latitude?: number | null;
   capture_longitude?: number | null;
   capture_accuracy?: number | null;
@@ -239,6 +242,25 @@ function auditLabel(photo: ProjectPhoto) {
   return 'Upload audit';
 }
 
+function formatPhotoGpsAudit(photo: ProjectPhoto) {
+  const latitude = Number(photo.gps_latitude ?? photo.capture_latitude);
+  const longitude = Number(photo.gps_longitude ?? photo.capture_longitude);
+  const hasValidCoordinates = Number.isFinite(latitude)
+    && Number.isFinite(longitude)
+    && Math.abs(latitude) <= 90
+    && Math.abs(longitude) <= 180
+    && !(Math.abs(latitude) < 0.00001 && Math.abs(longitude) < 0.00001);
+  if (!hasValidCoordinates) return 'GPS not verified';
+  const accuracy = Number(photo.gps_accuracy ?? photo.capture_accuracy);
+  const accuracyLabel = Number.isFinite(accuracy) ? ` +/- ${Math.round(accuracy)}m` : '';
+  return `GPS verified: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}${accuracyLabel}`;
+}
+
+function formatPhotoIpAudit(photo: ProjectPhoto) {
+  const ipAddress = String(photo.upload_ip_address || '').trim();
+  return ipAddress ? `IP: ${ipAddress}` : 'IP not recorded';
+}
+
 function playShutterSound() {
   if (typeof window === 'undefined') return;
   const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
@@ -300,6 +322,8 @@ export default function MobilePhotos() {
   const [searchParams] = useSearchParams();
   const { user } = useAuthStore();
   const requestedProjectId = searchParams.get('projectId') || '';
+  const lockedProjectId = requestedProjectId.trim();
+  const projectIsLocked = Boolean(lockedProjectId);
   const requestedPurpose = normalizePhotoPurpose(searchParams.get('mode') || searchParams.get('purpose'));
   const cameraFirstRequested = searchParams.get('camera') === '1' || searchParams.get('take') === '1';
   const storageKey = `buildtrack-mobile-photo-project:${user?.id || 'session'}`;
@@ -361,6 +385,7 @@ export default function MobilePhotos() {
     () => projects.find(project => project.id === selectedProjectId) || null,
     [projects, selectedProjectId]
   );
+  const projectContextReady = !projectIsLocked || selectedProjectId === lockedProjectId;
 
   const filteredProjects = useMemo(() => {
     const query = projectSearch.trim().toLowerCase();
@@ -439,12 +464,13 @@ export default function MobilePhotos() {
   }, [photoPurpose]);
 
   const selectProject = useCallback((projectId: string) => {
+    if (projectIsLocked && projectId !== lockedProjectId) return;
     setSelectedProjectId(projectId);
     localStorage.setItem(storageKey, projectId);
     setShowProjectSelector(false);
     setProjectSearch('');
     clearUploadQueue();
-  }, [clearUploadQueue, storageKey]);
+  }, [clearUploadQueue, lockedProjectId, projectIsLocked, storageKey]);
 
   const loadProjects = useCallback(async () => {
     setLoading(true);
@@ -453,10 +479,15 @@ export default function MobilePhotos() {
       const nextProjects: Project[] = Array.isArray(res.data) ? res.data : [];
       setProjects(nextProjects);
 
-      const preferredProjectId = requestedProjectId || localStorage.getItem(storageKey) || '';
+      const preferredProjectId = lockedProjectId || localStorage.getItem(storageKey) || '';
       const validProject = nextProjects.find(project => project.id === preferredProjectId);
       if (validProject) {
         selectProject(validProject.id);
+      } else if (projectIsLocked) {
+        setSelectedProjectId('');
+        setShowProjectSelector(false);
+        clearUploadQueue();
+        toast.error('This project could not be loaded for photo capture.');
       } else if (nextProjects.length === 1) {
         selectProject(nextProjects[0].id);
       } else {
@@ -468,7 +499,7 @@ export default function MobilePhotos() {
     } finally {
       setLoading(false);
     }
-  }, [requestedProjectId, selectProject, storageKey]);
+  }, [clearUploadQueue, lockedProjectId, projectIsLocked, selectProject, storageKey]);
 
   useEffect(() => {
     loadProjects();
@@ -653,6 +684,7 @@ export default function MobilePhotos() {
         batchSequenceStart: item.sequence,
         location: item.captureLocation || null,
         skipDeviceLocation: item.source === 'batch_camera' && !item.captureLocation,
+        projectId: item.projectId,
       });
       formData.append('photos', preparedFile, preparedFile.name);
 
@@ -668,7 +700,11 @@ export default function MobilePhotos() {
         },
       });
 
-      const uploadedPhotos = Array.isArray(response.data?.photos) ? response.data.photos : [];
+      const rawUploadedPhotos = Array.isArray(response.data?.photos) ? response.data.photos : [];
+      const uploadedPhotos = rawUploadedPhotos.filter((photo: any) => !photo?.project_id || String(photo.project_id) === item.projectId);
+      if (uploadedPhotos.length !== rawUploadedPhotos.length) {
+        toast.error('A photo returned under the wrong project and was not added locally.');
+      }
       const uploadedPhoto = uploadedPhotos[0] || null;
       addUploadedPhotosToList(item.projectId, uploadedPhotos, preparedFile);
       setUploadItems(current => current.map(uploadItem => uploadItem.id === item.id
@@ -720,6 +756,10 @@ export default function MobilePhotos() {
     options: { captureLocation?: ProgressUploadLocation | null } = {}
   ) => {
     if (!files.length) return;
+    if (!projectContextReady) {
+      toast.error('Loading the selected project. Try again in a moment.');
+      return;
+    }
     if (!selectedProjectId) {
       setShowProjectSelector(true);
       toast.error(`Choose a project before adding ${nounForPurpose(photoPurpose)} or videos`);
@@ -809,7 +849,7 @@ export default function MobilePhotos() {
     const item = uploadItemsRef.current.find(uploadItem => uploadItem.id === itemId);
     if (!item) return;
     if (item.status !== 'uploaded' || !item.uploadedPhotoId) {
-      toast.error('Wait until this picture is secured before saving its note');
+      toast.error('Wait until this picture is secured before saving its description');
       return;
     }
 
@@ -837,9 +877,9 @@ export default function MobilePhotos() {
         : uploadItem
       ));
       notifyMobileDataChanged({ entity: 'photo_note', action: noteText ? 'saved' : 'cleared', projectId: item.projectId });
-      toast.success(noteText ? 'Photo note secured' : 'Photo note cleared');
+      toast.success(noteText ? 'Photo description secured' : 'Photo description cleared');
     } catch (err: any) {
-      const message = err.response?.data?.error || 'Failed to save photo note';
+      const message = err.response?.data?.error || 'Failed to save photo description';
       setUploadItems(current => current.map(uploadItem => uploadItem.id === itemId
         ? { ...uploadItem, noteStatus: 'failed', noteError: message }
         : uploadItem
@@ -857,7 +897,7 @@ export default function MobilePhotos() {
     const noteText = batchNote.trim();
     const currentItems = uploadItemsRef.current.filter(item => item.projectId === selectedProjectId);
     if (!currentItems.length) {
-      toast.error('Take pictures before saving a batch note');
+      toast.error('Take pictures before saving a batch description');
       return;
     }
 
@@ -875,8 +915,8 @@ export default function MobilePhotos() {
 
     if (!securedIds.length) {
       setBatchNoteSaving(false);
-      setBatchNoteSyncMessage(`Note queued for ${pendingCount} picture${pendingCount === 1 ? '' : 's'} still uploading.`);
-      toast.success('Batch note will upload with the queued pictures');
+      setBatchNoteSyncMessage(`Description queued for ${pendingCount} picture${pendingCount === 1 ? '' : 's'} still uploading.`);
+      toast.success('Batch description will upload with the queued pictures');
       return;
     }
 
@@ -889,11 +929,11 @@ export default function MobilePhotos() {
         ? { ...photo, batch_note: noteText || null, individual_note: photo.individual_note || null }
         : photo
       ));
-      setBatchNoteSyncMessage(`${securedIds.length} secured picture${securedIds.length === 1 ? '' : 's'} updated${pendingCount ? `; ${pendingCount} queued picture${pendingCount === 1 ? '' : 's'} will carry this note.` : '.'}`);
+      setBatchNoteSyncMessage(`${securedIds.length} secured picture${securedIds.length === 1 ? '' : 's'} updated${pendingCount ? `; ${pendingCount} queued picture${pendingCount === 1 ? '' : 's'} will carry this description.` : '.'}`);
       notifyMobileDataChanged({ entity: 'photo_batch_note', action: noteText ? 'saved' : 'cleared', projectId: selectedProjectId });
-      toast.success(noteText ? 'Batch note secured in BuildTrack' : 'Batch note cleared');
+      toast.success(noteText ? 'Batch description secured in BuildTrack' : 'Batch description cleared');
     } catch (err: any) {
-      const message = err.response?.data?.error || 'Failed to save batch note';
+      const message = err.response?.data?.error || 'Failed to save batch description';
       setBatchNoteSyncMessage(message);
       toast.error(message);
     } finally {
@@ -1000,6 +1040,10 @@ export default function MobilePhotos() {
   const captureBatchPhoto = async () => {
     const video = batchCameraVideoRef.current;
     if (captureInFlightRef.current) return;
+    if (!projectContextReady || !selectedProjectId) {
+      toast.error('Loading the selected project. Try again in a moment.');
+      return;
+    }
     if (!video || !cameraReady) {
       toast.error('Camera is still getting ready');
       return;
@@ -1041,6 +1085,12 @@ export default function MobilePhotos() {
   };
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!projectContextReady) {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (cameraInputRef.current) cameraInputRef.current.value = '';
+      toast.error('Loading the selected project. Try again in a moment.');
+      return;
+    }
     if (!selectedProjectId) {
       setShowProjectSelector(true);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -1081,6 +1131,10 @@ export default function MobilePhotos() {
   };
 
   const openFilePicker = () => {
+    if (!projectContextReady) {
+      toast.error('Loading the selected project. Try again in a moment.');
+      return;
+    }
     if (!selectedProjectId) {
       setShowProjectSelector(true);
       return;
@@ -1089,6 +1143,10 @@ export default function MobilePhotos() {
   };
 
   const openCamera = () => {
+    if (!projectContextReady) {
+      toast.error('Loading the selected project. Try again in a moment.');
+      return;
+    }
     if (!selectedProjectId) {
       setShowProjectSelector(true);
       return;
@@ -1098,6 +1156,10 @@ export default function MobilePhotos() {
   };
 
   const openUploadOptions = () => {
+    if (!projectContextReady) {
+      toast.error('Loading the selected project. Try again in a moment.');
+      return;
+    }
     if (!selectedProjectId) {
       setShowProjectSelector(true);
       return;
@@ -1106,6 +1168,10 @@ export default function MobilePhotos() {
   };
 
   const openBatchCamera = () => {
+    if (!projectContextReady) {
+      toast.error('Loading the selected project. Try again in a moment.');
+      return;
+    }
     if (!selectedProjectId) {
       setShowProjectSelector(true);
       return;
@@ -1116,6 +1182,10 @@ export default function MobilePhotos() {
   };
 
   const openCameraFirst = () => {
+    if (!projectContextReady) {
+      toast.error('Loading the selected project. Try again in a moment.');
+      return;
+    }
     if (!selectedProjectId) {
       setShowProjectSelector(true);
       return;
@@ -1152,11 +1222,11 @@ export default function MobilePhotos() {
 
   useEffect(() => {
     const requestKey = `${requestedProjectId || selectedProjectId}:camera`;
-    if (!cameraFirstRequested || cameraFirstHandledRef.current === requestKey || loading || !selectedProjectId) return;
+    if (!cameraFirstRequested || cameraFirstHandledRef.current === requestKey || loading || !selectedProjectId || !projectContextReady) return;
     cameraFirstHandledRef.current = requestKey;
     setShowUploadOptions(false);
     setShowBatchCamera(true);
-  }, [cameraFirstRequested, loading, requestedProjectId, selectedProjectId]);
+  }, [cameraFirstRequested, loading, projectContextReady, requestedProjectId, selectedProjectId]);
 
   const changePhotoPurpose = (purpose: PhotoPurpose) => {
     setPhotoPurpose(purpose);
@@ -1259,12 +1329,15 @@ export default function MobilePhotos() {
 
         <div style={{ padding: '0 14px 14px', display: 'grid', gridTemplateColumns: '1fr', gap: 8 }}>
           <button
-            onClick={() => setShowProjectSelector(true)}
+            onClick={() => {
+              if (!projectIsLocked) setShowProjectSelector(true);
+            }}
+            disabled={projectIsLocked}
             style={{ minWidth: 0, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.08)', color: 'white', borderRadius: 13, padding: '10px 12px', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 9 }}
           >
             <FolderOpen size={17} color="#D99D26" />
             <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, fontWeight: 750 }}>
-              {selectedProject ? 'Change project' : 'Select project'}
+              {projectIsLocked ? 'Locked to this project' : selectedProject ? 'Change project' : 'Select project'}
             </span>
           </button>
           <button
@@ -1360,7 +1433,7 @@ export default function MobilePhotos() {
               <span style={{ minWidth: 0 }}>
                 <span style={{ display: 'block', fontSize: 12, fontWeight: 950 }}>Photo details</span>
                 <span style={{ display: 'block', marginTop: 2, color: '#6B7280', fontSize: 10.5, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {batchNote.trim() ? `${batchLabel} / batch note added` : `${batchLabel} label`}
+                  {batchNote.trim() ? `${batchLabel} / description added` : `${batchLabel} label`}
                 </span>
               </span>
               {captureDetailsOpen ? <Minus size={17} color="#6B7280" /> : <Plus size={17} color="#6B7280" />}
@@ -1378,14 +1451,14 @@ export default function MobilePhotos() {
                   </select>
                 </label>
                 <label style={{ display: 'grid', gap: 5 }}>
-                  <span style={{ color: '#6B7280', fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>Batch note</span>
+                  <span style={{ color: '#6B7280', fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>Batch description</span>
                   <VoiceTextarea
                     value={batchNote}
                     onChange={event => {
                       setBatchNote(event.target.value);
                       if (batchNoteSyncMessage) setBatchNoteSyncMessage('');
                     }}
-                    placeholder="Optional note for this picture batch"
+                    placeholder="Optional description for this picture batch"
                     rows={2}
                     style={{ width: '100%', boxSizing: 'border-box', border: '1px solid #E5E7EB', borderRadius: 12, padding: '10px 12px', color: '#111827', fontSize: 14, resize: 'vertical', minHeight: 46 }}
                   />
@@ -1399,10 +1472,10 @@ export default function MobilePhotos() {
                       style={{ minHeight: 44, border: 'none', borderRadius: 12, background: batchNoteSaving ? '#9CA3AF' : '#16A34A', color: 'white', fontSize: 13, fontWeight: 950, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
                     >
                       <CheckCircle2 size={16} color="white" />
-                      {batchNoteSaving ? 'Saving Note...' : uploadedPhotoIds.length ? `Save Note To ${uploadedPhotoIds.length} Secured` : 'Queue Note With Photos'}
+                      {batchNoteSaving ? 'Saving Description...' : uploadedPhotoIds.length ? `Save Description To ${uploadedPhotoIds.length} Secured` : 'Queue Description With Photos'}
                     </button>
                     <p style={{ margin: 0, color: '#15803D', fontSize: 11, fontWeight: 850, lineHeight: 1.35 }}>
-                      {batchNoteSyncMessage || (dirtyIndividualNoteCount ? `${dirtyIndividualNoteCount} individual photo note${dirtyIndividualNoteCount === 1 ? '' : 's'} still need Save Note.` : 'Batch notes stay attached to the uploaded photo records.')}
+                      {batchNoteSyncMessage || (dirtyIndividualNoteCount ? `${dirtyIndividualNoteCount} individual photo description${dirtyIndividualNoteCount === 1 ? '' : 's'} still need Save Description.` : 'Batch descriptions stay attached to the uploaded photo records.')}
                     </p>
                   </div>
                 )}
@@ -1427,7 +1500,7 @@ export default function MobilePhotos() {
             {uploadComplete && (
               <div className="bt-mobile-photo-secured-banner" style={{ display: 'flex', alignItems: 'center', gap: 8, borderRadius: 13, background: '#DCFCE7', border: '1px solid #86EFAC', color: '#166534', padding: '10px 11px', marginBottom: 10 }}>
                 <CheckCircle2 size={17} color="#16A34A" />
-                <span style={{ fontSize: 12, fontWeight: 900 }}>Secured in BuildTrack. Notes can still be saved from this screen.</span>
+                <span style={{ fontSize: 12, fontWeight: 900 }}>Secured in BuildTrack. Descriptions can still be saved from this screen.</span>
               </div>
             )}
             {!navigator.onLine && (
@@ -1536,7 +1609,7 @@ export default function MobilePhotos() {
                           value={item.note || ''}
                           onChange={event => updateUploadItemNote(item.id, event.target.value)}
                           disabled={item.status === 'uploading' || item.noteStatus === 'saving'}
-                          placeholder="Optional note for this photo"
+                          placeholder="Optional description for this photo"
                           rows={1}
                           wrapperStyle={{ minWidth: 0, flex: 1 }}
                           style={{ minWidth: 0, width: '100%', border: 'none', outline: 'none', background: 'transparent', color: '#111827', fontSize: 12, resize: 'none', minHeight: 34 }}
@@ -1563,11 +1636,11 @@ export default function MobilePhotos() {
                           }}
                         >
                           <CheckCircle2 size={14} color={item.noteStatus === 'dirty' || item.noteStatus === 'failed' ? 'white' : '#16A34A'} />
-                          {item.noteStatus === 'saving' ? 'Saving Note...' : item.noteStatus === 'dirty' ? 'Save Note' : item.noteStatus === 'failed' ? 'Retry Note Save' : 'Note Secured'}
+                          {item.noteStatus === 'saving' ? 'Saving Description...' : item.noteStatus === 'dirty' ? 'Save Description' : item.noteStatus === 'failed' ? 'Retry Description Save' : 'Description Secured'}
                         </button>
                       ) : (
                         <p style={{ margin: 0, color: '#6B7280', fontSize: 10.5, fontWeight: 800 }}>
-                          Note will upload automatically with this picture.
+                          Description will upload automatically with this picture.
                         </p>
                       )}
                     </div>
@@ -1721,6 +1794,10 @@ export default function MobilePhotos() {
                     const isVideo = isVideoMedia(photo);
                     const progressContext = isPhotoContextEnabled(photo.show_in_progress, photo.photo_type === 'progress' || photo.photo_type === 'note');
                     const scopeContext = isPhotoContextEnabled(photo.show_in_scope, photo.photo_type === 'scope' || photo.photo_type === 'construction_plan');
+                    const photoTimestamp = formatDateTime(photo.captured_at || photo.taken_at || photo.uploaded_at || photo.created_at);
+                    const uploaderName = photo.uploader_name || photo.uploaded_by_name || 'Unknown user';
+                    const gpsAudit = formatPhotoGpsAudit(photo);
+                    const ipAudit = formatPhotoIpAudit(photo);
                     return (
                       <div
                         key={photo.id}
@@ -1750,11 +1827,11 @@ export default function MobilePhotos() {
                           )}
                           {(photo.note_id || photo.individual_note || photo.batch_note) && (
                             <span style={{ position: 'absolute', right: 6, top: 6, borderRadius: 999, background: 'rgba(17,24,39,0.78)', color: 'white', padding: '4px 7px', fontSize: 9, fontWeight: 900 }}>
-                              Note
+                              Description
                             </span>
                           )}
                           {(progressContext || scopeContext) && (
-                            <span style={{ position: 'absolute', left: 6, bottom: photo.can_delete_correction ? 53 : 6, borderRadius: 999, background: 'rgba(255,255,255,0.94)', color: scopeContext && progressContext ? '#6D28D9' : scopeContext ? '#0F766E' : '#B45309', padding: '4px 7px', fontSize: 9, fontWeight: 950, boxShadow: '0 4px 10px rgba(0,0,0,0.14)' }}>
+                            <span style={{ position: 'absolute', left: 6, bottom: 84, borderRadius: 999, background: 'rgba(255,255,255,0.94)', color: scopeContext && progressContext ? '#6D28D9' : scopeContext ? '#0F766E' : '#B45309', padding: '4px 7px', fontSize: 9, fontWeight: 950, boxShadow: '0 4px 10px rgba(0,0,0,0.14)' }}>
                               {progressContext && scopeContext ? 'Progress + Scope' : scopeContext ? 'Scope' : 'Progress'}
                             </span>
                           )}
@@ -1770,7 +1847,7 @@ export default function MobilePhotos() {
                               style={{
                                 position: 'absolute',
                                 left: 6,
-                                bottom: 6,
+                                bottom: 84,
                                 minHeight: 44,
                                 border: '1px solid #FECACA',
                                 borderRadius: 12,
@@ -1791,14 +1868,32 @@ export default function MobilePhotos() {
                               {deletingPhotoId === photo.id ? 'Deleting' : 'Delete once'}
                             </button>
                           )}
+                          <div
+                            style={{
+                              pointerEvents: 'none',
+                              position: 'absolute',
+                              left: 0,
+                              right: 0,
+                              bottom: 0,
+                              padding: '8px 8px 7px',
+                              color: 'white',
+                              background: 'linear-gradient(0deg, rgba(0,0,0,0.96), rgba(0,0,0,0.82) 68%, rgba(0,0,0,0.20))',
+                              boxShadow: '0 -8px 18px rgba(0,0,0,0.35)',
+                            }}
+                          >
+                            <p style={{ margin: 0, color: 'white', fontSize: 10, lineHeight: '13px', fontWeight: 950, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{photoTimestamp}</p>
+                            <p style={{ margin: '1px 0 0', color: 'rgba(255,255,255,0.90)', fontSize: 9, lineHeight: '12px', fontWeight: 850, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Inserted by {uploaderName}</p>
+                            <p style={{ margin: '1px 0 0', color: '#CFFAFE', fontSize: 8.5, lineHeight: '11px', fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{gpsAudit}</p>
+                            <p style={{ margin: '1px 0 0', color: 'rgba(255,255,255,0.76)', fontSize: 8.5, lineHeight: '11px', fontWeight: 750, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ipAudit}</p>
+                          </div>
                         </div>
                         <div style={{ padding: 9 }}>
                           <p style={{ margin: 0, color: '#111827', fontSize: 11, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{photo.individual_note || photo.batch_note || photo.caption || photo.note_text || photo.original_name || (isVideo ? 'Project video' : 'Progress photo')}</p>
-                          <p style={{ margin: '3px 0 0', color: '#6B7280', fontSize: 10 }}>{formatDateTime(photo.captured_at || photo.taken_at || photo.uploaded_at || photo.created_at)}</p>
-                          {(photo.uploader_name || photo.uploaded_by_name) && (
-                            <p style={{ margin: '2px 0 0', color: '#D99D26', fontSize: 10, fontWeight: 700 }}>{photo.uploader_name || photo.uploaded_by_name}</p>
-                          )}
-                          <p style={{ margin: '2px 0 0', color: photo.capture_latitude ? '#16A34A' : '#9CA3AF', fontSize: 10, fontWeight: 750 }}>{auditLabel(photo)}{photo.capture_latitude ? ' / GPS' : ''}{photo.batch_id ? ' / Batch' : ''}</p>
+                          <p style={{ margin: '3px 0 0', color: '#6B7280', fontSize: 10 }}>{photoTimestamp}</p>
+                          <p style={{ margin: '2px 0 0', color: '#D99D26', fontSize: 10, fontWeight: 700 }}>{uploaderName}</p>
+                          <p style={{ margin: '2px 0 0', color: '#4B5563', fontSize: 10, fontWeight: 750 }}>{auditLabel(photo)}{photo.batch_id ? ' / Batch' : ''}</p>
+                          <p style={{ margin: '2px 0 0', color: gpsAudit.startsWith('GPS verified') ? '#16A34A' : '#9CA3AF', fontSize: 10, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{gpsAudit}</p>
+                          <p style={{ margin: '2px 0 0', color: '#6B7280', fontSize: 10, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ipAudit}</p>
                         </div>
                       </div>
                     );

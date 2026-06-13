@@ -8,7 +8,6 @@ import toast from 'react-hot-toast';
 import { useForm } from 'react-hook-form';
 import GooglePlacesInput from '../components/GooglePlacesInput';
 import CurrencyInput from '../components/CurrencyInput';
-import VoiceTextarea from '../components/VoiceTextarea';
 import AddToCalendarButton from '../components/AddToCalendarButton';
 
 interface Project {
@@ -20,7 +19,7 @@ interface Project {
   target_completion: string;
   open_punch_items: number;
   assigned_count: number;
-  budget: number;
+  budget?: number | null;
   updated_at: string;
   main_photo_url?: string | null;
   lockbox_code?: string | null;
@@ -34,9 +33,6 @@ interface ProjectForm {
   status: string;
   start_date: string;
   target_completion: string;
-  scope_of_work: string;
-  budget: string;
-  office_notes: string;
   purchase_price: string;
   acquisition_date: string;
   lockbox_code: string;
@@ -59,6 +55,7 @@ const PROJECT_FILTER_OPTIONS = [
   { value: 'rehab_completed', label: 'Completed Projects' },
   { value: 'long_term_holding', label: 'Long-Term Holdings' },
   { value: 'commercial', label: 'Commercial' },
+  { value: 'wholesale', label: 'Wholesale' },
 ];
 
 const PROJECT_STATUS_OPTIONS = [
@@ -67,6 +64,7 @@ const PROJECT_STATUS_OPTIONS = [
   { value: 'rehab_completed', label: 'Completed Projects' },
   { value: 'long_term_holding', label: 'Long-Term Holdings' },
   { value: 'commercial', label: 'Commercial' },
+  { value: 'wholesale', label: 'Wholesale' },
 ];
 
 const PROJECT_STATUS_BADGES: Record<string, { label: string; className: string }> = {
@@ -75,6 +73,7 @@ const PROJECT_STATUS_BADGES: Record<string, { label: string; className: string }
   rehab_completed: { label: 'Completed', className: 'border-emerald-300 bg-emerald-100 text-emerald-800' },
   long_term_holding: { label: 'Holding', className: 'border-amber-300 bg-amber-100 text-amber-800' },
   commercial: { label: 'Commercial', className: 'border-cyan-300 bg-cyan-100 text-cyan-800' },
+  wholesale: { label: 'Wholesale', className: 'border-teal-300 bg-teal-100 text-teal-800' },
 };
 
 const MARKET_STATUS_OPTIONS = [
@@ -98,6 +97,11 @@ const DOCUMENT_CATEGORIES = [
 ];
 
 const SOLD_DISPLAY_STATUSES = new Set(['sold', 'closed_sold', 'rehab_completed']);
+const PROJECT_BUDGET_ROLES = new Set(['super_admin', 'operations_manager', 'project_manager']);
+
+function canViewProjectBudget(role?: string | null) {
+  return PROJECT_BUDGET_ROLES.has(String(role || ''));
+}
 
 function getProjectStatusBadge(status?: string | null) {
   return PROJECT_STATUS_BADGES[String(status || '')] || PROJECT_STATUS_BADGES.not_started;
@@ -110,6 +114,10 @@ function getProjectPriority(project: Project) {
 
 function getMarketStatusLabel(value?: string | null) {
   return MARKET_STATUS_OPTIONS.find(option => option.value === value)?.label || 'Not On Market';
+}
+
+function getLockboxCode(project: Pick<Project, 'lockbox_code'>) {
+  return String(project.lockbox_code || '').trim();
 }
 
 export default function Projects() {
@@ -174,7 +182,7 @@ export default function Projects() {
       const res = await api.post('/projects', {
         ...data,
         address: addressValue || data.address,
-        budget: budgetValue ? parseFloat(budgetValue) : null,
+        ...(canSeeBudget ? { budget: budgetValue ? parseFloat(budgetValue) : null } : {}),
         purchase_price: purchasePriceValue ? parseFloat(purchasePriceValue) : null,
         market_status: data.market_status || 'not_on_market',
         work_priority: priority,
@@ -191,6 +199,11 @@ export default function Projects() {
   const canCreate = user && canCreateProjects(user.role);
   const canManageProjectActions = user && isAdminRole(user.role);
   const canChangeStatus = user && canChangeProjectStatus(user.role);
+  const canSeeBudget = Boolean(user && canViewProjectBudget(user.role));
+
+  useEffect(() => {
+    if (!canSeeBudget && sortBy === 'budget') setSortBy('priority');
+  }, [canSeeBudget, sortBy]);
 
   const projectRows = useMemo(() => {
     const toTime = (value?: string) => value ? new Date(value).getTime() || 0 : 0;
@@ -208,12 +221,12 @@ export default function Projects() {
           return toTime(b.updated_at) - toTime(a.updated_at);
         }
         if (sortBy === 'address') return String(a.address || '').localeCompare(String(b.address || ''));
-        if (sortBy === 'budget') return Number(b.budget || 0) - Number(a.budget || 0);
+        if (sortBy === 'budget' && canSeeBudget) return Number(b.budget || 0) - Number(a.budget || 0);
         if (sortBy === 'punch') return Number(b.open_punch_items || 0) - Number(a.open_punch_items || 0);
         if (sortBy === 'target') return toTime(a.target_completion) - toTime(b.target_completion);
         return toTime(b.updated_at) - toTime(a.updated_at);
       });
-  }, [projects, sortBy, teamFilter]);
+  }, [canSeeBudget, projects, sortBy, teamFilter]);
 
   const updateProjectStatus = async (project: Project, nextStatus: string) => {
     if (!canChangeStatus || project.status === nextStatus) return;
@@ -350,7 +363,7 @@ export default function Projects() {
           <option value="updated">Sort: Recently updated</option>
           <option value="target">Sort: Target completion</option>
           <option value="punch">Sort: Open punch items</option>
-          <option value="budget">Sort: Budget high to low</option>
+          {canSeeBudget && <option value="budget">Sort: Budget high to low</option>}
           <option value="address">Sort: Location A-Z</option>
         </select>
       </div>
@@ -372,11 +385,13 @@ export default function Projects() {
             const priority = getProjectPriority(p);
             const statusBadge = getProjectStatusBadge(p.status);
             const isOnMarket = p.market_status === 'on_market';
+            const lockboxCode = getLockboxCode(p);
+            const isActionsOpen = activeActionsProjectId === p.id;
             return (
               <div
                 key={p.id}
                 onClick={() => navigate(`/projects/${p.id}`)}
-                className="bt-project-card group relative flex w-full min-w-0 cursor-pointer flex-col items-stretch gap-3 overflow-visible rounded-[1.35rem] border border-slate-300 bg-gradient-to-br from-white via-white to-blue-50/45 p-4 transition-all hover:border-blue-400 hover:bg-blue-50/35 hover:shadow-xl sm:flex-row sm:items-center sm:gap-4"
+                className={`bt-project-card group relative isolate flex w-full min-w-0 cursor-pointer flex-col items-stretch gap-4 overflow-visible rounded-[1.35rem] border border-slate-300 bg-gradient-to-br from-white via-white to-blue-50/45 p-5 transition-all hover:border-blue-400 hover:bg-blue-50/35 hover:shadow-xl sm:flex-row sm:items-center sm:gap-5 ${isActionsOpen ? 'z-50' : 'z-0'}`}
                 style={{
                   boxShadow: '0 10px 28px rgba(15,23,42,0.10), 0 1px 0 rgba(15,23,42,0.04)',
                   borderLeft: `5px solid ${priority ? (priority <= 5 ? '#F59E0B' : '#2563EB') : '#2563EB'}`,
@@ -392,7 +407,7 @@ export default function Projects() {
                   className="absolute inset-0 z-10 rounded-[1.35rem] cursor-pointer bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
                 />
                 <label
-                  className={`relative w-20 h-16 rounded-xl border border-blue-200 shadow-sm flex items-center justify-center flex-shrink-0 overflow-hidden ${canManageProjectActions && !p.main_photo_url ? 'z-20 cursor-pointer' : 'z-0 cursor-pointer'}`}
+                  className={`relative h-24 w-32 rounded-xl border border-blue-200 shadow-md flex items-center justify-center flex-shrink-0 overflow-hidden sm:h-20 sm:w-28 lg:h-24 lg:w-32 ${canManageProjectActions && !p.main_photo_url ? 'z-20 cursor-pointer' : 'z-0 cursor-pointer'}`}
                   style={{ background: 'linear-gradient(135deg, #EFF6FF, #DBEAFE)' }}
                   onClick={e => {
                     if (canManageProjectActions && !p.main_photo_url) e.stopPropagation();
@@ -432,7 +447,7 @@ export default function Projects() {
                       <div className="mb-2 flex flex-wrap items-center gap-1.5">
                         {priority && (
                           <span
-                            className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-black uppercase tracking-wide shadow-sm ${
+                            className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-black uppercase tracking-wide shadow-sm ${
                               priority <= 5
                                 ? 'border-amber-300 bg-amber-400 text-amber-950'
                                 : 'border-blue-300 bg-blue-100 text-blue-800'
@@ -442,11 +457,11 @@ export default function Projects() {
                             Priority {priority}
                           </span>
                         )}
-                        <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-black uppercase tracking-wide ${statusBadge.className}`}>
+                        <span className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-black uppercase tracking-wide ${statusBadge.className}`}>
                           {statusBadge.label}
                         </span>
                         <span
-                          className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-black uppercase tracking-wide ${
+                          className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-black uppercase tracking-wide ${
                             isOnMarket
                               ? 'border-emerald-300 bg-emerald-500 text-emerald-950 shadow-sm'
                               : 'border-slate-300 bg-slate-100 text-slate-600'
@@ -454,9 +469,32 @@ export default function Projects() {
                         >
                           {getMarketStatusLabel(p.market_status)}
                         </span>
+                        {lockboxCode && (
+                          <span
+                            className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-black uppercase tracking-wide shadow-sm"
+                            style={{
+                              background: 'linear-gradient(135deg, #0F172A 0%, #1E3A8A 52%, #312E81 100%)',
+                              borderColor: '#60A5FA',
+                              color: '#F8FAFC',
+                              boxShadow: '0 8px 18px rgba(15, 23, 42, 0.26)',
+                            }}
+                            title={`Lock Box ${lockboxCode}`}
+                          >
+                            <KeyRound className="h-3.5 w-3.5" />
+                            <span>Lock Box</span>
+                            <span
+                              className="rounded-full px-2 py-0.5 font-mono text-xs tracking-normal"
+                              style={{
+                                background: '#F8FAFC',
+                                color: '#0F172A',
+                              }}
+                            >
+                              {lockboxCode}
+                            </span>
+                          </span>
+                        )}
                       </div>
-                      <p className="bt-project-title font-semibold text-gray-900 truncate">{p.address}</p>
-                      <p className="bt-project-subtitle text-sm text-gray-500 truncate">{p.job_name}</p>
+                      <p className="bt-project-title truncate text-lg font-black leading-6 text-gray-950 sm:text-xl">{p.address}</p>
                     </div>
                     <div className="flex flex-shrink-0 flex-wrap items-start gap-2 sm:items-center sm:justify-end">
                       {review && (
@@ -488,7 +526,7 @@ export default function Projects() {
                           sourceType="project"
                           sourceId={p.id}
                           contextLabel={[p.address, p.job_name].filter(Boolean).join(' - ')}
-                          buttonClassName="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs font-black text-cyan-800 shadow-sm transition-colors hover:bg-cyan-100"
+                          buttonClassName="inline-flex min-h-10 min-w-max items-center justify-center gap-1.5 rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs font-black text-cyan-800 shadow-sm transition-colors hover:bg-cyan-100"
                         />
                       </div>
                       <div
@@ -498,19 +536,19 @@ export default function Projects() {
                       >
                         <button
                           type="button"
-                          onClick={() => setActiveActionsProjectId(activeActionsProjectId === p.id ? null : p.id)}
+                          onClick={() => setActiveActionsProjectId(isActionsOpen ? null : p.id)}
                           className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
                           aria-haspopup="menu"
-                          aria-expanded={activeActionsProjectId === p.id}
+                          aria-expanded={isActionsOpen}
                           aria-label={`Open actions for ${p.address}`}
                         >
                           <MoreHorizontal className="h-4 w-4" />
                           Actions
                         </button>
-                        {activeActionsProjectId === p.id && (
+                        {isActionsOpen && (
                           <div
                             role="menu"
-                            className="absolute right-0 top-full mt-2 w-72 overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 text-sm shadow-2xl"
+                            className="absolute right-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 text-sm shadow-2xl"
                           >
                             {[
                               { label: 'Scope of Work', icon: FileText, hash: 'construction-plan' },
@@ -658,9 +696,6 @@ export default function Projects() {
                         <Users className="w-3.5 h-3.5" />
                         {p.assigned_count} assigned
                       </span>
-                    )}
-                    {p.budget && (
-                      <span className="bt-project-meta text-xs text-gray-500">${Number(p.budget).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                     )}
                   </div>
                 </div>
@@ -821,10 +856,12 @@ export default function Projects() {
                 <label className="block text-sm font-semibold text-gray-800 mb-1">Acquisition Price</label>
                 <CurrencyInput value={purchasePriceValue} onChange={setPurchasePriceValue} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-800 mb-1">Budget</label>
-                <CurrencyInput value={budgetValue} onChange={setBudgetValue} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
+              {canSeeBudget && (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-800 mb-1">Budget</label>
+                  <CurrencyInput value={budgetValue} onChange={setBudgetValue} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+              )}
             </div>
           </fieldset>
 
@@ -846,19 +883,6 @@ export default function Projects() {
             </div>
           </fieldset>
 
-          <fieldset className="rounded-2xl border border-gray-200 bg-white p-4">
-            <legend className="px-2 text-xs font-black uppercase tracking-wide text-gray-500">Scope and Notes</legend>
-            <div className="grid gap-4">
-              <div>
-                <label className="block text-sm font-semibold text-gray-800 mb-1">Scope of Work</label>
-                <textarea {...register('scope_of_work')} rows={3} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" placeholder="Describe the scope of work..." />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-800 mb-1">Office Notes</label>
-                <VoiceTextarea {...register('office_notes')} rows={2} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" placeholder="Internal notes..." />
-              </div>
-            </div>
-          </fieldset>
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={() => { setShowCreate(false); reset(DEFAULT_PROJECT_FORM_VALUES); setAddressValue(''); setBudgetValue(''); setPurchasePriceValue(''); }} className="flex-1 py-2.5 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">Cancel</button>
             <button type="submit" disabled={isSubmitting} className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50">

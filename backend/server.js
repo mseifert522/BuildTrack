@@ -23,6 +23,7 @@ const { startCalendarReminderScheduler } = require('./src/services/calendarRemin
 const documentRoutes = require('./src/routes/documents');
 const contractorOnboardingRoutes = require('./src/routes/contractorOnboarding');
 const quoteAnalyticsRoutes = require('./src/routes/quoteAnalytics');
+const vendorQuoteRequestRoutes = require('./src/routes/vendorQuoteRequests');
 const securityRoutes = require('./src/routes/security');
 const quickBooksRoutes = require('./src/routes/quickbooks');
 
@@ -127,6 +128,7 @@ app.use('/api/invoices/email-intake', (_req, res) => {
 });
 app.use('/api/documents', documentRoutes);
 app.use('/api/contractor-onboarding', contractorOnboardingRoutes);
+app.use('/api/vendor-quote-requests', vendorQuoteRequestRoutes);
 app.use('/api/quote-analytics', quoteAnalyticsRoutes.analyticsRouter);
 app.use('/api/security', securityRoutes);
 app.use('/api/quickbooks', quickBooksRoutes);
@@ -479,6 +481,9 @@ async function start() {
       startCalendarReminderScheduler();
       if (typeof quickBooksRoutes.startQuickBooksAutoSync === 'function') {
         quickBooksRoutes.startQuickBooksAutoSync();
+      }
+      if (typeof quickBooksRoutes.startQuickBooksPaymentQueueScheduler === 'function') {
+        quickBooksRoutes.startQuickBooksPaymentQueueScheduler();
       }
     });
   } catch (err) {

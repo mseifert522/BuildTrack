@@ -112,6 +112,9 @@ interface QuickBooksBill {
   project_job_name?: string | null;
   qbo_updated_at?: string | null;
   last_seen_at?: string | null;
+  last_paid_at?: string | null;
+  last_paid_seen_at?: string | null;
+  last_paid_payment_id?: string | null;
   split_lines?: QuickBooksBillSplitLine[];
   split_line_count?: number;
   matched_split_line_count?: number;
@@ -327,6 +330,43 @@ const sortQuickBooksBillsByBillDate = (bills: QuickBooksBill[]) => [...bills].so
   if (vendorCompare !== 0) return vendorCompare;
   return String(a.doc_number || a.qbo_id || '').localeCompare(String(b.doc_number || b.qbo_id || ''));
 });
+
+const quickBooksDateRank = (value?: string | null) => {
+  if (!value) return 0;
+  const parsed = parseBuildTrackTimestamp(value) || new Date(value);
+  const time = parsed.getTime();
+  return Number.isFinite(time) ? time : 0;
+};
+
+const quickBooksPaidDateKey = (bill?: QuickBooksBill | null) => (
+  String(
+    bill?.last_paid_at
+    || bill?.last_paid_seen_at
+    || bill?.qbo_updated_at
+    || bill?.last_seen_at
+    || bill?.txn_date
+    || bill?.due_date
+    || ''
+  )
+);
+
+const sortQuickBooksBillsByPaidDate = (bills: QuickBooksBill[]) => [...bills].sort((a, b) => {
+  const paidCompare = quickBooksDateRank(quickBooksPaidDateKey(b)) - quickBooksDateRank(quickBooksPaidDateKey(a));
+  if (paidCompare !== 0) return paidCompare;
+  const observedCompare = quickBooksDateRank(b.last_paid_seen_at || b.qbo_updated_at || b.last_seen_at) - quickBooksDateRank(a.last_paid_seen_at || a.qbo_updated_at || a.last_seen_at);
+  if (observedCompare !== 0) return observedCompare;
+  const vendorCompare = String(a.vendor_name || '').localeCompare(String(b.vendor_name || ''));
+  if (vendorCompare !== 0) return vendorCompare;
+  return String(a.doc_number || a.qbo_id || '').localeCompare(String(b.doc_number || b.qbo_id || ''));
+});
+
+const formatQuickBooksPaidDate = (bill?: QuickBooksBill | null) => {
+  const value = bill?.last_paid_at || bill?.last_paid_seen_at || bill?.qbo_updated_at || bill?.last_seen_at || '';
+  if (!value) return '';
+  return /[T:]/.test(value)
+    ? formatEasternDateTime(value, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+    : formatDateOnly(value, { month: 'short', day: 'numeric', year: 'numeric' });
+};
 
 const quickBooksSplitLines = (bill: QuickBooksBill) => (
   Array.isArray(bill.split_lines) ? bill.split_lines : []
@@ -598,14 +638,10 @@ export default function Invoices() {
   );
   const approvedPaymentTotal = approvedPaymentQueue.reduce((sum, bill) => sum + Number(bill.balance || 0), 0);
   const paidQuickBooksBills = useMemo(
-    () => sortQuickBooksBillsByBillDate(quickBooksBills.filter(bill => isQuickBooksBillPaid(bill))),
+    () => sortQuickBooksBillsByPaidDate(quickBooksBills.filter(bill => isQuickBooksBillPaid(bill))),
     [quickBooksBills]
   );
-  const paidPaymentQueue = useMemo(
-    () => paidQuickBooksBills.filter(bill => bill.payment_approval_status === 'approved_for_payment'),
-    [paidQuickBooksBills]
-  );
-  const paidPaymentTotal = paidPaymentQueue.reduce((sum, bill) => sum + Number(bill.total_amt || 0), 0);
+  const paidQuickBooksTotal = paidQuickBooksBills.reduce((sum, bill) => sum + Number(bill.total_amt || 0), 0);
   const invoiceById = useMemo(() => new Map(invoices.map(invoice => [invoice.id, invoice])), [invoices]);
   const openQuickBooksBills = useMemo(
     () => quickBooksBills.filter(bill => !isQuickBooksBillPaid(bill) && bill.payment_approval_status !== 'approved_for_payment'),
@@ -629,26 +665,26 @@ export default function Invoices() {
       count: openQuickBooksBills.length,
     },
     friday_queue: {
-      label: 'Friday queue',
+      label: 'Approved bills',
       title: 'Friday payment queue',
       subtitle: 'Approved unpaid bills waiting for QuickBooks payment',
       count: approvedPaymentQueue.length,
     },
     paid: {
-      label: 'Paid in QBO',
+      label: 'Paid bills',
       title: 'Paid QuickBooks bills',
-      subtitle: 'All bills QuickBooks currently reports as paid',
+      subtitle: 'Latest paid bills first by QuickBooks payment date and time',
       count: paidQuickBooksBills.length,
     },
     all: {
-      label: 'All mirrored',
+      label: 'Total bills',
       title: 'All mirrored QuickBooks bills',
       subtitle: 'Every bill currently mirrored from QuickBooks',
       count: allQuickBooksBills.length,
     },
   };
   const selectedQuickBooksBillFilter = quickBooksBillFilterMeta[quickBooksBillFilter];
-  const quickBooksMirrorRows = useMemo(() => sortQuickBooksBillsByBillDate(filteredQuickBooksBills).map(bill => ({
+  const quickBooksMirrorRows = useMemo(() => filteredQuickBooksBills.map(bill => ({
     bill,
     invoice: bill.matched_invoice_id ? invoiceById.get(bill.matched_invoice_id) || null : null,
   })), [filteredQuickBooksBills, invoiceById]);
@@ -963,26 +999,42 @@ export default function Invoices() {
               </div>
             </div>
 
-            <div className="bt-qbo-status-row">
+            <div className="bt-qbo-status-row bt-qbo-kpi-row">
               <div>
                 <span>Last sync</span>
                 <strong>{quickBooksStatus?.connection?.last_sync_at ? formatEasternDateTime(quickBooksStatus.connection.last_sync_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Not synced yet'}</strong>
+                <small>{quickBooksStatus?.connection?.last_sync_status || 'Waiting'}</small>
               </div>
-              <div>
-                <span>Total mirrored bills</span>
-                <strong>{quickBooksStatus?.stats?.bill_count || quickBooksMirrorRows.length}</strong>
-              </div>
-              <div>
-                <span>Unmatched bills</span>
-                <strong>{quickBooksStatus?.stats?.unmatched_count || 0}</strong>
-              </div>
-              <div>
-                <span>Sync status</span>
-                <strong>{quickBooksStatus?.connection?.last_sync_status || 'Waiting'}</strong>
-              </div>
+              <button
+                type="button"
+                onClick={() => setQuickBooksBillFilter('friday_queue')}
+                className={quickBooksBillFilter === 'friday_queue' ? 'is-active' : ''}
+              >
+                <span>Approved bills</span>
+                <strong>{approvedPaymentQueue.length}</strong>
+                <small>{money(approvedPaymentTotal)} due</small>
+              </button>
+              <button
+                type="button"
+                onClick={() => setQuickBooksBillFilter('paid')}
+                className={quickBooksBillFilter === 'paid' ? 'is-active' : ''}
+              >
+                <span>Paid bills</span>
+                <strong>{paidQuickBooksBills.length}</strong>
+                <small>{money(paidQuickBooksTotal)} paid</small>
+              </button>
+              <button
+                type="button"
+                onClick={() => setQuickBooksBillFilter('all')}
+                className={quickBooksBillFilter === 'all' ? 'is-active' : ''}
+              >
+                <span>Total bills</span>
+                <strong>{quickBooksStatus?.stats?.bill_count || allQuickBooksBills.length}</strong>
+                <small>{openQuickBooksBills.length} open</small>
+              </button>
             </div>
 
-            <div className="mx-4 mt-3 flex flex-wrap items-center gap-2">
+            <div className="bt-qbo-filter-row mx-4 mt-3 flex flex-wrap items-center gap-2">
               {([
                 { key: 'open', tone: 'blue' },
                 { key: 'friday_queue', tone: 'amber' },
@@ -1057,6 +1109,7 @@ export default function Invoices() {
                         const needsReview = !projectMatched && !isPaid;
                         const matchAddress = invoice?.address || bill.project_address || '';
                         const matchName = invoice?.job_name || bill.project_job_name || '';
+                        const paidDateLabel = isPaid ? formatQuickBooksPaidDate(bill) : '';
                         return (
                           <tr key={bill.qbo_id} className={`${isPaid ? 'is-paid' : isApprovedForPay ? 'is-approved-for-pay' : 'is-unpaid'} ${needsReview ? 'needs-review' : ''}`}>
                             <td>
@@ -1064,6 +1117,7 @@ export default function Invoices() {
                                 {isApprovedForPay ? 'Queued' : qboStatusLabel(bill.payment_status)}
                               </span>
                               <small>QBO #{bill.doc_number || bill.qbo_id}</small>
+                              {paidDateLabel ? <small>Paid: {paidDateLabel}</small> : null}
                               {isApprovedForPay ? <small>Pay run: Friday {qboPaymentRunLabel(bill)}</small> : null}
                               {localInvoiceMarkedPaid ? <small>BuildTrack marked paid; QBO still open</small> : null}
                             </td>
@@ -1179,6 +1233,7 @@ export default function Invoices() {
               </div>
             )}
 
+            {quickBooksBillFilter !== 'paid' && quickBooksBillFilter !== 'all' && (
             <div className="bt-approved-pay-panel bt-approved-pay-panel--embedded">
               <div className="bt-approved-pay-header">
                 <div>
@@ -1248,46 +1303,8 @@ export default function Invoices() {
                   })}
                 </div>
               )}
-              {paidPaymentQueue.length > 0 ? (
-                <div className="bt-qbo-paid-tile" aria-label="Invoices paid in QuickBooks">
-                  <div className="bt-qbo-paid-tile-header">
-                    <div>
-                      <span>Paid</span>
-                      <strong>{paidPaymentQueue.length}</strong>
-                    </div>
-                    <p>{money(paidPaymentTotal)} confirmed by QuickBooks sync</p>
-                  </div>
-                  <div className="bt-approved-pay-grid bt-approved-pay-grid--paid">
-                    {paidPaymentQueue.map(bill => {
-                      const invoice = bill.matched_invoice_id ? invoiceById.get(bill.matched_invoice_id) || null : null;
-                      const projectHref = invoice?.project_id
-                        ? `/projects/${invoice.project_id}/invoices/${invoice.id}`
-                        : bill.project_id
-                          ? `/projects/${bill.project_id}`
-                          : '/invoices';
-                      return (
-                        <article key={bill.qbo_id} className="bt-approved-pay-card bt-approved-pay-card--paid">
-                          <div className="bt-approved-pay-card-top">
-                            <span>Paid</span>
-                            <strong>{money(bill.total_amt || 0)}</strong>
-                          </div>
-                          <div className="bt-approved-pay-card-body">
-                            <p className="bt-approved-pay-contractor">{bill.vendor_name || 'Vendor missing'}</p>
-                            <p className="bt-approved-pay-meta">QBO #{bill.doc_number || bill.qbo_id}</p>
-                            <p className="bt-approved-pay-project">{invoice?.address || bill.project_address || bill.project_job_name || 'Project not listed'}</p>
-                            <p className="bt-approved-pay-meta">Paid in QuickBooks</p>
-                          </div>
-                          <div className="bt-approved-pay-card-bottom">
-                            <span>Synced from QBO</span>
-                            <Link to={projectHref}>Review</Link>
-                          </div>
-                        </article>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : null}
             </div>
+            )}
           </section>
         )}
 

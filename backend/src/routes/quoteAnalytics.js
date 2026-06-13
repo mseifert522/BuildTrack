@@ -10,6 +10,11 @@ const { authenticate, authorizeProjectAccess, PROJECT_MANAGE_ROLES } = require('
 const { logActivity } = require('../utils/audit');
 
 const QUOTE_STATUSES = ['draft', 'submitted', 'approved', 'rejected', 'paid', 'completed', 'historical'];
+const QUOTE_FILTER_STATUSES = {
+  review: ['submitted'],
+  approved: ['approved', 'paid', 'completed'],
+  database: QUOTE_STATUSES,
+};
 const FINANCIAL_FIELDS = [
   'total_quote_amount',
   'labor_cost',
@@ -461,6 +466,60 @@ function createQuote(req, res, projectIdFromRoute = null) {
   }
 }
 
+function updateQuoteReviewStatus(req, res, forcedProjectId = null, nextStatus) {
+  if (!['approved', 'rejected'].includes(nextStatus)) {
+    return res.status(400).json({ error: 'Unsupported quote review action' });
+  }
+
+  const db = getDb();
+  const quote = db.prepare('SELECT * FROM contractor_quotes WHERE id = ?').get(req.params.id);
+  if (!quote || (forcedProjectId && quote.project_id !== forcedProjectId)) {
+    return res.status(404).json({ error: 'Quote not found' });
+  }
+
+  const previousStatus = quote.status;
+  const action = nextStatus === 'approved' ? 'approved' : 'rejected';
+  const reviewNote = String(req.body?.review_note || req.body?.note || '').trim();
+  const approvedAmount = nextStatus === 'approved'
+    ? numberValue(req.body?.final_approved_amount, numberValue(quote.final_approved_amount, numberValue(quote.total_quote_amount)))
+    : quote.final_approved_amount;
+
+  try {
+    const updated = db.transaction(() => {
+      db.prepare(`
+        UPDATE contractor_quotes
+        SET status = ?,
+            final_approved_amount = CASE WHEN ? = 'approved' THEN ? ELSE final_approved_amount END,
+            updated_at = datetime('now')
+        WHERE id = ?
+      `).run(nextStatus, nextStatus, approvedAmount, quote.id);
+
+      insertHistoricalRecord(db, quote.id, quote.project_id, quote.quote_year, req.user.id, action);
+      return quoteSnapshot(db, quote.id);
+    })();
+
+    clearSummaryCache();
+    logActivity({
+      userId: req.user.id,
+      projectId: quote.project_id,
+      action: nextStatus === 'approved' ? 'quote_approved' : 'quote_rejected',
+      entityType: 'contractor_quote',
+      entityId: quote.id,
+      details: {
+        quote_number: quote.quote_number,
+        previous_status: previousStatus,
+        new_status: nextStatus,
+        review_note: reviewNote || null,
+      },
+    });
+
+    return res.json(updated);
+  } catch (err) {
+    console.error('[QUOTE_ANALYTICS] review status update failed:', err);
+    return res.status(500).json({ error: 'Failed to update quote review status' });
+  }
+}
+
 function filterWhere(query, forcedProjectId = null) {
   const where = [];
   const params = [];
@@ -479,6 +538,13 @@ function filterWhere(query, forcedProjectId = null) {
   if (query.status) {
     where.push('q.status = ?');
     params.push(String(query.status).toLowerCase());
+  } else if (query.quote_filter) {
+    const filterKey = String(query.quote_filter || '').toLowerCase();
+    const statuses = QUOTE_FILTER_STATUSES[filterKey];
+    if (statuses && filterKey !== 'database') {
+      where.push(`q.status IN (${statuses.map(() => '?').join(',')})`);
+      params.push(...statuses);
+    }
   }
   if (query.contractor) {
     where.push('(q.contractor_name LIKE ? OR q.contractor_company LIKE ?)');
@@ -532,10 +598,16 @@ function listQuotes(req, res, forcedProjectId = null) {
       q.*,
       u.name as uploaded_by_name,
       pd.id as document_id,
-      pd.original_name as document_original_name
+      pd.original_name as document_original_name,
+      vqr.id as vendor_quote_request_id,
+      vqr.sent_at as quote_request_sent_at,
+      vqr.opened_at as quote_request_opened_at,
+      vqr.submitted_at as quote_returned_at,
+      vqr.status as quote_request_status
     FROM contractor_quotes q
     LEFT JOIN users u ON u.id = q.uploaded_by
     LEFT JOIN project_documents pd ON pd.id = q.source_document_id
+    LEFT JOIN vendor_quote_requests vqr ON vqr.submitted_quote_id = q.id
     ${where.sql}
     ORDER BY date(q.quote_date) DESC, datetime(q.created_at) DESC
     LIMIT ? OFFSET ?
@@ -785,6 +857,8 @@ analyticsRouter.get('/summary', (req, res) => quoteSummary(req, res));
 analyticsRouter.get('/quotes', (req, res) => listQuotes(req, res));
 analyticsRouter.post('/quotes', (req, res) => createQuote(req, res));
 analyticsRouter.post('/quotes/upload', upload.single('quote_file'), (req, res) => createQuote(req, res));
+analyticsRouter.post('/quotes/:id/approve', (req, res) => updateQuoteReviewStatus(req, res, null, 'approved'));
+analyticsRouter.post('/quotes/:id/deny', (req, res) => updateQuoteReviewStatus(req, res, null, 'rejected'));
 analyticsRouter.get('/quotes/:id/download', (req, res) => downloadQuoteDocument(req, res));
 
 const projectQuotesRouter = express.Router({ mergeParams: true });
@@ -793,6 +867,8 @@ projectQuotesRouter.get('/', (req, res) => listQuotes(req, res, req.params.proje
 projectQuotesRouter.get('/summary', (req, res) => quoteSummary(req, res, req.params.projectId));
 projectQuotesRouter.post('/', (req, res) => createQuote(req, res, req.params.projectId));
 projectQuotesRouter.post('/upload', upload.single('quote_file'), (req, res) => createQuote(req, res, req.params.projectId));
+projectQuotesRouter.post('/:id/approve', (req, res) => updateQuoteReviewStatus(req, res, req.params.projectId, 'approved'));
+projectQuotesRouter.post('/:id/deny', (req, res) => updateQuoteReviewStatus(req, res, req.params.projectId, 'rejected'));
 projectQuotesRouter.get('/:id/download', (req, res) => downloadQuoteDocument(req, res, req.params.projectId));
 
 module.exports = {

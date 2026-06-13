@@ -38,6 +38,7 @@ type ContractorAccessMode = 'pin' | 'email' | 'forgot' | 'signup';
 
 type LoginProps = {
   initialMode?: LoginMode;
+  forceMobileLogin?: boolean;
 };
 
 type LoginPayload = {
@@ -155,12 +156,12 @@ const getMobileQuickAccessState = () => {
   };
 };
 
-export default function Login({ initialMode = 'password' }: LoginProps) {
-  const mobileLoginHost = isMobileAppHost();
+export default function Login({ initialMode = 'password', forceMobileLogin = false }: LoginProps) {
+  const mobileLoginHost = forceMobileLogin || isMobileAppHost();
   const [email, setEmail] = useState(() => localStorage.getItem(REMEMBERED_EMAIL_KEY) || '');
   const [password, setPassword] = useState('');
-  const [stayLoggedIn, setStayLoggedIn] = useState(
-    localStorage.getItem('stayLoggedIn') === 'true'
+  const [stayLoggedIn, setStayLoggedIn] = useState(() =>
+    mobileLoginHost || localStorage.getItem('stayLoggedIn') === 'true'
   );
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -171,14 +172,14 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
   const [quickAccessLabel, setQuickAccessLabel] = useState(() => getMobileQuickAccessState().userLabel);
   const [needs2FA, setNeeds2FA] = useState(false);
   const [twofaCode, setTwofaCode] = useState('');
-  const [trustDevice, setTrustDevice] = useState(false);
+  const [trustDevice, setTrustDevice] = useState(() => mobileLoginHost);
   const [twofaLoading, setTwofaLoading] = useState(false);
   const [loginMode, setLoginMode] = useState<LoginMode>(() => mobileLoginHost ? initialMode : 'password');
   const [contractorAccessMode, setContractorAccessMode] = useState<ContractorAccessMode>('pin');
   const [pinDigits, setPinDigits] = useState('');
   const [contractorEmail, setContractorEmail] = useState(() => localStorage.getItem(REMEMBERED_CONTRACTOR_EMAIL_KEY) || '');
-  const [contractorEmailCode, setContractorEmailCode] = useState('');
-  const [contractorEmailCodeSent, setContractorEmailCodeSent] = useState(false);
+  const [contractorPassword, setContractorPassword] = useState('');
+  const [showContractorPassword, setShowContractorPassword] = useState(false);
   const [contractorActionLoading, setContractorActionLoading] = useState(false);
   const [signupForm, setSignupForm] = useState({ name: '', company: '', email: '', phone: '' });
   const [focusedField, setFocusedField] = useState<string | null>(null);
@@ -393,37 +394,25 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
     }
   };
 
-  const requestContractorEmailCode = async (e: React.FormEvent) => {
+  const handleContractorPasswordLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setContractorActionLoading(true);
     try {
-      await api.post('/auth/contractor/email-login/request', { email: contractorEmail });
-      setContractorEmailCodeSent(true);
-      toast.success('If that email is on file, a login code was sent.');
-    } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Unable to send login code');
-    } finally {
-      setContractorActionLoading(false);
-    }
-  };
-
-  const verifyContractorEmailCode = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (contractorEmailCode.length !== 6) return;
-    setContractorActionLoading(true);
-    try {
+      const normalizedEmail = contractorEmail.toLowerCase().trim();
       const rememberThisDevice = wantsTrustedDevice();
-      const res = await api.post('/auth/contractor/email-login/verify', {
-        email: contractorEmail,
-        code: contractorEmailCode,
+      const res = await api.post('/auth/login', {
+        email: normalizedEmail,
+        password: contractorPassword,
         device_token: getStoredDeviceToken(),
         trust_device: rememberThisDevice,
+        client_type: 'contractor-mobile',
       });
       localStorage.setItem('stayLoggedIn', rememberThisDevice ? 'true' : 'false');
+      localStorage.setItem(REMEMBERED_CONTRACTOR_EMAIL_KEY, normalizedEmail);
       completeLogin(res.data);
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Invalid or expired login code');
-      setContractorEmailCode('');
+      toast.error(err.response?.data?.error || 'Invalid contractor email or password');
+      setContractorPassword('');
     } finally {
       setContractorActionLoading(false);
     }
@@ -449,7 +438,7 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
       await api.post('/contractor-onboarding/self-signup', signupForm);
       setContractorEmail(signupForm.email);
       setContractorAccessMode('email');
-      setContractorEmailCodeSent(false);
+      setContractorPassword('');
       toast.success('Check your email for the secure setup link.');
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Unable to start contractor signup');
@@ -468,7 +457,14 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
   };
 
   return (
-    <div className="min-h-screen flex" style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
+    <div
+      className={forceMobileLogin ? 'min-h-screen flex items-start justify-center px-3 py-5 sm:px-5' : 'min-h-screen flex'}
+      style={{
+        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+        background: forceMobileLogin ? 'linear-gradient(145deg, #090D15 0%, #111827 52%, #1E293B 100%)' : undefined,
+      }}
+    >
+      {!forceMobileLogin && (
       <div
         className="hidden lg:flex lg:w-[52%] relative flex-col justify-between p-12 overflow-hidden"
         style={{ background: 'linear-gradient(145deg, #0D1117 0%, #151B24 58%, #1E2530 100%)' }}
@@ -546,12 +542,15 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
           ))}
         </div>
       </div>
+      )}
 
       <div
-        className="flex-1 flex flex-col items-center justify-center px-4 py-8 sm:px-6 md:px-10 relative"
-        style={{ background: '#F8F9FC' }}
+        className={forceMobileLogin
+          ? 'w-full max-w-[430px] flex flex-col items-center justify-center relative rounded-[28px] border border-slate-700/70 bg-[#F8F9FC] px-4 py-7 shadow-2xl'
+          : 'flex-1 flex flex-col items-center justify-center px-4 py-8 sm:px-6 md:px-10 relative'}
+        style={{ background: forceMobileLogin ? '#F8F9FC' : '#F8F9FC' }}
       >
-        <div className="lg:hidden flex items-center gap-3 mb-6 w-full max-w-[460px]">
+        <div className={`${forceMobileLogin ? 'flex' : 'lg:hidden flex'} items-center gap-3 mb-6 w-full max-w-[460px]`}>
           <div
             className="w-12 h-12 rounded-lg overflow-hidden bg-slate-950 shadow-sm"
             style={{ boxShadow: '0 0 0 1px rgba(217,157,38,0.46)' }}
@@ -693,7 +692,7 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                   }}
                 >
                   <Mail className="w-4 h-4" />
-                  Email Login
+                  Email & Password
                 </button>
                 <button
                   type="button"
@@ -706,7 +705,7 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                   }}
                 >
                   <KeyRound className="w-4 h-4" />
-                  Mobile App PIN
+                  PIN Number
                 </button>
               </div>
               )}
@@ -814,8 +813,8 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-2">
                     {[
-                      { id: 'pin' as ContractorAccessMode, label: 'Use PIN', icon: KeyRound },
-                      { id: 'email' as ContractorAccessMode, label: 'Email Code', icon: Mail },
+                      { id: 'pin' as ContractorAccessMode, label: 'Use PIN Number', icon: KeyRound },
+                      { id: 'email' as ContractorAccessMode, label: 'Email & Password', icon: Mail },
                       { id: 'forgot' as ContractorAccessMode, label: 'Forgot PIN', icon: ShieldCheck },
                       { id: 'signup' as ContractorAccessMode, label: 'Sign Up', icon: UserPlus },
                     ].map(item => {
@@ -849,8 +848,8 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                         <div className="w-12 h-12 rounded-lg flex items-center justify-center mx-auto mb-4" style={{ background: 'rgba(217,157,38,0.1)' }}>
                           <Smartphone className="w-6 h-6" style={{ color: '#D99D26' }} />
                         </div>
-                        <h3 className="font-black text-gray-900 text-lg">Mobile App Pin# Access</h3>
-                        <p className="text-sm text-gray-500 mt-1 mb-5">Enter the mobile app PIN to open assigned projects.</p>
+                        <h3 className="font-black text-gray-900 text-lg">PIN Number Access</h3>
+                        <p className="text-sm text-gray-500 mt-1 mb-5">Enter the contractor PIN number from management to open assigned projects.</p>
                         <input
                           name="one-time-code"
                           type="text"
@@ -866,8 +865,8 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                       </div>
 
                       {renderTrustDevicePreference(
-                        'Trust this device after mobile app PIN verification',
-                        'Use this mobile app PIN once, then continue faster next time on this device.'
+                        'Enable one-touch app login',
+                        'This device will remember the contractor after this successful PIN login.'
                       )}
 
                       <button
@@ -892,13 +891,13 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                   )}
 
                   {contractorAccessMode === 'email' && (
-                    <form onSubmit={contractorEmailCodeSent ? verifyContractorEmailCode : requestContractorEmailCode} className="space-y-4">
+                    <form onSubmit={handleContractorPasswordLogin} className="space-y-4">
                       <div className="rounded-lg p-5" style={{ background: 'white', border: '1px solid #E5E7EB' }}>
                         <div className="w-12 h-12 rounded-lg flex items-center justify-center mx-auto mb-4" style={{ background: 'rgba(217,157,38,0.1)' }}>
                           <Mail className="w-6 h-6" style={{ color: '#D99D26' }} />
                         </div>
-                        <h3 className="text-center font-black text-gray-900 text-lg">Contractor Email Login</h3>
-                        <p className="text-center text-sm text-gray-500 mt-1 mb-5">Use your contractor email to receive a 6-digit login code.</p>
+                        <h3 className="text-center font-black text-gray-900 text-lg">Email & Password Login</h3>
+                        <p className="text-center text-sm text-gray-500 mt-1 mb-5">Use the contractor email and password listed in BuildTrack.</p>
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Contractor Email</label>
                         <input
                           name="contractor-email"
@@ -911,34 +910,42 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                           style={{ border: '2px solid #E5E7EB' }}
                           placeholder="contractor@email.com"
                         />
-                        {contractorEmailCodeSent && (
-                          <div className="mt-4">
-                            <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Login Code</label>
+                        <div className="mt-4">
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Password</label>
+                          <div className="relative">
                             <input
-                              name="contractor-email-code"
-                              type="text"
-                              inputMode="numeric"
-                              maxLength={6}
-                              value={contractorEmailCode}
-                              onChange={e => setContractorEmailCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                              className="w-full rounded-lg px-4 py-3 text-center text-2xl font-black text-gray-900 focus:outline-none"
+                              name="contractor-password"
+                              type={showContractorPassword ? 'text' : 'password'}
+                              value={contractorPassword}
+                              onChange={e => setContractorPassword(e.target.value)}
+                              required
+                              autoComplete="current-password"
+                              className="w-full rounded-lg py-3 pl-4 pr-12 text-sm font-semibold text-gray-900 focus:outline-none"
                               style={{ border: '2px solid #E5E7EB' }}
-                              placeholder="000000"
+                              placeholder="Password"
                             />
+                            <button
+                              type="button"
+                              onClick={() => setShowContractorPassword(!showContractorPassword)}
+                              className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-gray-400"
+                              aria-label={showContractorPassword ? 'Hide password' : 'Show password'}
+                            >
+                              {showContractorPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                            </button>
                           </div>
-                        )}
+                        </div>
                       </div>
                       {renderTrustDevicePreference(
-                        'Trust this device after email verification',
-                        'Remember contractor email, then continue faster next time on this browser.'
+                        'Enable one-touch app login',
+                        'This device will remember the contractor after this successful email and password login.'
                       )}
                       <button
                         type="submit"
-                        disabled={contractorActionLoading || (contractorEmailCodeSent && contractorEmailCode.length !== 6)}
+                        disabled={contractorActionLoading || !contractorEmail.trim() || !contractorPassword}
                         className="w-full py-4 rounded-lg font-bold text-sm text-white disabled:opacity-50"
                         style={{ background: 'linear-gradient(135deg, #D99D26 0%, #C4891F 100%)' }}
                       >
-                        {contractorActionLoading ? 'Working...' : contractorEmailCodeSent ? 'Verify Code and Open Projects' : 'Email Me a Login Code'}
+                        {contractorActionLoading ? 'Signing In...' : 'Sign In and Open Projects'}
                       </button>
                     </form>
                   )}
@@ -947,7 +954,7 @@ export default function Login({ initialMode = 'password' }: LoginProps) {
                     <form onSubmit={sendContractorPin} className="space-y-4">
                       <div className="rounded-lg p-5" style={{ background: 'white', border: '1px solid #E5E7EB' }}>
                         <h3 className="font-black text-gray-900 text-lg">Forgot PIN or Login?</h3>
-                        <p className="text-sm text-gray-500 mt-1 mb-5">Enter the email management has on file. BuildTrack will email the Mobile App Pin# if the account exists.</p>
+                        <p className="text-sm text-gray-500 mt-1 mb-5">Enter the email management has on file. BuildTrack will email the PIN number if the account exists.</p>
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Contractor Email</label>
                         <input
                           type="email"

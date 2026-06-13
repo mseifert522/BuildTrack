@@ -8,7 +8,7 @@ const { createCalendarReminder, sendCalendarReminderNow } = require('../services
 
 const router = express.Router();
 
-const MANAGEMENT_ROLES = ['super_admin', 'operations_manager', 'project_manager', 'admin_assistant'];
+const MANAGEMENT_ROLES = ['super_admin', 'operations_manager', 'project_manager'];
 const EVENT_TYPES = new Set(['task', 'maintenance', 'inspection', 'note', 'other']);
 const PRIORITIES = new Set(['low', 'normal', 'high', 'critical']);
 const STATUSES = new Set(['scheduled', 'in_progress', 'completed', 'cancelled']);
@@ -18,6 +18,13 @@ router.use(authenticate);
 function isManagement(user) {
   return MANAGEMENT_ROLES.includes(user?.role);
 }
+
+router.use((req, res, next) => {
+  if (!isManagement(req.user)) {
+    return res.status(403).json({ error: 'Only management users can access the operations calendar' });
+  }
+  next();
+});
 
 function normalizeDate(value, fallback = null) {
   const raw = String(value || '').trim();

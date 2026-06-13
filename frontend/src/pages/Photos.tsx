@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import api from '../lib/api';
 import { Loading } from '../components/ui';
-import { Camera, FileImage, Grid, List, PlayCircle, Trash2, X } from 'lucide-react';
+import { Camera, FileImage, Grid, List, MessageSquare, PlayCircle, Trash2, X } from 'lucide-react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import { appendProgressUploadAudit, PROGRESS_MEDIA_ACCEPT } from '../lib/progressUpload';
 import { getProgressMediaKind } from '../lib/progressMedia';
+import VoiceTextarea from '../components/VoiceTextarea';
 
 type PhotoView = 'general' | 'progress' | 'scope';
 
@@ -24,13 +25,19 @@ interface Photo {
   project_address?: string;
   note_id?: string | null;
   note_text?: string | null;
+  individual_note?: string | null;
+  batch_note?: string | null;
   note_user_name?: string | null;
   upload_ip_address?: string | null;
+  gps_latitude?: number | null;
+  gps_longitude?: number | null;
+  gps_accuracy?: number | null;
   capture_latitude?: number | null;
   capture_longitude?: number | null;
   capture_accuracy?: number | null;
   capture_source?: string | null;
   uploaded_by?: string;
+  uploaded_by_name?: string;
   photo_type?: string;
   show_in_progress?: number | boolean;
   show_in_scope?: number | boolean;
@@ -100,6 +107,33 @@ function groupPhotosByDay(photos: Photo[]) {
   }, []);
 }
 
+function photoBelongsToProject(photo: Photo, projectId: string) {
+  return String(photo?.project_id || '') === String(projectId || '');
+}
+
+function getPhotoDescriptionText(photo?: Photo | null) {
+  return String(photo?.individual_note || photo?.caption || photo?.note_text || '').trim();
+}
+
+function formatPhotoGpsAudit(photo: Photo) {
+  const latitude = Number(photo.gps_latitude ?? photo.capture_latitude);
+  const longitude = Number(photo.gps_longitude ?? photo.capture_longitude);
+  const hasValidCoordinates = Number.isFinite(latitude)
+    && Number.isFinite(longitude)
+    && Math.abs(latitude) <= 90
+    && Math.abs(longitude) <= 180
+    && !(Math.abs(latitude) < 0.00001 && Math.abs(longitude) < 0.00001);
+  if (!hasValidCoordinates) return 'GPS not verified';
+  const accuracy = Number(photo.gps_accuracy ?? photo.capture_accuracy);
+  const accuracyLabel = Number.isFinite(accuracy) ? ` +/- ${Math.round(accuracy)}m` : '';
+  return `GPS verified: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}${accuracyLabel}`;
+}
+
+function formatPhotoIpAudit(photo: Photo) {
+  const ipAddress = String(photo.upload_ip_address || '').trim();
+  return ipAddress ? `IP: ${ipAddress}` : 'IP not recorded';
+}
+
 export default function Photos() {
   const [searchParams] = useSearchParams();
   const requestedProjectId = searchParams.get('projectId') || '';
@@ -114,29 +148,40 @@ export default function Photos() {
   const [selectedProject, setSelectedProject] = useState(requestedProjectId);
   const [caption, setCaption] = useState('');
   const [deletingPhotoId, setDeletingPhotoId] = useState('');
+  const [descriptionPhoto, setDescriptionPhoto] = useState<Photo | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const loadSequenceRef = useRef(0);
   const groupedPhotos = groupPhotosByDay(photos);
 
   const load = async () => {
+    const loadSequence = loadSequenceRef.current + 1;
+    loadSequenceRef.current = loadSequence;
+    const requestProjectId = selectedProject;
+    const requestPhotoView = photoView;
     setLoading(true);
     try {
       const projRes = await api.get('/projects');
+      if (loadSequenceRef.current !== loadSequence) return;
       setProjects(projRes.data);
 
       const allPhotos: Photo[] = [];
-      const projectsToLoad = selectedProject
-        ? projRes.data.filter((p: any) => p.id === selectedProject)
+      const projectsToLoad = requestProjectId
+        ? projRes.data.filter((p: any) => p.id === requestProjectId)
         : projRes.data;
 
       for (const proj of projectsToLoad) {
         try {
-          const res = await api.get(`/projects/${proj.id}/photos?type=${PHOTO_VIEW_META[photoView].type}`);
+          const res = await api.get(`/projects/${proj.id}/photos?type=${PHOTO_VIEW_META[requestPhotoView].type}`);
+          if (loadSequenceRef.current !== loadSequence) return;
           res.data.forEach((photo: Photo) => {
             allPhotos.push({ ...photo, project_address: proj.address });
           });
         } catch (err) {}
       }
-      setPhotos(allPhotos.sort((a, b) => new Date(b.taken_at || b.created_at).getTime() - new Date(a.taken_at || a.created_at).getTime()));
+      const scopedPhotos = requestProjectId
+        ? allPhotos.filter(photo => photoBelongsToProject(photo, requestProjectId))
+        : allPhotos;
+      setPhotos(scopedPhotos.sort((a, b) => new Date(b.taken_at || b.created_at).getTime() - new Date(a.taken_at || a.created_at).getTime()));
     } catch (err) {
       console.error(err);
       toast.error('Failed to load project photos');
@@ -146,6 +191,8 @@ export default function Photos() {
   };
 
   useEffect(() => {
+    setPhotos([]);
+    setLightbox(null);
     load();
   }, [selectedProject, photoView]);
 
@@ -181,7 +228,7 @@ export default function Photos() {
       if (caption.trim()) formData.append('caption', caption.trim());
       formData.append('photo_type', uploadType);
       formData.append('photo_contexts', JSON.stringify(contexts));
-      await appendProgressUploadAudit(formData, uploadFiles, uploadFiles.map(() => 'desktop'));
+      await appendProgressUploadAudit(formData, uploadFiles, uploadFiles.map(() => 'desktop'), { projectId: selectedProject });
 
       await api.post(`/projects/${selectedProject}/photos?type=${uploadType}`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -239,6 +286,16 @@ export default function Photos() {
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to update photo usage');
     }
+  };
+
+  const handleDescriptionSaved = async (updatedPhoto: Photo) => {
+    setDescriptionPhoto(null);
+    setPhotos(current => current.map(photo => (
+      photo.id === updatedPhoto.id
+        ? { ...photo, ...updatedPhoto, project_address: photo.project_address || updatedPhoto.project_address }
+        : photo
+    )));
+    await load();
   };
 
   return (
@@ -335,6 +392,9 @@ export default function Photos() {
                     const isVideo = mediaKind === 'video';
                     const progressContext = isPhotoContextEnabled(photo.show_in_progress, photo.photo_type === 'progress' || photo.photo_type === 'note');
                     const scopeContext = isPhotoContextEnabled(photo.show_in_scope, photo.photo_type === 'scope' || photo.photo_type === 'construction_plan');
+                    const descriptionText = getPhotoDescriptionText(photo);
+                    const photoTimestamp = format(new Date(photo.taken_at || photo.created_at), 'MMM d, yyyy h:mm a');
+                    const uploaderName = photo.uploader_name || photo.uploaded_by_name || 'Unknown user';
                     return (
                       <div
                         key={photo.id}
@@ -353,8 +413,23 @@ export default function Photos() {
                             <PlayCircle className="w-11 h-11 text-white drop-shadow" />
                           </div>
                         )}
-                        {photo.note_id && <span className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-black text-white">Note</span>}
-                        <div className="absolute bottom-14 left-2 right-2 z-20 grid grid-cols-2 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={event => {
+                            event.stopPropagation();
+                            setDescriptionPhoto(photo);
+                          }}
+                          className={`absolute left-2 top-2 z-30 inline-flex min-h-8 items-center justify-center gap-1 rounded-lg px-2 text-[10px] font-black shadow-sm transition ${
+                            descriptionText
+                              ? 'bg-amber-500 text-slate-950 hover:bg-amber-400'
+                              : 'border border-white/70 bg-black/65 text-white hover:border-amber-300 hover:text-amber-200'
+                          }`}
+                          aria-label={`${descriptionText ? 'Edit' : 'Add'} description for ${photo.original_name || 'project picture'}`}
+                        >
+                          <MessageSquare className="h-3.5 w-3.5" />
+                          {descriptionText ? 'Edit Description' : 'Add Description'}
+                        </button>
+                        <div className="absolute bottom-[4.75rem] left-2 right-2 z-20 grid grid-cols-2 gap-1.5">
                           <button
                             type="button"
                             onClick={event => {
@@ -391,11 +466,12 @@ export default function Photos() {
                             {deletingPhotoId === photo.id ? 'Deleting' : 'Delete once'}
                           </button>
                         )}
-                        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent opacity-100 transition-opacity" />
-                        <div className="pointer-events-none absolute bottom-0 left-0 right-0 p-2">
-                          <p className="text-white text-xs font-bold truncate">{photo.project_address}</p>
-                          <p className="text-white/80 text-xs truncate">{photo.uploader_name || 'Unknown user'} / {format(new Date(photo.taken_at || photo.created_at), 'h:mm a')}</p>
-                          <p className="text-white/70 text-[10px] truncate">{photo.capture_latitude ? 'GPS recorded' : 'IP recorded'}{photo.upload_ip_address ? ` / ${photo.upload_ip_address}` : ''}</p>
+                        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-100 transition-opacity" />
+                        <div className="pointer-events-none absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/95 via-black/82 to-black/18 p-2 text-white shadow-[0_-8px_18px_rgba(0,0,0,0.35)]">
+                          <p className="truncate text-[11px] font-black leading-4 text-white">{photoTimestamp}</p>
+                          <p className="truncate text-[10px] font-extrabold leading-4 text-white/90">Inserted by {uploaderName}</p>
+                          <p className="truncate text-[9px] font-bold leading-3 text-cyan-100">{formatPhotoGpsAudit(photo)}</p>
+                          <p className="truncate text-[9px] font-bold leading-3 text-white/75">{formatPhotoIpAudit(photo)}</p>
                         </div>
                       </div>
                     );
@@ -416,6 +492,9 @@ export default function Photos() {
                     const isVideo = mediaKind === 'video';
                     const progressContext = isPhotoContextEnabled(photo.show_in_progress, photo.photo_type === 'progress' || photo.photo_type === 'note');
                     const scopeContext = isPhotoContextEnabled(photo.show_in_scope, photo.photo_type === 'scope' || photo.photo_type === 'construction_plan');
+                    const descriptionText = getPhotoDescriptionText(photo);
+                    const photoTimestamp = format(new Date(photo.taken_at || photo.created_at), 'MMM d, yyyy h:mm a');
+                    const uploaderName = photo.uploader_name || photo.uploaded_by_name || 'Unknown user';
                     return (
                       <div key={photo.id} className="bg-white rounded-xl border border-gray-200 p-3 flex items-center gap-3">
                         <div className="w-16 h-16 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0 cursor-pointer relative" onClick={() => openMedia(photo)}>
@@ -429,10 +508,14 @@ export default function Photos() {
                           ) : (
                             <UnsupportedMediaTile name={photo.original_name || photo.filename} />
                           )}
+                          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-black/82 px-1.5 py-1 text-white">
+                            <p className="truncate text-[8px] font-black leading-3">{photoTimestamp}</p>
+                            <p className="truncate text-[8px] font-bold leading-3">By {uploaderName}</p>
+                          </div>
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-gray-900 truncate">{photo.project_address}</p>
-                          <p className="text-xs text-gray-500">{isVideo ? 'Project video' : 'Project photo'} / {photo.uploader_name || 'Unknown user'}</p>
+                          <p className="text-xs text-gray-500">{isVideo ? 'Project video' : 'Project photo'} / {uploaderName}</p>
                           <div className="mt-1 flex flex-wrap gap-1.5">
                             <button
                               type="button"
@@ -448,10 +531,24 @@ export default function Photos() {
                             >
                               {scopeContext ? 'In Scope' : 'Use Scope'}
                             </button>
+                            <button
+                              type="button"
+                              onClick={() => setDescriptionPhoto(photo)}
+                              className={`min-h-8 rounded-lg px-2 text-[10px] font-black ${
+                                descriptionText
+                                  ? 'bg-amber-50 text-amber-800 ring-1 ring-amber-200'
+                                  : 'border border-gray-200 bg-gray-50 text-gray-600 hover:bg-white'
+                              }`}
+                            >
+                              <MessageSquare className="mr-1 inline h-3 w-3" />
+                              {descriptionText ? 'Edit Description' : 'Add Description'}
+                            </button>
                           </div>
                           {photo.note_text && <p className="text-xs font-semibold text-amber-700 truncate">Note: {photo.note_text}</p>}
                           {photo.caption && <p className="text-xs text-gray-400 truncate">{photo.caption}</p>}
-                          <p className="text-xs text-gray-400">{format(new Date(photo.taken_at || photo.created_at), 'MMM d, yyyy h:mm a')} / {photo.capture_latitude ? 'GPS recorded' : 'IP recorded'}{photo.upload_ip_address ? ` / ${photo.upload_ip_address}` : ''}</p>
+                          <p className="text-xs text-gray-400">{photoTimestamp}</p>
+                          <p className="text-xs font-semibold text-gray-500">{formatPhotoGpsAudit(photo)}</p>
+                          <p className="text-xs text-gray-400">{formatPhotoIpAudit(photo)}</p>
                         </div>
                         {photo.can_delete_correction && (
                           <button
@@ -487,6 +584,134 @@ export default function Photos() {
           </button>
         </div>
       )}
+      <PhotoDescriptionModal
+        photo={descriptionPhoto}
+        onClose={() => setDescriptionPhoto(null)}
+        onSaved={handleDescriptionSaved}
+      />
+    </div>
+  );
+}
+
+function PhotoDescriptionModal({
+  photo,
+  onClose,
+  onSaved,
+}: {
+  photo: Photo | null;
+  onClose: () => void;
+  onSaved: (photo: Photo) => Promise<void> | void;
+}) {
+  const [descriptionText, setDescriptionText] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [voiceStopSignal, setVoiceStopSignal] = useState(0);
+  const existingDescription = getPhotoDescriptionText(photo);
+  const mediaKind = photo ? getProgressMediaKind(photo) : 'image';
+  const src = photo ? `/uploads/${photo.project_id}/${photo.filename}` : '';
+
+  useEffect(() => {
+    setDescriptionText(existingDescription);
+  }, [photo?.id, existingDescription]);
+
+  if (!photo) return null;
+
+  const saveDescription = async (overrideDescription?: string) => {
+    if (saving) return;
+    const nextDescription = overrideDescription ?? descriptionText;
+    setVoiceStopSignal(current => current + 1);
+    setSaving(true);
+    try {
+      const res = await api.put(`/projects/${photo.project_id}/photos/${photo.id}/note`, { note: nextDescription });
+      const updatedPhoto = res.data?.photo || res.data;
+      toast.success(nextDescription.trim() ? 'Photo description saved' : 'Photo description cleared');
+      setSaving(false);
+      await onSaved(updatedPhoto);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to save photo description');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
+      <div className="w-full max-w-3xl overflow-hidden rounded-xl border border-amber-400/40 bg-slate-950 shadow-2xl" onClick={event => event.stopPropagation()}>
+        <div
+          className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3"
+          style={{ background: 'linear-gradient(135deg, rgba(15,23,42,0.98), rgba(69,26,3,0.72))' }}
+        >
+          <div className="min-w-0">
+            <p className="text-[11px] font-black uppercase tracking-wide text-amber-300">Picture description</p>
+            <h3 className="truncate text-sm font-black text-white">{photo.original_name || photo.filename || 'Project picture'}</h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-white/20 bg-white/10 text-white transition hover:border-amber-300 hover:text-amber-200"
+            aria-label="Close picture description"
+          >
+            <X className="h-6 w-6" />
+          </button>
+        </div>
+
+        <div className="grid gap-4 p-4 md:grid-cols-[260px_minmax(0,1fr)]">
+          <div className="overflow-hidden rounded-lg border border-white/10 bg-black">
+            <div className="aspect-square">
+              {mediaKind === 'video' ? (
+                <video src={src} className="h-full w-full object-cover" controls />
+              ) : mediaKind === 'image' ? (
+                <img src={src} alt={photo.original_name || 'Project picture'} className="h-full w-full object-cover" />
+              ) : (
+                <UnsupportedMediaTile name={photo.original_name || photo.filename} />
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <label className="block">
+              <span className="mb-2 block text-xs font-black uppercase tracking-wide text-slate-300">Photo description</span>
+              <VoiceTextarea
+                value={descriptionText}
+                onChange={event => setDescriptionText(event.target.value)}
+                rows={8}
+                disabled={saving}
+                stopSignal={voiceStopSignal}
+                className="w-full resize-none rounded-lg border border-amber-300/30 bg-slate-900 px-3 py-2 text-sm font-semibold leading-6 text-white outline-none transition placeholder:text-slate-500 focus:border-amber-300 focus:ring-2 focus:ring-amber-300/30"
+                placeholder="Describe what this picture shows..."
+                autoFocus
+              />
+            </label>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={saving}
+                className="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-600 bg-slate-900 px-4 text-sm font-black text-slate-200 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveDescription()}
+                disabled={saving || !descriptionText.trim() || descriptionText.trim() === existingDescription}
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-amber-300 bg-amber-500 px-4 text-sm font-black text-slate-950 shadow-lg shadow-amber-950/25 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:border-slate-500 disabled:bg-slate-700 disabled:text-slate-300"
+              >
+                <MessageSquare className="h-4 w-4" />
+                {saving ? 'Saving...' : 'Save Description'}
+              </button>
+              {(existingDescription || descriptionText.trim()) && (
+                <button
+                  type="button"
+                  onClick={() => void saveDescription('')}
+                  disabled={saving || (!existingDescription && !descriptionText.trim())}
+                  className="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-600 bg-slate-900 px-4 text-sm font-black text-slate-200 transition hover:border-red-300 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Clear description
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

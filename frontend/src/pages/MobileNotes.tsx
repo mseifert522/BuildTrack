@@ -246,7 +246,7 @@ export default function MobileNotes() {
     formData.append('note_id', noteId);
     formData.append('photo_type', 'progress');
     formData.append('caption', 'Progress pictures attached to project note');
-    await appendProgressUploadAudit(formData, files, files.map(() => 'library'));
+    await appendProgressUploadAudit(formData, files, files.map(() => 'library'), { projectId });
     await api.post(`/projects/${projectId}/photos?type=progress`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });

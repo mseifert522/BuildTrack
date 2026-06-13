@@ -100,6 +100,8 @@ export default function ContractorProjectDetail() {
     try {
       const formData = new FormData();
       Array.from(files).forEach(f => formData.append('photos', f));
+      formData.append('capture_project_id', id || '');
+      formData.append('client_project_id', id || '');
       formData.append('photo_type', 'progress');
       formData.append('taken_at_values', JSON.stringify(
         Array.from(files).map(file => new Date(file.lastModified || Date.now()).toISOString())
