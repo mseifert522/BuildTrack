@@ -1234,7 +1234,7 @@ export default function ProjectDetail() {
           </div>
 
           {/* Tabs */}
-          <div className="bt-project-tabs grid grid-cols-2 items-stretch gap-1.5 overflow-visible sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-10">
+          <div className="bt-project-tabs grid grid-cols-2 items-stretch gap-1.5 overflow-visible sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 2xl:grid-cols-10">
             {tabs.map(({ id: tabId, label, icon: Icon }) => (
               <button
                 key={tabId}
@@ -1262,7 +1262,7 @@ export default function ProjectDetail() {
       </div>
 
       {/* Tab Content */}
-      <div className={`p-4 md:p-6 mx-auto ${tab === 'project-timeline' ? 'max-w-[1480px]' : 'max-w-5xl'}`}>
+      <div className={`p-4 md:p-6 mx-auto ${tab === 'project-timeline' ? 'max-w-[1480px]' : 'max-w-6xl'}`}>
         {/* Overview */}
         {tab === 'overview' && (
           <div className="space-y-4">
@@ -6515,7 +6515,7 @@ function ProgressMediaLightbox({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4" onClick={() => onChange(null)}>
-      <div className="relative flex h-[90vh] w-[94vw] max-w-7xl flex-col overflow-hidden rounded-xl border border-white/20 bg-slate-950 shadow-2xl" onClick={event => event.stopPropagation()}>
+      <div className="relative flex h-[90dvh] max-h-[90vh] w-[94vw] max-w-7xl flex-col overflow-hidden rounded-xl border border-white/20 bg-slate-950 shadow-2xl" onClick={event => event.stopPropagation()}>
         <div className="flex min-h-14 items-center justify-between gap-3 border-b border-white/10 bg-black/45 px-4 py-3">
           <div className="min-w-0">
             <p className="text-[11px] font-black uppercase tracking-wide text-orange-300">Progress picture preview</p>

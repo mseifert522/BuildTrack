@@ -1171,7 +1171,7 @@ export default function Dashboard() {
 
   const renderCalendarWeekView = () => (
     <div className="overflow-x-auto bg-gradient-to-br from-[#050914] via-[#0B1224] to-[#101B34]">
-      <div className="grid min-w-[1620px] grid-cols-7 items-start gap-2.5 p-3">
+      <div className="grid min-w-[860px] grid-cols-7 items-start gap-2.5 p-3">
         {calendarVisibleWeekDays.map(day => {
           const dayEvents = sortCalendarEventsForDay(calendarEventsByDate[day.key] || []);
           const badgeDate = formatCalendarBadgeDate(day.key);
@@ -1226,7 +1226,7 @@ export default function Dashboard() {
 
   const renderCalendarMonthView = () => (
     <div className="overflow-x-auto bg-gradient-to-br from-[#050914] via-[#0B1224] to-[#101B34]">
-      <div className="min-w-[1480px] p-3">
+      <div className="min-w-[760px] p-3">
         <div className="grid grid-cols-7 overflow-hidden rounded-t-xl border border-b-0 border-slate-600/70 bg-gradient-to-r from-slate-950 via-blue-950 to-indigo-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.10)]">
           {calendarWeekdayLabels.map(dayLabel => (
             <div key={dayLabel} className="border-r border-white/10 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-white last:border-r-0">
@@ -1559,7 +1559,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="mx-auto max-w-none space-y-5 px-4 py-4 md:px-6">
+      <div className="mx-auto max-w-[1720px] space-y-5 px-4 py-4 md:px-6">
         {/* Operations schedule */}
         {canAccessOperationsCalendar && (
         <section
@@ -1632,7 +1632,7 @@ export default function Dashboard() {
               );
             })}
           </div>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-3 grid gap-2 grid-cols-2 lg:grid-cols-4">
             {calendarSummaryCards.map(card => (
               <div
                 key={card.label}

@@ -768,7 +768,7 @@ export default function Layout({ children }: LayoutProps) {
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setProfileOpen(false)} />
                   <div
-                    className="absolute right-0 top-full mt-2 w-72 rounded-md shadow-xl z-20 overflow-hidden"
+                    className="absolute right-0 top-full mt-2 w-72 max-w-[calc(100vw-1rem)] rounded-md shadow-xl z-20 overflow-hidden"
                     style={{ background: '#111315', border: '1px solid #E78B4A' }}
                   >
                     {/* Profile header */}

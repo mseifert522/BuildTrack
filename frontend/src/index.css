@@ -7402,3 +7402,118 @@ body,
     background: rgba(255, 255, 255, 0.96) !important;
   }
 }
+
+/* ============================================================================
+   BuildTrack Responsive Design System  (responsive audit — 2026-06-13)
+   --------------------------------------------------------------------------
+   Centralized, non-destructive responsive foundation. Appended last so it
+   composes over earlier rules. Adds: fluid spacing/typography tokens, a
+   max-width + fluid-padding page container (fixes cramped laptops + 4K stretch),
+   responsive grid/table/modal guards. Brand colors & components are preserved.
+
+   Breakpoint system (matches Tailwind sm/md/lg/xl/2xl + named tokens below):
+     xs   0–374    sm 375–639   md 640–767   tablet 768–1023
+     laptop-sm 1024–1279   laptop-md 1280–1439   laptop-lg 1440–1599
+     desktop 1600–1919   desktop-lg 1920–2559   ultra 2560+
+   ============================================================================ */
+
+:root {
+  /* Breakpoint reference tokens (documentation + JS/container-query use) */
+  --bp-xs: 375px;
+  --bp-sm: 640px;
+  --bp-md: 768px;
+  --bp-tablet: 768px;
+  --bp-laptop-sm: 1024px;
+  --bp-laptop-md: 1280px;
+  --bp-laptop-lg: 1440px;
+  --bp-desktop: 1600px;
+  --bp-desktop-lg: 1920px;
+  --bp-ultra: 2560px;
+
+  /* Fluid spacing scale — scales smoothly between phone and desktop */
+  --bt-space-2xs: clamp(0.25rem, 0.4vw + 0.15rem, 0.375rem);
+  --bt-space-xs:  clamp(0.375rem, 0.6vw + 0.2rem, 0.5rem);
+  --bt-space-sm:  clamp(0.5rem, 1vw + 0.25rem, 0.75rem);
+  --bt-space-md:  clamp(0.75rem, 1.4vw + 0.35rem, 1rem);
+  --bt-space-lg:  clamp(1rem, 2vw + 0.4rem, 1.5rem);
+  --bt-space-xl:  clamp(1.5rem, 3vw + 0.5rem, 2.25rem);
+  --bt-space-2xl: clamp(2rem, 4vw + 0.6rem, 3.5rem);
+
+  /* Fluid typography scale */
+  --bt-text-2xs: clamp(0.625rem, 0.3vw + 0.55rem, 0.7rem);
+  --bt-text-xs:  clamp(0.7rem,  0.3vw + 0.62rem, 0.78rem);
+  --bt-text-sm:  clamp(0.8rem,  0.4vw + 0.7rem,  0.9rem);
+  --bt-text-base:clamp(0.9rem,  0.4vw + 0.8rem,  1rem);
+  --bt-text-lg:  clamp(1rem,    0.6vw + 0.85rem, 1.18rem);
+  --bt-text-xl:  clamp(1.15rem, 0.9vw + 0.9rem,  1.45rem);
+  --bt-text-2xl: clamp(1.35rem, 1.4vw + 1rem,    1.9rem);
+  --bt-text-3xl: clamp(1.6rem,  2vw + 1.05rem,   2.4rem);
+
+  /* Desktop content-width discipline (prevents absurd 4K stretch) */
+  --bt-content-max-desktop: 1600px;
+  --bt-content-max-dashboard: 1720px;
+}
+
+/* ── Page container: fluid padding + centered max-width ──────────────────────
+   Fixes the two core complaints at once:
+   • cramped on 1366×768 / 1536×864  (old fixed 16px padding → fluid 14–40px)
+   • edge-to-edge stretch on 1920 / 2560 / 4K  (no max-width → centered 1600px)
+   Full-bleed pages (dashboard, invoices) opt out and cap their own inner
+   content instead, so their immersive backgrounds still span the viewport.   */
+.bt-desktop-shell .bt-desktop-page {
+  width: 100%;
+  max-width: var(--bt-content-max-desktop);
+  margin-inline: auto;
+  padding-inline: var(--bt-page-pad) !important;
+  padding-block: clamp(0.875rem, 1.4vh + 0.4rem, 1.75rem) !important;
+}
+
+/* Dashboard owns its full-bleed background + internal padding entirely */
+.bt-desktop-shell .bt-desktop-page.bt-dashboard-page {
+  max-width: none;
+  margin-inline: 0;
+  padding: 0 !important;
+}
+
+/* Invoices stays full-bleed in WIDTH (immersive background) but keeps the
+   fluid page padding from the base rule, and its own inner max-w-7xl centers
+   content — so it never stretches on 4K nor touches edges on phones. */
+.bt-desktop-shell .bt-desktop-page.bt-invoices-light {
+  max-width: none;
+  margin-inline: 0;
+}
+
+/* ── Fluid headings (reduce header height on small screens, scale up on wide) */
+.bt-desktop-shell .bt-section-title { font-size: var(--bt-text-base); }
+.bt-desktop-shell .bt-section-kicker { font-size: var(--bt-text-2xs); }
+.bt-desktop-shell .bt-dashboard-ops-header h2 { font-size: var(--bt-text-2xl); line-height: 1.15; }
+.bt-desktop-shell .bt-dashboard-ops-header p { font-size: var(--bt-text-sm); }
+
+/* ── Responsive grid helpers (auto-fit; never overflow, never single-column-bloat)
+   Usable via className for future layouts; documented in the design system.   */
+.bt-auto-grid {
+  display: grid;
+  gap: var(--bt-space-md);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+}
+.bt-auto-grid--sm { grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr)); }
+.bt-auto-grid--lg { grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); }
+
+/* ── Table guard: any wide table inside the desktop shell scrolls INSIDE its
+   container rather than breaking the page width. Reinforces .bt-table-wrap.   */
+.bt-desktop-shell .bt-table-wrap,
+.bt-desktop-shell .bt-qbo-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Let constrained table/cell text use the space it has instead of arbitrary caps */
+.bt-desktop-shell .bt-qbo-split-list { max-width: 100%; }
+
+/* ── Wide-screen polish: on ultra-wide, give the desktop shell breathing room
+   instead of letting dense pages run to the very edges.                       */
+@media (min-width: 2560px) {
+  :root { --bt-content-max-desktop: 1760px; --bt-content-max-dashboard: 1880px; }
+}
+

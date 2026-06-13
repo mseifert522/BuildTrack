@@ -171,7 +171,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md', descripti
   }, [isOpen]);
 
   if (!isOpen) return null;
-  const sizeClass = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-5xl' }[size];
+  const sizeMax = { sm: 384, md: 512, lg: 672, xl: 1024 }[size];
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
       <div className="absolute inset-0 bg-slate-950/45" onClick={onClose} />
@@ -182,7 +182,8 @@ export function Modal({ isOpen, onClose, title, children, size = 'md', descripti
         aria-labelledby={titleId}
         aria-describedby={description ? descriptionId : undefined}
         tabIndex={-1}
-        className={`bt-modal-panel relative flex max-h-[90vh] w-full ${sizeClass} flex-col rounded-t-2xl bg-white shadow-2xl sm:rounded-xl`}
+        style={{ maxWidth: `min(${sizeMax}px, calc(100vw - 1rem))` }}
+        className="bt-modal-panel relative flex max-h-[90vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:rounded-xl"
       >
         <div className="flex flex-shrink-0 items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
           <div>
