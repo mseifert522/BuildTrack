@@ -24,6 +24,7 @@ const documentRoutes = require('./src/routes/documents');
 const contractorOnboardingRoutes = require('./src/routes/contractorOnboarding');
 const quoteAnalyticsRoutes = require('./src/routes/quoteAnalytics');
 const vendorQuoteRequestRoutes = require('./src/routes/vendorQuoteRequests');
+const agentBridgeRoutes = require('./src/routes/agentBridge');
 const securityRoutes = require('./src/routes/security');
 const quickBooksRoutes = require('./src/routes/quickbooks');
 
@@ -83,6 +84,8 @@ app.use('/uploads', express.static(path.resolve(uploadsPath), {
   setHeaders: (res, filePath) => {
     if (filePath.includes(`${path.sep}avatars${path.sep}`)) {
       res.setHeader('Cache-Control', 'private, no-cache, max-age=0, must-revalidate');
+    } else if (filePath.includes(`${path.sep}project-main${path.sep}`)) {
+      res.setHeader('Cache-Control', 'private, max-age=2592000, immutable');
     }
   },
 }));
@@ -129,6 +132,7 @@ app.use('/api/invoices/email-intake', (_req, res) => {
 app.use('/api/documents', documentRoutes);
 app.use('/api/contractor-onboarding', contractorOnboardingRoutes);
 app.use('/api/vendor-quote-requests', vendorQuoteRequestRoutes);
+app.use('/api/agent-bridge', agentBridgeRoutes);
 app.use('/api/quote-analytics', quoteAnalyticsRoutes.analyticsRouter);
 app.use('/api/security', securityRoutes);
 app.use('/api/quickbooks', quickBooksRoutes);
@@ -165,36 +169,23 @@ app.get('/api/notes/recent', authenticate, (req, res) => {
       u.name as user_name,
       u.role as user_role,
       u.avatar_url as user_avatar_url,
-      (
-        SELECT ph.id FROM photos ph
-        WHERE ph.note_id = n.id
-        ORDER BY datetime(COALESCE(ph.taken_at, ph.created_at)) DESC, ph.created_at DESC
-        LIMIT 1
-      ) as photo_id,
-      (
-        SELECT ph.filename FROM photos ph
-        WHERE ph.note_id = n.id
-        ORDER BY datetime(COALESCE(ph.taken_at, ph.created_at)) DESC, ph.created_at DESC
-        LIMIT 1
-      ) as photo_filename,
-      (
-        SELECT ph.original_name FROM photos ph
-        WHERE ph.note_id = n.id
-        ORDER BY datetime(COALESCE(ph.taken_at, ph.created_at)) DESC, ph.created_at DESC
-        LIMIT 1
-      ) as photo_original_name,
-      (
-        SELECT ph.caption FROM photos ph
-        WHERE ph.note_id = n.id
-        ORDER BY datetime(COALESCE(ph.taken_at, ph.created_at)) DESC, ph.created_at DESC
-        LIMIT 1
-      ) as photo_caption,
+      photo.id as photo_id,
+      photo.filename as photo_filename,
+      photo.original_name as photo_original_name,
+      photo.caption as photo_caption,
       p.address as project_address,
       p.job_name as project_job_name,
       p.status as project_status
     FROM project_notes n
     JOIN users u ON u.id = n.user_id
     JOIN projects p ON p.id = n.project_id
+    LEFT JOIN photos photo ON photo.id = (
+      SELECT p2.id
+      FROM photos p2
+      WHERE p2.note_id = n.id
+      ORDER BY datetime(COALESCE(p2.taken_at, p2.created_at)) DESC, p2.created_at DESC
+      LIMIT 1
+    )
     ${assignmentJoin}
       ${contractorOnly ? "AND (n.user_id = ? OR n.visibility = 'public')" : ''}
     ORDER BY datetime(n.created_at) DESC, n.created_at DESC
@@ -247,30 +238,10 @@ app.get('/api/dashboard/activity-feed', authenticate, (req, res) => {
       n.visibility,
       n.edited_at,
       n.edit_count,
-      (
-        SELECT ph.id FROM photos ph
-        WHERE ph.note_id = n.id
-        ORDER BY datetime(COALESCE(ph.taken_at, ph.created_at)) DESC, ph.created_at DESC
-        LIMIT 1
-      ) as photo_id,
-      (
-        SELECT ph.filename FROM photos ph
-        WHERE ph.note_id = n.id
-        ORDER BY datetime(COALESCE(ph.taken_at, ph.created_at)) DESC, ph.created_at DESC
-        LIMIT 1
-      ) as photo_filename,
-      (
-        SELECT ph.original_name FROM photos ph
-        WHERE ph.note_id = n.id
-        ORDER BY datetime(COALESCE(ph.taken_at, ph.created_at)) DESC, ph.created_at DESC
-        LIMIT 1
-      ) as photo_original_name,
-      (
-        SELECT ph.caption FROM photos ph
-        WHERE ph.note_id = n.id
-        ORDER BY datetime(COALESCE(ph.taken_at, ph.created_at)) DESC, ph.created_at DESC
-        LIMIT 1
-      ) as photo_caption,
+      photo.id as photo_id,
+      photo.filename as photo_filename,
+      photo.original_name as photo_original_name,
+      photo.caption as photo_caption,
       NULL as action,
       NULL as entity_type,
       NULL as entity_id,
@@ -278,6 +249,13 @@ app.get('/api/dashboard/activity-feed', authenticate, (req, res) => {
     FROM project_notes n
     JOIN users u ON u.id = n.user_id
     JOIN projects p ON p.id = n.project_id
+    LEFT JOIN photos photo ON photo.id = (
+      SELECT p2.id
+      FROM photos p2
+      WHERE p2.note_id = n.id
+      ORDER BY datetime(COALESCE(p2.taken_at, p2.created_at)) DESC, p2.created_at DESC
+      LIMIT 1
+    )
     ${noteAssignmentJoin}
     WHERE ${noteVisibilityWhere}
     ORDER BY datetime(n.created_at) DESC, n.created_at DESC
@@ -418,21 +396,38 @@ app.get('/', (req, res, next) => {
 });
 
 // Serve React frontend in production
+
+function isHashedBuildAsset(fileName) {
+  return /-[A-Za-z0-9_-]{6,}\.(js|mjs|css)$/i.test(fileName)
+    || /\.[a-f0-9]{8,}\.(js|mjs|css|woff2?)$/i.test(fileName);
+}
+
+function setFrontendStaticHeaders(res, filePath) {
+  const normalized = String(filePath || '');
+  const baseName = path.basename(normalized);
+  if (normalized.endsWith(`${path.sep}index.html`)) {
+    res.setHeader('Cache-Control', 'private, no-store, max-age=0, must-revalidate');
+    return;
+  }
+  if (normalized.includes(`${path.sep}assets${path.sep}`)) {
+    if (isHashedBuildAsset(baseName)) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    } else {
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+    }
+    return;
+  }
+  if (/\.(svg|png|ico|webp|woff2?)$/i.test(baseName)) {
+    res.setHeader('Cache-Control', 'public, max-age=604800, must-revalidate');
+    return;
+  }
+  res.setHeader('Cache-Control', 'public, max-age=300, must-revalidate');
+}
+
 const frontendDist = path.resolve(__dirname, '../frontend/dist');
 if (fs.existsSync(frontendDist)) {
   app.use(express.static(frontendDist, {
-    setHeaders: (res, filePath) => {
-      const normalized = String(filePath || '');
-      if (normalized.endsWith(`${path.sep}index.html`)) {
-        res.setHeader('Cache-Control', 'private, no-store, max-age=0, must-revalidate');
-        return;
-      }
-      if (normalized.includes(`${path.sep}assets${path.sep}`)) {
-        res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
-        return;
-      }
-      res.setHeader('Cache-Control', 'public, max-age=300, must-revalidate');
-    },
+    setHeaders: setFrontendStaticHeaders,
   }));
   app.get('/assets/{*assetPath}', (req, res, next) => {
     const requested = String(req.params?.assetPath || req.path || '');

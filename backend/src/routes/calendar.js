@@ -390,7 +390,10 @@ router.put('/events/:id', (req, res) => {
       return res.json({ message: 'Calendar task updated' });
     }
     if (!event) return res.status(404).json({ error: 'Calendar event not found' });
-    assertProjectAccess(db, req.user, event.project_id);
+    const nextProjectId = req.body.project_id !== undefined
+      ? (req.body.project_id ? String(req.body.project_id) : null)
+      : event.project_id;
+    assertProjectAccess(db, req.user, nextProjectId);
 
     const status = req.body.status !== undefined && STATUSES.has(String(req.body.status)) ? String(req.body.status) : event.status;
     const scheduledFor = req.body.scheduled_for !== undefined ? normalizeDate(req.body.scheduled_for, event.scheduled_for) : event.scheduled_for;
@@ -403,14 +406,19 @@ router.put('/events/:id', (req, res) => {
     const completionNote = req.body.completion_note !== undefined
       ? String(req.body.completion_note || '').slice(0, 2000)
       : event.completion_note;
+    const vendorName = req.body.vendor_name !== undefined
+      ? (String(req.body.vendor_name || '').trim().slice(0, 160) || null)
+      : event.vendor_name;
     db.prepare(`
       UPDATE operations_calendar_events
-      SET title = ?, description = ?, event_type = ?, scheduled_for = ?, due_time = ?, status = ?, priority = ?,
+      SET project_id = ?, title = ?, description = ?, event_type = ?, scheduled_for = ?, due_time = ?, status = ?, priority = ?,
+          vendor_name = ?,
           completed_at = CASE WHEN ? = 'completed' THEN COALESCE(completed_at, datetime('now')) ELSE completed_at END,
           completion_note = ?,
           updated_at = datetime('now')
       WHERE id = ?
     `).run(
+      nextProjectId,
       title,
       req.body.description !== undefined ? String(req.body.description || '').slice(0, 1000) : event.description,
       eventType,
@@ -418,6 +426,7 @@ router.put('/events/:id', (req, res) => {
       req.body.due_time !== undefined ? String(req.body.due_time || '').slice(0, 20) || null : event.due_time,
       status,
       req.body.priority !== undefined && PRIORITIES.has(String(req.body.priority)) ? String(req.body.priority) : event.priority,
+      vendorName,
       status,
       completionNote || null,
       req.params.id
@@ -425,7 +434,7 @@ router.put('/events/:id', (req, res) => {
 
     logActivity({
       userId: req.user.id,
-      projectId: event.project_id,
+      projectId: nextProjectId,
       action: status === 'completed' ? 'calendar_event_completed' : 'calendar_event_updated',
       entityType: 'operations_calendar_event',
       entityId: req.params.id,
@@ -436,6 +445,39 @@ router.put('/events/:id', (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(err.statusCode || 500).json({ error: err.message || 'Failed to update calendar event' });
+  }
+});
+
+router.delete('/events/:id', (req, res) => {
+  try {
+    const db = getDb();
+    if (String(req.params.id || '').startsWith('task-')) {
+      return res.status(400).json({ error: 'Construction tasks cannot be deleted from the operations calendar' });
+    }
+
+    const event = db.prepare('SELECT * FROM operations_calendar_events WHERE id = ?').get(req.params.id);
+    if (!event) return res.status(404).json({ error: 'Calendar event not found' });
+    assertProjectAccess(db, req.user, event.project_id);
+
+    const deleteCalendarEvent = db.transaction(() => {
+      db.prepare('DELETE FROM calendar_email_reminders WHERE event_id = ?').run(event.id);
+      db.prepare('DELETE FROM operations_calendar_events WHERE id = ?').run(event.id);
+    });
+    deleteCalendarEvent();
+
+    logActivity({
+      userId: req.user.id,
+      projectId: event.project_id,
+      action: 'calendar_event_deleted',
+      entityType: 'operations_calendar_event',
+      entityId: event.id,
+      details: { title: event.title, scheduled_for: event.scheduled_for, event_type: event.event_type },
+    });
+
+    res.json({ message: 'Calendar event deleted' });
+  } catch (err) {
+    console.error(err);
+    res.status(err.statusCode || 500).json({ error: err.message || 'Failed to delete calendar event' });
   }
 });
 

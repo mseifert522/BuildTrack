@@ -2,6 +2,14 @@ const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('./schema');
 
+function seedTempPassword() {
+  const value = String(process.env.BUILDTRACK_SEED_TEMP_PASSWORD || '').trim();
+  if (value.length < 12) {
+    throw new Error('BUILDTRACK_SEED_TEMP_PASSWORD must be set to a temporary password of at least 12 characters before seeding initial users.');
+  }
+  return value;
+}
+
 async function seedDatabase() {
   const db = getDb();
 
@@ -14,7 +22,7 @@ async function seedDatabase() {
 
   console.log('Seeding database with initial users...');
 
-  const tempPassword = 'TempPass2026!';
+  const tempPassword = seedTempPassword();
   const hash = await bcrypt.hash(tempPassword, 12);
 
   const users = [
@@ -65,7 +73,7 @@ async function seedDatabase() {
 
   console.log('');
   console.log('=== INITIAL ACCOUNTS CREATED ===');
-  console.log('All accounts use temporary password: TempPass2026!');
+  console.log('All accounts use the temporary password supplied in BUILDTRACK_SEED_TEMP_PASSWORD.');
   console.log('Users will be prompted to change password on first login.');
   console.log('');
   users.forEach(u => {

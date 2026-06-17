@@ -1,0 +1,3879 @@
+.bt-desktop-page.bt-invoices-light {
+  min-height: 100%;
+  background:
+    linear-gradient(rgba(255,255,255,0.024) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px),
+    radial-gradient(120% 95% at 12% 0%, rgba(37, 99, 235, 0.18), transparent 42%),
+    radial-gradient(110% 90% at 90% 4%, rgba(231, 139, 74, 0.18), transparent 40%),
+    linear-gradient(135deg, #080A0D 0%, #0E1218 48%, #11100C 100%) !important;
+  background-size: 22px 22px, 22px 22px, auto, auto, auto !important;
+  color: #F0E8DD !important;
+}
+
+.bt-invoices-light .bg-white,
+.bt-invoices-light .bg-gray-50,
+.bt-invoices-light .bg-gray-50\/55,
+.bt-invoices-light .bg-gray-50\/70,
+.bt-invoices-light [style*="background: white"],
+.bt-invoices-light [style*="background:white"],
+.bt-invoices-light [style*="background: #FFFFFF"],
+.bt-invoices-light [style*="background:#FFFFFF"],
+.bt-invoices-light [style*="background-color: #FFFFFF"],
+.bt-invoices-light [style*="background-color:#FFFFFF"] {
+  background:
+    radial-gradient(120% 90% at 16% 0%, rgba(231, 139, 74, 0.13), transparent 44%),
+    linear-gradient(180deg, rgba(255,255,255,0.075), rgba(255,255,255,0.018) 42%, rgba(0,0,0,0.18)),
+    #101316 !important;
+  background-color: #101316 !important;
+}
+
+.bt-invoices-light .text-gray-900,
+.bt-invoices-light .text-gray-800,
+.bt-invoices-light h1,
+.bt-invoices-light h2,
+.bt-invoices-light h3 {
+  color: #FFF4E8 !important;
+}
+
+.bt-invoices-light .text-gray-700 {
+  color: #E5D8C9 !important;
+}
+
+.bt-invoices-light .text-gray-600,
+.bt-invoices-light .text-gray-500 {
+  color: #B9C1CB !important;
+}
+
+.bt-invoices-light .text-blue-700 {
+  color: #9FC9FF !important;
+}
+
+.bt-invoices-light .text-blue-300,
+.bt-invoices-light .text-gray-300,
+.bt-invoices-light .text-gray-400 {
+  color: #8D98A6 !important;
+}
+
+.bt-invoices-light .border-gray-200,
+.bt-invoices-light .border-gray-100,
+.bt-invoices-light .border-gray-300,
+.bt-invoices-light .border-blue-100 {
+  border-color: #384452 !important;
+}
+
+.bt-invoices-light .bg-blue-50,
+.bt-invoices-light .bg-blue-50\/60,
+.bt-invoices-light .bg-blue-100,
+.bt-invoices-light .bg-gray-50 {
+  background:
+    linear-gradient(180deg, rgba(59, 130, 246, 0.16), rgba(59, 130, 246, 0.06)),
+    #111820 !important;
+  background-color: #111820 !important;
+}
+
+.bt-invoices-light input,
+.bt-invoices-light select {
+  background: #080B0F !important;
+  color: #FFF4E8 !important;
+  border-color: #4B5563 !important;
+}
+
+.bt-invoice-section {
+  overflow: hidden;
+  border: 1px solid #4B5563;
+  border-radius: 6px;
+  background:
+    radial-gradient(120% 90% at 10% 0%, rgba(37, 99, 235, 0.11), transparent 42%),
+    linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.018) 38%, rgba(0,0,0,0.2)),
+    #0E1012;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.08),
+    inset 0 0 0 1px rgba(255,255,255,0.015),
+    0 18px 40px rgba(0,0,0,0.34);
+}
+
+.bt-invoice-section-header {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 20px;
+  border-bottom: 1px solid #4B5563;
+  background:
+    linear-gradient(90deg, rgba(231,139,74,0.22) 0 3px, transparent 3px),
+    radial-gradient(110% 90% at 12% 0%, rgba(37, 99, 235, 0.18), transparent 44%),
+    linear-gradient(135deg, rgba(31,38,46,0.92), rgba(14,16,18,0.96));
+}
+
+.bt-invoice-icon {
+  display: flex;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: 1px solid rgba(147, 197, 253, 0.35);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+}
+
+.bt-invoice-filter,
+.bt-invoice-refresh,
+.bt-invoice-save-button {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 6px;
+  border: 1px solid #4B5563;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.018)),
+    #111315;
+  padding: 8px 12px;
+  color: #F0E8DD;
+  font-size: 12px;
+  font-weight: 900;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.bt-invoice-filter.is-active,
+.bt-invoice-save-button {
+  border-color: #E78B4A;
+  background:
+    linear-gradient(180deg, rgba(231,139,74,0.28), rgba(231,139,74,0.13)),
+    #1E1610;
+  color: #FFD0A8;
+  box-shadow: 0 0 0 1px rgba(231,139,74,0.16);
+}
+
+.bt-invoice-refresh:disabled,
+.bt-invoice-save-button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.bt-invoice-save-button.needs-input {
+  border-color: #C98B55;
+  background:
+    linear-gradient(180deg, rgba(231,139,74,0.20), rgba(231,139,74,0.08)),
+    #17120E;
+  color: #FFE2C2;
+}
+
+.bt-invoice-save-button.needs-input:hover {
+  border-color: #FFD0A8;
+  background:
+    linear-gradient(180deg, rgba(231,139,74,0.30), rgba(231,139,74,0.12)),
+    #1D1510;
+}
+
+.bt-invoice-empty {
+  margin: 16px;
+  border: 1px dashed #4B5563;
+  border-radius: 6px;
+  background: rgba(14, 16, 18, 0.82);
+  padding: 32px;
+  text-align: center;
+  color: #B9C1CB;
+}
+
+.bt-qbo-mirror-section {
+  border-color: #60A5FA;
+  background:
+    radial-gradient(120% 90% at 10% 0%, rgba(37, 99, 235, 0.22), transparent 42%),
+    radial-gradient(110% 86% at 92% 0%, rgba(20, 184, 166, 0.16), transparent 40%),
+    linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.018) 42%, rgba(0,0,0,0.24)),
+    #0B1119;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.11),
+    0 20px 46px rgba(2,6,23,0.42),
+    0 0 0 1px rgba(96,165,250,0.18);
+}
+
+.bt-qbo-status-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  padding: 14px 16px 0;
+}
+
+.bt-qbo-status-row div,
+.bt-qbo-status-row button {
+  border: 1px solid rgba(96, 165, 250, 0.38);
+  border-radius: 6px;
+  background:
+    linear-gradient(135deg, rgba(15,23,42,0.96), rgba(30,64,175,0.2)),
+    #0B1119;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.bt-qbo-status-row span,
+.bt-qbo-bill-card-top span {
+  display: block;
+  color: #AFC8E8;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.bt-qbo-status-row strong {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  color: #EFF6FF;
+  font-size: 14px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bt-qbo-status-row small {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  color: #AFC8E8;
+  font-size: 11px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bt-qbo-bill-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+  gap: 12px;
+  padding: 14px;
+}
+
+.bt-qbo-bill-card {
+  display: flex;
+  min-height: 230px;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(96,165,250,0.48);
+  border-radius: 6px;
+  background:
+    linear-gradient(90deg, rgba(96,165,250,0.62) 0 3px, transparent 3px),
+    radial-gradient(120% 92% at 14% 0%, rgba(37,99,235,0.24), transparent 42%),
+    linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.018) 42%, rgba(0,0,0,0.2)),
+    #0C1118;
+  padding: 13px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.08),
+    0 14px 30px rgba(2,6,23,0.28);
+}
+
+.bt-qbo-bill-card.is-approved {
+  border-color: rgba(16,185,129,0.62);
+  background:
+    linear-gradient(90deg, rgba(16,185,129,0.62) 0 3px, transparent 3px),
+    radial-gradient(120% 90% at 14% 0%, rgba(16,185,129,0.18), transparent 44%),
+    linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.018) 42%, rgba(0,0,0,0.2)),
+    #0C1513;
+}
+
+.bt-qbo-bill-card.is-paid {
+  border-color: rgba(148,163,184,0.48);
+  opacity: 0.82;
+}
+
+.bt-qbo-bill-card-top,
+.bt-qbo-bill-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.bt-qbo-bill-card-top strong {
+  display: block;
+  overflow: hidden;
+  color: #FFF4E8;
+  font-size: 14px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bt-qbo-bill-card-top em {
+  flex: 0 0 auto;
+  border: 1px solid rgba(251,191,36,0.38);
+  border-radius: 999px;
+  background: rgba(217,119,6,0.14);
+  padding: 3px 8px;
+  color: #FDE68A;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.bt-qbo-bill-main p {
+  overflow: hidden;
+  color: #F8FAFC;
+  font-size: 14px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bt-qbo-bill-main strong {
+  display: block;
+  margin-top: 4px;
+  color: #FFF4E8;
+  font-size: 25px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.bt-qbo-bill-main span,
+.bt-qbo-bill-meta span {
+  display: block;
+  overflow: hidden;
+  color: #B9C1CB;
+  font-size: 12px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bt-qbo-bill-meta {
+  display: grid;
+  gap: 4px;
+  border-top: 1px solid rgba(148,163,184,0.18);
+  padding-top: 10px;
+}
+
+.bt-qbo-bill-actions {
+  align-items: center;
+  border-top: 1px solid rgba(148,163,184,0.18);
+  padding-top: 10px;
+}
+
+.bt-qbo-bill-actions a,
+.bt-approved-pay-card-bottom a {
+  color: #BFDBFE;
+  font-size: 12px;
+  font-weight: 950;
+  text-decoration: none;
+}
+
+.bt-qbo-bill-actions a:hover,
+.bt-approved-pay-card-bottom a:hover {
+  color: #FFFFFF;
+}
+
+.bt-approve-payment-button,
+.bt-payment-run-chip {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid rgba(16,185,129,0.62);
+  border-radius: 6px;
+  background:
+    linear-gradient(180deg, rgba(16,185,129,0.32), rgba(16,185,129,0.13)),
+    #071713;
+  padding: 8px 10px;
+  color: #D1FAE5;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.bt-approve-payment-button {
+  cursor: pointer;
+}
+
+.bt-approve-payment-button:hover:not(:disabled) {
+  border-color: #A7F3D0;
+  background:
+    linear-gradient(180deg, rgba(16,185,129,0.42), rgba(16,185,129,0.18)),
+    #092018;
+}
+
+.bt-approve-payment-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.bt-payment-run-chip.is-paid {
+  border-color: rgba(148,163,184,0.46);
+  background:
+    linear-gradient(180deg, rgba(148,163,184,0.18), rgba(148,163,184,0.08)),
+    #111315;
+  color: #CBD5E1;
+}
+
+.bt-qbo-unmatched {
+  color: #FDE68A;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.bt-qbo-delete-open-bill-button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid rgba(248, 113, 113, 0.68);
+  border-radius: 7px;
+  background:
+    linear-gradient(180deg, rgba(185, 28, 28, 0.84), rgba(69, 10, 10, 0.95)),
+    #450A0A;
+  box-shadow:
+    0 10px 18px rgba(2, 6, 23, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.20),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.34);
+  color: #FFFFFF;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.bt-qbo-delete-open-bill-button:hover:not(:disabled) {
+  border-color: rgba(254, 202, 202, 0.96);
+  background:
+    linear-gradient(180deg, rgba(220, 38, 38, 0.92), rgba(127, 29, 29, 0.98)),
+    #7F1D1D;
+  transform: translateY(-1px);
+}
+
+.bt-qbo-delete-open-bill-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.bt-dashboard-ops-panel {
+  border: 1px solid rgba(167, 139, 250, 0.26);
+  border-radius: 16px;
+  background:
+    radial-gradient(110% 80% at 14% 0%, rgba(139, 92, 246, 0.18), transparent 44%),
+    radial-gradient(100% 80% at 92% 0%, rgba(20, 184, 166, 0.12), transparent 42%),
+    linear-gradient(180deg, rgba(25, 24, 54, 0.96), rgba(13, 18, 36, 0.96));
+  box-shadow:
+    0 18px 45px rgba(0, 0, 0, 0.30),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.bt-dashboard-ops-strip {
+  height: 3px;
+  background: linear-gradient(90deg, #A78BFA 0%, #38BDF8 52%, #14B8A6 100%);
+  box-shadow: 0 0 24px rgba(167, 139, 250, 0.16);
+}
+
+.bt-dashboard-ops-header {
+  border-bottom: 1px solid rgba(167, 139, 250, 0.16);
+  padding: 24px 24px 18px;
+  background:
+    linear-gradient(90deg, rgba(124, 58, 237, 0.12), transparent 42%),
+    rgba(17, 24, 39, 0.54);
+}
+
+.bt-calendar-filter-row {
+  padding: 10px 24px 0;
+}
+
+.bt-calendar-shell {
+  border: 1px solid rgba(167, 139, 250, 0.18);
+  background:
+    linear-gradient(180deg, rgba(21, 20, 45, 0.96), rgba(8, 10, 24, 0.98));
+}
+
+.bt-calendar-toolbar {
+  box-shadow:
+    inset 0 -1px 0 rgba(148, 163, 184, 0.12),
+    0 10px 26px rgba(2, 6, 23, 0.18);
+}
+
+.bt-calendar-preview {
+  background:
+    radial-gradient(110% 105% at 0% 0%, rgba(124, 58, 237, 0.10), transparent 42%),
+    linear-gradient(180deg, rgba(13, 13, 32, 0.96), rgba(6, 8, 18, 0.98));
+}
+
+.bt-calendar-day-card,
+.bt-calendar-preview-list,
+.bt-calendar-day-agenda,
+.bt-calendar-agenda-group,
+.bt-calendar-empty-state {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 12px 28px rgba(2, 6, 23, 0.18);
+}
+
+.bt-calendar-day-card {
+  background:
+    linear-gradient(135deg, rgba(67, 56, 202, 0.34), rgba(13, 18, 36, 0.70));
+}
+
+.bt-calendar-preview-list,
+.bt-calendar-day-agenda {
+  background: rgba(11, 10, 28, 0.34);
+}
+
+.bt-calendar-agenda-group {
+  background:
+    linear-gradient(90deg, rgba(30, 27, 75, 0.42), rgba(15, 23, 42, 0.28));
+}
+
+.bt-calendar-task-card,
+.bt-calendar-preview-task,
+.bt-calendar-month-pill {
+  border-color: rgba(148, 163, 184, 0.10) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.055),
+    0 8px 18px rgba(2, 6, 23, 0.18);
+}
+
+.bt-calendar-task-card:hover,
+.bt-calendar-preview-task:hover,
+.bt-calendar-month-pill:hover {
+  border-color: rgba(125, 211, 252, 0.20) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.075),
+    0 12px 24px rgba(2, 6, 23, 0.22);
+}
+
+.bt-dashboard-ops-stats {
+  padding: 16px 20px 0;
+}
+
+.bt-dashboard-ops-stat {
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 10px 24px rgba(2, 6, 23, 0.24);
+}
+
+.bt-dashboard-ops-stat--blue {
+  border-color: rgba(147, 197, 253, 0.58);
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.98), rgba(30, 64, 175, 0.30));
+}
+
+.bt-dashboard-ops-stat--amber {
+  border-color: rgba(251, 191, 36, 0.62);
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.96), rgba(217, 119, 6, 0.34));
+}
+
+.bt-dashboard-ops-list {
+  padding: 16px 20px 20px;
+}
+
+.bt-dashboard-ops-event {
+  position: relative;
+  overflow: hidden;
+}
+
+.bt-dashboard-ops-event::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-left: 3px solid currentColor;
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.bt-dashboard-ops-event:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 18px 42px rgba(2, 6, 23, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.09) !important;
+}
+
+.bt-dashboard-ops-event--expanded {
+  align-items: start;
+  background:
+    radial-gradient(95% 120% at 10% 0%, rgba(59, 130, 246, 0.22), transparent 42%),
+    radial-gradient(80% 120% at 92% 0%, rgba(245, 158, 11, 0.20), transparent 44%),
+    linear-gradient(135deg, rgba(15, 23, 42, 0.98), rgba(12, 17, 24, 0.96)) !important;
+}
+
+.bt-dashboard-note-button {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  min-height: 32px;
+  min-width: 116px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  overflow: hidden;
+  border: 1px solid rgba(253, 224, 71, 0.94);
+  border-radius: 9px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.28), transparent 45%),
+    linear-gradient(135deg, #FDE68A 0%, #F59E0B 45%, #B45309 100%);
+  color: #111827;
+  padding: 0 13px;
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  box-shadow:
+    0 11px 24px rgba(180, 83, 9, 0.28),
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.44),
+    inset 0 -1px 0 rgba(120, 53, 15, 0.36);
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    filter 160ms ease;
+}
+
+.bt-dashboard-note-button::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  z-index: -1;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  pointer-events: none;
+}
+
+.bt-dashboard-note-button::after {
+  content: "";
+  position: absolute;
+  inset: -42% auto auto -20%;
+  width: 64%;
+  height: 180%;
+  transform: rotate(22deg);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.36), transparent);
+  opacity: 0.42;
+  pointer-events: none;
+}
+
+.bt-dashboard-note-button svg {
+  flex: 0 0 auto;
+  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.34));
+}
+
+.bt-dashboard-note-button:hover {
+  transform: translateY(-1px);
+  border-color: #FEF3C7;
+  filter: saturate(1.08);
+  box-shadow:
+    0 14px 30px rgba(245, 158, 11, 0.36),
+    0 0 0 1px rgba(253, 224, 71, 0.24),
+    0 0 22px rgba(245, 158, 11, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.52),
+    inset 0 -1px 0 rgba(120, 53, 15, 0.36);
+}
+
+.bt-dashboard-note-button:active {
+  transform: translateY(0);
+  box-shadow:
+    0 7px 16px rgba(180, 83, 9, 0.24),
+    inset 0 1px 5px rgba(120, 53, 15, 0.24);
+}
+
+.bt-dashboard-note-button:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px rgba(15, 23, 42, 0.95),
+    0 0 0 4px rgba(253, 224, 71, 0.86),
+    0 14px 30px rgba(245, 158, 11, 0.34);
+}
+
+.bt-dashboard-note-button--active {
+  border-color: rgba(251, 191, 36, 1);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.26), transparent 46%),
+    linear-gradient(135deg, #FBBF24 0%, #D97706 48%, #92400E 100%);
+}
+
+.bt-dashboard-ops-event-detail {
+  border-color: rgba(148, 163, 184, 0.36);
+  background:
+    linear-gradient(90deg, rgba(96, 165, 250, 0.18) 0 3px, transparent 3px),
+    radial-gradient(120% 140% at 0% 0%, rgba(14, 165, 233, 0.16), transparent 42%),
+    linear-gradient(135deg, rgba(2, 6, 23, 0.72), rgba(15, 23, 42, 0.82));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 10px 22px rgba(2, 6, 23, 0.22);
+}
+
+.bt-dashboard-ops-detail-cell {
+  display: grid;
+  gap: 3px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.62);
+  padding: 8px 10px;
+  min-width: 0;
+}
+
+.bt-dashboard-ops-detail-cell span {
+  color: #93A4B8;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.bt-dashboard-ops-detail-cell strong {
+  color: #F8FAFC;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.4;
+}
+
+.bt-dashboard-ops-event-toggle {
+  align-self: stretch;
+}
+
+/* Operations Calendar redesign: raised graphite shell with readable CRM surfaces. */
+.bt-dashboard-ops-panel {
+  border: 2px solid #64748B !important;
+  border-radius: 18px !important;
+  background:
+    radial-gradient(120% 96% at 0% 0%, rgba(96, 165, 250, 0.20), rgba(96, 165, 250, 0) 44%),
+    radial-gradient(105% 95% at 100% 0%, rgba(45, 212, 191, 0.16), rgba(45, 212, 191, 0) 46%),
+    linear-gradient(135deg, #333A42 0%, #252D36 50%, #193641 100%) !important;
+  box-shadow:
+    0 34px 72px rgba(2, 6, 23, 0.56),
+    0 14px 30px rgba(0, 0, 0, 0.36),
+    0 4px 0 rgba(15, 23, 42, 0.72),
+    0 0 0 1px rgba(255, 255, 255, 0.22),
+    inset 0 2px 0 rgba(255, 255, 255, 0.30),
+    inset 0 -7px 0 rgba(0, 0, 0, 0.28),
+    inset 2px 0 0 rgba(255, 255, 255, 0.12),
+    inset -2px 0 0 rgba(15, 23, 42, 0.42) !important;
+}
+
+.bt-dashboard-ops-strip {
+  height: 3px !important;
+  background: linear-gradient(90deg, #FBBF24 0%, #38BDF8 48%, #14B8A6 100%) !important;
+  box-shadow: 0 0 18px rgba(56, 189, 248, 0.26) !important;
+}
+
+.bt-dashboard-ops-header {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.44) !important;
+  background:
+    linear-gradient(120deg, rgba(55, 65, 81, 0.96), rgba(31, 41, 55, 0.94) 54%, rgba(8, 47, 73, 0.88)) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.30) !important;
+}
+
+.bt-calendar-filter-row {
+  padding: 10px 24px 0 !important;
+}
+
+.bt-dashboard-ops-panel .bt-section-kicker {
+  color: #FBBF24 !important;
+}
+
+.bt-calendar-summary-chip {
+  background:
+    radial-gradient(95% 120% at 0% 0%, rgba(14, 165, 233, 0.12), rgba(14, 165, 233, 0) 48%),
+    linear-gradient(145deg, #0B2A3C 0%, #061C2E 100%) !important;
+  border-color: #26485E !important;
+  color: #EAF2FF !important;
+  box-shadow:
+    0 18px 34px rgba(2, 6, 23, 0.40),
+    0 3px 0 rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.13) !important;
+}
+
+.bt-calendar-summary-chip--blue {
+  border-color: #2563EB !important;
+  color: #EAF2FF !important;
+}
+
+.bt-calendar-summary-chip--cyan {
+  border-color: #06B6D4 !important;
+  color: #EAF2FF !important;
+}
+
+.bt-calendar-summary-chip--red {
+  border-color: #EF4444 !important;
+  color: #FFF1F2 !important;
+}
+
+.bt-calendar-summary-chip--amber {
+  border-color: #FBBF24 !important;
+  color: #FFFBEB !important;
+}
+
+.bt-calendar-summary-chip--green {
+  border-color: #22C55E !important;
+  color: #ECFDF5 !important;
+}
+
+.bt-calendar-preview,
+.bt-calendar-day-card,
+.bt-calendar-preview-list,
+.bt-calendar-day-agenda,
+.bt-calendar-agenda-group,
+.bt-calendar-empty-state {
+  box-shadow:
+    0 16px 32px rgba(2, 6, 23, 0.34),
+    0 3px 0 rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
+}
+
+.bt-calendar-shell {
+  border: 2px solid #4F6F8F !important;
+  background:
+    radial-gradient(115% 100% at 0% 0%, rgba(56, 189, 248, 0.13), rgba(56, 189, 248, 0) 48%),
+    linear-gradient(180deg, #08283B 0%, #061A2B 100%) !important;
+  box-shadow:
+    0 26px 56px rgba(2, 6, 23, 0.48),
+    0 5px 0 rgba(0, 0, 0, 0.32),
+    0 0 0 1px rgba(255, 255, 255, 0.16),
+    inset 0 2px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -5px 0 rgba(0, 0, 0, 0.22) !important;
+}
+
+.bt-calendar-toolbar {
+  border-bottom-color: rgba(148, 163, 184, 0.32) !important;
+  background:
+    linear-gradient(180deg, rgba(15, 42, 62, 0.96), rgba(6, 26, 43, 0.96)) !important;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.16),
+    0 12px 24px rgba(2, 6, 23, 0.28),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.30) !important;
+}
+
+.bt-calendar-event-card {
+  background: #FFFFFF !important;
+  border-color: #E2E8F0 !important;
+  color: #0F172A !important;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08) !important;
+}
+
+.bt-calendar-event-card:hover,
+.bt-calendar-event-card--open {
+  border-color: #93C5FD !important;
+  box-shadow: 0 12px 26px rgba(37, 99, 235, 0.14) !important;
+}
+
+.bt-calendar-event-card--priority {
+  border-color: #FCA5A5 !important;
+}
+
+.bt-calendar-event-card--completed {
+  border-color: #86EFAC !important;
+  background: #F0FDF4 !important;
+}
+
+.bt-calendar-event-rail {
+  background: #2563EB !important;
+}
+
+.bt-calendar-event-rail--priority {
+  background: #DC2626 !important;
+}
+
+.bt-calendar-event-rail--completed {
+  background: #16A34A !important;
+}
+
+.bt-calendar-event-rail--maintenance {
+  background: #F59E0B !important;
+}
+
+.bt-calendar-event-rail--inspection {
+  background: #7C3AED !important;
+}
+
+.bt-calendar-event-rail--note {
+  background: #0891B2 !important;
+}
+
+.bt-calendar-badge,
+.bt-calendar-time-badge {
+  border: 1px solid #CBD5E1;
+  background: #F8FAFC;
+  color: #334155;
+}
+
+.bt-calendar-badge--task,
+.bt-calendar-badge--other {
+  border-color: #BFDBFE;
+  background: #EFF6FF;
+  color: #1D4ED8;
+}
+
+.bt-calendar-badge--maintenance {
+  border-color: #FDE68A;
+  background: #FFFBEB;
+  color: #92400E;
+}
+
+.bt-calendar-badge--inspection {
+  border-color: #DDD6FE;
+  background: #F5F3FF;
+  color: #5B21B6;
+}
+
+.bt-calendar-badge--note,
+.bt-calendar-badge--reminder {
+  border-color: #A5F3FC;
+  background: #ECFEFF;
+  color: #155E75;
+}
+
+.bt-calendar-badge--priority {
+  border-color: #FECACA;
+  background: #FEF2F2;
+  color: #B91C1C;
+}
+
+.bt-calendar-badge--completed {
+  border-color: #BBF7D0;
+  background: #F0FDF4;
+  color: #15803D;
+}
+
+.bt-calendar-badge--neutral {
+  border-color: #CBD5E1;
+  background: #F8FAFC;
+  color: #475569;
+}
+
+.bt-calendar-time-badge {
+  border-color: #E2E8F0;
+  background: #F1F5F9;
+  color: #0F172A;
+}
+
+.bt-directory-page {
+  min-height: 100%;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.016) 1px, transparent 1px),
+    radial-gradient(120% 105% at 8% 0%, rgba(245, 158, 11, 0.20), transparent 42%),
+    radial-gradient(105% 90% at 92% 0%, rgba(14, 165, 233, 0.18), transparent 42%),
+    linear-gradient(135deg, #080A0D 0%, #0D1218 48%, #0F1115 100%) !important;
+  background-size: 22px 22px, 22px 22px, auto, auto, auto !important;
+  color: #F8EFE4;
+}
+
+.bt-directory-hero {
+  overflow: hidden;
+  border: 1px solid rgba(231, 139, 74, 0.46);
+  border-radius: 6px;
+  background:
+    linear-gradient(90deg, rgba(231, 139, 74, 0.34) 0 4px, transparent 4px),
+    radial-gradient(110% 115% at 9% 0%, rgba(245, 158, 11, 0.30), transparent 42%),
+    radial-gradient(100% 100% at 94% 0%, rgba(20, 184, 166, 0.22), transparent 38%),
+    linear-gradient(135deg, rgba(17, 24, 39, 0.98), rgba(12, 17, 23, 0.96));
+  padding: 18px 20px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 20px 46px rgba(2, 6, 23, 0.34);
+}
+
+.bt-suppliers-page .bt-directory-hero {
+  border-color: rgba(96, 165, 250, 0.50);
+  background:
+    linear-gradient(90deg, rgba(96, 165, 250, 0.42) 0 4px, transparent 4px),
+    radial-gradient(110% 115% at 9% 0%, rgba(37, 99, 235, 0.28), transparent 42%),
+    radial-gradient(100% 100% at 94% 0%, rgba(245, 158, 11, 0.20), transparent 38%),
+    linear-gradient(135deg, rgba(15, 23, 42, 0.98), rgba(10, 16, 24, 0.96));
+}
+
+.bt-directory-kicker {
+  margin: 0 0 4px;
+  color: #FDBA74;
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.bt-suppliers-page .bt-directory-kicker {
+  color: #93C5FD;
+}
+
+.bt-directory-title-block h1 {
+  color: #FFF7ED !important;
+}
+
+.bt-directory-title-block p:not(.bt-directory-kicker) {
+  color: #C8D2DE !important;
+  font-weight: 800;
+}
+
+.bt-directory-actions {
+  align-items: stretch;
+}
+
+.bt-directory-primary-action {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgba(251, 146, 60, 0.72);
+  border-radius: 6px;
+  background:
+    linear-gradient(180deg, rgba(251, 146, 60, 0.34), rgba(251, 146, 60, 0.14)),
+    #19110B;
+  padding: 0 16px;
+  color: #FFE8D1;
+  font-size: 13px;
+  font-weight: 950;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.10),
+    0 12px 24px rgba(2, 6, 23, 0.28);
+  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.bt-directory-primary-action:hover {
+  border-color: #FDBA74;
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 18px 32px rgba(2, 6, 23, 0.34);
+}
+
+.bt-suppliers-page .bt-directory-primary-action {
+  border-color: rgba(96, 165, 250, 0.72);
+  background:
+    linear-gradient(180deg, rgba(37, 99, 235, 0.40), rgba(37, 99, 235, 0.18)),
+    #0B1526;
+  color: #DBEAFE;
+}
+
+.bt-suppliers-page .bt-directory-primary-action:hover {
+  border-color: #93C5FD;
+}
+
+.bt-directory-search,
+.bt-directory-field {
+  border-color: rgba(148, 163, 184, 0.38) !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.018)),
+    #090D12 !important;
+  color: #FFF7ED !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 10px 22px rgba(2, 6, 23, 0.22) !important;
+}
+
+.bt-directory-search input,
+.bt-directory-field,
+.bt-directory-filter-panel input,
+.bt-directory-filter-panel select {
+  color: #FFF7ED !important;
+  caret-color: #FDBA74;
+}
+
+.bt-directory-search input::placeholder,
+.bt-directory-field::placeholder,
+.bt-directory-filter-panel input::placeholder {
+  color: #91A0B3 !important;
+}
+
+.bt-directory-filter-panel {
+  overflow: hidden;
+  border: 1px solid rgba(251, 146, 60, 0.48) !important;
+  border-radius: 6px !important;
+  background:
+    linear-gradient(90deg, rgba(251, 146, 60, 0.30) 0 3px, transparent 3px),
+    radial-gradient(120% 100% at 8% 0%, rgba(251, 146, 60, 0.18), transparent 42%),
+    radial-gradient(100% 90% at 92% 0%, rgba(59, 130, 246, 0.16), transparent 40%),
+    linear-gradient(135deg, rgba(14, 18, 23, 0.98), rgba(9, 13, 18, 0.96)) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 18px 42px rgba(2, 6, 23, 0.28) !important;
+}
+
+.bt-directory-filter-panel p,
+.bt-directory-filter-panel label {
+  color: #F8EFE4 !important;
+}
+
+.bt-directory-filter-panel .border-t {
+  border-color: rgba(148, 163, 184, 0.28) !important;
+}
+
+.bt-directory-filter-panel-3d {
+  position: relative;
+  overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, 0.18) !important;
+  border-radius: 8px !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.018)),
+    radial-gradient(115% 120% at 0% 0%, rgba(251, 146, 60, 0.20), transparent 44%),
+    radial-gradient(110% 110% at 100% 10%, rgba(20, 184, 166, 0.15), transparent 40%),
+    linear-gradient(135deg, #262B31 0%, #151A20 48%, #090C10 100%) !important;
+  outline: 1px solid rgba(251, 146, 60, 0.62);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(0, 0, 0, 0.80),
+    0 16px 0 rgba(0, 0, 0, 0.13),
+    0 24px 46px rgba(0, 0, 0, 0.42) !important;
+}
+
+.bt-directory-filter-panel-3d::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  border-top: 1px solid rgba(255, 255, 255, 0.22);
+  border-left: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    inset 0 0 0 1px rgba(251, 146, 60, 0.16),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.55);
+}
+
+.bt-directory-filter-title-row {
+  position: relative;
+  z-index: 1;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.10);
+  padding-bottom: 10px;
+  margin-bottom: 14px !important;
+}
+
+.bt-directory-filter-title-row svg {
+  color: #FFFFFF !important;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.75));
+}
+
+.bt-directory-filter-title-row p,
+.bt-directory-filter-panel-3d label,
+.bt-directory-filter-label {
+  color: #FFFFFF !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+}
+
+.bt-directory-filter-grid {
+  position: relative;
+  z-index: 1;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)) !important;
+}
+
+.bt-directory-filter-field,
+.bt-directory-filter-panel-3d input,
+.bt-directory-filter-panel-3d select,
+.bt-directory-filter-search {
+  min-width: 0;
+  border: 2px solid rgba(226, 232, 240, 0.24) !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.025)),
+    linear-gradient(135deg, #2A3038 0%, #151A20 54%, #0A0D11 100%) !important;
+  color: #FFFFFF !important;
+  -webkit-text-fill-color: #FFFFFF;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.55),
+    0 1px 0 rgba(255, 255, 255, 0.06),
+    0 9px 18px rgba(0, 0, 0, 0.28) !important;
+}
+
+.bt-directory-filter-field:hover,
+.bt-directory-filter-panel-3d input:hover,
+.bt-directory-filter-panel-3d select:hover,
+.bt-directory-filter-search:hover {
+  border-color: rgba(251, 191, 36, 0.58) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.20),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(251, 146, 60, 0.20),
+    0 10px 22px rgba(0, 0, 0, 0.32) !important;
+}
+
+.bt-directory-filter-field:focus,
+.bt-directory-filter-panel-3d input:focus,
+.bt-directory-filter-panel-3d select:focus,
+.bt-directory-filter-search:focus-within {
+  border-color: rgba(103, 232, 249, 0.72) !important;
+  outline: 2px solid rgba(103, 232, 249, 0.20) !important;
+  outline-offset: 2px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.52),
+    0 0 0 1px rgba(103, 232, 249, 0.30),
+    0 12px 24px rgba(0, 0, 0, 0.34) !important;
+}
+
+.bt-directory-filter-field::placeholder,
+.bt-directory-filter-panel-3d input::placeholder,
+.bt-directory-filter-search input::placeholder {
+  color: #F8FAFC !important;
+  -webkit-text-fill-color: #F8FAFC;
+  opacity: 0.86;
+}
+
+.bt-directory-filter-field option,
+.bt-directory-filter-panel-3d select option {
+  background: #111827;
+  color: #FFFFFF;
+}
+
+.bt-directory-filter-panel-3d input[type="date"] {
+  color-scheme: dark !important;
+}
+
+.bt-directory-filter-panel-3d input[type="date"]::-webkit-datetime-edit,
+.bt-directory-filter-panel-3d input[type="date"]::-webkit-datetime-edit-fields-wrapper,
+.bt-directory-filter-panel-3d input[type="date"]::-webkit-datetime-edit-text,
+.bt-directory-filter-panel-3d input[type="date"]::-webkit-datetime-edit-month-field,
+.bt-directory-filter-panel-3d input[type="date"]::-webkit-datetime-edit-day-field,
+.bt-directory-filter-panel-3d input[type="date"]::-webkit-datetime-edit-year-field {
+  color: #FFFFFF !important;
+  -webkit-text-fill-color: #FFFFFF;
+}
+
+.bt-directory-filter-panel-3d input[type="date"]::-webkit-calendar-picker-indicator {
+  opacity: 1;
+  filter: invert(1) brightness(1.9) drop-shadow(0 1px 1px rgba(0, 0, 0, 0.75));
+}
+
+.bt-directory-filter-search-block {
+  position: relative;
+  z-index: 1;
+  border-top: 2px solid rgba(226, 232, 240, 0.18) !important;
+  box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.55);
+}
+
+.bt-directory-filter-search svg {
+  color: #FFFFFF !important;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.75));
+}
+
+.bt-directory-filter-search input {
+  color: #FFFFFF !important;
+  -webkit-text-fill-color: #FFFFFF;
+  caret-color: #67E8F9;
+}
+
+.bt-directory-list {
+  border: 1px solid rgba(148, 163, 184, 0.32) !important;
+  border-radius: 6px !important;
+  background:
+    radial-gradient(115% 95% at 12% 0%, rgba(59, 130, 246, 0.12), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.044), rgba(255, 255, 255, 0.015)),
+    rgba(8, 11, 15, 0.84) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 22px 54px rgba(2, 6, 23, 0.35) !important;
+}
+
+.bt-directory-list-header {
+  border-color: rgba(96, 165, 250, 0.30) !important;
+  background:
+    linear-gradient(90deg, rgba(96, 165, 250, 0.14), rgba(251, 146, 60, 0.10)),
+    #0D1218 !important;
+  color: #AFC8E8 !important;
+}
+
+.bt-directory-card {
+  border-color: rgba(71, 85, 105, 0.72) !important;
+  border-left-color: rgba(251, 146, 60, 0.78) !important;
+  background:
+    linear-gradient(90deg, rgba(251, 146, 60, 0.24), transparent 22%),
+    radial-gradient(120% 100% at 4% 0%, rgba(251, 146, 60, 0.10), transparent 38%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.050), rgba(255, 255, 255, 0.012)),
+    #101418 !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 10px 26px rgba(2, 6, 23, 0.24);
+}
+
+.bt-suppliers-page .bt-directory-card {
+  border-left-color: rgba(96, 165, 250, 0.82) !important;
+  background:
+    linear-gradient(90deg, rgba(37, 99, 235, 0.24), transparent 22%),
+    radial-gradient(120% 100% at 4% 0%, rgba(37, 99, 235, 0.12), transparent 38%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.050), rgba(255, 255, 255, 0.012)),
+    #101418 !important;
+}
+
+.bt-directory-card:hover {
+  border-color: rgba(251, 146, 60, 0.52) !important;
+  transform: translateY(-1px);
+}
+
+.bt-suppliers-page .bt-directory-card:hover {
+  border-color: rgba(96, 165, 250, 0.52) !important;
+}
+
+.bt-directory-card.is-expanded {
+  border-color: rgba(45, 212, 191, 0.56) !important;
+  border-left-color: #2DD4BF !important;
+  background:
+    linear-gradient(90deg, rgba(45, 212, 191, 0.24), transparent 24%),
+    radial-gradient(120% 100% at 8% 0%, rgba(45, 212, 191, 0.14), transparent 40%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.018)),
+    #0D1718 !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 18px 42px rgba(2, 6, 23, 0.34),
+    0 0 0 1px rgba(45, 212, 191, 0.16) !important;
+}
+
+.bt-directory-row {
+  min-height: 64px;
+  background: transparent !important;
+}
+
+.bt-directory-avatar {
+  border: 1px solid rgba(251, 146, 60, 0.38) !important;
+  background:
+    linear-gradient(135deg, rgba(251, 146, 60, 0.22), rgba(59, 130, 246, 0.16)),
+    #111827 !important;
+  color: #FFF7ED !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.bt-suppliers-page .bt-directory-avatar {
+  border-color: rgba(96, 165, 250, 0.44) !important;
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.28), rgba(20, 184, 166, 0.13)),
+    #111827 !important;
+}
+
+.bt-directory-card h2,
+.bt-directory-card p.text-sm,
+.bt-directory-card .text-gray-950,
+.bt-directory-card .text-gray-900,
+.bt-directory-card .text-slate-800,
+.bt-directory-card .text-slate-900 {
+  color: #FFF7ED !important;
+}
+
+.bt-directory-card .text-gray-700,
+.bt-directory-card .text-gray-600,
+.bt-directory-card .text-slate-700,
+.bt-directory-card .text-slate-600 {
+  color: #D7DEE8 !important;
+}
+
+.bt-directory-card .text-gray-500,
+.bt-directory-card .text-slate-500,
+.bt-directory-card .text-gray-400,
+.bt-directory-card .text-slate-400 {
+  color: #9BA9BA !important;
+}
+
+.bt-directory-card svg {
+  color: #AFC8E8;
+}
+
+.bt-directory-row-action {
+  color: #93C5FD !important;
+}
+
+.bt-directory-chip {
+  border-color: rgba(96, 165, 250, 0.42) !important;
+  background:
+    linear-gradient(180deg, rgba(37, 99, 235, 0.24), rgba(37, 99, 235, 0.08)),
+    #101827 !important;
+  color: #BFDBFE !important;
+}
+
+.bt-directory-chip-warning {
+  border-color: rgba(251, 191, 36, 0.45) !important;
+  background:
+    linear-gradient(180deg, rgba(251, 191, 36, 0.22), rgba(251, 191, 36, 0.08)),
+    #211708 !important;
+  color: #FDE68A !important;
+}
+
+.bt-directory-expanded {
+  border-color: rgba(148, 163, 184, 0.26) !important;
+  background:
+    radial-gradient(110% 92% at 12% 0%, rgba(20, 184, 166, 0.12), transparent 42%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.82), rgba(8, 12, 17, 0.92)) !important;
+}
+
+.bt-directory-info-panel {
+  border-color: rgba(148, 163, 184, 0.34) !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.060), rgba(255, 255, 255, 0.018)),
+    #0D1218 !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 10px 24px rgba(2, 6, 23, 0.24) !important;
+}
+
+.bt-invoice-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.bt-invoice-summary-card {
+  display: flex;
+  min-height: 210px;
+  cursor: pointer;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+  border: 1px solid #4C5967;
+  border-radius: 6px;
+  background:
+    linear-gradient(90deg, var(--summary-accent, rgba(231,139,74,0.28)) 0 4px, transparent 4px),
+    radial-gradient(120% 90% at 16% 0%, var(--summary-glow, rgba(59,130,246,0.16)), transparent 42%),
+    linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.018) 40%, rgba(0,0,0,0.24)),
+    #0D1116;
+  padding: 14px;
+  text-align: left;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.075),
+    0 16px 34px rgba(0,0,0,0.3);
+  transition: border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+}
+
+.bt-invoice-summary-card:hover,
+.bt-invoice-summary-card.is-active {
+  border-color: #E78B4A;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.1),
+    0 0 0 1px rgba(231,139,74,0.18),
+    0 18px 38px rgba(0,0,0,0.36);
+}
+
+.bt-invoice-summary-card:hover {
+  transform: translateY(-1px);
+}
+
+.bt-invoice-summary-card--blue {
+  --summary-accent: rgba(59,130,246,0.42);
+  --summary-glow: rgba(59,130,246,0.2);
+}
+
+.bt-invoice-summary-card--green {
+  --summary-accent: rgba(16,185,129,0.42);
+  --summary-glow: rgba(16,185,129,0.18);
+}
+
+.bt-invoice-summary-card--purple {
+  --summary-accent: rgba(139,92,246,0.38);
+  --summary-glow: rgba(139,92,246,0.16);
+}
+
+.bt-invoice-summary-card--orange {
+  --summary-accent: rgba(231,139,74,0.46);
+  --summary-glow: rgba(231,139,74,0.18);
+}
+
+.bt-invoice-summary-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bt-invoice-summary-label {
+  color: #FFD0A8;
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.bt-invoice-summary-value {
+  margin-top: 8px;
+  color: #FFF4E8;
+  font-size: 27px;
+  font-weight: 950;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.bt-invoice-summary-sub {
+  margin-top: 6px;
+  color: #C4CAD2;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.bt-invoice-summary-icon {
+  display: flex;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 6px;
+  background: rgba(7, 10, 14, 0.72);
+  color: #FFD0A8;
+}
+
+.bt-invoice-summary-activity {
+  display: grid;
+  gap: 7px;
+  margin-top: 14px;
+}
+
+.bt-invoice-summary-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  border: 1px solid #36414E;
+  border-radius: 5px;
+  background: rgba(5, 8, 12, 0.48);
+  padding: 7px 8px;
+}
+
+.bt-invoice-summary-contractor,
+.bt-invoice-summary-amount {
+  color: #F7E9D8;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.bt-invoice-summary-contractor,
+.bt-invoice-summary-project {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bt-invoice-summary-project {
+  grid-column: 1 / -1;
+  color: #AEB8C5;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.bt-invoice-summary-empty {
+  border: 1px dashed #394452;
+  border-radius: 5px;
+  padding: 14px;
+  color: #AEB8C5;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.bt-invoice-summary-footer {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 5px;
+  margin-top: 14px;
+  border: 1px solid #36414E;
+  border-radius: 999px;
+  background: rgba(5, 8, 12, 0.52);
+  padding: 5px 8px;
+  color: #D7DEE8;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.bt-invoice-summary-drawer {
+  overflow: hidden;
+  border: 1px solid #4B5563;
+  border-radius: 6px;
+  background:
+    radial-gradient(120% 90% at 10% 0%, rgba(231,139,74,0.12), transparent 42%),
+    linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.018)),
+    #0E1012;
+}
+
+.bt-invoice-summary-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #3C4652;
+  padding: 13px 15px;
+}
+
+.bt-invoice-summary-drawer-header p {
+  color: #FFD0A8;
+  font-size: 13px;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.bt-invoice-summary-drawer-header span {
+  color: #C4CAD2;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.bt-invoice-summary-drawer-header button {
+  min-height: 34px;
+  border: 1px solid #4B5563;
+  border-radius: 6px;
+  background: #111315;
+  padding: 7px 10px;
+  color: #F0E8DD;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.bt-invoice-summary-drawer-list {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.bt-invoice-summary-drawer-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 12px;
+  border: 1px solid #36414E;
+  border-radius: 5px;
+  background: rgba(5, 8, 12, 0.5);
+  padding: 9px 10px;
+}
+
+.bt-invoice-summary-drawer-row span,
+.bt-invoice-summary-drawer-row strong {
+  color: #FFF4E8;
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.bt-invoice-summary-drawer-row em {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  color: #B9C1CB;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bt-invoice-summary-drawer-empty {
+  padding: 18px;
+  color: #C4CAD2;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.bt-invoice-email-queue {
+  display: grid;
+  gap: 18px;
+  margin: 18px 14px 24px;
+}
+
+.bt-invoice-intake-card {
+  --bt-email-accent: 96, 165, 250;
+  --bt-email-accent-strong: 147, 197, 253;
+  --bt-email-warm: 231, 139, 74;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(var(--bt-email-accent-strong), 0.82);
+  border-left: 6px solid rgb(var(--bt-email-accent));
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(var(--bt-email-accent), 0.28), transparent 22%),
+    radial-gradient(120% 110% at 9% 0%, rgba(var(--bt-email-accent), 0.34), transparent 44%),
+    radial-gradient(95% 80% at 100% 0%, rgba(var(--bt-email-warm), 0.18), transparent 48%),
+    linear-gradient(180deg, #223041 0%, #151D28 48%, #090D13 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.18),
+    0 0 0 1px rgba(var(--bt-email-accent), 0.2),
+    0 18px 34px rgba(0,0,0,0.48);
+}
+
+.bt-invoice-intake-card:nth-child(3n + 2) {
+  --bt-email-accent: 20, 184, 166;
+  --bt-email-accent-strong: 94, 234, 212;
+  --bt-email-warm: 96, 165, 250;
+}
+
+.bt-invoice-intake-card:nth-child(3n + 3) {
+  --bt-email-accent: 245, 158, 11;
+  --bt-email-accent-strong: 252, 211, 77;
+  --bt-email-warm: 239, 68, 68;
+}
+
+.bt-invoice-intake-card::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 5px;
+  background: linear-gradient(90deg, rgb(var(--bt-email-accent)), rgba(var(--bt-email-warm), 0.98), rgba(var(--bt-email-accent), 0.16));
+}
+
+.bt-invoice-intake-card.is-expanded {
+  border-color: rgba(var(--bt-email-accent-strong), 0.86);
+  background:
+    radial-gradient(120% 100% at 8% 0%, rgba(var(--bt-email-accent), 0.3), transparent 44%),
+    radial-gradient(110% 90% at 96% 0%, rgba(var(--bt-email-warm), 0.18), transparent 48%),
+    linear-gradient(180deg, #1E2631 0%, #121820 44%, #080B0F 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.14),
+    0 0 0 1px rgba(var(--bt-email-accent), 0.2),
+    0 24px 46px rgba(0,0,0,0.46);
+}
+
+.bt-invoice-email-row {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: minmax(170px, 0.76fr) minmax(250px, 1.12fr) minmax(340px, 1.56fr) minmax(170px, 0.72fr) minmax(130px, 0.52fr) minmax(160px, 0.58fr) minmax(110px, auto);
+  gap: 14px;
+  align-items: center;
+  min-height: 98px;
+  padding: 18px 16px 18px 20px;
+  background:
+    linear-gradient(90deg, rgba(var(--bt-email-accent), 0.22), transparent 32%),
+    linear-gradient(180deg, rgba(255,255,255,0.13), rgba(255,255,255,0.034)),
+    rgba(12, 19, 29, 0.82);
+  box-shadow: inset 0 -1px 0 rgba(255,255,255,0.08);
+}
+
+.bt-invoice-email-row:hover {
+  background:
+    linear-gradient(90deg, rgba(var(--bt-email-accent), 0.3), transparent 38%),
+    linear-gradient(180deg, rgba(255,255,255,0.16), rgba(255,255,255,0.04)),
+    rgba(17, 27, 40, 0.95);
+}
+
+.bt-invoice-email-row.is-expanded {
+  border-bottom: 1px solid rgba(var(--bt-email-accent-strong), 0.55);
+  background:
+    linear-gradient(90deg, rgba(var(--bt-email-accent), 0.2), transparent 36%),
+    linear-gradient(180deg, rgba(255,255,255,0.11), rgba(255,255,255,0.028)),
+    rgba(14, 20, 28, 0.88);
+}
+
+.bt-invoice-email-row-status {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  align-self: stretch;
+  border: 1px solid rgba(var(--bt-email-accent-strong), 0.32);
+  border-radius: 7px;
+  background:
+    linear-gradient(180deg, rgba(var(--bt-email-accent), 0.14), rgba(2, 6, 12, 0.14)),
+    rgba(4, 8, 14, 0.22);
+  padding: 10px;
+}
+
+.bt-invoice-email-row-status .inline-flex,
+.bt-invoice-email-row-status .bt-invoice-soft-chip {
+  min-height: 30px;
+  align-items: center;
+  border-color: rgba(var(--bt-email-accent-strong), 0.64) !important;
+  background:
+    linear-gradient(180deg, rgba(var(--bt-email-accent), 0.42), rgba(var(--bt-email-accent), 0.16)),
+    #102033 !important;
+  color: #F7FBFF !important;
+  font-size: 12px !important;
+  line-height: 1.1;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.16);
+}
+
+.bt-invoice-email-row-cell {
+  display: grid;
+  min-width: 0;
+  min-height: 62px;
+  align-content: center;
+  gap: 5px;
+  border: 1px solid rgba(191, 219, 254, 0.22);
+  border-radius: 7px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.085), rgba(255,255,255,0.02)),
+    rgba(3, 7, 13, 0.28);
+  padding: 9px 11px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.07);
+}
+
+.bt-invoice-email-row-cell span {
+  overflow: hidden;
+  color: #FFD29A;
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.bt-invoice-email-row-cell strong {
+  overflow: hidden;
+  color: #FFFFFF;
+  font-size: 15px;
+  font-weight: 950;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bt-invoice-email-row-subject strong {
+  color: #FFFFFF;
+  font-size: 15px;
+}
+
+.bt-invoice-email-row-cell small {
+  overflow: hidden;
+  color: #D7E7FB;
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bt-invoice-expand-button {
+  display: inline-flex;
+  min-height: 56px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid rgba(191, 219, 254, 0.82);
+  border-radius: 7px;
+  background:
+    linear-gradient(180deg, rgba(59,130,246,0.42), rgba(29,78,216,0.22)),
+    #132A45;
+  padding: 12px 15px;
+  color: #FFFFFF;
+  font-size: 13px;
+  font-weight: 950;
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.16),
+    0 8px 18px rgba(0,0,0,0.2);
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease, transform 120ms ease;
+}
+
+.bt-invoice-expand-button:hover {
+  border-color: #FFFFFF;
+  background:
+    linear-gradient(180deg, rgba(96,165,250,0.58), rgba(37,99,235,0.3)),
+    #16395E;
+  color: #FFFFFF;
+  transform: translateY(-1px);
+}
+
+.bt-invoice-expand-button svg {
+  flex: 0 0 auto;
+  transition: transform 140ms ease;
+}
+
+.bt-invoice-expand-button.is-expanded svg {
+  transform: rotate(90deg);
+}
+
+.bt-invoice-intake-detail {
+  position: relative;
+  z-index: 2;
+  border-top: 1px solid rgba(var(--bt-email-accent-strong), 0.66);
+  background:
+    radial-gradient(120% 95% at 92% 0%, rgba(var(--bt-email-warm), 0.13), transparent 43%),
+    linear-gradient(180deg, rgba(var(--bt-email-accent), 0.1), rgba(0,0,0,0.28));
+  padding: 18px;
+}
+
+.bt-approved-pay-panel {
+  overflow: hidden;
+  border: 1px solid #4B5563;
+  border-radius: 6px;
+  background:
+    radial-gradient(120% 90% at 12% 0%, rgba(16, 185, 129, 0.12), transparent 40%),
+    radial-gradient(120% 90% at 92% 0%, rgba(231, 139, 74, 0.14), transparent 42%),
+    linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.018) 40%, rgba(0,0,0,0.2)),
+    #0E1012;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.07), 0 16px 34px rgba(0,0,0,0.28);
+}
+
+.bt-approved-pay-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #3C4652;
+  padding: 16px;
+}
+
+.bt-approved-pay-total {
+  min-width: 190px;
+  border: 1px solid rgba(16, 185, 129, 0.42);
+  border-radius: 6px;
+  background: rgba(6, 78, 59, 0.22);
+  padding: 10px 12px;
+  text-align: right;
+}
+
+.bt-approved-pay-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: stretch;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.bt-approved-pay-notify-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 250px;
+  border: 1px solid rgba(251, 191, 36, 0.62);
+  border-radius: 7px;
+  background:
+    linear-gradient(145deg, rgba(251, 146, 60, 0.30), rgba(8, 13, 22, 0.94)),
+    #0A0F16;
+  padding: 10px 14px;
+  color: #FFF7ED;
+  font-size: 12px;
+  font-weight: 950;
+  box-shadow:
+    0 14px 28px rgba(2, 6, 23, 0.30),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.bt-approved-pay-notify-button:hover:not(:disabled) {
+  border-color: rgba(253, 186, 116, 0.92);
+  background:
+    linear-gradient(145deg, rgba(251, 146, 60, 0.42), rgba(10, 14, 18, 0.96)),
+    #100F0B;
+}
+
+.bt-approved-pay-notify-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
+.bt-approved-pay-total span {
+  display: block;
+  color: #A7F3D0;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.bt-approved-pay-total strong {
+  display: block;
+  margin-top: 4px;
+  color: #D1FAE5;
+  font-size: 22px;
+  font-weight: 950;
+}
+
+.bt-approved-pay-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 14px 14px;
+}
+
+.bt-approved-pay-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px 14px;
+  min-height: 52px;
+  border: 1px solid #46515F;
+  border-radius: 5px;
+  background:
+    linear-gradient(90deg, rgba(16,185,129,0.24) 0 3px, transparent 3px),
+    linear-gradient(180deg, #151A1F, #0B0E11);
+  padding: 8px 10px 8px 12px;
+}
+
+.bt-approved-pay-grid--paid {
+  padding-top: 8px;
+}
+
+.bt-approved-pay-card--paid {
+  border-color: rgba(34, 197, 94, 0.50);
+  background:
+    linear-gradient(90deg, rgba(34,197,94,0.36) 0 3px, transparent 3px),
+    linear-gradient(180deg, #132019, #0A0F0D);
+}
+
+.bt-approved-pay-card-top {
+  display: contents;
+}
+
+.bt-approved-pay-card-bottom {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  grid-column: 4;
+  grid-row: 1;
+  min-width: max-content;
+}
+
+.bt-approved-pay-card-top span {
+  grid-column: 1;
+  grid-row: 1;
+  border: 1px solid rgba(16, 185, 129, 0.42);
+  border-radius: 999px;
+  background: rgba(6, 78, 59, 0.22);
+  padding: 4px 7px;
+  color: #A7F3D0;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.bt-approved-pay-card-top strong {
+  grid-column: 3;
+  grid-row: 1;
+  color: #D1FAE5;
+  font-size: 15px;
+  font-weight: 950;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.bt-approved-pay-card--paid .bt-approved-pay-card-top span {
+  border-color: rgba(34, 197, 94, 0.54);
+  background: rgba(20, 83, 45, 0.30);
+  color: #BBF7D0;
+}
+
+.bt-approved-pay-card--paid .bt-approved-pay-card-top strong {
+  color: #DCFCE7;
+}
+
+.bt-approved-pay-card-body {
+  display: flex;
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 12px;
+  margin: 0;
+}
+
+.bt-approved-pay-contractor {
+  min-width: min(180px, 100%);
+  color: #FFF4E8;
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.bt-approved-pay-meta,
+.bt-approved-pay-project,
+.bt-approved-pay-card-bottom span {
+  margin-top: 0;
+  color: #B9C1CB;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.bt-approved-pay-card-bottom a {
+  flex: 0 0 auto;
+  color: #FFD0A8;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.bt-approved-pay-card-bottom button {
+  flex: 0 1 auto;
+  border: 1px solid rgba(148, 163, 184, 0.40);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.72);
+  padding: 5px 8px;
+  color: #CBD5E1;
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.bt-approved-pay-card-bottom button:hover:not(:disabled) {
+  border-color: rgba(253, 186, 116, 0.76);
+  color: #FFF7ED;
+}
+
+.bt-approved-pay-card-bottom button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.bt-qbo-paid-tile {
+  margin: 12px 14px 14px;
+  overflow: hidden;
+  border: 1px solid rgba(34, 197, 94, 0.40);
+  border-radius: 6px;
+  background:
+    radial-gradient(90% 120% at 12% 0%, rgba(34, 197, 94, 0.10), transparent 46%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.040), rgba(255, 255, 255, 0.010)),
+    rgba(5, 14, 10, 0.74);
+}
+
+.bt-qbo-paid-tile-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid rgba(34, 197, 94, 0.24);
+  padding: 10px 12px;
+}
+
+.bt-qbo-paid-tile-header span {
+  display: block;
+  color: #BBF7D0;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.bt-qbo-paid-tile-header strong {
+  display: block;
+  margin-top: 2px;
+  color: #F0FDF4;
+  font-size: 20px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.bt-qbo-paid-tile-header p {
+  margin: 0;
+  color: #A7F3D0;
+  font-size: 12px;
+  font-weight: 850;
+  text-align: right;
+}
+
+.bt-approved-pay-empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px;
+  border: 1px dashed #3C4652;
+  border-radius: 6px;
+  padding: 18px;
+  color: #C4CAD2;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+/* Invoice workspace depth and separation */
+.bt-invoices-light .max-w-7xl {
+  position: relative;
+}
+
+.bt-invoices-light .bt-invoice-filter-results-layout {
+  width: 100%;
+  max-width: none !important;
+}
+
+.bt-invoice-section {
+  position: relative;
+  isolation: isolate;
+  border-color: rgba(96, 165, 250, 0.52);
+  border-radius: 8px;
+  background:
+    radial-gradient(125% 100% at 8% 0%, rgba(37, 99, 235, 0.20), transparent 42%),
+    radial-gradient(110% 90% at 92% 0%, rgba(45, 212, 191, 0.11), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.070), rgba(255, 255, 255, 0.020) 44%, rgba(0, 0, 0, 0.32)),
+    #0A1018;
+  box-shadow:
+    0 26px 72px rgba(2, 6, 23, 0.48),
+    0 0 0 1px rgba(96, 165, 250, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.42);
+}
+
+.bt-invoice-section::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 4px;
+  z-index: 3;
+  background: linear-gradient(90deg, #60A5FA, #2563EB, #2DD4BF);
+  box-shadow: 0 0 26px rgba(96, 165, 250, 0.44);
+  pointer-events: none;
+}
+
+.bt-invoice-section::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  z-index: -1;
+  border-radius: 7px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.055), transparent 32%),
+    radial-gradient(75% 46% at 50% 0%, rgba(255, 255, 255, 0.06), transparent 66%);
+  pointer-events: none;
+}
+
+.bt-qbo-mirror-section {
+  border-color: rgba(96, 165, 250, 0.70);
+  background:
+    radial-gradient(120% 95% at 8% 0%, rgba(37, 99, 235, 0.30), transparent 42%),
+    radial-gradient(110% 88% at 92% 0%, rgba(20, 184, 166, 0.18), transparent 42%),
+    linear-gradient(135deg, rgba(15, 23, 42, 0.98), rgba(8, 13, 22, 0.96) 58%, rgba(6, 16, 26, 0.98));
+}
+
+.bt-qbo-mirror-section.is-filter-results .bt-qbo-table-shell {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.bt-qbo-mirror-section.is-filter-results .bt-qbo-filter-row {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.bt-invoice-section-header {
+  position: relative;
+  z-index: 2;
+  align-items: stretch;
+  border-bottom-color: rgba(148, 163, 184, 0.28);
+  background:
+    radial-gradient(90% 120% at 10% 0%, rgba(96, 165, 250, 0.16), transparent 48%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.020)),
+    rgba(8, 12, 18, 0.66);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.10),
+    0 12px 30px rgba(2, 6, 23, 0.20);
+}
+
+.bt-invoice-section-header > .flex:first-child,
+.bt-approved-pay-header > div:first-child {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid rgba(147, 197, 253, 0.34);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(96, 165, 250, 0.19), rgba(14, 20, 30, 0.92) 46%, rgba(11, 16, 24, 0.96)),
+    #0D1420;
+  padding: 12px 14px;
+  box-shadow:
+    0 16px 30px rgba(2, 6, 23, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.36);
+}
+
+.bt-invoice-section-header h2,
+.bt-approved-pay-header h2 {
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.42), 0 12px 24px rgba(0, 0, 0, 0.34);
+}
+
+.bt-invoice-icon {
+  width: 42px;
+  height: 42px;
+  border-color: rgba(147, 197, 253, 0.54);
+  background:
+    linear-gradient(145deg, rgba(96, 165, 250, 0.34), rgba(15, 23, 42, 0.92)) !important;
+  color: #BFDBFE !important;
+  box-shadow:
+    0 14px 24px rgba(2, 6, 23, 0.36),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -8px 16px rgba(0, 0, 0, 0.22);
+}
+
+.bt-invoice-filter,
+.bt-invoice-refresh {
+  border-color: rgba(148, 163, 184, 0.42);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.085), rgba(255, 255, 255, 0.020)),
+    #0A0F16;
+  box-shadow:
+    0 10px 20px rgba(2, 6, 23, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10);
+}
+
+.bt-qbo-status-row {
+  gap: 12px;
+  padding: 16px 16px 2px;
+}
+
+.bt-qbo-status-row div,
+.bt-qbo-status-row button {
+  position: relative;
+  overflow: hidden;
+  min-height: 62px;
+  border-color: rgba(96, 165, 250, 0.56);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(96, 165, 250, 0.18), rgba(14, 20, 30, 0.92) 46%, rgba(8, 13, 22, 0.98)),
+    #0B1220;
+  padding: 12px 14px;
+  box-shadow:
+    0 14px 28px rgba(2, 6, 23, 0.30),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.32);
+}
+
+.bt-qbo-status-row button {
+  cursor: pointer;
+  transition: border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+}
+
+.bt-qbo-status-row button:hover {
+  border-color: rgba(253, 186, 116, 0.78);
+  transform: translateY(-1px);
+}
+
+.bt-qbo-status-row button.is-active {
+  border-color: rgba(251, 146, 60, 0.88);
+  box-shadow:
+    0 16px 30px rgba(2, 6, 23, 0.38),
+    0 0 0 1px rgba(251, 146, 60, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.bt-qbo-status-row div::before,
+.bt-qbo-status-row button::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(147, 197, 253, 0.95), rgba(45, 212, 191, 0.70));
+  opacity: 0.85;
+}
+
+.bt-qbo-status-row strong {
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.42);
+}
+
+.bt-qbo-filter-row {
+  position: relative;
+  z-index: 2;
+  align-items: stretch;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(30, 41, 59, 0.86), rgba(8, 13, 22, 0.94)),
+    #0B1220;
+  padding: 10px;
+  box-shadow:
+    0 14px 28px rgba(2, 6, 23, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10);
+}
+
+.bt-qbo-status-filter-pills {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.bt-qbo-invoice-filter-panel {
+  display: grid;
+  flex: 1 1 640px;
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  align-items: end;
+  gap: 8px;
+  min-width: 300px;
+  border: 1px solid rgba(96, 165, 250, 0.24);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.060), rgba(255, 255, 255, 0.014)),
+    rgba(5, 10, 18, 0.72);
+  padding: 8px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.22);
+}
+
+.bt-qbo-invoice-filter-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.bt-qbo-invoice-filter-panel label > span {
+  color: #C7D2FE;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.bt-qbo-invoice-filter-panel select,
+.bt-qbo-invoice-filter-panel input {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid rgba(147, 197, 253, 0.72);
+  border-radius: 7px;
+  background:
+    linear-gradient(180deg, #F8FAFC, #E2E8F0);
+  color: #0F172A;
+  font-size: 12px;
+  font-weight: 850;
+  outline: none;
+  padding: 0 10px;
+  box-shadow:
+    0 8px 18px rgba(2, 6, 23, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.88);
+}
+
+.bt-qbo-invoice-filter-panel select:focus,
+.bt-qbo-invoice-filter-panel input:focus {
+  border-color: rgba(251, 146, 60, 0.90);
+  box-shadow:
+    0 0 0 2px rgba(251, 146, 60, 0.22),
+    0 8px 18px rgba(2, 6, 23, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.88);
+}
+
+.bt-qbo-invoice-filter-count,
+.bt-qbo-clear-invoice-filter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  border-radius: 999px;
+  padding: 0 12px;
+  font-size: 11px;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.bt-qbo-invoice-filter-count {
+  border: 1px solid rgba(148, 163, 184, 0.36);
+  background: rgba(15, 23, 42, 0.78);
+  color: #DBEAFE;
+}
+
+.bt-qbo-invoice-filter-count.is-active {
+  border-color: rgba(34, 197, 94, 0.50);
+  background:
+    linear-gradient(180deg, rgba(16, 185, 129, 0.18), rgba(6, 78, 59, 0.20)),
+    rgba(15, 23, 42, 0.78);
+  color: #BBF7D0;
+}
+
+.bt-qbo-clear-invoice-filter {
+  gap: 6px;
+  border: 1px solid rgba(251, 146, 60, 0.62);
+  background:
+    linear-gradient(180deg, rgba(251, 146, 60, 0.22), rgba(124, 45, 18, 0.28)),
+    rgba(15, 23, 42, 0.82);
+  color: #FED7AA;
+  cursor: pointer;
+  transition: transform 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.bt-qbo-clear-invoice-filter:hover {
+  border-color: rgba(253, 186, 116, 0.86);
+  color: #FFFFFF;
+  transform: translateY(-1px);
+}
+
+.bt-qbo-table-title span {
+  display: block;
+  color: #AFC8E8;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.bt-qbo-table-shell {
+  position: relative;
+  z-index: 2;
+  margin: 14px 16px 16px;
+  overflow: hidden;
+  border: 1px solid rgba(96, 165, 250, 0.46);
+  border-radius: 8px;
+  background:
+    radial-gradient(110% 90% at 8% 0%, rgba(96, 165, 250, 0.14), transparent 42%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(6, 10, 16, 0.98)),
+    #080D14;
+  box-shadow:
+    0 20px 44px rgba(2, 6, 23, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10);
+}
+
+.bt-qbo-table-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.24);
+  background:
+    linear-gradient(135deg, rgba(96, 165, 250, 0.14), rgba(20, 184, 166, 0.07)),
+    rgba(8, 13, 22, 0.78);
+  padding: 12px 14px;
+}
+
+.bt-qbo-table-title strong {
+  display: block;
+  margin-top: 3px;
+  color: #FFFFFF;
+  font-size: 16px;
+  font-weight: 950;
+}
+
+.bt-qbo-table-title p {
+  margin: 0;
+  color: #CBD5E1;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.bt-qbo-table-wrap {
+  overflow-x: auto;
+}
+
+.bt-qbo-bill-table {
+  width: 100%;
+  min-width: 1120px;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.bt-qbo-bill-table th {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.34);
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(8, 13, 22, 0.96));
+  padding: 10px 12px;
+  color: #BFDBFE;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.bt-qbo-bill-table td {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  padding: 10px 12px;
+  color: #E5E7EB;
+  font-size: 12px;
+  font-weight: 850;
+  vertical-align: middle;
+}
+
+.bt-qbo-bill-table tr {
+  background:
+    linear-gradient(90deg, rgba(96, 165, 250, 0.42) 0 3px, transparent 3px),
+    linear-gradient(135deg, rgba(15, 23, 42, 0.78), rgba(8, 13, 22, 0.88));
+}
+
+.bt-qbo-bill-table tr.needs-review {
+  background:
+    linear-gradient(90deg, rgba(251, 146, 60, 0.72) 0 3px, transparent 3px),
+    radial-gradient(120% 120% at 0% 0%, rgba(251, 146, 60, 0.12), transparent 38%),
+    linear-gradient(135deg, rgba(18, 22, 30, 0.86), rgba(8, 13, 22, 0.92));
+}
+
+.bt-qbo-bill-table tr.is-paid {
+  background:
+    linear-gradient(90deg, rgba(34, 197, 94, 0.48) 0 3px, transparent 3px),
+    linear-gradient(135deg, rgba(12, 20, 18, 0.76), rgba(8, 13, 22, 0.90));
+}
+
+.bt-qbo-bill-table tr.is-approved-for-pay {
+  background:
+    linear-gradient(90deg, rgba(16, 185, 129, 0.62) 0 3px, transparent 3px),
+    radial-gradient(120% 120% at 0% 0%, rgba(16, 185, 129, 0.14), transparent 42%),
+    linear-gradient(135deg, rgba(11, 24, 21, 0.84), rgba(8, 13, 22, 0.92));
+}
+
+.bt-qbo-bill-table tr:hover {
+  background:
+    linear-gradient(90deg, rgba(147, 197, 253, 0.70) 0 3px, transparent 3px),
+    radial-gradient(110% 120% at 0% 0%, rgba(96, 165, 250, 0.16), transparent 44%),
+    linear-gradient(135deg, rgba(17, 24, 39, 0.94), rgba(9, 14, 22, 0.96));
+}
+
+.bt-qbo-bill-table td strong {
+  display: block;
+  overflow: hidden;
+  max-width: 230px;
+  color: #F8FAFC;
+  font-size: 13px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bt-qbo-bill-table td small {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  max-width: 260px;
+  color: #94A3B8;
+  font-size: 11px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bt-qbo-split-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  max-width: 520px;
+}
+
+.bt-qbo-split-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  border: 1px solid rgba(59, 130, 246, 0.24);
+  border-radius: 8px;
+  padding: 7px 8px;
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.bt-qbo-split-line.is-matched {
+  border-color: rgba(34, 197, 94, 0.34);
+  background:
+    linear-gradient(90deg, rgba(16, 185, 129, 0.18), rgba(15, 23, 42, 0.76));
+}
+
+.bt-qbo-split-line.needs-match {
+  border-color: rgba(251, 191, 36, 0.48);
+  background:
+    linear-gradient(90deg, rgba(217, 119, 6, 0.18), rgba(15, 23, 42, 0.76));
+}
+
+.bt-qbo-split-line span,
+.bt-qbo-split-line small,
+.bt-qbo-split-line a {
+  display: block;
+  overflow: hidden;
+  max-width: 360px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bt-qbo-split-line span {
+  color: #F8FAFC;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.bt-qbo-split-line small {
+  margin-top: 2px;
+  color: #CBD5E1;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.bt-qbo-split-line a {
+  margin-top: 3px;
+  color: #BFDBFE;
+  font-size: 11px;
+  font-weight: 950;
+  text-decoration: none;
+}
+
+.bt-qbo-split-line a:hover {
+  color: #FFFFFF;
+}
+
+.bt-qbo-bill-table .bt-qbo-split-line > strong {
+  max-width: none;
+  color: #FFF4E8;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.bt-qbo-split-summary-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  border: 1px solid rgba(96, 165, 250, 0.44);
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: rgba(37, 99, 235, 0.16);
+  color: #DBEAFE;
+  font-size: 11px;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.bt-qbo-money {
+  color: #FFF4E8 !important;
+  font-size: 13px !important;
+  font-weight: 950 !important;
+  white-space: nowrap;
+}
+
+.bt-qbo-status-chip,
+.bt-qbo-match-needed {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.bt-qbo-status-chip.is-unpaid,
+.bt-qbo-match-needed {
+  border: 1px solid rgba(251, 191, 36, 0.48);
+  background: rgba(217, 119, 6, 0.16);
+  color: #FDE68A;
+}
+
+.bt-qbo-status-chip.is-paid {
+  border: 1px solid rgba(34, 197, 94, 0.46);
+  background: rgba(16, 185, 129, 0.14);
+  color: #BBF7D0;
+}
+
+.bt-qbo-status-chip.is-approved-for-pay {
+  border: 1px solid rgba(16, 185, 129, 0.58);
+  background: rgba(6, 78, 59, 0.24);
+  color: #A7F3D0;
+}
+
+.bt-qbo-pdf-control {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin-top: 8px;
+  max-width: 158px;
+}
+
+.bt-qbo-pdf-control small {
+  color: #D7E6FF !important;
+  font-size: 10px !important;
+  font-weight: 850 !important;
+  line-height: 1.25;
+}
+
+.bt-qbo-pdf-view-button,
+.bt-qbo-pdf-upload-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  width: 100%;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 950;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.bt-qbo-pdf-view-button {
+  border: 1px solid rgba(248, 250, 252, 0.55);
+  background:
+    linear-gradient(180deg, rgba(248, 250, 252, 0.24), rgba(15, 23, 42, 0.44)) padding-box,
+    linear-gradient(135deg, rgba(255, 255, 255, 0.88), rgba(59, 130, 246, 0.72), rgba(15, 23, 42, 0.82)) border-box;
+  color: #FFFFFF;
+  box-shadow:
+    0 9px 18px rgba(2, 6, 23, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.30);
+}
+
+.bt-qbo-pdf-upload-button {
+  border: 1px dashed rgba(191, 219, 254, 0.76);
+  background:
+    linear-gradient(180deg, rgba(30, 41, 59, 0.92), rgba(15, 23, 42, 0.96)) padding-box,
+    linear-gradient(135deg, rgba(147, 197, 253, 0.82), rgba(255, 255, 255, 0.42), rgba(30, 41, 59, 0.88)) border-box;
+  color: #EFF6FF;
+  box-shadow:
+    0 8px 16px rgba(2, 6, 23, 0.30),
+    inset 0 1px 0 rgba(255, 255, 255, 0.15),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.26);
+}
+
+.bt-qbo-pdf-upload-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.bt-qbo-pdf-control.is-dragging .bt-qbo-pdf-upload-button,
+.bt-qbo-pdf-upload-button:hover,
+.bt-qbo-pdf-view-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.92);
+  box-shadow:
+    0 12px 22px rgba(2, 6, 23, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.34),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.32);
+}
+
+.bt-qbo-pdf-control.is-uploading {
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+.bt-qbo-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.bt-qbo-row-actions a {
+  color: #BFDBFE;
+  font-size: 12px;
+  font-weight: 950;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.bt-qbo-row-actions a:hover {
+  color: #FFFFFF;
+}
+
+.bt-qbo-table-shell {
+  border: 3px solid transparent;
+  background:
+    linear-gradient(180deg, rgba(30, 41, 59, 0.96), rgba(15, 23, 42, 0.98)) padding-box,
+    linear-gradient(145deg, rgba(255, 255, 255, 0.88), rgba(96, 165, 250, 0.72) 34%, rgba(15, 23, 42, 0.94) 72%, rgba(2, 6, 23, 1)) border-box;
+  box-shadow:
+    0 24px 46px rgba(2, 6, 23, 0.40),
+    inset 0 2px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.34);
+}
+
+.bt-qbo-table-title {
+  background:
+    linear-gradient(180deg, rgba(71, 85, 105, 0.88), rgba(30, 41, 59, 0.92)),
+    #334155;
+}
+
+.bt-qbo-table-title span,
+.bt-qbo-table-title p {
+  color: #F8FAFC;
+}
+
+.bt-qbo-table-wrap {
+  background:
+    linear-gradient(180deg, rgba(51, 65, 85, 0.72), rgba(15, 23, 42, 0.88)),
+    #1E293B;
+}
+
+.bt-qbo-bill-table {
+  border-spacing: 0 8px;
+  padding: 0 8px 8px;
+}
+
+.bt-qbo-bill-table th {
+  border-top: 2px solid rgba(255, 255, 255, 0.22);
+  border-bottom: 3px solid rgba(2, 6, 23, 0.70);
+  background:
+    linear-gradient(180deg, rgba(71, 85, 105, 0.98), rgba(30, 41, 59, 0.98)),
+    #334155;
+  color: #FFFFFF;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.40);
+}
+
+.bt-qbo-bill-table tbody td {
+  border-top: 2px solid rgba(255, 255, 255, 0.24);
+  border-bottom: 4px solid rgba(2, 6, 23, 0.78);
+  background:
+    linear-gradient(180deg, rgba(71, 85, 105, 0.95), rgba(30, 41, 59, 0.96)),
+    #334155;
+  color: #FFFFFF;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.28),
+    0 8px 16px rgba(2, 6, 23, 0.26);
+}
+
+.bt-qbo-bill-table tbody td:first-child {
+  border-left: 4px solid rgba(147, 197, 253, 0.95);
+  border-top-left-radius: 8px;
+  border-bottom-left-radius: 8px;
+}
+
+.bt-qbo-bill-table tbody td:last-child {
+  border-right: 4px solid rgba(15, 23, 42, 0.92);
+  border-top-right-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+
+.bt-qbo-bill-table tbody tr.is-paid td:first-child {
+  border-left-color: rgba(34, 197, 94, 0.96);
+}
+
+.bt-qbo-bill-table tbody tr.is-approved-for-pay td:first-child {
+  border-left-color: rgba(16, 185, 129, 0.96);
+}
+
+.bt-qbo-bill-table tbody tr.needs-review td:first-child {
+  border-left-color: rgba(251, 146, 60, 0.98);
+}
+
+.bt-qbo-bill-table tbody tr:hover td {
+  background:
+    linear-gradient(180deg, rgba(96, 165, 250, 0.58), rgba(30, 41, 59, 0.98)),
+    #334155;
+}
+
+.bt-qbo-bill-table td strong,
+.bt-qbo-bill-table td small,
+.bt-qbo-money {
+  color: #FFFFFF !important;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.46);
+}
+
+.bt-qbo-row-actions a,
+.bt-qbo-split-line a {
+  color: #FFFFFF;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.bt-qbo-table-empty {
+  margin: 14px 16px 16px;
+}
+
+.bt-invoice-empty {
+  min-height: 130px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-color: rgba(148, 163, 184, 0.34);
+  background:
+    radial-gradient(90% 120% at 50% 0%, rgba(96, 165, 250, 0.12), transparent 46%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.010)),
+    rgba(5, 8, 13, 0.70);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    inset 0 0 28px rgba(2, 6, 23, 0.44);
+}
+
+.bt-approved-pay-panel--embedded {
+  margin: 16px;
+}
+
+.bt-approved-pay-panel {
+  border-color: rgba(16, 185, 129, 0.46);
+  border-radius: 8px;
+  background:
+    radial-gradient(120% 92% at 10% 0%, rgba(16, 185, 129, 0.18), transparent 42%),
+    radial-gradient(105% 90% at 92% 0%, rgba(249, 115, 22, 0.13), transparent 42%),
+    linear-gradient(135deg, rgba(6, 20, 17, 0.98), rgba(10, 14, 18, 0.96));
+  box-shadow:
+    0 18px 42px rgba(2, 6, 23, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10),
+    0 0 0 1px rgba(16, 185, 129, 0.12);
+}
+
+.bt-approved-pay-header {
+  border-bottom-color: rgba(16, 185, 129, 0.30);
+  background:
+    linear-gradient(180deg, rgba(16, 185, 129, 0.08), rgba(255, 255, 255, 0.014));
+  padding: 16px;
+}
+
+.bt-approved-pay-header > div:first-child {
+  border-color: rgba(16, 185, 129, 0.42);
+  background:
+    linear-gradient(135deg, rgba(16, 185, 129, 0.18), rgba(8, 19, 17, 0.95) 48%, rgba(10, 14, 18, 0.96)),
+    #071512;
+}
+
+.bt-approved-pay-total {
+  border-color: rgba(16, 185, 129, 0.62);
+  background:
+    linear-gradient(145deg, rgba(16, 185, 129, 0.24), rgba(5, 22, 17, 0.94)),
+    #061511;
+  box-shadow:
+    0 16px 28px rgba(2, 6, 23, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.34);
+}
+
+.bt-approved-pay-empty {
+  border-color: rgba(148, 163, 184, 0.34);
+  background:
+    radial-gradient(90% 120% at 50% 0%, rgba(16, 185, 129, 0.10), transparent 46%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.010)),
+    rgba(5, 8, 13, 0.70);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.bt-invoice-email-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.48fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.bt-invoice-email-content {
+  min-width: 0;
+  border: 1px solid rgba(var(--bt-email-accent-strong), 0.28);
+  border-radius: 7px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.052), rgba(255,255,255,0.014)),
+    rgba(7, 10, 14, 0.58);
+  padding: 14px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.055);
+}
+
+.bt-invoice-email-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid rgba(96, 112, 134, 0.55);
+  padding-bottom: 12px;
+}
+
+.bt-invoice-origin-title {
+  margin-top: 10px;
+  color: #FFF4E8;
+  font-size: 17px;
+  font-weight: 950;
+  letter-spacing: 0;
+  line-height: 1.35;
+}
+
+.bt-invoice-sender-panel {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+  border: 1px solid rgba(var(--bt-email-accent-strong), 0.48);
+  border-left: 3px solid rgb(var(--bt-email-accent));
+  border-radius: 7px;
+  background:
+    radial-gradient(90% 130% at 0% 0%, rgba(var(--bt-email-accent), 0.14), transparent 56%),
+    linear-gradient(180deg, rgba(255,255,255,0.075), rgba(255,255,255,0.02)),
+    #0A0F14;
+  padding: 14px 14px 14px 16px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+.bt-invoice-sender-panel span {
+  display: block;
+  color: #FFB46E;
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.bt-invoice-sender-panel strong {
+  display: block;
+  margin-top: 7px;
+  overflow: hidden;
+  color: #FFF4E8;
+  font-size: 15px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bt-invoice-not-invoice-control {
+  display: inline-flex;
+  width: min(100%, 430px);
+  min-height: 56px;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  border: 1px solid #6B4B3A;
+  border-radius: 6px;
+  background:
+    linear-gradient(90deg, rgba(239, 68, 68, 0.22) 0 3px, transparent 3px),
+    linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.015)),
+    #15100E;
+  padding: 10px 12px;
+  color: #FFE8D6;
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.07),
+    0 0 0 1px rgba(239,68,68,0.06);
+}
+
+.bt-invoice-not-invoice-control:hover {
+  border-color: #FCA5A5;
+  background:
+    linear-gradient(90deg, rgba(239, 68, 68, 0.3) 0 3px, transparent 3px),
+    linear-gradient(180deg, rgba(239,68,68,0.16), rgba(255,255,255,0.018)),
+    #1A1010;
+}
+
+.bt-invoice-not-invoice-control input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  accent-color: #EF4444;
+  cursor: pointer;
+}
+
+.bt-invoice-not-invoice-control input:disabled {
+  cursor: not-allowed;
+}
+
+.bt-invoice-not-invoice-control.is-checked,
+.bt-invoice-not-invoice-control:has(input:disabled) {
+  cursor: default;
+  opacity: 0.76;
+}
+
+.bt-invoice-not-invoice-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bt-invoice-not-invoice-text strong {
+  color: #FFE8D6;
+  font-size: 13px;
+  font-weight: 950;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.bt-invoice-not-invoice-text small {
+  color: #C9B7AA;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.bt-invoice-not-invoice-button,
+.bt-invoice-not-invoice-badge {
+  display: inline-flex;
+  min-height: 36px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 6px;
+  border: 1px solid #8B4B4B;
+  background:
+    linear-gradient(180deg, rgba(239, 68, 68, 0.16), rgba(239, 68, 68, 0.055)),
+    #15100E;
+  padding: 8px 11px;
+  color: #FFD7D7;
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.bt-invoice-not-invoice-button:hover {
+  border-color: #FCA5A5;
+  background:
+    linear-gradient(180deg, rgba(239, 68, 68, 0.25), rgba(239, 68, 68, 0.08)),
+    #1A1010;
+  color: #FFFFFF;
+}
+
+.bt-invoice-not-invoice-button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.bt-invoice-not-invoice-badge {
+  cursor: default;
+  opacity: 0.78;
+}
+
+.bt-invoice-message-preview {
+  min-height: 152px;
+  border: 1px solid rgba(var(--bt-email-accent-strong), 0.48);
+  border-top: 3px solid rgb(var(--bt-email-accent));
+  border-radius: 7px;
+  background:
+    radial-gradient(120% 95% at 100% 0%, rgba(var(--bt-email-accent), 0.14), transparent 48%),
+    linear-gradient(180deg, rgba(255,255,255,0.065), rgba(255,255,255,0.018)),
+    #0A0D10;
+  padding: 12px;
+  color: #D7DEE8;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+}
+
+.bt-invoice-message-preview > div:first-child {
+  color: #E78B4A;
+}
+
+.bt-invoice-message-scroll {
+  max-height: 190px;
+  overflow: auto;
+  border-top: 1px solid #2C3440;
+  padding-top: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.55;
+  color: #D7DEE8;
+}
+
+.bt-invoice-attachment-button {
+  display: inline-flex;
+  max-width: min(100%, 330px);
+  min-height: 48px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #7891B0;
+  border-radius: 6px;
+  background:
+    linear-gradient(180deg, rgba(217,235,255,0.12), rgba(59,130,246,0.08)),
+    #0D1722;
+  padding: 8px 12px 8px 8px;
+  color: #E4F1FF;
+  font-size: 13px;
+  font-weight: 950;
+  text-align: left;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+.bt-invoice-attachment-button:hover {
+  border-color: #B7D7FF;
+  background:
+    linear-gradient(180deg, rgba(217,235,255,0.18), rgba(59,130,246,0.1)),
+    #101B27;
+  color: #F0F8FF;
+}
+
+.bt-invoice-attachment-button.is-pdf {
+  border-color: rgba(248, 113, 113, 0.78);
+  background:
+    linear-gradient(180deg, rgba(248, 113, 113, 0.20), rgba(127, 29, 29, 0.14)),
+    #170D0F;
+  color: #FFF1F2;
+  box-shadow:
+    0 10px 22px rgba(127, 29, 29, 0.20),
+    inset 0 1px 0 rgba(255,255,255,0.10);
+}
+
+.bt-invoice-attachment-button.is-pdf:hover {
+  border-color: #FCA5A5;
+  background:
+    linear-gradient(180deg, rgba(248, 113, 113, 0.28), rgba(127, 29, 29, 0.18)),
+    #211012;
+  color: #FFFFFF;
+}
+
+.bt-invoice-attachment-button.is-pdf .bt-invoice-attachment-type {
+  border-color: rgba(254, 202, 202, 0.72);
+  background:
+    linear-gradient(180deg, #EF4444, #991B1B),
+    #B91C1C;
+  color: #FFFFFF;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.20),
+    0 6px 14px rgba(127, 29, 29, 0.24);
+}
+
+.bt-invoice-attachment-button.is-pdf .bt-invoice-attachment-file-icon {
+  color: #FCA5A5;
+  filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.32));
+}
+
+.bt-invoice-attachment-button.is-pdf .bt-invoice-attachment-size {
+  border-left-color: rgba(254, 202, 202, 0.30);
+  color: #FECACA;
+}
+
+.bt-invoice-attachment-size {
+  flex: 0 0 auto;
+  border-left: 1px solid rgba(147,197,253,0.25);
+  padding-left: 7px;
+  color: #AEB8C5;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.bt-invoice-email-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+  border: 1px solid rgba(83, 97, 112, 0.7);
+  border-radius: 7px;
+  background:
+    linear-gradient(90deg, rgba(var(--bt-email-accent), 0.08), transparent 38%),
+    linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.012)),
+    rgba(6, 9, 13, 0.82);
+  padding: 10px;
+}
+
+.bt-invoice-attachments-label {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  padding: 0 8px;
+  color: #AEB8C5;
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.bt-invoice-attachment-type {
+  display: inline-flex;
+  min-width: 42px;
+  min-height: 30px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(147,197,253,0.52);
+  border-radius: 4px;
+  background:
+    linear-gradient(180deg, rgba(147,197,253,0.18), rgba(147,197,253,0.06)),
+    rgba(15, 23, 42, 0.92);
+  color: #B7D7FF;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+}
+
+.bt-invoice-attachment-assignments {
+  margin-top: 16px;
+  border: 1px solid rgba(231,139,74,0.72);
+  border-top: 3px solid #F59E0B;
+  border-radius: 7px;
+  background:
+    radial-gradient(120% 90% at 0% 0%, rgba(245,158,11,0.16), transparent 50%),
+    linear-gradient(180deg, rgba(231,139,74,0.12), rgba(0,0,0,0.18)),
+    rgba(9, 10, 12, 0.76);
+  padding: 14px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.08),
+    0 12px 24px rgba(0,0,0,0.24);
+}
+
+.bt-invoice-attachment-assignments-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid rgba(231,139,74,0.32);
+  padding-bottom: 10px;
+}
+
+.bt-invoice-attachment-assignments-header p {
+  color: #FFD0A8;
+  font-size: 13px;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.bt-invoice-attachment-assignments-header span {
+  color: #C4CAD2;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.bt-invoice-attachment-assignment-card {
+  border: 1px solid rgba(111, 129, 150, 0.72);
+  border-left: 3px solid rgba(245, 158, 11, 0.84);
+  border-radius: 7px;
+  background:
+    linear-gradient(90deg, rgba(245,158,11,0.1), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.012)),
+    rgba(8, 11, 15, 0.74);
+  padding: 12px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.045);
+}
+
+.bt-invoice-attachment-assignment-card + .bt-invoice-attachment-assignment-card {
+  margin-top: 10px;
+}
+
+.bt-invoice-attachment-assignment-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.bt-invoice-assigned-chip {
+  border: 1px solid rgba(16,185,129,0.42);
+  border-radius: 999px;
+  background: rgba(6,78,59,0.2);
+  padding: 5px 9px;
+  color: #A7F3D0;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.bt-invoice-soft-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  border: 1px solid #4B5563;
+  background: rgba(20, 24, 29, 0.88);
+  padding: 4px 8px;
+  color: #C4CAD2;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.bt-invoice-assignment-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.bt-invoice-field {
+  display: grid;
+  gap: 6px;
+}
+
+.bt-invoice-field span {
+  color: #D7DEE8;
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.bt-invoice-field input,
+.bt-invoice-field select {
+  min-height: 40px;
+  width: 100%;
+  border-radius: 6px;
+  border: 1px solid #4B5563;
+  background: #080B0F;
+  padding: 8px 10px;
+  color: #FFF4E8;
+  font-size: 13px;
+  font-weight: 700;
+  outline: none;
+}
+
+.bt-invoice-field input:focus,
+.bt-invoice-field select:focus {
+  border-color: #E78B4A;
+  box-shadow: 0 0 0 3px rgba(231, 139, 74, 0.18);
+}
+
+.bt-invoice-review-row {
+  min-width: 940px;
+  border-bottom: 1px solid #343A42;
+}
+
+.bt-invoice-pdf-viewer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 22px;
+  background:
+    radial-gradient(circle at 50% 20%, rgba(37, 99, 235, 0.20), transparent 34%),
+    rgba(2, 6, 23, 0.84);
+  backdrop-filter: blur(7px);
+}
+
+.bt-invoice-pdf-viewer-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(1180px, calc(100vw - 36px));
+  height: min(860px, calc(100vh - 36px));
+  overflow: hidden;
+  border: 3px solid transparent;
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(8, 13, 24, 0.99)) padding-box,
+    linear-gradient(145deg, rgba(248, 250, 252, 0.95), rgba(96, 165, 250, 0.70), rgba(15, 23, 42, 1)) border-box;
+  box-shadow:
+    0 34px 72px rgba(0, 0, 0, 0.62),
+    0 0 0 1px rgba(255, 255, 255, 0.10),
+    inset 0 2px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.45);
+}
+
+.bt-invoice-pdf-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 2px solid rgba(148, 163, 184, 0.42);
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.96));
+  padding: 12px 14px;
+}
+
+.bt-invoice-pdf-title {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.bt-invoice-pdf-title span {
+  color: #FDBA74;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.bt-invoice-pdf-title strong {
+  overflow: hidden;
+  color: #FFFFFF;
+  font-size: 16px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bt-invoice-pdf-title small {
+  color: #CBD5E1;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.bt-invoice-pdf-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.bt-invoice-pdf-control-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.48);
+  border-radius: 999px;
+  background: rgba(2, 6, 23, 0.42);
+  padding: 4px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.24);
+}
+
+.bt-invoice-pdf-control-group button,
+.bt-invoice-pdf-open-link,
+.bt-invoice-pdf-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  border: 1px solid rgba(226, 232, 240, 0.45);
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(51, 65, 85, 0.98), rgba(15, 23, 42, 0.96));
+  color: #FFFFFF;
+  font-size: 12px;
+  font-weight: 950;
+  text-decoration: none;
+  box-shadow:
+    0 8px 18px rgba(0, 0, 0, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.30);
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.bt-invoice-pdf-control-group button {
+  width: 34px;
+  padding: 0;
+}
+
+.bt-invoice-pdf-control-group button:hover,
+.bt-invoice-pdf-open-link:hover,
+.bt-invoice-pdf-close:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.82);
+}
+
+.bt-invoice-pdf-control-group button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+  transform: none;
+}
+
+.bt-invoice-pdf-control-group label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #D7E6FF;
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.bt-invoice-pdf-control-group label span {
+  color: #CBD5E1;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.bt-invoice-pdf-control-group input {
+  width: 62px;
+  min-height: 30px;
+  border: 1px solid rgba(148, 163, 184, 0.52);
+  border-radius: 999px;
+  background: rgba(248, 250, 252, 0.95);
+  color: #0F172A;
+  font-size: 13px;
+  font-weight: 950;
+  text-align: center;
+  outline: none;
+}
+
+.bt-invoice-pdf-control-group strong {
+  min-width: 52px;
+  color: #FFFFFF;
+  font-size: 12px;
+  font-weight: 950;
+  text-align: center;
+}
+
+.bt-invoice-pdf-open-link {
+  padding: 0 12px;
+}
+
+.bt-invoice-pdf-close {
+  width: 38px;
+  padding: 0;
+  border-color: rgba(248, 113, 113, 0.48);
+}
+
+.bt-invoice-pdf-viewer-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: #E5EAF1;
+  padding: 12px;
+}
+
+.bt-invoice-pdf-viewer-body iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 540px;
+  border: 2px solid rgba(15, 23, 42, 0.38);
+  border-radius: 8px;
+  background: #F8FAFC;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 14px 26px rgba(15, 23, 42, 0.22);
+}
+
+@media (max-width: 760px) {
+  .bt-invoice-pdf-viewer-overlay {
+    padding: 10px;
+  }
+
+  .bt-invoice-pdf-viewer-panel {
+    width: calc(100vw - 14px);
+    height: calc(100vh - 14px);
+    border-radius: 10px;
+  }
+
+  .bt-invoice-pdf-viewer-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .bt-invoice-pdf-toolbar {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .bt-invoice-pdf-viewer-body {
+    padding: 8px;
+  }
+
+  .bt-invoice-pdf-viewer-body iframe {
+    min-height: 420px;
+  }
+}
+
+.bt-invoice-attachment-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(3, 6, 10, 0.78);
+  padding: 24px;
+  backdrop-filter: blur(3px);
+}
+
+.bt-invoice-attachment-modal-panel {
+  display: flex;
+  width: min(1180px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #5B6674;
+  border-radius: 6px;
+  background:
+    radial-gradient(120% 90% at 12% 0%, rgba(37,99,235,0.16), transparent 42%),
+    linear-gradient(180deg, #171B20, #0A0D10);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.09),
+    0 24px 70px rgba(0,0,0,0.58);
+}
+
+.bt-invoice-attachment-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #46515F;
+  padding: 14px 16px;
+  background:
+    linear-gradient(90deg, rgba(231,139,74,0.22) 0 3px, transparent 3px),
+    rgba(14,16,18,0.86);
+}
+
+.bt-invoice-modal-action,
+.bt-invoice-modal-close {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid #4B5563;
+  border-radius: 6px;
+  background: #111315;
+  padding: 8px 10px;
+  color: #F0E8DD;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.bt-invoice-modal-action:hover,
+.bt-invoice-modal-close:hover {
+  border-color: #E78B4A;
+  color: #FFD0A8;
+}
+
+.bt-invoice-attachment-modal-body {
+  min-height: 360px;
+  flex: 1;
+  overflow: auto;
+  background: #05070A;
+}
+
+.bt-invoice-attachment-modal-body iframe {
+  display: block;
+  width: 100%;
+  height: min(74vh, 820px);
+  border: 0;
+  background: #FFFFFF;
+}
+
+.bt-invoice-attachment-modal-body img {
+  display: block;
+  max-width: 100%;
+  max-height: min(74vh, 820px);
+  margin: 0 auto;
+  object-fit: contain;
+}
+
+.bt-invoice-attachment-fallback {
+  display: grid;
+  min-height: 360px;
+  place-items: center;
+  gap: 12px;
+  padding: 32px;
+  color: #C4CAD2;
+  text-align: center;
+}
+
+@media (max-width: 900px) {
+  .bt-invoice-section-header {
+    flex-direction: column;
+  }
+
+  .bt-invoice-email-row {
+    grid-template-columns: 1fr;
+  }
+
+  .bt-invoice-expand-button {
+    width: 100%;
+  }
+
+  .bt-invoice-assignment-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .bt-invoice-email-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .bt-approved-pay-header,
+  .bt-invoice-sender-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .bt-approved-pay-header {
+    flex-direction: column;
+  }
+
+  .bt-approved-pay-actions {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .bt-approved-pay-notify-button,
+  .bt-approved-pay-total {
+    width: 100%;
+  }
+
+  .bt-approved-pay-grid {
+    padding: 10px;
+  }
+
+  .bt-approved-pay-card {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .bt-approved-pay-card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .bt-approved-pay-card-top span,
+  .bt-approved-pay-card-top strong,
+  .bt-approved-pay-card-body,
+  .bt-approved-pay-card-bottom {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .bt-approved-pay-card-body {
+    gap: 4px 10px;
+  }
+
+  .bt-approved-pay-card-bottom {
+    justify-content: space-between;
+    min-width: 0;
+  }
+}
+
+@media (min-width: 901px) and (max-width: 1200px) {
+  .bt-invoice-email-row {
+    grid-template-columns: minmax(130px, 0.7fr) minmax(170px, 1fr) minmax(240px, 1.4fr) minmax(130px, 0.68fr) auto;
+  }
+}

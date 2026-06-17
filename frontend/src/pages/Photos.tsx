@@ -5,6 +5,7 @@ import { Loading } from '../components/ui';
 import { Camera, FileImage, Grid, List, MessageSquare, PlayCircle, Trash2, X } from 'lucide-react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
+import { fileDropHandlers } from '../lib/fileDrop';
 import { appendProgressUploadAudit, PROGRESS_MEDIA_ACCEPT } from '../lib/progressUpload';
 import { getProgressMediaKind } from '../lib/progressMedia';
 import VoiceTextarea from '../components/VoiceTextarea';
@@ -206,7 +207,7 @@ export default function Photos() {
     setPhotoView(current => current === requestedPhotoView ? current : requestedPhotoView);
   }, [requestedPhotoView]);
 
-  const uploadMedia = async (files?: FileList | null) => {
+  const uploadMedia = async (files?: FileList | File[] | null) => {
     if (!files || files.length === 0) return;
     if (!selectedProject) {
       toast.error('Select a project before uploading photos or videos');
@@ -233,7 +234,7 @@ export default function Photos() {
       await api.post(`/projects/${selectedProject}/photos?type=${uploadType}`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      toast.success(`${files.length} ${photoView === 'scope' ? 'scope' : 'project'} item${files.length === 1 ? '' : 's'} uploaded`);
+      toast.success(`${uploadFiles.length} ${photoView === 'scope' ? 'scope' : 'project'} item${uploadFiles.length === 1 ? '' : 's'} uploaded`);
       setCaption('');
       await load();
     } catch (err: any) {
@@ -298,6 +299,12 @@ export default function Photos() {
     await load();
   };
 
+  const uploadDropHandlers = fileDropHandlers(uploadMedia, {
+    accept: PROGRESS_MEDIA_ACCEPT,
+    disabled: !selectedProject || uploading,
+    multiple: true,
+  });
+
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto">
       <div className="flex flex-col gap-3 mb-5 sm:flex-row sm:items-center sm:justify-between">
@@ -310,10 +317,11 @@ export default function Photos() {
             type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={!selectedProject || uploading}
+            {...uploadDropHandlers}
             className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-black text-white shadow-sm transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
           >
             <Camera className="h-4 w-4" />
-            {uploading ? 'Uploading...' : `Upload ${photoView === 'scope' ? 'Scope' : 'Project'} Pictures`}
+            {uploading ? 'Uploading...' : `Upload or Drop ${photoView === 'scope' ? 'Scope' : 'Project'} Pictures`}
           </button>
           <input
             ref={fileInputRef}

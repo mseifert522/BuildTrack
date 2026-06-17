@@ -3,6 +3,7 @@ import { Download, FileText, FolderOpen, Search, Trash2, Upload } from 'lucide-r
 import toast from 'react-hot-toast';
 import api from '../lib/api';
 import { Loading } from '../components/ui';
+import { fileDropHandlers } from '../lib/fileDrop';
 import { formatEasternDateTime } from '../lib/time';
 
 interface ProjectDocument {
@@ -60,16 +61,17 @@ export default function Documents() {
     });
   }, [projects, query]);
 
-  const uploadDocuments = async (projectId: string, files: FileList | null) => {
-    if (!files || files.length === 0) return;
+  const uploadDocuments = async (projectId: string, files: FileList | File[] | null) => {
+    const uploadFiles = Array.from(files || []);
+    if (uploadFiles.length === 0) return;
     setUploadingProjectId(projectId);
     try {
       const formData = new FormData();
-      Array.from(files).forEach(file => formData.append('documents', file));
+      uploadFiles.forEach(file => formData.append('documents', file));
       await api.post(`/documents/${projectId}`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      toast.success(files.length === 1 ? 'Document uploaded' : 'Documents uploaded');
+      toast.success(uploadFiles.length === 1 ? 'Document uploaded' : 'Documents uploaded');
       await loadDocuments();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to upload document');
@@ -129,7 +131,13 @@ export default function Documents() {
                   </div>
                   <p className="text-sm text-gray-500 mt-1">{project.job_name}</p>
                 </div>
-                <label className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-black text-white bg-gray-900 hover:bg-gray-800 cursor-pointer">
+                <label
+                  className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-black text-white bg-gray-900 hover:bg-gray-800 cursor-pointer"
+                  {...fileDropHandlers(files => uploadDocuments(project.id, files), {
+                    disabled: uploadingProjectId === project.id,
+                    multiple: true,
+                  })}
+                >
                   <Upload className="w-3.5 h-3.5" />
                   {uploadingProjectId === project.id ? 'Uploading...' : 'Upload'}
                   <input

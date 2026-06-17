@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Building2, ChevronDown, Edit2, Mail, MapPin, PackageCheck, Phone, Plus, Search, Truck, UserRound } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../lib/api';
@@ -241,6 +242,20 @@ export default function Suppliers() {
             <p className="mt-1 text-sm font-semibold">{filteredSuppliers.length} active supplier records</p>
           </div>
           <div className="bt-directory-actions flex w-full flex-col gap-2 sm:flex-row md:w-auto">
+            <div className="inline-flex rounded-2xl border border-slate-300 bg-white p-1 shadow-sm">
+              <Link
+                to="/contractors"
+                className="rounded-xl px-4 py-2 text-sm font-black text-slate-600 transition hover:bg-slate-100 hover:text-slate-950"
+              >
+                Contractors
+              </Link>
+              <Link
+                to="/suppliers"
+                className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-black text-white shadow-sm"
+              >
+                Supplies
+              </Link>
+            </div>
             <div className="bt-directory-search flex min-h-11 w-full items-center gap-2 rounded-xl border border-slate-400 bg-slate-50 px-3 shadow-sm sm:w-80">
               <Search className="h-4 w-4 flex-shrink-0 text-gray-400" />
               <input

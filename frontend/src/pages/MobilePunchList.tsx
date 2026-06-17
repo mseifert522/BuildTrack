@@ -16,6 +16,7 @@ import toast from 'react-hot-toast';
 import api from '../lib/api';
 import { useAuthStore, canChangeProjectStatus } from '../store/authStore';
 import { mobilePath } from '../lib/appUrls';
+import { fileDropHandlers } from '../lib/fileDrop';
 import { notifyMobileDataChanged } from '../lib/mobileEvents';
 
 interface PunchItem {
@@ -176,7 +177,7 @@ export default function MobilePunchList() {
     });
   };
 
-  const handleDraftPhotos = (draftId: string, files: FileList | null) => {
+  const handleDraftPhotos = (draftId: string, files: FileList | File[] | null) => {
     const nextFiles = Array.from(files || []);
     if (!nextFiles.length) return;
     setDrafts(prev => prev.map(draft => {
@@ -288,12 +289,17 @@ export default function MobilePunchList() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files || []);
+  const queuePhotoPanelFiles = (filesInput: FileList | File[] | null) => {
+    const files = Array.from(filesInput || []);
     if (!files.length) return;
     previewUrls.forEach(url => URL.revokeObjectURL(url));
     setPreviewFiles(files);
     setPreviewUrls(files.map(file => URL.createObjectURL(file)));
+  };
+
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    queuePhotoPanelFiles(event.target.files);
+    event.currentTarget.value = '';
   };
 
   const handleUpload = async () => {
@@ -530,7 +536,10 @@ export default function MobilePunchList() {
                   </div>
 
                   <div className="bt-mobile-draft-photo-block">
-                    <label className="bt-mobile-photo-add">
+                    <label
+                      className="bt-mobile-photo-add"
+                      {...fileDropHandlers(files => handleDraftPhotos(draft.id, files), { accept: 'image/*', multiple: true })}
+                    >
                       <ImagePlus size={22} />
                       <span>{draft.photos.length ? 'Add more photos' : 'Attach photos'}</span>
                       <input
@@ -601,7 +610,10 @@ export default function MobilePunchList() {
 
             <div className="bt-mobile-photo-panel">
               {canAttachPhotos && (
-                <div className="bt-mobile-upload-zone">
+                <div
+                  className="bt-mobile-upload-zone"
+                  {...fileDropHandlers(queuePhotoPanelFiles, { accept: 'image/*', multiple: true })}
+                >
                   <input
                     ref={fileInputRef}
                     type="file"

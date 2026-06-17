@@ -1,0 +1,225 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "BuildTrack AI Agent Bridge",
+    "version": "1.0.0",
+    "description": "Secure API bridge for approved Hermes AI agents to create BuildTrack scope-of-work and punch-list records from Telegram commands."
+  },
+  "servers": [
+    {
+      "url": "https://buildtrack.newurbandev.com/api/agent-bridge"
+    }
+  ],
+  "security": [
+    {
+      "AgentApiKey": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "AgentApiKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Agent API key generated once in BuildTrack Settings > AI Agent Bridge. X-BuildTrack-Agent-Key is also accepted."
+      }
+    },
+    "schemas": {
+      "ScopeItem": {
+        "type": "object",
+        "required": ["description"],
+        "properties": {
+          "description": { "type": "string" },
+          "category": { "type": "string", "default": "General" },
+          "location": { "type": "string" },
+          "priority": { "type": "string", "enum": ["low", "normal", "high", "critical", "urgent"], "default": "normal" },
+          "trade": { "type": "string" },
+          "estimatedCost": { "type": "number" },
+          "laborCost": { "type": "number" },
+          "materialCost": { "type": "number" },
+          "assignedTo": { "type": "string" },
+          "dueDate": { "type": "string" },
+          "status": { "type": "string", "enum": ["not_started", "in_progress", "waiting_materials", "needs_review", "completed"], "default": "not_started" },
+          "notes": { "type": "string" }
+        }
+      },
+      "PunchItem": {
+        "type": "object",
+        "required": ["description"],
+        "properties": {
+          "description": { "type": "string" },
+          "location": { "type": "string" },
+          "priority": { "type": "string", "enum": ["low", "normal", "medium", "high", "urgent"], "default": "normal" },
+          "trade": { "type": "string" },
+          "assignedTo": { "type": "string" },
+          "dueDate": { "type": "string" },
+          "status": { "type": "string", "enum": ["open", "not_started", "in_progress", "waiting_materials", "needs_review", "completed"], "default": "open" },
+          "notes": { "type": "string" }
+        }
+      },
+      "AgentRequestBase": {
+        "type": "object",
+        "required": ["requestId", "agentName", "source", "intent"],
+        "properties": {
+          "requestId": { "type": "string" },
+          "agentName": { "type": "string" },
+          "source": { "type": "string", "default": "telegram" },
+          "intent": { "type": "string", "enum": ["scope_of_work", "punch_list"] },
+          "propertyId": { "type": ["string", "null"] },
+          "propertyAddress": { "type": ["string", "null"] },
+          "rawTranscript": { "type": "string" },
+          "title": { "type": "string" }
+        }
+      },
+      "SuccessResponse": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean" },
+          "requestId": { "type": "string" },
+          "property": {
+            "type": "object",
+            "properties": {
+              "propertyId": { "type": "string" },
+              "address": { "type": "string" },
+              "jobName": { "type": ["string", "null"] }
+            }
+          },
+          "created": { "type": "object" }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "const": false },
+          "error": { "type": "string" },
+          "message": { "type": "string" },
+          "matches": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "propertyId": { "type": "string" },
+                "address": { "type": "string" },
+                "jobName": { "type": ["string", "null"] }
+              }
+            }
+          }
+        }
+      }
+    },
+    "parameters": {
+      "AgentName": {
+        "name": "X-BuildTrack-Agent-Name",
+        "in": "header",
+        "required": true,
+        "schema": { "type": "string" }
+      },
+      "RequestId": {
+        "name": "X-Request-Id",
+        "in": "header",
+        "required": true,
+        "schema": { "type": "string" }
+      }
+    }
+  },
+  "paths": {
+    "/property-lookup": {
+      "get": {
+        "summary": "Look up an existing BuildTrack property by address or ID.",
+        "parameters": [
+          { "$ref": "#/components/parameters/AgentName" },
+          { "$ref": "#/components/parameters/RequestId" },
+          { "name": "address", "in": "query", "schema": { "type": "string" } },
+          { "name": "propertyId", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Property found" },
+          "404": { "description": "No property found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } },
+          "409": { "description": "Ambiguous property match", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/scope-of-work": {
+      "post": {
+        "summary": "Create an AI-generated scope of work under an existing property.",
+        "parameters": [
+          { "$ref": "#/components/parameters/AgentName" },
+          { "$ref": "#/components/parameters/RequestId" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  { "$ref": "#/components/schemas/AgentRequestBase" },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "intent": { "const": "scope_of_work" },
+                      "items": { "type": "array", "items": { "$ref": "#/components/schemas/ScopeItem" } }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Scope created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } },
+          "400": { "description": "Validation error" },
+          "401": { "description": "Invalid agent API key" },
+          "403": { "description": "Agent disabled or missing scope" },
+          "409": { "description": "Duplicate request ID or ambiguous property" }
+        }
+      }
+    },
+    "/punch-list": {
+      "post": {
+        "summary": "Create AI-generated punch-list items under an existing property.",
+        "parameters": [
+          { "$ref": "#/components/parameters/AgentName" },
+          { "$ref": "#/components/parameters/RequestId" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  { "$ref": "#/components/schemas/AgentRequestBase" },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "intent": { "const": "punch_list" },
+                      "items": { "type": "array", "items": { "$ref": "#/components/schemas/PunchItem" } }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Punch list created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } },
+          "400": { "description": "Validation error" },
+          "401": { "description": "Invalid agent API key" },
+          "403": { "description": "Agent disabled or missing scope" },
+          "409": { "description": "Duplicate request ID or ambiguous property" }
+        }
+      }
+    },
+    "/intake": {
+      "post": {
+        "summary": "Unified endpoint that routes scope_of_work or punch_list requests.",
+        "parameters": [
+          { "$ref": "#/components/parameters/AgentName" },
+          { "$ref": "#/components/parameters/RequestId" }
+        ],
+        "responses": {
+          "201": { "description": "Request accepted and routed" },
+          "400": { "description": "Invalid intent" }
+        }
+      }
+    }
+  }
+}

@@ -13,6 +13,10 @@ function canOverrideNoteEdit(user) {
   return NOTE_ADMIN_ROLES.includes(user?.role);
 }
 
+function canDeleteProjectNote(user) {
+  return NOTE_ADMIN_ROLES.includes(user?.role);
+}
+
 function isWithinContractorNoteEditWindow(note, now = Date.now()) {
   const createdAt = parseStoredDate(note?.created_at);
   if (!createdAt) return false;
@@ -48,9 +52,16 @@ function getNoteEditPermission(user, note) {
   return { allowed: true };
 }
 
+function getNoteDeletePermission(user) {
+  if (canDeleteProjectNote(user)) return { allowed: true };
+  return { allowed: false, status: 403, error: 'Only Super Admin and Operations Manager can delete notes' };
+}
+
 module.exports = {
   CONTRACTOR_NOTE_EDIT_WINDOW_MS,
+  canDeleteProjectNote,
   canOverrideNoteEdit,
+  getNoteDeletePermission,
   getNoteEditPermission,
   isWithinContractorNoteEditWindow,
 };

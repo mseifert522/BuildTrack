@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../lib/api';
 import { Loading, StatusBadge } from '../components/ui';
-import { ClipboardList, Search, Filter } from 'lucide-react';
+import { Bot, ClipboardList, Search, Filter } from 'lucide-react';
 import { format } from 'date-fns';
 import { useAuthStore } from '../store/authStore';
 
@@ -18,6 +18,7 @@ interface PunchItem {
   project_address?: string;
   created_at: string;
   photo_count: number;
+  created_by_agent?: string;
 }
 
 export default function PunchList() {
@@ -154,6 +155,11 @@ export default function PunchList() {
                           </div>
                           <div className="flex items-center gap-3 mt-1">
                             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColors[item.status]}`}>{item.status.replace(/_/g, ' ')}</span>
+                            {item.created_by_agent && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-xs font-black text-violet-700">
+                                <Bot className="h-3 w-3" /> AI Agent: {item.created_by_agent}
+                              </span>
+                            )}
                             {item.assigned_to_name && <span className="text-xs text-gray-500">{item.assigned_to_name}</span>}
                             {item.due_date && <span className="text-xs text-gray-400">Due {format(new Date(item.due_date), 'MMM d')}</span>}
                           </div>

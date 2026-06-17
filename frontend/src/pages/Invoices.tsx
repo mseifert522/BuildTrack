@@ -4,10 +4,15 @@ import api from '../lib/api';
 import { Loading } from '../components/ui';
 import {
   AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   CalendarDays,
   CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   ClipboardCheck,
+  Download,
   Eye,
   ExternalLink,
   FileText,
@@ -16,11 +21,32 @@ import {
   Paperclip,
   Receipt,
   RefreshCw,
+  Trash2,
+  Upload,
   X,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import { useAuthStore, isAdminRole } from '../store/authStore';
 import toast from 'react-hot-toast';
 import { formatDateOnly, formatEasternDate, formatEasternDateTime, parseBuildTrackTimestamp } from '../lib/time';
+
+interface InvoicePdfSummary {
+  available: boolean;
+  source?: string | null;
+  label?: string | null;
+  id?: string | null;
+  invoice_id?: string | null;
+  project_id?: string | null;
+  qbo_bill_id?: string | null;
+  original_name?: string | null;
+  mime_type?: string | null;
+  size?: number | null;
+  size_label?: string | null;
+  uploaded_by_name?: string | null;
+  created_at?: string | null;
+  url?: string | null;
+}
 
 interface Invoice {
   id: string;
@@ -52,6 +78,7 @@ interface Invoice {
   external_invoice_number?: string | null;
   source_attachment_id?: string | null;
   source_attachment_name?: string | null;
+  invoice_pdf?: InvoicePdfSummary | null;
 }
 
 interface QuickBooksStatus {
@@ -111,6 +138,7 @@ interface QuickBooksBill {
   project_address?: string | null;
   project_job_name?: string | null;
   qbo_updated_at?: string | null;
+  first_seen_at?: string | null;
   last_seen_at?: string | null;
   last_paid_at?: string | null;
   last_paid_seen_at?: string | null;
@@ -119,6 +147,12 @@ interface QuickBooksBill {
   split_line_count?: number;
   matched_split_line_count?: number;
   unmatched_split_line_count?: number;
+  visible_split_lines?: QuickBooksBillSplitLine[];
+  split_scope_line_id?: string | null;
+  split_scope_project_id?: string | null;
+  split_scope_parent_total?: number | null;
+  split_scope_parent_balance?: number | null;
+  invoice_pdf?: InvoicePdfSummary | null;
 }
 
 interface QuickBooksBillSplitLine {
@@ -137,6 +171,23 @@ interface QuickBooksBillSplitLine {
 }
 
 type QuickBooksBillFilter = 'open' | 'friday_queue' | 'paid' | 'all';
+type QuickBooksInvoiceFilterMode = 'all' | 'project' | 'project_date_range' | 'project_vendor' | 'project_vendor_date_range' | 'project_specific_date' | 'vendor_only';
+type QuickBooksInvoiceSortKey = 'status' | 'vendor' | 'bill_date' | 'due_date' | 'bill_amount' | 'open_balance';
+type QuickBooksInvoiceSortDirection = 'asc' | 'desc';
+
+interface QuickBooksInvoiceFilterState {
+  mode: QuickBooksInvoiceFilterMode;
+  projectId: string;
+  vendor: string;
+  startDate: string;
+  endDate: string;
+  exactDate: string;
+}
+
+interface QuickBooksInvoiceSortState {
+  key: QuickBooksInvoiceSortKey;
+  direction: QuickBooksInvoiceSortDirection;
+}
 
 interface ProjectOption {
   id: string;
@@ -144,6 +195,27 @@ interface ProjectOption {
   job_name: string;
   status: string;
   updated_at?: string;
+}
+
+interface ContractorSupplierDirectoryRow {
+  id: string;
+  name?: string | null;
+  vendor_name?: string | null;
+  company?: string | null;
+  contact_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  account_number?: string | null;
+}
+
+interface VendorSupplierFilterOption {
+  label: string;
+  aliases: string[];
+}
+
+interface QuickBooksMirrorRow {
+  bill: QuickBooksBill;
+  invoice: Invoice | null;
 }
 
 interface InvoiceEmailAttachment {
@@ -220,6 +292,16 @@ interface AttachmentPreviewState {
   attachment: InvoiceEmailAttachment;
 }
 
+interface InvoicePdfPreviewState {
+  title: string;
+  filename?: string | null;
+  url: string;
+  mime_type?: string | null;
+  size_label?: string | null;
+  page: number;
+  zoom: number;
+}
+
 const money = (value: number) =>
   Number(value || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 
@@ -244,6 +326,17 @@ const formatBytes = (value?: number) => {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${Math.round(size / 102.4) / 10} KB`;
   return `${Math.round(size / 1024 / 102.4) / 10} MB`;
+};
+
+const invoicePdfDownloadName = (filename?: string | null) => {
+  const raw = String(filename || 'invoice').trim() || 'invoice';
+  const base = raw
+    .replace(/\.pdf$/i, '')
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim() || 'invoice';
+  const limited = base.length > 170 ? base.slice(0, 170).trim() : base;
+  return `${limited.replace(/\.+$/, '') || 'invoice'}.pdf`;
 };
 
 const attachmentUrl = (emailId: string, attachmentId: string, inline = false) =>
@@ -306,6 +399,31 @@ const emailStatusClass: Record<string, string> = {
 
 const QUICKBOOKS_PANEL_ROLES = ['super_admin', 'operations_manager'];
 const QUICKBOOKS_BILLS_PATH = '/quickbooks/bills?limit=1000';
+const DEFAULT_QUICKBOOKS_INVOICE_FILTER: QuickBooksInvoiceFilterState = {
+  mode: 'all',
+  projectId: '',
+  vendor: '',
+  startDate: '',
+  endDate: '',
+  exactDate: '',
+};
+const DEFAULT_QUICKBOOKS_INVOICE_SORT: QuickBooksInvoiceSortState = {
+  key: 'bill_date',
+  direction: 'desc',
+};
+const QUICKBOOKS_INVOICE_FILTER_OPTIONS: { value: QuickBooksInvoiceFilterMode; label: string }[] = [
+  { value: 'all', label: 'No project filter' },
+  { value: 'project', label: 'Project only' },
+  { value: 'project_date_range', label: 'Project + date range' },
+  { value: 'project_vendor', label: 'Project + Vendor / Suppliers' },
+  { value: 'project_vendor_date_range', label: 'Project + Vendor / Suppliers + date range' },
+  { value: 'project_specific_date', label: 'Project + specific date' },
+  { value: 'vendor_only', label: 'Vendor / Suppliers Only' },
+];
+const QUICKBOOKS_FILTER_PROJECT_MODES = new Set<QuickBooksInvoiceFilterMode>(['project', 'project_date_range', 'project_vendor', 'project_vendor_date_range', 'project_specific_date']);
+const QUICKBOOKS_FILTER_VENDOR_MODES = new Set<QuickBooksInvoiceFilterMode>(['project_vendor', 'project_vendor_date_range', 'vendor_only']);
+const QUICKBOOKS_FILTER_DATE_RANGE_MODES = new Set<QuickBooksInvoiceFilterMode>(['project_date_range', 'project_vendor_date_range']);
+const QUICKBOOKS_FILTER_EXACT_DATE_MODES = new Set<QuickBooksInvoiceFilterMode>(['project_specific_date']);
 
 const qboStatusLabel = (status?: string | null) => {
   const value = String(status || 'unpaid').toLowerCase();
@@ -323,9 +441,9 @@ const quickBooksBillDateKey = (bill?: QuickBooksBill | null) => (
   String(bill?.txn_date || bill?.due_date || bill?.qbo_updated_at || bill?.last_seen_at || '')
 );
 
-const sortQuickBooksBillsByBillDate = (bills: QuickBooksBill[]) => [...bills].sort((a, b) => {
+const sortQuickBooksBillsByBillDate = (bills: QuickBooksBill[], direction: QuickBooksInvoiceSortDirection = 'desc') => [...bills].sort((a, b) => {
   const dateCompare = quickBooksBillDateKey(a).localeCompare(quickBooksBillDateKey(b));
-  if (dateCompare !== 0) return dateCompare;
+  if (dateCompare !== 0) return direction === 'asc' ? dateCompare : -dateCompare;
   const vendorCompare = String(a.vendor_name || '').localeCompare(String(b.vendor_name || ''));
   if (vendorCompare !== 0) return vendorCompare;
   return String(a.doc_number || a.qbo_id || '').localeCompare(String(b.doc_number || b.qbo_id || ''));
@@ -341,19 +459,29 @@ const quickBooksDateRank = (value?: string | null) => {
 const quickBooksPaidDateKey = (bill?: QuickBooksBill | null) => (
   String(
     bill?.last_paid_at
+    || bill?.txn_date
+    || bill?.due_date
     || bill?.last_paid_seen_at
     || bill?.qbo_updated_at
     || bill?.last_seen_at
-    || bill?.txn_date
-    || bill?.due_date
     || ''
   )
+);
+
+const quickBooksPaidTieBreakDateKey = (bill?: QuickBooksBill | null) => (
+  String(bill?.txn_date || bill?.due_date || '')
+);
+
+const quickBooksPaidObservedDateKey = (bill?: QuickBooksBill | null) => (
+  String(bill?.last_paid_seen_at || bill?.qbo_updated_at || bill?.last_seen_at || '')
 );
 
 const sortQuickBooksBillsByPaidDate = (bills: QuickBooksBill[]) => [...bills].sort((a, b) => {
   const paidCompare = quickBooksDateRank(quickBooksPaidDateKey(b)) - quickBooksDateRank(quickBooksPaidDateKey(a));
   if (paidCompare !== 0) return paidCompare;
-  const observedCompare = quickBooksDateRank(b.last_paid_seen_at || b.qbo_updated_at || b.last_seen_at) - quickBooksDateRank(a.last_paid_seen_at || a.qbo_updated_at || a.last_seen_at);
+  const billDateCompare = quickBooksDateRank(quickBooksPaidTieBreakDateKey(b)) - quickBooksDateRank(quickBooksPaidTieBreakDateKey(a));
+  if (billDateCompare !== 0) return billDateCompare;
+  const observedCompare = quickBooksDateRank(quickBooksPaidObservedDateKey(b)) - quickBooksDateRank(quickBooksPaidObservedDateKey(a));
   if (observedCompare !== 0) return observedCompare;
   const vendorCompare = String(a.vendor_name || '').localeCompare(String(b.vendor_name || ''));
   if (vendorCompare !== 0) return vendorCompare;
@@ -368,9 +496,196 @@ const formatQuickBooksPaidDate = (bill?: QuickBooksBill | null) => {
     : formatDateOnly(value, { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
+const formatQuickBooksDeiDate = (bill?: QuickBooksBill | null, invoice?: Invoice | null) => {
+  const value = bill?.first_seen_at || invoice?.created_at || bill?.last_seen_at || bill?.qbo_updated_at || bill?.txn_date || bill?.due_date || '';
+  return value ? formatDateOnly(value, { month: 'short', day: 'numeric', year: 'numeric' }) : '-';
+};
+
 const quickBooksSplitLines = (bill: QuickBooksBill) => (
   Array.isArray(bill.split_lines) ? bill.split_lines : []
 );
+
+const quickBooksVisibleSplitLines = (bill: QuickBooksBill) => (
+  Array.isArray(bill.visible_split_lines) ? bill.visible_split_lines : quickBooksSplitLines(bill)
+);
+
+const quickBooksDateOnly = (value?: string | null) => {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const isoMatch = text.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoMatch) return isoMatch[1];
+  const parsed = parseBuildTrackTimestamp(text) || new Date(text);
+  if (!Number.isFinite(parsed.getTime())) return '';
+  return parsed.toISOString().slice(0, 10);
+};
+
+const quickBooksFilterText = (value?: string | null) => String(value || '').trim().toLowerCase();
+
+const vendorSupplierAliasCandidates = (row: ContractorSupplierDirectoryRow) => (
+  [
+    row.vendor_name,
+    row.name,
+    row.company,
+    row.contact_name,
+    row.email,
+    row.phone,
+    row.account_number,
+  ]
+    .map(value => String(value || '').trim())
+    .filter(Boolean)
+);
+
+const quickBooksBillFilterDate = (bill: QuickBooksBill) => (
+  quickBooksDateOnly(bill.txn_date || bill.due_date || bill.qbo_updated_at || bill.last_seen_at)
+);
+
+const quickBooksBillDueDateKey = (bill?: QuickBooksBill | null) => String(bill?.due_date || '');
+
+const quickBooksInvoiceRowTieBreak = (a: QuickBooksMirrorRow, b: QuickBooksMirrorRow) => {
+  const billDateCompare = quickBooksDateRank(quickBooksBillDateKey(b.bill)) - quickBooksDateRank(quickBooksBillDateKey(a.bill));
+  if (billDateCompare !== 0) return billDateCompare;
+  const vendorCompare = String(a.bill.vendor_name || '').localeCompare(String(b.bill.vendor_name || ''));
+  if (vendorCompare !== 0) return vendorCompare;
+  return String(a.bill.doc_number || a.bill.qbo_id || '').localeCompare(String(b.bill.doc_number || b.bill.qbo_id || ''));
+};
+
+const quickBooksInvoiceStatusSortLabel = (bill: QuickBooksBill) => {
+  const paid = isQuickBooksBillPaid(bill);
+  if (bill.payment_approval_status === 'approved_for_payment' && !paid) return 'Queued';
+  return qboStatusLabel(bill.payment_status);
+};
+
+const quickBooksInvoiceTextSortValue = (value?: string | null) => (
+  String(value || '').trim().toLocaleLowerCase()
+);
+
+const quickBooksInvoiceMoneySortValue = (value?: number | null) => {
+  const amount = Number(value ?? 0);
+  return Number.isFinite(amount) ? amount : 0;
+};
+
+const sortQuickBooksInvoiceRows = (
+  rows: QuickBooksMirrorRow[],
+  sortState: QuickBooksInvoiceSortState | null
+) => {
+  if (!sortState) return rows;
+  return [...rows].sort((a, b) => {
+    let compare = 0;
+    if (sortState.key === 'status') {
+      compare = quickBooksInvoiceStatusSortLabel(a.bill).localeCompare(quickBooksInvoiceStatusSortLabel(b.bill));
+    } else if (sortState.key === 'vendor') {
+      compare = quickBooksInvoiceTextSortValue(a.bill.vendor_name).localeCompare(quickBooksInvoiceTextSortValue(b.bill.vendor_name));
+    } else if (sortState.key === 'bill_date') {
+      compare = quickBooksDateRank(quickBooksBillDateKey(a.bill)) - quickBooksDateRank(quickBooksBillDateKey(b.bill));
+    } else if (sortState.key === 'due_date') {
+      compare = quickBooksDateRank(quickBooksBillDueDateKey(a.bill)) - quickBooksDateRank(quickBooksBillDueDateKey(b.bill));
+    } else if (sortState.key === 'bill_amount') {
+      compare = quickBooksInvoiceMoneySortValue(a.bill.total_amt) - quickBooksInvoiceMoneySortValue(b.bill.total_amt);
+    } else {
+      compare = quickBooksInvoiceMoneySortValue(a.bill.balance) - quickBooksInvoiceMoneySortValue(b.bill.balance);
+    }
+    if (sortState.direction === 'desc') compare *= -1;
+    return compare || quickBooksInvoiceRowTieBreak(a, b);
+  });
+};
+
+const quickBooksBillProjectIds = (bill: QuickBooksBill, invoice?: Invoice | null) => {
+  const ids = new Set<string>();
+  if (invoice?.project_id) ids.add(invoice.project_id);
+  if (bill.project_id) ids.add(bill.project_id);
+  quickBooksSplitLines(bill).forEach(line => {
+    if (line.project_id) ids.add(line.project_id);
+  });
+  return ids;
+};
+
+const quickBooksBillMatchesProject = (bill: QuickBooksBill, invoice: Invoice | null, projectId: string) => (
+  !projectId || quickBooksBillProjectIds(bill, invoice).has(projectId)
+);
+
+const quickBooksBillMatchesVendorSupplier = (
+  bill: QuickBooksBill,
+  vendor: string,
+  vendorSupplierAliasMap?: Map<string, Set<string>>
+) => {
+  if (!vendor) return true;
+  const billVendor = quickBooksFilterText(bill.vendor_name);
+  const selectedVendor = quickBooksFilterText(vendor);
+  if (!billVendor || !selectedVendor) return false;
+  if (billVendor === selectedVendor) return true;
+  return vendorSupplierAliasMap?.get(selectedVendor)?.has(billVendor) || false;
+};
+
+const quickBooksBillMatchesDateRange = (bill: QuickBooksBill, startDate: string, endDate: string) => {
+  const billDate = quickBooksBillFilterDate(bill);
+  if (!billDate) return false;
+  if (startDate && billDate < startDate) return false;
+  if (endDate && billDate > endDate) return false;
+  return true;
+};
+
+const quickBooksBillMatchesExactDate = (bill: QuickBooksBill, exactDate: string) => (
+  !exactDate || quickBooksBillFilterDate(bill) === exactDate
+);
+
+const quickBooksBillScopedToProject = (
+  bill: QuickBooksBill,
+  invoice: Invoice | null,
+  projectId: string
+) => {
+  if (!projectId) return [bill];
+  const splitLines = quickBooksSplitLines(bill);
+  if (!splitLines.length) return quickBooksBillMatchesProject(bill, invoice, projectId) ? [bill] : [];
+
+  const matchingLines = splitLines.filter(line => line.project_id === projectId);
+  if (!matchingLines.length) return [];
+
+  const paid = isQuickBooksBillPaid(bill);
+  return matchingLines.map((line, index) => {
+    const lineAmount = Number(line.amount || 0);
+    return {
+      ...bill,
+      total_amt: lineAmount,
+      balance: paid ? 0 : lineAmount,
+      project_id: line.project_id || bill.project_id || null,
+      project_address: line.project_address || bill.project_address || null,
+      project_job_name: line.project_job_name || bill.project_job_name || null,
+      qbo_class_id: line.class_id || bill.qbo_class_id || null,
+      qbo_class_name: line.class_name || bill.qbo_class_name || null,
+      visible_split_lines: [line],
+      split_scope_line_id: line.id || line.qbo_line_id || `${bill.qbo_id}:${line.line_num || index + 1}`,
+      split_scope_project_id: line.project_id || null,
+      split_scope_parent_total: Number(bill.total_amt || 0),
+      split_scope_parent_balance: Number(bill.balance || 0),
+    };
+  });
+};
+
+const quickBooksBillMatchesInvoiceFilter = (
+  bill: QuickBooksBill,
+  invoice: Invoice | null,
+  filter: QuickBooksInvoiceFilterState,
+  vendorSupplierAliasMap?: Map<string, Set<string>>
+) => {
+  if (filter.mode === 'all') return true;
+  if (QUICKBOOKS_FILTER_PROJECT_MODES.has(filter.mode)) {
+    if (!filter.projectId) return false;
+    if (!quickBooksBillMatchesProject(bill, invoice, filter.projectId)) return false;
+  }
+  if (QUICKBOOKS_FILTER_VENDOR_MODES.has(filter.mode)) {
+    if (!filter.vendor) return false;
+    if (!quickBooksBillMatchesVendorSupplier(bill, filter.vendor, vendorSupplierAliasMap)) return false;
+  }
+  if (QUICKBOOKS_FILTER_DATE_RANGE_MODES.has(filter.mode)) {
+    if (!filter.startDate && !filter.endDate) return false;
+    if (!quickBooksBillMatchesDateRange(bill, filter.startDate, filter.endDate)) return false;
+  }
+  if (QUICKBOOKS_FILTER_EXACT_DATE_MODES.has(filter.mode)) {
+    if (!filter.exactDate) return false;
+    if (!quickBooksBillMatchesExactDate(bill, filter.exactDate)) return false;
+  }
+  return true;
+};
 
 const quickBooksSplitLineCount = (bill: QuickBooksBill) => Number(
   bill.split_line_count ?? quickBooksSplitLines(bill).length ?? 0
@@ -408,11 +723,21 @@ export default function Invoices() {
   const [attachmentPreviewUrl, setAttachmentPreviewUrl] = useState('');
   const [attachmentPreviewLoading, setAttachmentPreviewLoading] = useState(false);
   const [attachmentPreviewError, setAttachmentPreviewError] = useState('');
+  const [qboPdfPreview, setQboPdfPreview] = useState<InvoicePdfPreviewState | null>(null);
+  const [qboPdfPreviewUrl, setQboPdfPreviewUrl] = useState('');
+  const [qboPdfPreviewLoading, setQboPdfPreviewLoading] = useState(false);
+  const [qboPdfPreviewError, setQboPdfPreviewError] = useState('');
   const [quickBooksStatus, setQuickBooksStatus] = useState<QuickBooksStatus | null>(null);
   const [quickBooksBills, setQuickBooksBills] = useState<QuickBooksBill[]>([]);
+  const [contractorSupplierDirectory, setContractorSupplierDirectory] = useState<ContractorSupplierDirectoryRow[]>([]);
   const [quickBooksBillFilter, setQuickBooksBillFilter] = useState<QuickBooksBillFilter>('open');
+  const [quickBooksInvoiceFilter, setQuickBooksInvoiceFilter] = useState<QuickBooksInvoiceFilterState>({ ...DEFAULT_QUICKBOOKS_INVOICE_FILTER });
+  const [quickBooksInvoiceSort, setQuickBooksInvoiceSort] = useState<QuickBooksInvoiceSortState | null>(null);
   const [approvingQboBillId, setApprovingQboBillId] = useState<string | null>(null);
   const [removingQboBillId, setRemovingQboBillId] = useState<string | null>(null);
+  const [deletingQboBillId, setDeletingQboBillId] = useState<string | null>(null);
+  const [uploadingQboBillPdfId, setUploadingQboBillPdfId] = useState<string | null>(null);
+  const [draggingQboBillPdfId, setDraggingQboBillPdfId] = useState<string | null>(null);
   const [notifyingPaymentQueue, setNotifyingPaymentQueue] = useState(false);
   const canReadQuickBooksStatus = isAdminRole(user?.role || '');
   const canManageQuickBooks = Boolean(user?.role && QUICKBOOKS_PANEL_ROLES.includes(user.role));
@@ -420,32 +745,26 @@ export default function Invoices() {
   const load = async () => {
     setLoading(true);
     try {
-      const [projectRes, invoiceRes, qboStatusRes, qboBillsRes] = await Promise.all([
+      const [projectRes, invoiceRes, qboStatusRes, qboBillsRes, contractorSupplierRes] = await Promise.all([
         api.get('/projects'),
         api.get('/invoices'),
         canReadQuickBooksStatus ? api.get('/quickbooks/status').catch(() => ({ data: null })) : Promise.resolve({ data: null }),
         canManageQuickBooks
           ? api.get(QUICKBOOKS_BILLS_PATH).catch(() => ({ data: [] }))
           : Promise.resolve({ data: [] }),
+        canManageQuickBooks
+          ? api.get('/users/contractors/directory').catch(() => ({ data: { contractors: [] } }))
+          : Promise.resolve({ data: { contractors: [] } }),
       ]);
       setProjects(Array.isArray(projectRes.data) ? projectRes.data : []);
       setInvoices(Array.isArray(invoiceRes.data) ? invoiceRes.data : []);
       setQuickBooksStatus(qboStatusRes.data || null);
       setQuickBooksBills(Array.isArray(qboBillsRes.data) ? qboBillsRes.data : []);
+      setContractorSupplierDirectory(Array.isArray(contractorSupplierRes.data?.contractors) ? contractorSupplierRes.data.contractors : []);
     } catch {
       toast.error('Failed to load invoices');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const connectQuickBooks = async () => {
-    try {
-      const res = await api.get('/quickbooks/connect-url');
-      if (!res.data?.auth_url) throw new Error('QuickBooks did not return a connection URL');
-      window.location.href = res.data.auth_url;
-    } catch (err: any) {
-      toast.error(err.response?.data?.error || err.message || 'Failed to start QuickBooks connection');
     }
   };
 
@@ -626,6 +945,42 @@ export default function Invoices() {
     };
   }, [attachmentPreview?.emailId, attachmentPreview?.attachment.id]);
 
+  useEffect(() => {
+    if (!qboPdfPreview) {
+      setQboPdfPreviewUrl('');
+      setQboPdfPreviewError('');
+      setQboPdfPreviewLoading(false);
+      return;
+    }
+
+    let active = true;
+    let objectUrl = '';
+    setQboPdfPreviewUrl('');
+    setQboPdfPreviewError('');
+    setQboPdfPreviewLoading(true);
+
+    api.get(apiClientPath(qboPdfPreview.url), { responseType: 'blob' })
+      .then(res => {
+        if (!active) return;
+        const responseContentType = res.headers?.['content-type'];
+        const blobType = typeof responseContentType === 'string' ? responseContentType : 'application/pdf';
+        const blob = new Blob([res.data], { type: qboPdfPreview.mime_type || blobType });
+        objectUrl = URL.createObjectURL(blob);
+        setQboPdfPreviewUrl(objectUrl);
+      })
+      .catch(() => {
+        if (active) setQboPdfPreviewError('Unable to load invoice PDF. Try refreshing the invoices page and open it again.');
+      })
+      .finally(() => {
+        if (active) setQboPdfPreviewLoading(false);
+      });
+
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [qboPdfPreview?.url]);
+
   const approvedPaymentQueue = useMemo(
     () => quickBooksBills
       .filter(bill => !isQuickBooksBillPaid(bill) && bill.payment_approval_status === 'approved_for_payment')
@@ -643,6 +998,7 @@ export default function Invoices() {
   );
   const paidQuickBooksTotal = paidQuickBooksBills.reduce((sum, bill) => sum + Number(bill.total_amt || 0), 0);
   const invoiceById = useMemo(() => new Map(invoices.map(invoice => [invoice.id, invoice])), [invoices]);
+  const projectById = useMemo(() => new Map(projects.map(project => [project.id, project])), [projects]);
   const openQuickBooksBills = useMemo(
     () => quickBooksBills.filter(bill => !isQuickBooksBillPaid(bill) && bill.payment_approval_status !== 'approved_for_payment'),
     [quickBooksBills]
@@ -684,10 +1040,152 @@ export default function Invoices() {
     },
   };
   const selectedQuickBooksBillFilter = quickBooksBillFilterMeta[quickBooksBillFilter];
-  const quickBooksMirrorRows = useMemo(() => filteredQuickBooksBills.map(bill => ({
+  const quickBooksStatusMirrorRows = useMemo(() => filteredQuickBooksBills.map(bill => ({
     bill,
     invoice: bill.matched_invoice_id ? invoiceById.get(bill.matched_invoice_id) || null : null,
   })), [filteredQuickBooksBills, invoiceById]);
+  const quickBooksAllMirrorRows = useMemo(() => allQuickBooksBills.map(bill => ({
+    bill,
+    invoice: bill.matched_invoice_id ? invoiceById.get(bill.matched_invoice_id) || null : null,
+  })), [allQuickBooksBills, invoiceById]);
+  const quickBooksProjectFilterOptions = useMemo(() => {
+    const options = new Map<string, string>();
+    const addOption = (projectId?: string | null, address?: string | null, jobName?: string | null) => {
+      if (!projectId || options.has(projectId)) return;
+      const project = projectById.get(projectId);
+      const labelParts = [
+        project?.address || address || '',
+        project?.job_name || jobName || '',
+      ].filter(Boolean);
+      options.set(projectId, labelParts.join(' - ') || projectId);
+    };
+    quickBooksBills.forEach(bill => {
+      const invoice = bill.matched_invoice_id ? invoiceById.get(bill.matched_invoice_id) || null : null;
+      addOption(invoice?.project_id, invoice?.address, invoice?.job_name);
+      addOption(bill.project_id, bill.project_address, bill.project_job_name);
+      quickBooksSplitLines(bill).forEach(line => addOption(line.project_id, line.project_address, line.project_job_name));
+    });
+    return Array.from(options.entries())
+      .map(([id, label]) => ({ id, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [invoiceById, projectById, quickBooksBills]);
+  const quickBooksVendorSupplierFilterOptions = useMemo(() => {
+    const options = new Map<string, VendorSupplierFilterOption>();
+    const addOption = (labelValue?: string | null, aliases: string[] = []) => {
+      const label = String(labelValue || '').trim();
+      if (!label) return;
+      const key = quickBooksFilterText(label);
+      const normalizedAliases = Array.from(new Set(
+        [label, ...aliases]
+          .map(value => String(value || '').trim())
+          .filter(Boolean)
+      ));
+      const existing = options.get(key);
+      if (existing) {
+        existing.aliases = Array.from(new Set([...existing.aliases, ...normalizedAliases]));
+        return;
+      }
+      options.set(key, { label, aliases: normalizedAliases });
+    };
+
+    contractorSupplierDirectory.forEach(row => {
+      const aliases = vendorSupplierAliasCandidates(row);
+      addOption(row.vendor_name || row.name || row.company || row.contact_name, aliases);
+    });
+    quickBooksBills.forEach(bill => addOption(bill.vendor_name, [String(bill.vendor_name || '').trim()]));
+
+    return Array.from(options.values()).sort((a, b) => a.label.localeCompare(b.label));
+  }, [contractorSupplierDirectory, quickBooksBills]);
+  const quickBooksVendorSupplierAliasMap = useMemo(() => {
+    const aliasMap = new Map<string, Set<string>>();
+    quickBooksVendorSupplierFilterOptions.forEach(option => {
+      const key = quickBooksFilterText(option.label);
+      if (!key) return;
+      aliasMap.set(key, new Set(option.aliases.map(alias => quickBooksFilterText(alias)).filter(Boolean)));
+    });
+    return aliasMap;
+  }, [quickBooksVendorSupplierFilterOptions]);
+  const quickBooksInvoiceFilterNeedsProject = QUICKBOOKS_FILTER_PROJECT_MODES.has(quickBooksInvoiceFilter.mode);
+  const quickBooksInvoiceFilterNeedsVendor = QUICKBOOKS_FILTER_VENDOR_MODES.has(quickBooksInvoiceFilter.mode);
+  const quickBooksInvoiceFilterNeedsDateRange = QUICKBOOKS_FILTER_DATE_RANGE_MODES.has(quickBooksInvoiceFilter.mode);
+  const quickBooksInvoiceFilterNeedsExactDate = QUICKBOOKS_FILTER_EXACT_DATE_MODES.has(quickBooksInvoiceFilter.mode);
+  const quickBooksInvoiceFilterReady = quickBooksInvoiceFilter.mode === 'all' || (
+    (!quickBooksInvoiceFilterNeedsProject || Boolean(quickBooksInvoiceFilter.projectId))
+    && (!quickBooksInvoiceFilterNeedsVendor || Boolean(quickBooksInvoiceFilter.vendor))
+    && (!quickBooksInvoiceFilterNeedsDateRange || Boolean(quickBooksInvoiceFilter.startDate || quickBooksInvoiceFilter.endDate))
+    && (!quickBooksInvoiceFilterNeedsExactDate || Boolean(quickBooksInvoiceFilter.exactDate))
+  );
+  const quickBooksInvoiceFilterInUse = quickBooksInvoiceFilter.mode !== 'all';
+  const quickBooksInvoiceFilterActive = quickBooksInvoiceFilter.mode !== 'all' && quickBooksInvoiceFilterReady;
+  const quickBooksEffectiveInvoiceSort = quickBooksInvoiceSort || (
+    quickBooksInvoiceFilterInUse || quickBooksBillFilter === 'all' || quickBooksBillFilter === 'open'
+      ? DEFAULT_QUICKBOOKS_INVOICE_SORT
+      : null
+  );
+  const quickBooksBaseMirrorRows = quickBooksInvoiceFilter.mode === 'all' ? quickBooksStatusMirrorRows : quickBooksAllMirrorRows;
+  const quickBooksMirrorRows = useMemo(() => {
+    const filteredRows = quickBooksBaseMirrorRows.filter(({ bill, invoice }) => (
+      quickBooksBillMatchesInvoiceFilter(bill, invoice, quickBooksInvoiceFilter, quickBooksVendorSupplierAliasMap)
+    ));
+    const rows = (!quickBooksInvoiceFilterNeedsProject || !quickBooksInvoiceFilter.projectId)
+      ? filteredRows
+      : filteredRows.flatMap(({ bill, invoice }) => (
+        quickBooksBillScopedToProject(bill, invoice, quickBooksInvoiceFilter.projectId)
+        .filter(scopedBill => quickBooksBillMatchesInvoiceFilter(scopedBill, invoice, quickBooksInvoiceFilter, quickBooksVendorSupplierAliasMap))
+        .map(scopedBill => ({ bill: scopedBill, invoice }))
+      ));
+    return sortQuickBooksInvoiceRows(rows, quickBooksEffectiveInvoiceSort);
+  }, [quickBooksBaseMirrorRows, quickBooksEffectiveInvoiceSort, quickBooksInvoiceFilter, quickBooksInvoiceFilterNeedsProject, quickBooksVendorSupplierAliasMap]);
+  const quickBooksInvoiceFilterLabel = QUICKBOOKS_INVOICE_FILTER_OPTIONS.find(option => option.value === quickBooksInvoiceFilter.mode)?.label || 'Filter';
+  const quickBooksInvoiceFilterScope = quickBooksInvoiceFilter.mode === 'vendor_only' ? 'vendor / supplier' : 'project';
+  const quickBooksInvoiceFilterPrompt = quickBooksInvoiceFilter.mode === 'all'
+    ? quickBooksInvoiceFilterLabel
+    : quickBooksInvoiceFilterNeedsProject && !quickBooksInvoiceFilter.projectId
+      ? 'Select project'
+      : quickBooksInvoiceFilterNeedsVendor && !quickBooksInvoiceFilter.vendor
+        ? 'Select vendor / supplier'
+        : quickBooksInvoiceFilterNeedsDateRange && !quickBooksInvoiceFilter.startDate && !quickBooksInvoiceFilter.endDate
+          ? 'Select date range'
+          : quickBooksInvoiceFilterNeedsExactDate && !quickBooksInvoiceFilter.exactDate
+            ? 'Select bill date'
+            : `${quickBooksMirrorRows.length} ${quickBooksInvoiceFilterScope} invoice${quickBooksMirrorRows.length === 1 ? '' : 's'}`;
+  const quickBooksTableTitle = quickBooksInvoiceFilterActive ? `Filtered ${quickBooksInvoiceFilterScope} invoices` : selectedQuickBooksBillFilter.title;
+  const quickBooksTableSubtitle = quickBooksInvoiceFilterActive
+    ? `Paid and unpaid QuickBooks bills matched to the selected ${quickBooksInvoiceFilterScope} filter.`
+    : selectedQuickBooksBillFilter.subtitle;
+  const showFridayPaymentQueuePanel = quickBooksBillFilter === 'open' && !quickBooksInvoiceFilterInUse;
+  const clearQuickBooksInvoiceFilter = () => setQuickBooksInvoiceFilter({ ...DEFAULT_QUICKBOOKS_INVOICE_FILTER });
+  const updateQuickBooksInvoiceFilter = (patch: Partial<QuickBooksInvoiceFilterState>) => {
+    setQuickBooksInvoiceFilter(current => ({ ...current, ...patch }));
+  };
+  const updateQuickBooksInvoiceSort = (key: QuickBooksInvoiceSortKey) => {
+    setQuickBooksInvoiceSort(current => {
+      const currentSort = current || quickBooksEffectiveInvoiceSort;
+      if (currentSort?.key === key) {
+        return { key, direction: currentSort.direction === 'desc' ? 'asc' : 'desc' };
+      }
+      return { key, direction: key === 'status' || key === 'vendor' ? 'asc' : 'desc' };
+    });
+  };
+  const quickBooksSortAria = (key: QuickBooksInvoiceSortKey): 'none' | 'ascending' | 'descending' => {
+    if (quickBooksEffectiveInvoiceSort?.key !== key) return 'none';
+    return quickBooksEffectiveInvoiceSort.direction === 'asc' ? 'ascending' : 'descending';
+  };
+  const renderQuickBooksSortableHeader = (key: QuickBooksInvoiceSortKey, label: string) => {
+    const activeSort = quickBooksEffectiveInvoiceSort?.key === key ? quickBooksEffectiveInvoiceSort : null;
+    const SortIcon = !activeSort ? ArrowUpDown : activeSort.direction === 'asc' ? ArrowUp : ArrowDown;
+    return (
+      <button
+        type="button"
+        className={`inline-flex items-center gap-1 bg-transparent p-0 text-left font-black uppercase tracking-wide transition ${activeSort ? 'text-white' : 'text-orange-300 hover:text-white'}`}
+        onClick={() => updateQuickBooksInvoiceSort(key)}
+        title={`Sort by ${label}`}
+      >
+        <span>{label}</span>
+        <SortIcon className={`h-3.5 w-3.5 ${activeSort ? 'opacity-100' : 'opacity-60'}`} />
+      </button>
+    );
+  };
   const canApproveForPayment = (invoice?: Invoice | null) => Boolean(
     invoice
     && isAdminRole(user?.role || '')
@@ -725,6 +1223,85 @@ export default function Invoices() {
     setQuickBooksBills(prev => prev.map(item => item.qbo_id === updated.qbo_id ? { ...item, ...updated } : item));
   };
 
+  const qboPdfInputId = (bill: QuickBooksBill) =>
+    `qbo-bill-pdf-${String(bill.qbo_id || '').replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+
+  const apiClientPath = (url: string) => {
+    const value = String(url || '').trim();
+    if (!value) return value;
+    if (value.startsWith('/api/')) return value.slice(4);
+    if (/^https?:\/\//i.test(value)) {
+      try {
+        const parsed = new URL(value);
+        if (parsed.origin === window.location.origin && parsed.pathname.startsWith('/api/')) {
+          return `${parsed.pathname.slice(4)}${parsed.search}`;
+        }
+      } catch {
+        return value;
+      }
+    }
+    return value;
+  };
+
+  const qboPdfFrameSrc = qboPdfPreviewUrl && qboPdfPreview
+    ? `${qboPdfPreviewUrl}#page=${Math.max(1, qboPdfPreview.page)}&zoom=${qboPdfPreview.zoom}&toolbar=0&navpanes=0&scrollbar=1`
+    : '';
+
+  const updateQboPdfViewer = (patch: Partial<Pick<InvoicePdfPreviewState, 'page' | 'zoom'>>) => {
+    setQboPdfPreview(current => {
+      if (!current) return current;
+      const page = patch.page !== undefined ? Math.max(1, Math.floor(patch.page || 1)) : current.page;
+      const zoom = patch.zoom !== undefined ? Math.max(50, Math.min(250, Math.round(patch.zoom))) : current.zoom;
+      return { ...current, page, zoom };
+    });
+  };
+
+  const previewQuickBooksBillPdf = (bill: QuickBooksBill) => {
+    const pdf = bill.invoice_pdf;
+    if (!pdf?.available || !pdf.url) {
+      toast.error('No PDF invoice is attached to this bill yet');
+      return;
+    }
+    const title = pdf.original_name || `QBO bill ${bill.doc_number || bill.qbo_id}.pdf`;
+    setQboPdfPreview({
+      title,
+      filename: invoicePdfDownloadName(title),
+      url: pdf.url,
+      mime_type: pdf.mime_type || 'application/pdf',
+      size_label: pdf.size_label || null,
+      page: 1,
+      zoom: 115,
+    });
+  };
+
+  const uploadQuickBooksBillPdf = async (bill: QuickBooksBill, file?: File | null) => {
+    if (!file) return;
+    const isPdf = file.type.toLowerCase().includes('pdf') || file.name.toLowerCase().endsWith('.pdf');
+    if (!isPdf) {
+      toast.error('Upload a PDF invoice file');
+      return;
+    }
+
+    setUploadingQboBillPdfId(bill.qbo_id);
+    try {
+      const form = new FormData();
+      form.append('invoice_pdf', file);
+      const res = await api.post(`/quickbooks/bills/${encodeURIComponent(bill.qbo_id)}/attachments`, form);
+      updateQuickBooksBill(res.data);
+      toast.success('Invoice PDF uploaded');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to upload invoice PDF');
+    } finally {
+      setUploadingQboBillPdfId(null);
+      setDraggingQboBillPdfId(null);
+    }
+  };
+
+  const handleQuickBooksBillPdfFiles = (bill: QuickBooksBill, files?: FileList | null) => {
+    const file = files && files.length ? files[0] : null;
+    uploadQuickBooksBillPdf(bill, file);
+  };
+
   const canApproveQuickBooksBill = (bill: QuickBooksBill, invoice?: Invoice | null) => {
     if (!isAdminRole(user?.role || '')) return false;
     if (isQuickBooksBillPaid(bill)) return false;
@@ -739,6 +1316,12 @@ export default function Invoices() {
     if (!quickBooksBillHasApprovalMatch(bill, invoice)) return 'Assign before approval';
     return 'Ready for Friday payment approval';
   };
+
+  const canDeleteQuickBooksOpenBill = (bill: QuickBooksBill) => (
+    canManageQuickBooks
+    && !isQuickBooksBillPaid(bill)
+    && bill.payment_approval_status !== 'approved_for_payment'
+  );
 
   const approveQuickBooksBillForPay = async (bill: QuickBooksBill, invoice?: Invoice | null) => {
     if (!canApproveQuickBooksBill(bill, invoice)) {
@@ -769,6 +1352,28 @@ export default function Invoices() {
       toast.error(err.response?.data?.error || 'Failed to remove this bill from the payment queue');
     } finally {
       setRemovingQboBillId(null);
+    }
+  };
+
+  const deleteQuickBooksOpenBill = async (bill: QuickBooksBill) => {
+    if (!canDeleteQuickBooksOpenBill(bill)) {
+      toast.error('Only unpaid open bills can be deleted from BuildTrack.');
+      return;
+    }
+    const label = bill.doc_number || bill.vendor_name || bill.qbo_id;
+    const confirmed = window.confirm(`Delete open bill ${label} from BuildTrack? This removes the local mirrored bill and any attached invoice PDF from BuildTrack.`);
+    if (!confirmed) return;
+
+    setDeletingQboBillId(bill.qbo_id);
+    try {
+      const res = await api.delete(`/quickbooks/bills/${encodeURIComponent(bill.qbo_id)}`);
+      setQuickBooksBills(prev => prev.filter(item => item.qbo_id !== bill.qbo_id));
+      await refreshQuickBooksStatus();
+      toast.success(res.data?.message || 'Open bill deleted');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to delete this open bill');
+    } finally {
+      setDeletingQboBillId(null);
     }
   };
 
@@ -961,44 +1566,70 @@ export default function Invoices() {
     );
   };
 
+  const renderQuickBooksBillPdfControl = (bill: QuickBooksBill) => {
+    const pdf = bill.invoice_pdf;
+    const hasPdf = Boolean(pdf?.available && pdf.url);
+    const inputId = qboPdfInputId(bill);
+    const busy = uploadingQboBillPdfId === bill.qbo_id;
+    const dragging = draggingQboBillPdfId === bill.qbo_id;
+
+    if (hasPdf) {
+      return (
+        <div className="bt-qbo-pdf-control has-pdf">
+          <button
+            type="button"
+            className="bt-qbo-pdf-view-button"
+            onClick={() => previewQuickBooksBillPdf(bill)}
+            title={`View ${pdf?.original_name || 'invoice PDF'}`}
+          >
+            <FileText className="h-4 w-4" />
+            <span>View Invoice</span>
+            <Eye className="h-3.5 w-3.5" />
+          </button>
+          <small>{pdf?.label || 'PDF available'}{pdf?.size_label ? ` - ${pdf.size_label}` : ''}</small>
+        </div>
+      );
+    }
+
+    return (
+      <div
+        className={`bt-qbo-pdf-control needs-pdf ${dragging ? 'is-dragging' : ''} ${busy ? 'is-uploading' : ''}`}
+        onDragOver={event => {
+          event.preventDefault();
+          setDraggingQboBillPdfId(bill.qbo_id);
+        }}
+        onDragLeave={() => setDraggingQboBillPdfId(current => current === bill.qbo_id ? null : current)}
+        onDrop={event => {
+          event.preventDefault();
+          handleQuickBooksBillPdfFiles(bill, event.dataTransfer.files);
+        }}
+      >
+        <label htmlFor={inputId} className="bt-qbo-pdf-upload-button">
+          <Upload className="h-4 w-4" />
+          <span>{busy ? 'Uploading...' : 'Add PDF'}</span>
+          <input
+            id={inputId}
+            type="file"
+            accept="application/pdf,.pdf"
+            disabled={busy}
+            onChange={event => {
+              handleQuickBooksBillPdfFiles(bill, event.target.files);
+              event.currentTarget.value = '';
+            }}
+          />
+        </label>
+        <small>{dragging ? 'Drop PDF to attach' : 'Drop PDF or click to upload'}</small>
+      </div>
+    );
+  };
+
   if (loading) return <Loading />;
 
   return (
     <div className="bt-desktop-page bt-invoices-light min-h-full px-6 py-6 md:px-8">
-      <div className="max-w-7xl mx-auto space-y-5">
+      <div className={`${quickBooksInvoiceFilterInUse ? 'bt-invoice-filter-results-layout max-w-none' : 'max-w-7xl'} mx-auto space-y-5`}>
         {canManageQuickBooks && (
-          <section className="bt-invoice-section bt-qbo-mirror-section">
-            <div className="bt-invoice-section-header">
-              <div className="flex items-start gap-3">
-                <div className="bt-invoice-icon bg-blue-50 text-blue-700">
-                  <Receipt className="w-5 h-5" />
-                </div>
-                <div>
-                  <p className="text-xs font-black uppercase tracking-wide text-orange-300">QuickBooks Online source of truth</p>
-                  <h2 className="text-lg font-black text-gray-900">QuickBooks Bills mirror</h2>
-                  <p className="text-sm text-gray-600">
-                    Bills entered in QuickBooks are mirrored here automatically. Accounting sync stays in the background.
-                  </p>
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                <span className={`bt-invoice-filter ${quickBooksStatus?.connected ? 'is-active' : ''}`}>
-                  {quickBooksStatus?.connected ? `${quickBooksStatus.connection?.company_name || 'QBO'} connected` : 'QBO not connected'}
-                </span>
-                {!quickBooksStatus?.connected && (
-                  <button
-                    type="button"
-                    onClick={connectQuickBooks}
-                    disabled={!quickBooksStatus?.configured}
-                    className="bt-invoice-refresh"
-                  >
-                    <ExternalLink className="h-4 w-4" />
-                    Connect QuickBooks
-                  </button>
-                )}
-              </div>
-            </div>
-
+          <section className={`bt-invoice-section bt-qbo-mirror-section ${quickBooksInvoiceFilterInUse ? 'is-filter-results' : ''}`}>
             <div className="bt-qbo-status-row bt-qbo-kpi-row">
               <div>
                 <span>Last sync</span>
@@ -1035,28 +1666,111 @@ export default function Invoices() {
             </div>
 
             <div className="bt-qbo-filter-row mx-4 mt-3 flex flex-wrap items-center gap-2">
-              {([
-                { key: 'open', tone: 'blue' },
-                { key: 'friday_queue', tone: 'amber' },
-                { key: 'paid', tone: 'emerald' },
-                { key: 'all', tone: 'slate' },
-              ] as const).map(option => {
-                const meta = quickBooksBillFilterMeta[option.key];
-                const active = quickBooksBillFilter === option.key;
-                return (
-                  <button
-                    key={option.key}
-                    type="button"
-                    onClick={() => setQuickBooksBillFilter(option.key)}
-                    className={`bt-invoice-filter ${active ? 'is-active' : ''}`}
-                    aria-pressed={active}
-                    data-tone={option.tone}
+              <div className="bt-qbo-status-filter-pills">
+                {([
+                  { key: 'open', tone: 'blue' },
+                  { key: 'friday_queue', tone: 'amber' },
+                  { key: 'paid', tone: 'emerald' },
+                  { key: 'all', tone: 'slate' },
+                ] as const).map(option => {
+                  const meta = quickBooksBillFilterMeta[option.key];
+                  const active = quickBooksBillFilter === option.key;
+                  return (
+                    <button
+                      key={option.key}
+                      type="button"
+                      onClick={() => setQuickBooksBillFilter(option.key)}
+                      className={`bt-invoice-filter ${active ? 'is-active' : ''}`}
+                      aria-pressed={active}
+                      data-tone={option.tone}
+                    >
+                      {meta.label}
+                      <span className="ml-1 rounded-full bg-black/10 px-1.5 py-0.5 text-[10px] font-black">{meta.count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="bt-qbo-invoice-filter-panel">
+                <label>
+                  <span>Invoice filter</span>
+                  <select
+                    value={quickBooksInvoiceFilter.mode}
+                    onChange={event => updateQuickBooksInvoiceFilter({ mode: event.target.value as QuickBooksInvoiceFilterMode })}
                   >
-                    {meta.label}
-                    <span className="ml-1 rounded-full bg-black/10 px-1.5 py-0.5 text-[10px] font-black">{meta.count}</span>
+                    {QUICKBOOKS_INVOICE_FILTER_OPTIONS.map(option => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                {quickBooksInvoiceFilterNeedsProject && (
+                  <label>
+                    <span>Project required</span>
+                    <select
+                      value={quickBooksInvoiceFilter.projectId}
+                      onChange={event => updateQuickBooksInvoiceFilter({ projectId: event.target.value })}
+                    >
+                      <option value="">Select project</option>
+                      {quickBooksProjectFilterOptions.map(option => (
+                        <option key={option.id} value={option.id}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {quickBooksInvoiceFilterNeedsVendor && (
+                  <label>
+                    <span>Vendor / Suppliers</span>
+                    <select
+                      value={quickBooksInvoiceFilter.vendor}
+                      onChange={event => updateQuickBooksInvoiceFilter({ vendor: event.target.value })}
+                    >
+                      <option value="">Select vendor / supplier</option>
+                      {quickBooksVendorSupplierFilterOptions.map(option => (
+                        <option key={option.label} value={option.label}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {quickBooksInvoiceFilterNeedsDateRange && (
+                  <>
+                    <label>
+                      <span>Start date</span>
+                      <input
+                        type="date"
+                        value={quickBooksInvoiceFilter.startDate}
+                        onChange={event => updateQuickBooksInvoiceFilter({ startDate: event.target.value })}
+                      />
+                    </label>
+                    <label>
+                      <span>End date</span>
+                      <input
+                        type="date"
+                        value={quickBooksInvoiceFilter.endDate}
+                        onChange={event => updateQuickBooksInvoiceFilter({ endDate: event.target.value })}
+                      />
+                    </label>
+                  </>
+                )}
+                {quickBooksInvoiceFilterNeedsExactDate && (
+                  <label>
+                    <span>Bill date</span>
+                    <input
+                      type="date"
+                      value={quickBooksInvoiceFilter.exactDate}
+                      onChange={event => updateQuickBooksInvoiceFilter({ exactDate: event.target.value })}
+                    />
+                  </label>
+                )}
+                <span className={`bt-qbo-invoice-filter-count ${quickBooksInvoiceFilterActive ? 'is-active' : ''}`}>
+                  {quickBooksInvoiceFilterPrompt}
+                </span>
+                {quickBooksInvoiceFilter.mode !== 'all' && (
+                  <button type="button" className="bt-qbo-clear-invoice-filter" onClick={clearQuickBooksInvoiceFilter}>
+                    <X className="h-3.5 w-3.5" />
+                    Clear
                   </button>
-                );
-              })}
+                )}
+              </div>
             </div>
 
             {quickBooksStatus?.connection?.last_sync_error && (
@@ -1070,28 +1784,32 @@ export default function Invoices() {
               <div className="bt-invoice-empty bt-qbo-table-empty">
                 <Receipt className="mx-auto mb-3 h-8 w-8 text-blue-300" />
                 <p className="text-sm font-bold text-gray-600">
-                  No {selectedQuickBooksBillFilter.label.toLowerCase()} are showing right now.
+                  {quickBooksInvoiceFilter.mode !== 'all' && !quickBooksInvoiceFilterReady
+                    ? 'Select the required invoice filter fields to show paid and unpaid invoices.'
+                    : quickBooksInvoiceFilterActive
+                      ? `No paid or unpaid invoices match this ${quickBooksInvoiceFilterScope} filter right now.`
+                      : `No ${selectedQuickBooksBillFilter.label.toLowerCase()} are showing right now.`}
                 </p>
               </div>
             ) : (
               <div className="bt-qbo-table-shell">
                 <div className="bt-qbo-table-title">
                   <div>
-                    <span>{selectedQuickBooksBillFilter.title}</span>
+                    <span>{quickBooksTableTitle}</span>
                     <strong>{quickBooksMirrorRows.length} shown</strong>
                   </div>
-                  <p>{selectedQuickBooksBillFilter.subtitle}</p>
+                  <p>{quickBooksTableSubtitle}</p>
                 </div>
                 <div className="bt-qbo-table-wrap">
                   <table className="bt-qbo-bill-table">
                     <thead>
                       <tr>
-                        <th>Status</th>
-                        <th>Vendor</th>
-                        <th>Bill date</th>
-                        <th>Due date</th>
-                        <th>Bill amount</th>
-                        <th>Open balance</th>
+                        <th aria-sort={quickBooksSortAria('status')}>{renderQuickBooksSortableHeader('status', 'Status')}</th>
+                        <th aria-sort={quickBooksSortAria('vendor')}>{renderQuickBooksSortableHeader('vendor', 'Vendor')}</th>
+                        <th aria-sort={quickBooksSortAria('bill_date')}>{renderQuickBooksSortableHeader('bill_date', 'Bill date')}</th>
+                        <th aria-sort={quickBooksSortAria('due_date')}>{renderQuickBooksSortableHeader('due_date', 'Due date')}</th>
+                        <th aria-sort={quickBooksSortAria('bill_amount')}>{renderQuickBooksSortableHeader('bill_amount', 'Bill amount')}</th>
+                        <th aria-sort={quickBooksSortAria('open_balance')}>{renderQuickBooksSortableHeader('open_balance', 'Open balance')}</th>
                         <th>BuildTrack match</th>
                         <th>Action</th>
                       </tr>
@@ -1101,40 +1819,51 @@ export default function Invoices() {
                         const isPaid = isQuickBooksBillPaid(bill);
                         const isApprovedForPay = bill.payment_approval_status === 'approved_for_payment' && !isPaid;
                         const localInvoiceMarkedPaid = Boolean(!isPaid && invoice && (invoice.status === 'paid' || invoice.quickbooks_payment_status === 'paid'));
-                        const splitLines = quickBooksSplitLines(bill);
+                        const splitLines = quickBooksVisibleSplitLines(bill);
+                        const visibleSplitLineCount = splitLines.length;
                         const splitLineCount = quickBooksSplitLineCount(bill);
                         const unmatchedSplitCount = quickBooksUnmatchedSplitLineCount(bill);
                         const splitMatched = quickBooksBillSplitMatched(bill);
+                        const isSplitScoped = Boolean(bill.split_scope_line_id);
                         const projectMatched = quickBooksBillHasApprovalMatch(bill, invoice);
                         const needsReview = !projectMatched && !isPaid;
-                        const matchAddress = invoice?.address || bill.project_address || '';
-                        const matchName = invoice?.job_name || bill.project_job_name || '';
+                        const canDeleteOpenBill = canDeleteQuickBooksOpenBill(bill);
+                        const matchAddress = isSplitScoped ? bill.project_address || invoice?.address || '' : invoice?.address || bill.project_address || '';
+                        const matchName = isSplitScoped ? bill.project_job_name || invoice?.job_name || '' : invoice?.job_name || bill.project_job_name || '';
                         const paidDateLabel = isPaid ? formatQuickBooksPaidDate(bill) : '';
+                        const deiDateLabel = formatQuickBooksDeiDate(bill, invoice);
+                        const rowKey = isSplitScoped ? `${bill.qbo_id}:${bill.split_scope_line_id}` : bill.qbo_id;
                         return (
-                          <tr key={bill.qbo_id} className={`${isPaid ? 'is-paid' : isApprovedForPay ? 'is-approved-for-pay' : 'is-unpaid'} ${needsReview ? 'needs-review' : ''}`}>
+                          <tr key={rowKey} className={`${isPaid ? 'is-paid' : isApprovedForPay ? 'is-approved-for-pay' : 'is-unpaid'} ${needsReview ? 'needs-review' : ''}`}>
                             <td>
                               <span className={`bt-qbo-status-chip ${isPaid ? 'is-paid' : isApprovedForPay ? 'is-approved-for-pay' : 'is-unpaid'}`}>
                                 {isApprovedForPay ? 'Queued' : qboStatusLabel(bill.payment_status)}
                               </span>
                               <small>QBO #{bill.doc_number || bill.qbo_id}</small>
+                              <small>DEI: {deiDateLabel}</small>
                               {paidDateLabel ? <small>Paid: {paidDateLabel}</small> : null}
                               {isApprovedForPay ? <small>Pay run: Friday {qboPaymentRunLabel(bill)}</small> : null}
                               {localInvoiceMarkedPaid ? <small>BuildTrack marked paid; QBO still open</small> : null}
+                              {renderQuickBooksBillPdfControl(bill)}
                             </td>
                             <td>
                               <strong>{bill.vendor_name || 'Vendor missing'}</strong>
                               {bill.private_note ? <small>{bill.private_note}</small> : null}
-                              {splitLineCount > 1 ? <small>{splitLineCount} QBO class split lines</small> : null}
+                              {isSplitScoped ? (
+                                <small>Project split from bill total {money(bill.split_scope_parent_total || 0)}</small>
+                              ) : splitLineCount > 1 ? (
+                                <small>{splitLineCount} QBO class split lines</small>
+                              ) : null}
                             </td>
                             <td>{bill.txn_date ? formatDateOnly(bill.txn_date, { month: 'short', day: 'numeric', year: 'numeric' }) : '-'}</td>
                             <td>{bill.due_date ? formatDateOnly(bill.due_date, { month: 'short', day: 'numeric', year: 'numeric' }) : '-'}</td>
                             <td className="bt-qbo-money">{money(bill.total_amt || 0)}</td>
                             <td className="bt-qbo-money">{money(bill.balance || 0)}</td>
                             <td>
-                              {splitLineCount > 0 ? (
+                              {visibleSplitLineCount > 0 ? (
                                 <>
-                                  <strong>{splitMatched ? `${splitLineCount} class splits matched` : `${unmatchedSplitCount} class split${unmatchedSplitCount === 1 ? '' : 's'} need match`}</strong>
-                                  <small>Approval stays on one QBO balance</small>
+                                  <strong>{isSplitScoped ? 'Project split matched' : splitMatched ? `${splitLineCount} class splits matched` : `${unmatchedSplitCount} class split${unmatchedSplitCount === 1 ? '' : 's'} need match`}</strong>
+                                  <small>{isSplitScoped ? 'Showing only the selected project split.' : 'Approval stays on one QBO balance'}</small>
                                   <div className="bt-qbo-split-list">
                                     {splitLines.map(line => (
                                       <div
@@ -1210,18 +1939,46 @@ export default function Invoices() {
                                       {approvingQboBillId === bill.qbo_id ? 'Approving...' : 'Approve for Pay'}
                                     </button>
                                   )}
-                                  {invoice ? (
+                                  {isSplitScoped && bill.project_id ? (
+                                    <Link to={`/projects/${bill.project_id}`}>Open project</Link>
+                                  ) : invoice ? (
                                     <Link to={`/projects/${invoice.project_id}/invoices/${invoice.id}`}>Open invoice</Link>
                                   ) : bill.project_id ? (
                                     <Link to={`/projects/${bill.project_id}`}>Open project</Link>
                                   ) : splitLineCount > 0 ? (
                                     <span className="bt-qbo-split-summary-chip">{splitLineCount} project splits</span>
                                   ) : null}
+                                  {canDeleteOpenBill ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => deleteQuickBooksOpenBill(bill)}
+                                      disabled={deletingQboBillId === bill.qbo_id}
+                                      title="Delete incorrect open bill from BuildTrack"
+                                      className="bt-qbo-delete-open-bill-button"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                      {deletingQboBillId === bill.qbo_id ? 'Deleting...' : 'Delete'}
+                                    </button>
+                                  ) : null}
                                 </div>
                               ) : (
-                                <span className="bt-qbo-unmatched">
-                                  {splitLineCount > 0 ? 'Assign every class split' : 'Assign before approval'}
-                                </span>
+                                <div className="bt-qbo-row-actions">
+                                  <span className="bt-qbo-unmatched">
+                                    {splitLineCount > 0 ? 'Assign every class split' : 'Assign before approval'}
+                                  </span>
+                                  {canDeleteOpenBill ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => deleteQuickBooksOpenBill(bill)}
+                                      disabled={deletingQboBillId === bill.qbo_id}
+                                      title="Delete incorrect open bill from BuildTrack"
+                                      className="bt-qbo-delete-open-bill-button"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                      {deletingQboBillId === bill.qbo_id ? 'Deleting...' : 'Delete'}
+                                    </button>
+                                  ) : null}
+                                </div>
                               )}
                             </td>
                           </tr>
@@ -1233,7 +1990,7 @@ export default function Invoices() {
               </div>
             )}
 
-            {quickBooksBillFilter !== 'paid' && quickBooksBillFilter !== 'all' && (
+            {showFridayPaymentQueuePanel && (
             <div className="bt-approved-pay-panel bt-approved-pay-panel--embedded">
               <div className="bt-approved-pay-header">
                 <div>
@@ -1592,6 +2349,17 @@ export default function Invoices() {
                   <ExternalLink className="h-4 w-4" />
                   Open
                 </a>
+                {isPdfAttachment(attachmentPreview.attachment) && attachmentPreviewUrl ? (
+                  <a
+                    href={attachmentPreviewUrl}
+                    download={invoicePdfDownloadName(attachmentPreview.attachment.original_name || 'invoice attachment.pdf')}
+                    className="bt-invoice-modal-action"
+                    title="Download invoice PDF"
+                  >
+                    <Download className="h-4 w-4" />
+                    Download
+                  </a>
+                ) : null}
                 <button
                   type="button"
                   className="bt-invoice-modal-close"
@@ -1627,6 +2395,133 @@ export default function Invoices() {
                 <div className="bt-invoice-attachment-fallback">
                   <FileText className="h-10 w-10" />
                   <p>This attachment type may not preview in the browser. Use Open to view or download it.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {qboPdfPreview && (
+        <div
+          className="bt-invoice-pdf-viewer-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`PDF viewer for ${qboPdfPreview.title || 'invoice PDF'}`}
+          onClick={() => setQboPdfPreview(null)}
+        >
+          <div className="bt-invoice-pdf-viewer-panel" onClick={event => event.stopPropagation()}>
+            <div className="bt-invoice-pdf-viewer-header">
+              <div className="bt-invoice-pdf-title">
+                <span>Invoice PDF Viewer</span>
+                <strong>{qboPdfPreview.title || 'Invoice PDF'}</strong>
+                <small>
+                  {qboPdfPreview.mime_type || 'application/pdf'}
+                  {qboPdfPreview.size_label ? ` - ${qboPdfPreview.size_label}` : ''}
+                </small>
+              </div>
+              <div className="bt-invoice-pdf-toolbar" aria-label="PDF viewer controls">
+                <div className="bt-invoice-pdf-control-group" aria-label="Page controls">
+                  <button
+                    type="button"
+                    onClick={() => updateQboPdfViewer({ page: qboPdfPreview.page - 1 })}
+                    disabled={qboPdfPreview.page <= 1}
+                    aria-label="Previous page"
+                    title="Previous page"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                  <label>
+                    <span>Page</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={qboPdfPreview.page}
+                      onChange={event => updateQboPdfViewer({ page: Number(event.target.value || 1) })}
+                      aria-label="PDF page number"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => updateQboPdfViewer({ page: qboPdfPreview.page + 1 })}
+                    aria-label="Next page"
+                    title="Next page"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="bt-invoice-pdf-control-group" aria-label="Zoom controls">
+                  <button
+                    type="button"
+                    onClick={() => updateQboPdfViewer({ zoom: qboPdfPreview.zoom - 15 })}
+                    disabled={qboPdfPreview.zoom <= 50}
+                    aria-label="Zoom out"
+                    title="Zoom out"
+                  >
+                    <ZoomOut className="h-4 w-4" />
+                  </button>
+                  <strong>{qboPdfPreview.zoom}%</strong>
+                  <button
+                    type="button"
+                    onClick={() => updateQboPdfViewer({ zoom: qboPdfPreview.zoom + 15 })}
+                    disabled={qboPdfPreview.zoom >= 250}
+                    aria-label="Zoom in"
+                    title="Zoom in"
+                  >
+                    <ZoomIn className="h-4 w-4" />
+                  </button>
+                </div>
+                {qboPdfPreviewUrl ? (
+                  <a
+                    href={qboPdfPreviewUrl}
+                    className="bt-invoice-pdf-open-link"
+                    target="_blank"
+                    rel="noreferrer"
+                    title="Open PDF in a new tab"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                    Open
+                  </a>
+                ) : null}
+                {qboPdfPreviewUrl ? (
+                  <a
+                    href={qboPdfPreviewUrl}
+                    download={invoicePdfDownloadName(qboPdfPreview.filename || qboPdfPreview.title)}
+                    className="bt-invoice-pdf-open-link"
+                    title="Download invoice PDF"
+                  >
+                    <Download className="h-4 w-4" />
+                    Download
+                  </a>
+                ) : null}
+                <button
+                  type="button"
+                  className="bt-invoice-pdf-close"
+                  onClick={() => setQboPdfPreview(null)}
+                  aria-label="Close invoice PDF preview"
+                  title="Close viewer"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+            <div className="bt-invoice-pdf-viewer-body">
+              {qboPdfPreviewLoading ? (
+                <div className="bt-invoice-attachment-fallback">
+                  <FileText className="h-10 w-10" />
+                  <p>Loading invoice PDF...</p>
+                </div>
+              ) : qboPdfPreviewError ? (
+                <div className="bt-invoice-attachment-fallback">
+                  <FileText className="h-10 w-10" />
+                  <p>{qboPdfPreviewError}</p>
+                </div>
+              ) : qboPdfFrameSrc ? (
+                <iframe title={qboPdfPreview.title || 'Invoice PDF'} src={qboPdfFrameSrc} />
+              ) : (
+                <div className="bt-invoice-attachment-fallback">
+                  <FileText className="h-10 w-10" />
+                  <p>No invoice PDF preview is available.</p>
                 </div>
               )}
             </div>

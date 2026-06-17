@@ -3,7 +3,7 @@ const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/schema');
 const { authenticate, authorizeProjectAccess } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
-const { getNoteEditPermission } = require('../utils/projectNotes');
+const { getNoteDeletePermission, getNoteEditPermission } = require('../utils/projectNotes');
 
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
@@ -229,7 +229,25 @@ router.put('/:id', (req, res) => {
 });
 
 router.delete('/:id', (req, res) => {
-  res.status(405).json({ error: 'Notes cannot be deleted' });
+  const db = getDb();
+  const existing = db.prepare('SELECT * FROM project_notes WHERE id = ? AND project_id = ?')
+    .get(req.params.id, req.params.projectId);
+  if (!existing) return res.status(404).json({ error: 'Note not found' });
+
+  const permission = getNoteDeletePermission(req.user, existing);
+  if (!permission.allowed) return res.status(permission.status).json({ error: permission.error });
+
+  db.prepare('UPDATE photos SET note_id = NULL WHERE note_id = ?').run(req.params.id);
+  db.prepare('DELETE FROM project_notes WHERE id = ? AND project_id = ?').run(req.params.id, req.params.projectId);
+  broadcastToProject(req.params.projectId, { type: 'delete_note', note_id: req.params.id });
+  logActivity({
+    userId: req.user.id,
+    projectId: req.params.projectId,
+    action: 'note_deleted',
+    entityType: 'note',
+    entityId: req.params.id,
+  });
+  res.json({ message: 'Note deleted' });
 });
 
 module.exports = router;

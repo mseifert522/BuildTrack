@@ -315,6 +315,9 @@ function initializeSchema() {
       session_revoked_at TEXT,
       is_active INTEGER NOT NULL DEFAULT 1,
       force_password_reset INTEGER NOT NULL DEFAULT 0,
+      deleted_at TEXT,
+      deleted_by TEXT,
+      deleted_email TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -376,6 +379,12 @@ function initializeSchema() {
       due_date TEXT,
       notes TEXT,
       sort_order INTEGER DEFAULT 0,
+      trade TEXT,
+      location TEXT,
+      created_by_agent TEXT,
+      source TEXT,
+      raw_transcript TEXT,
+      agent_request_id TEXT,
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -416,6 +425,17 @@ function initializeSchema() {
       approved_at TEXT,
       approval_notes TEXT,
       last_field_update_at TEXT,
+      trade TEXT,
+      location TEXT,
+      priority TEXT,
+      estimated_cost REAL,
+      labor_cost REAL,
+      material_cost REAL,
+      notes TEXT,
+      created_by_agent TEXT,
+      source TEXT,
+      raw_transcript TEXT,
+      agent_request_id TEXT,
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -441,6 +461,10 @@ function initializeSchema() {
       timeline_start TEXT,
       timeline_end TEXT,
       sort_order INTEGER NOT NULL DEFAULT 0,
+      created_by_agent TEXT,
+      source TEXT,
+      raw_transcript TEXT,
+      agent_request_id TEXT,
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -698,6 +722,30 @@ function initializeSchema() {
     CREATE INDEX IF NOT EXISTS idx_quickbooks_bills_match
       ON quickbooks_bills(matched_invoice_id, project_id);
 
+    CREATE TABLE IF NOT EXISTS quickbooks_bill_attachments (
+      id TEXT PRIMARY KEY,
+      qbo_bill_id TEXT NOT NULL,
+      qbo_attachable_id TEXT,
+      source TEXT NOT NULL DEFAULT 'manual',
+      filename TEXT NOT NULL,
+      original_name TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      size INTEGER NOT NULL DEFAULT 0,
+      qbo_file_access_uri TEXT,
+      qbo_metadata_json TEXT NOT NULL DEFAULT '{}',
+      uploaded_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (qbo_bill_id) REFERENCES quickbooks_bills(qbo_id) ON DELETE CASCADE,
+      FOREIGN KEY (uploaded_by) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_quickbooks_bill_attachments_bill
+      ON quickbooks_bill_attachments(qbo_bill_id, created_at);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_quickbooks_bill_attachments_qbo_bill_attachable
+      ON quickbooks_bill_attachments(qbo_bill_id, qbo_attachable_id)
+      WHERE qbo_attachable_id IS NOT NULL AND qbo_attachable_id != '';
+
     CREATE TABLE IF NOT EXISTS quickbooks_bill_lines (
       id TEXT PRIMARY KEY,
       qbo_bill_id TEXT NOT NULL,
@@ -884,6 +932,66 @@ function initializeSchema() {
 
     CREATE INDEX IF NOT EXISTS idx_portal_agent_runs_created
       ON portal_agent_runs(created_at);
+
+    -- AI Agent Bridge registry, idempotency, and request audit.
+    CREATE TABLE IF NOT EXISTS agent_bridge_agents (
+      id TEXT PRIMARY KEY,
+      agent_name TEXT UNIQUE NOT NULL,
+      api_key_hash TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      allowed_scopes TEXT NOT NULL DEFAULT '[]',
+      created_by_user_id TEXT,
+      notes TEXT,
+      last_used_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_agent_bridge_agents_enabled
+      ON agent_bridge_agents(enabled, agent_name);
+
+    CREATE TABLE IF NOT EXISTS agent_bridge_request_logs (
+      id TEXT PRIMARY KEY,
+      request_id TEXT NOT NULL,
+      agent_id TEXT,
+      agent_name TEXT,
+      source TEXT,
+      intent TEXT,
+      property_id TEXT,
+      property_address TEXT,
+      endpoint TEXT NOT NULL,
+      status TEXT NOT NULL,
+      success INTEGER NOT NULL DEFAULT 0,
+      error_code TEXT,
+      error_message TEXT,
+      raw_transcript TEXT,
+      sanitized_payload TEXT,
+      ip_address TEXT,
+      user_agent TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      completed_at TEXT,
+      UNIQUE(agent_id, request_id),
+      FOREIGN KEY (agent_id) REFERENCES agent_bridge_agents(id) ON DELETE SET NULL,
+      FOREIGN KEY (property_id) REFERENCES projects(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_agent_bridge_request_logs_created
+      ON agent_bridge_request_logs(created_at, success, intent);
+
+    CREATE TABLE IF NOT EXISTS agent_bridge_created_records (
+      id TEXT PRIMARY KEY,
+      request_log_id TEXT NOT NULL,
+      project_id TEXT,
+      record_type TEXT NOT NULL,
+      record_id TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (request_log_id) REFERENCES agent_bridge_request_logs(id) ON DELETE CASCADE,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_agent_bridge_created_records_log
+      ON agent_bridge_created_records(request_log_id, record_type);
 
     -- Activity / audit log
     CREATE TABLE IF NOT EXISTS activity_log (
@@ -1556,6 +1664,9 @@ function initializeSchema() {
   try { db.exec(`ALTER TABLE users ADD COLUMN last_login_at TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE users ADD COLUMN last_seen_at TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE users ADD COLUMN session_revoked_at TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE users ADD COLUMN deleted_at TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE users ADD COLUMN deleted_by TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE users ADD COLUMN deleted_email TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE auth_sessions ADD COLUMN details TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE auth_sessions ADD COLUMN current_ip_address TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE auth_sessions ADD COLUMN ip_address_updated_at TEXT`); } catch (_) { /* already exists */ }
@@ -1667,7 +1778,76 @@ function initializeSchema() {
   try { db.exec(`UPDATE project_notes SET visibility = 'private' WHERE visibility IS NULL OR visibility NOT IN ('private','public')`); } catch (_) { /* best-effort */ }
   try { db.exec(`ALTER TABLE project_scopes ADD COLUMN timeline_start TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE project_scopes ADD COLUMN timeline_end TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE project_scopes ADD COLUMN created_by_agent TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE project_scopes ADD COLUMN source TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE project_scopes ADD COLUMN raw_transcript TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE project_scopes ADD COLUMN agent_request_id TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_project_scopes_timeline ON project_scopes(project_id, timeline_start, timeline_end)`); } catch (_) { /* best-effort */ }
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_project_scopes_agent_request ON project_scopes(agent_request_id)`); } catch (_) { /* best-effort */ }
+  try { db.exec(`ALTER TABLE punch_list_items ADD COLUMN trade TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE punch_list_items ADD COLUMN location TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE punch_list_items ADD COLUMN created_by_agent TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE punch_list_items ADD COLUMN source TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE punch_list_items ADD COLUMN raw_transcript TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE punch_list_items ADD COLUMN agent_request_id TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_punch_list_agent_request ON punch_list_items(agent_request_id)`); } catch (_) { /* best-effort */ }
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS agent_bridge_agents (
+        id TEXT PRIMARY KEY,
+        agent_name TEXT UNIQUE NOT NULL,
+        api_key_hash TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        allowed_scopes TEXT NOT NULL DEFAULT '[]',
+        created_by_user_id TEXT,
+        notes TEXT,
+        last_used_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_agent_bridge_agents_enabled
+        ON agent_bridge_agents(enabled, agent_name);
+      CREATE TABLE IF NOT EXISTS agent_bridge_request_logs (
+        id TEXT PRIMARY KEY,
+        request_id TEXT NOT NULL,
+        agent_id TEXT,
+        agent_name TEXT,
+        source TEXT,
+        intent TEXT,
+        property_id TEXT,
+        property_address TEXT,
+        endpoint TEXT NOT NULL,
+        status TEXT NOT NULL,
+        success INTEGER NOT NULL DEFAULT 0,
+        error_code TEXT,
+        error_message TEXT,
+        raw_transcript TEXT,
+        sanitized_payload TEXT,
+        ip_address TEXT,
+        user_agent TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        completed_at TEXT,
+        UNIQUE(agent_id, request_id),
+        FOREIGN KEY (agent_id) REFERENCES agent_bridge_agents(id) ON DELETE SET NULL,
+        FOREIGN KEY (property_id) REFERENCES projects(id) ON DELETE SET NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_agent_bridge_request_logs_created
+        ON agent_bridge_request_logs(created_at, success, intent);
+      CREATE TABLE IF NOT EXISTS agent_bridge_created_records (
+        id TEXT PRIMARY KEY,
+        request_log_id TEXT NOT NULL,
+        project_id TEXT,
+        record_type TEXT NOT NULL,
+        record_id TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (request_log_id) REFERENCES agent_bridge_request_logs(id) ON DELETE CASCADE,
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_agent_bridge_created_records_log
+        ON agent_bridge_created_records(request_log_id, record_type);
+    `);
+  } catch (_) { /* bridge tables already exist */ }
   try {
     db.exec(`
       CREATE TABLE IF NOT EXISTS calendar_email_reminders (
@@ -1791,6 +1971,17 @@ function initializeSchema() {
 	  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN approval_notes TEXT`); } catch (_) { /* already exists */ }
 	  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN last_field_update_at TEXT`); } catch (_) { /* already exists */ }
 	  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN project_scope_id TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN trade TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN location TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN priority TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN estimated_cost REAL`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN labor_cost REAL`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN material_cost REAL`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN notes TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN created_by_agent TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN source TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN raw_transcript TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE construction_plan_items ADD COLUMN agent_request_id TEXT`); } catch (_) { /* already exists */ }
   try {
     db.exec(`
       UPDATE construction_plan_items
@@ -1806,6 +1997,7 @@ function initializeSchema() {
     `);
   } catch (_) { /* best-effort */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_construction_plan_watch_status ON construction_plan_items(project_id, status, verification_status, invoice_status, target_date)`); } catch (_) { /* best-effort */ }
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_construction_plan_agent_request ON construction_plan_items(agent_request_id)`); } catch (_) { /* best-effort */ }
   try { db.exec(`ALTER TABLE invoices ADD COLUMN quickbooks_status TEXT NOT NULL DEFAULT 'not_ready'`); } catch (_) { /* already exists */ }
 	  try { db.exec(`ALTER TABLE invoices ADD COLUMN quickbooks_bill_id TEXT`); } catch (_) { /* already exists */ }
 	  try { db.exec(`ALTER TABLE invoices ADD COLUMN quickbooks_error TEXT`); } catch (_) { /* already exists */ }
@@ -1841,6 +2033,44 @@ function initializeSchema() {
 	  try { db.exec(`ALTER TABLE quickbooks_bills ADD COLUMN payment_approval_notified_by TEXT`); } catch (_) { /* already exists */ }
 	  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_quickbooks_bills_qbo_class ON quickbooks_bills(qbo_class_id, project_id)`); } catch (_) { /* best-effort */ }
 	  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_quickbooks_bills_payment_approval ON quickbooks_bills(payment_approval_status, payment_run_date, payment_status)`); } catch (_) { /* best-effort */ }
+	  try { db.exec(`ALTER TABLE quickbooks_bill_attachments ADD COLUMN qbo_attachable_id TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE quickbooks_bill_attachments ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE quickbooks_bill_attachments ADD COLUMN qbo_file_access_uri TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE quickbooks_bill_attachments ADD COLUMN qbo_metadata_json TEXT NOT NULL DEFAULT '{}'`); } catch (_) { /* already exists */ }
+	  try {
+	    db.exec(`
+	      DROP INDEX IF EXISTS idx_quickbooks_bill_attachments_qbo_attachable;
+	      CREATE UNIQUE INDEX IF NOT EXISTS idx_quickbooks_bill_attachments_qbo_bill_attachable
+	        ON quickbooks_bill_attachments(qbo_bill_id, qbo_attachable_id)
+	        WHERE qbo_attachable_id IS NOT NULL AND qbo_attachable_id != ''
+	    `);
+	  } catch (_) { /* best-effort */ }
+	  try {
+	    db.exec(`
+	      CREATE TABLE IF NOT EXISTS quickbooks_bill_attachments (
+	        id TEXT PRIMARY KEY,
+	        qbo_bill_id TEXT NOT NULL,
+	        qbo_attachable_id TEXT,
+	        source TEXT NOT NULL DEFAULT 'manual',
+	        filename TEXT NOT NULL,
+	        original_name TEXT NOT NULL,
+	        mime_type TEXT NOT NULL,
+	        size INTEGER NOT NULL DEFAULT 0,
+	        qbo_file_access_uri TEXT,
+	        qbo_metadata_json TEXT NOT NULL DEFAULT '{}',
+	        uploaded_by TEXT NOT NULL,
+	        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	        FOREIGN KEY (qbo_bill_id) REFERENCES quickbooks_bills(qbo_id) ON DELETE CASCADE,
+	        FOREIGN KEY (uploaded_by) REFERENCES users(id)
+	      );
+	      CREATE INDEX IF NOT EXISTS idx_quickbooks_bill_attachments_bill
+	        ON quickbooks_bill_attachments(qbo_bill_id, created_at);
+	      DROP INDEX IF EXISTS idx_quickbooks_bill_attachments_qbo_attachable;
+	      CREATE UNIQUE INDEX IF NOT EXISTS idx_quickbooks_bill_attachments_qbo_bill_attachable
+	        ON quickbooks_bill_attachments(qbo_bill_id, qbo_attachable_id)
+	        WHERE qbo_attachable_id IS NOT NULL AND qbo_attachable_id != '';
+	    `);
+	  } catch (_) { /* best-effort */ }
 	  try {
 	    db.exec(`
 	      CREATE TABLE IF NOT EXISTS quickbooks_bill_lines (
@@ -1947,6 +2177,31 @@ function initializeSchema() {
 
 	      CREATE INDEX IF NOT EXISTS idx_quickbooks_bills_payment_approval
 	        ON quickbooks_bills(payment_approval_status, payment_run_date, payment_status);
+
+	      CREATE TABLE IF NOT EXISTS quickbooks_bill_attachments (
+	        id TEXT PRIMARY KEY,
+	        qbo_bill_id TEXT NOT NULL,
+	        qbo_attachable_id TEXT,
+	        source TEXT NOT NULL DEFAULT 'manual',
+	        filename TEXT NOT NULL,
+	        original_name TEXT NOT NULL,
+	        mime_type TEXT NOT NULL,
+	        size INTEGER NOT NULL DEFAULT 0,
+	        qbo_file_access_uri TEXT,
+	        qbo_metadata_json TEXT NOT NULL DEFAULT '{}',
+	        uploaded_by TEXT NOT NULL,
+	        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	        FOREIGN KEY (qbo_bill_id) REFERENCES quickbooks_bills(qbo_id) ON DELETE CASCADE,
+	        FOREIGN KEY (uploaded_by) REFERENCES users(id)
+	      );
+
+	      CREATE INDEX IF NOT EXISTS idx_quickbooks_bill_attachments_bill
+	        ON quickbooks_bill_attachments(qbo_bill_id, created_at);
+
+	      DROP INDEX IF EXISTS idx_quickbooks_bill_attachments_qbo_attachable;
+	      CREATE UNIQUE INDEX IF NOT EXISTS idx_quickbooks_bill_attachments_qbo_bill_attachable
+	        ON quickbooks_bill_attachments(qbo_bill_id, qbo_attachable_id)
+	        WHERE qbo_attachable_id IS NOT NULL AND qbo_attachable_id != '';
 
 	      CREATE TABLE IF NOT EXISTS quickbooks_bill_lines (
 	        id TEXT PRIMARY KEY,

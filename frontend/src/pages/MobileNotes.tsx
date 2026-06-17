@@ -6,9 +6,10 @@ import { useAuthStore } from '../store/authStore';
 import {
   ArrowLeft, Send, MessageSquare, Wifi, WifiOff,
   Clock, ChevronDown, Mic, Square, Edit2, Check, X,
-  Camera, ImagePlus, PlayCircle,
+  Camera, ImagePlus, PlayCircle, Trash2,
 } from 'lucide-react';
 import { formatEasternDate, formatEasternDateTime, formatEasternRelative } from '../lib/time';
+import { fileDropHandlers } from '../lib/fileDrop';
 import { appendProgressUploadAudit, PROGRESS_MEDIA_ACCEPT } from '../lib/progressUpload';
 import { notifyMobileDataChanged } from '../lib/mobileEvents';
 import Avatar from '../components/Avatar';
@@ -134,6 +135,7 @@ export default function MobileNotes() {
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
+  const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
   const [noteFiles, setNoteFiles] = useState<File[]>([]);
   const [noteFileUrls, setNoteFileUrls] = useState<string[]>([]);
   const [attachToNoteId, setAttachToNoteId] = useState<string | null>(null);
@@ -146,6 +148,7 @@ export default function MobileNotes() {
   const attachExistingInputRef = useRef<HTMLInputElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const recognitionRef = useRef<any>(null);
+  const canDeleteProjectNotes = ['super_admin', 'operations_manager'].includes(user?.role || '');
 
   // Load project info + initial notes
   useEffect(() => {
@@ -200,6 +203,8 @@ export default function MobileNotes() {
             });
           } else if (data.type === 'update_note') {
             setNotes(prev => prev.map(n => n.id === data.note.id ? data.note : n));
+          } else if (data.type === 'delete_note') {
+            setNotes(prev => prev.filter(n => n.id !== data.note_id));
           }
         } catch { /* ignore parse errors */ }
       };
@@ -231,7 +236,7 @@ export default function MobileNotes() {
     if (noteFileInputRef.current) noteFileInputRef.current.value = '';
   }, []);
 
-  const queueNoteFiles = useCallback((files?: FileList | null) => {
+  const queueNoteFiles = useCallback((files?: FileList | File[] | null) => {
     const nextFiles = Array.from(files || []);
     if (!nextFiles.length) return;
     setNoteFiles(current => [...current, ...nextFiles]);
@@ -258,9 +263,9 @@ export default function MobileNotes() {
     setNotes(Array.isArray(notesRes.data) ? notesRes.data : []);
   }, [projectId]);
 
-  const attachFilesToExistingNote = useCallback(async (files?: FileList | null) => {
+  const attachFilesToExistingNote = useCallback(async (files?: FileList | File[] | null, explicitNoteId?: string) => {
     const selectedFiles = Array.from(files || []);
-    const noteId = attachToNoteId;
+    const noteId = explicitNoteId || attachToNoteId;
     if (!noteId || !selectedFiles.length) return;
     setAttachingNoteId(noteId);
     try {
@@ -276,6 +281,20 @@ export default function MobileNotes() {
       if (attachExistingInputRef.current) attachExistingInputRef.current.value = '';
     }
   }, [attachToNoteId, projectId, refreshNotes, uploadFilesToNote]);
+
+  const composerDropHandlers = fileDropHandlers(queueNoteFiles, {
+    accept: PROGRESS_MEDIA_ACCEPT,
+    multiple: true,
+  });
+
+  const existingNoteDropHandlers = (noteId: string) => fileDropHandlers(files => {
+    setAttachToNoteId(noteId);
+    void attachFilesToExistingNote(files, noteId);
+  }, {
+    accept: PROGRESS_MEDIA_ACCEPT,
+    disabled: attachingNoteId === noteId,
+    multiple: true,
+  });
 
   const handleSend = useCallback(async () => {
     if (!text.trim() || sending) return;
@@ -347,6 +366,23 @@ export default function MobileNotes() {
       setSavingEdit(false);
     }
   }, [cancelEdit, editingText, projectId, savingEdit]);
+
+  const deleteProjectNote = useCallback(async (note: Note) => {
+    if (!projectId || !canDeleteProjectNotes || deletingNoteId) return;
+    if (!window.confirm('Delete this note? Attached photos will stay in the project photo history.')) return;
+    setDeletingNoteId(note.id);
+    try {
+      await api.delete(`/projects/${projectId}/notes/${note.id}`);
+      setNotes(prev => prev.filter(item => item.id !== note.id));
+      if (editingNoteId === note.id) cancelEdit();
+      notifyMobileDataChanged({ entity: 'note', action: 'deleted', projectId });
+      toast.success('Note deleted');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to delete note');
+    } finally {
+      setDeletingNoteId(null);
+    }
+  }, [canDeleteProjectNotes, cancelEdit, deletingNoteId, editingNoteId, projectId]);
 
   const startDictation = useCallback(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -646,11 +682,24 @@ export default function MobileNotes() {
                                 attachExistingInputRef.current?.click();
                               }}
                               disabled={attachingNoteId === note.id}
+                              {...existingNoteDropHandlers(note.id)}
                               className="flex items-center gap-1 text-xs font-bold disabled:opacity-50"
                               style={{ color: '#D99D26' }}
                             >
                               <ImagePlus className="w-3 h-3" />
                               {attachingNoteId === note.id ? 'Attaching...' : 'Attach pictures'}
+                            </button>
+                          )}
+                          {canDeleteProjectNotes && !isEditing && (
+                            <button
+                              type="button"
+                              onClick={() => deleteProjectNote(note)}
+                              disabled={deletingNoteId === note.id}
+                              className="flex items-center gap-1 text-xs font-bold disabled:opacity-50"
+                              style={{ color: '#DC2626' }}
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              {deletingNoteId === note.id ? 'Deleting' : 'Delete'}
                             </button>
                           )}
                         </div>
@@ -682,6 +731,7 @@ export default function MobileNotes() {
       {/* ── Input Bar ── */}
       <div
         className="px-4 py-3 flex-shrink-0"
+        {...composerDropHandlers}
         style={{
           background: 'white',
           borderTop: '1px solid #E5E7EB',

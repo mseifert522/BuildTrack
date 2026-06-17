@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { ArrowLeft, Camera, CheckCircle2, ClipboardList, FileText, ImagePlus, Plus, Send } from 'lucide-react';
 import api from '../lib/api';
 import { useAuthStore } from '../store/authStore';
+import { fileDropHandlers } from '../lib/fileDrop';
 import { appendProgressUploadAudit, PROGRESS_MEDIA_ACCEPT } from '../lib/progressUpload';
 import { notifyMobileDataChanged } from '../lib/mobileEvents';
 import VoiceTextarea from '../components/VoiceTextarea';
@@ -308,7 +309,12 @@ export default function MobileFieldWork() {
               style={{ display: 'none' }}
             />
             <div className="btm-project-actions" style={{ padding: '10px 0 0' }}>
-              <button type="button" onClick={() => fileInputRef.current?.click()} className="btm-action-button btm-action-photo">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="btm-action-button btm-action-photo"
+                {...fileDropHandlers(files => setNoteFiles(files), { accept: PROGRESS_MEDIA_ACCEPT, multiple: true })}
+              >
                 <Camera size={21} />
                 <span>{noteFiles.length ? `${noteFiles.length} Ready` : 'Add Pictures'}</span>
               </button>
@@ -376,7 +382,15 @@ export default function MobileFieldWork() {
                   )}
                 </div>
                 <div className="btm-project-actions" style={{ padding: '10px 0 0' }}>
-                  <label className="btm-action-button btm-action-photo" style={{ cursor: 'pointer' }}>
+                  <label
+                    className="btm-action-button btm-action-photo"
+                    style={{ cursor: 'pointer' }}
+                    {...fileDropHandlers(files => updateTaskEvidenceDraft(task.id, { files }), {
+                      accept: 'image/*',
+                      disabled: uploadingTaskId === task.id,
+                      multiple: true,
+                    })}
+                  >
                     <input
                       type="file"
                       accept="image/*"

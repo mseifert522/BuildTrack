@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "test:agent-bridge": "node tests/agentBridge.test.js"
   },
   "keywords": [],
   "author": "",
@@ -24,6 +25,7 @@
     "negotiator": "^1.0.0",
     "nodemailer": "^8.0.4",
     "pdfkit": "^0.18.0",
+    "sharp": "^0.35.1",
     "uuid": "^13.0.0"
   }
 }

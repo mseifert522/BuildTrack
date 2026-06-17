@@ -3,10 +3,11 @@ import { useAuthStore, roleLabels, canManageUsers } from '../store/authStore';
 import api from '../lib/api';
 import { Loading, Modal, PageHeader } from '../components/ui';
 import Avatar from '../components/Avatar';
-import { Users as UsersIcon, Plus, Edit2, Key, ToggleLeft, ToggleRight, ShieldOff, ShieldCheck, Camera, Trash2, Radio } from 'lucide-react';
+import { Plus, Edit2, Key, Mail, ShieldOff, ShieldCheck, Camera, Trash2, Radio } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { format, formatDistanceToNow } from 'date-fns';
+import { fileDropHandlers } from '../lib/fileDrop';
 
 interface User {
   id: string;
@@ -44,6 +45,20 @@ const fallbackCategories = [
   'Framing',
 ];
 
+const roleLevel: Record<string, number> = {
+  contractor: 0,
+  project_manager: 1,
+  operations_manager: 2,
+  super_admin: 3,
+};
+
+const normalizeEmail = (value?: string | null) => String(value || '').trim().toLowerCase();
+const isMikeSeifert = (user?: { email?: string } | null) => normalizeEmail(user?.email) === 'mike@seifertcapital.com';
+const isProtectedJeanette = (user: User) => {
+  const email = normalizeEmail(user.email);
+  return email === 'jeanettemfallon@gmail.com' || (email.includes('fallon') && user.name.toLowerCase().includes('jeanette'));
+};
+
 export default function Users() {
   const { user: currentUser } = useAuthStore();
   const [users, setUsers] = useState<User[]>([]);
@@ -51,13 +66,19 @@ export default function Users() {
   const [showCreate, setShowCreate] = useState(false);
   const [editUser, setEditUser] = useState<User | null>(null);
   const [resetUser, setResetUser] = useState<User | null>(null);
+  const [resetSubmitting, setResetSubmitting] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [categories, setCategories] = useState<string[]>(fallbackCategories);
   const { register, handleSubmit, reset, setValue, formState: { isSubmitting } } = useForm();
-  const { register: registerReset, handleSubmit: handleSubmitReset, reset: resetForm, formState: { isSubmitting: isResetting } } = useForm();
 
   const canManage = currentUser ? canManageUsers(currentUser.role) : false;
   const canAddCategories = currentUser ? ['super_admin', 'operations_manager'].includes(currentUser.role) : false;
+  const canManageUserRecord = (u: User) => {
+    if (!canManage || !currentUser || u.id === currentUser.id) return false;
+    if (isMikeSeifert(currentUser)) return true;
+    return (roleLevel[currentUser.role] ?? -1) > (roleLevel[u.role] ?? -1);
+  };
+  const canDeleteUserRecord = (u: User) => canManageUserRecord(u) && (!isProtectedJeanette(u) || isMikeSeifert(currentUser));
 
   const load = async () => {
     try {
@@ -160,25 +181,36 @@ export default function Users() {
     }
   };
 
-  const onResetPassword = async (data: any) => {
+  const onResetPassword = async () => {
     if (!resetUser) return;
+    setResetSubmitting(true);
     try {
-      const res = await api.post(`/users/${resetUser.id}/reset-password`, data);
+      const res = await api.post(`/users/${resetUser.id}/reset-password`);
       toast.success(res.data.message);
       setResetUser(null);
-      resetForm();
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Failed to reset password');
+      toast.error(err.response?.data?.error || 'Failed to send password setup link');
+    } finally {
+      setResetSubmitting(false);
     }
   };
 
-  /** Instant lockout — blacklists all active sessions immediately */
-  const handleDelete = async (u: User) => {
-    if (!confirm(`Permanently delete ${u.name}? This cannot be undone.`)) return;
-    if (!confirm(`Are you absolutely sure? All data for ${u.name} will be removed.`)) return;
+  const handleReinvite = async (u: User) => {
     try {
-      await api.delete(`/users/${u.id}`);
-      toast.success(`${u.name} has been deleted`);
+      const res = await api.post(`/users/${u.id}/reinvite`);
+      toast.success(res.data.message || `Welcome email sent to ${u.email}`);
+      load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to re-invite user');
+    }
+  };
+
+  /** Delete from active access while preserving historical project and audit records. */
+  const handleDelete = async (u: User) => {
+    if (!confirm(`Delete ${u.name} from active BuildTrack access? Historical project and audit records will be preserved.`)) return;
+    try {
+      const res = await api.delete(`/users/${u.id}`);
+      toast.success(res.data?.message || `${u.name} has been deleted`);
       load();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to delete user');
@@ -254,7 +286,7 @@ export default function Users() {
                     <Radio className={`w-3 h-3 ${u.is_online ? 'animate-pulse' : ''}`} />
                     {u.is_online ? 'Live now' : 'Offline'}
                   </span>
-                  {!u.is_active && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600 font-medium">🔒 Locked Out</span>}
+                  {!u.is_active && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600 font-medium">Locked Out</span>}
                 </div>
                 <p className="text-xs text-gray-500">{u.email}</p>
                 {u.phone && <p className="text-xs text-gray-400">{u.phone}</p>}
@@ -271,10 +303,10 @@ export default function Users() {
                       Seen {formatDistanceToNow(new Date(/[zZ]|[+-]\d{2}:?\d{2}$/.test(u.last_seen_at) ? u.last_seen_at : `${u.last_seen_at}Z`), { addSuffix: true })}
                     </p>
                   )}
-                  {u.pin && <span className="text-xs font-mono font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded">Mobile App Pin#: {u.pin}</span>}
+                  {u.pin && <span className="text-xs font-mono font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded">Personal PIN: {u.pin}</span>}
                 </div>
               </div>
-              {canManage && u.id !== currentUser?.id && u.role !== 'super_admin' && (
+              {canManageUserRecord(u) && (
                 <div className="flex items-center gap-1 flex-shrink-0">
                   <button
                     onClick={() => { setEditUser(u); Object.entries(u).forEach(([k, v]) => setValue(k, v)); }}
@@ -286,9 +318,16 @@ export default function Users() {
                   <button
                     onClick={() => setResetUser(u)}
                     className="p-2 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-colors"
-                    title="Reset password"
+                    title="Send password setup link"
                   >
                     <Key className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => handleReinvite(u)}
+                    className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                    title="Re-invite user"
+                  >
+                    <Mail className="w-4 h-4" />
                   </button>
                   {u.is_active ? (
                     <button
@@ -307,13 +346,15 @@ export default function Users() {
                       <ShieldCheck className="w-4 h-4" />
                     </button>
                   )}
-                  <button
-                    onClick={() => handleDelete(u)}
-                    className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                    title="Delete user permanently"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  {canDeleteUserRecord(u) && (
+                    <button
+                      onClick={() => handleDelete(u)}
+                      className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      title="Delete user"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -359,7 +400,7 @@ export default function Users() {
             {categorySelect('contractor_secondary_category', 'Optional secondary category...')}
           </div>
           <div className="bg-blue-50 rounded-lg p-3 text-xs text-blue-700">
-            A temporary password will be generated. The user will be prompted to change it on first login.
+            BuildTrack will email a secure welcome link so the user can create their own password. A personal PIN is assigned automatically.
           </div>
           <div className="flex gap-3">
             <button type="button" onClick={() => { setShowCreate(false); reset(); }} className="flex-1 py-2.5 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50">Cancel</button>
@@ -384,7 +425,13 @@ export default function Users() {
                 fallbackClassName="text-gray-400"
                 fallbackStyle={{ background: '#F3F4F6' }}
               />
-              <label className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer rounded-full">
+              <label
+                className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer rounded-full"
+                {...fileDropHandlers(files => {
+                  const file = files[0];
+                  if (file && editUser) handleAvatarUpload(editUser.id, file);
+                }, { accept: 'image/*', multiple: false })}
+              >
                 <Camera className="w-6 h-6 text-white" />
                 <input
                   type="file"
@@ -447,20 +494,16 @@ export default function Users() {
         </form>
       </Modal>
 
-      {/* Reset Password Modal */}
-      <Modal isOpen={!!resetUser} onClose={() => { setResetUser(null); resetForm(); }} title={`Reset Password — ${resetUser?.name}`}>
-        <form onSubmit={handleSubmitReset(onResetPassword)} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
-            <input type="password" {...registerReset('new_password')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Leave blank for auto-generated password" />
-          </div>
+      {/* Password Setup Link Modal */}
+      <Modal isOpen={!!resetUser} onClose={() => setResetUser(null)} title={`Send Password Setup Link - ${resetUser?.name}`}>
+        <form onSubmit={(event) => { event.preventDefault(); onResetPassword(); }} className="space-y-4">
           <div className="bg-yellow-50 rounded-lg p-3 text-xs text-yellow-700">
-            The user will be required to change their password on next login.
+            BuildTrack will email this user a secure link to create and save their own password.
           </div>
           <div className="flex gap-3">
-            <button type="button" onClick={() => { setResetUser(null); resetForm(); }} className="flex-1 py-2.5 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50">Cancel</button>
-            <button type="submit" disabled={isResetting} className="flex-1 py-2.5 bg-orange-600 text-white rounded-xl text-sm font-semibold hover:bg-orange-700 disabled:opacity-50">
-              {isResetting ? 'Resetting...' : 'Reset Password'}
+            <button type="button" onClick={() => setResetUser(null)} className="flex-1 py-2.5 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50">Cancel</button>
+            <button type="submit" disabled={resetSubmitting} className="flex-1 py-2.5 bg-orange-600 text-white rounded-xl text-sm font-semibold hover:bg-orange-700 disabled:opacity-50">
+              {resetSubmitting ? 'Sending...' : 'Send Link'}
             </button>
           </div>
         </form>

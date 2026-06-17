@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs');
@@ -9,7 +10,7 @@ const { getDb } = require('../db/schema');
 const { authenticate, authorize, blockProjectManagerMutation, authorizeOverUser, blacklistToken } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
 const { logDataAccess } = require('../utils/dataAccessAudit');
-const { sendInviteEmail } = require('../utils/email');
+const { sendInviteEmail, sendPasswordResetEmail } = require('../utils/email');
 const { decryptJson } = require('../utils/secureFields');
 const { ensureContractorMobileAccount, generatePin, syncContractorProjectAssignments } = require('../utils/contractorAccess');
 
@@ -55,6 +56,19 @@ const avatarUpload = multer({
 });
 
 const VALID_ROLES = ['super_admin', 'operations_manager', 'project_manager', 'contractor'];
+const USER_SETUP_LINK_TTL_MINUTES = Number(process.env.USER_SETUP_LINK_TTL_MINUTES || 7 * 24 * 60);
+const OWNER_EMAILS = new Set(
+  String(process.env.BUILDTRACK_OWNER_EMAILS || 'mike@seifertcapital.com')
+    .split(',')
+    .map(email => email.trim().toLowerCase())
+    .filter(Boolean)
+);
+const PROTECTED_USER_EMAILS = new Set(
+  String(process.env.BUILDTRACK_PROTECTED_USER_EMAILS || 'jeanettemfallon@gmail.com')
+    .split(',')
+    .map(email => email.trim().toLowerCase())
+    .filter(Boolean)
+);
 const DEFAULT_CONTRACTOR_CATEGORIES = [
   'Floor',
   'Roof',
@@ -101,6 +115,66 @@ const DEFAULT_CONTRACTOR_CATEGORIES = [
   'Dumpster and Hauling',
   'Cleaning Supplies',
 ];
+
+function normalizeEmailAddress(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function sqliteDateTime(date) {
+  return date.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
+}
+
+function minutesFromNow(minutes) {
+  return sqliteDateTime(new Date(Date.now() + minutes * 60 * 1000));
+}
+
+function setupUrlForToken(token) {
+  const appUrl = (process.env.APP_URL || 'https://buildtrack.newurbandev.com').replace(/\/+$/, '');
+  return `${appUrl}/reset-password?token=${encodeURIComponent(token)}`;
+}
+
+function createPasswordSetupToken(db, userId, ttlMinutes = USER_SETUP_LINK_TTL_MINUTES) {
+  const token = crypto.randomBytes(32).toString('hex');
+  const expiresAt = minutesFromNow(ttlMinutes);
+  db.prepare('UPDATE password_reset_tokens SET used = 1 WHERE user_id = ? AND used = 0').run(userId);
+  db.prepare(
+    'INSERT INTO password_reset_tokens (id, user_id, token, expires_at) VALUES (?, ?, ?, ?)'
+  ).run(uuidv4(), userId, token, expiresAt);
+  return { token, setupUrl: setupUrlForToken(token), expiresAt };
+}
+
+function ensureUserPin(db, user) {
+  if (user?.pin && /^\d{5}$/.test(String(user.pin))) return user.pin;
+  const pin = generatePin(db);
+  db.prepare("UPDATE users SET pin = ?, updated_at = datetime('now') WHERE id = ?").run(pin, user.id);
+  return pin;
+}
+
+function isOwnerUser(user) {
+  return OWNER_EMAILS.has(normalizeEmailAddress(user?.email));
+}
+
+function isProtectedUser(user) {
+  const email = normalizeEmailAddress(user?.email);
+  return PROTECTED_USER_EMAILS.has(email) || (email.includes('fallon') && String(user?.name || '').toLowerCase().includes('jeanette'));
+}
+
+function canManageTargetUser(actor, target) {
+  if (!actor || !target || actor.id === target.id) return false;
+  if (isOwnerUser(actor)) return true;
+  return authorizeOverUser(actor.role, target.role);
+}
+
+function canDeleteTargetUser(actor, target) {
+  if (!canManageTargetUser(actor, target)) return false;
+  if (isProtectedUser(target) && !isOwnerUser(actor)) return false;
+  return true;
+}
+
+function deletedEmailForUser(user) {
+  const idPart = String(user.id || crypto.randomUUID()).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 48) || Date.now();
+  return `deleted+${idPart}@buildtrack.local`;
+}
 
 const SUPPLIER_CATEGORY_RULES = [
   { includes: ['landscape', 'landscaping', 'sod'], categories: ['Landscaping Materials'] },
@@ -423,6 +497,7 @@ router.get('/', authorize('super_admin', 'operations_manager'), (req, res) => {
       is_active, pin, created_at, last_login_at, last_seen_at,
       CASE WHEN last_seen_at IS NOT NULL AND datetime(last_seen_at) >= datetime('now', '-2 minutes') THEN 1 ELSE 0 END as is_online
      FROM users
+     WHERE deleted_at IS NULL
      ORDER BY is_online DESC, name`
   ).all();
   logDataAccess(req, {
@@ -439,7 +514,7 @@ router.get('/', authorize('super_admin', 'operations_manager'), (req, res) => {
 router.get('/contractors', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
   const db = getDb();
   const users = db.prepare(
-    "SELECT id, name, email, phone, company, contractor_category, contractor_secondary_category, last_seen_at, CASE WHEN last_seen_at IS NOT NULL AND datetime(last_seen_at) >= datetime('now', '-2 minutes') THEN 1 ELSE 0 END as is_online FROM users WHERE role = 'contractor' AND is_active = 1 ORDER BY name"
+    "SELECT id, name, email, phone, company, contractor_category, contractor_secondary_category, last_seen_at, CASE WHEN last_seen_at IS NOT NULL AND datetime(last_seen_at) >= datetime('now', '-2 minutes') THEN 1 ELSE 0 END as is_online FROM users WHERE role = 'contractor' AND is_active = 1 AND deleted_at IS NULL ORDER BY name"
   ).all();
   logDataAccess(req, {
     action: 'contractor_user_list_viewed',
@@ -741,9 +816,10 @@ router.get('/contractors/directory', authorize('super_admin', 'operations_manage
   if (contractorIds.length > 0) {
     const placeholders = contractorIds.map(() => '?').join(',');
     const noteRows = db.prepare(`
-      SELECT contractor_id, note, created_at, user_name, user_avatar_url
+      SELECT id, contractor_id, note, created_at, user_name, user_avatar_url
       FROM (
         SELECT
+          cn.id,
           cn.contractor_id,
           cn.note,
           cn.created_at,
@@ -762,7 +838,7 @@ router.get('/contractors/directory', authorize('super_admin', 'operations_manage
     `).all(...contractorIds);
     for (const row of noteRows) {
       const notes = notesByContractor.get(row.contractor_id) || [];
-      notes.push({ note: row.note, created_at: row.created_at, user_name: row.user_name, user_avatar_url: row.user_avatar_url });
+      notes.push({ id: row.id, note: row.note, created_at: row.created_at, user_name: row.user_name, user_avatar_url: row.user_avatar_url });
       notesByContractor.set(row.contractor_id, notes);
     }
   }
@@ -1300,13 +1376,20 @@ router.delete('/contractors/:id/notes/:noteId', authorize('super_admin', 'operat
   if (!canDelete) return res.status(403).json({ error: 'Cannot delete this note' });
 
   db.prepare('DELETE FROM contractor_profile_notes WHERE id = ?').run(req.params.noteId);
+  logActivity({
+    userId: req.user.id,
+    action: 'contractor_note_deleted',
+    entityType: 'contractor_note',
+    entityId: req.params.noteId,
+    details: { contractor_id: req.params.id },
+  });
   res.json({ message: 'Note deleted' });
 });
 
 // POST /api/users - create user (super_admin or operations_manager)
 router.post('/', authorize('super_admin', 'operations_manager'), async (req, res) => {
   try {
-    const { name, email, role, phone, company, contractor_category, contractor_secondary_category, password } = req.body;
+    const { name, email, role, phone, company, contractor_category, contractor_secondary_category } = req.body;
     if (!name || !email || !role) return res.status(400).json({ error: 'Name, email, and role are required' });
     if (!VALID_ROLES.includes(role)) return res.status(400).json({ error: 'Invalid role' });
 
@@ -1318,39 +1401,41 @@ router.post('/', authorize('super_admin', 'operations_manager'), async (req, res
     const db = getDb();
     const primaryCategory = role === 'contractor' ? validateCategory(db, contractor_category, 'contractor category') : null;
     const secondaryCategory = role === 'contractor' ? validateCategory(db, contractor_secondary_category, 'secondary contractor category') : null;
-    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase().trim());
+    const normalizedEmail = normalizeEmailAddress(email);
+    const existing = db.prepare('SELECT id FROM users WHERE email = ? AND deleted_at IS NULL').get(normalizedEmail);
     if (existing) return res.status(409).json({ error: 'Email already in use' });
 
-    const tempPass = password || Math.random().toString(36).slice(-10) + 'A1!';
-    const hash = await bcrypt.hash(tempPass, 12);
+    const initialSecret = `${crypto.randomBytes(24).toString('base64url')}A1!`;
+    const hash = await bcrypt.hash(initialSecret, 12);
     const id = uuidv4();
 
-    // Auto-generate PIN for contractors
     const pin = generatePin(db);
 
     db.prepare(
       `INSERT INTO users (id, name, email, password_hash, role, phone, company, contractor_category, contractor_secondary_category, force_password_reset, pin)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`
-    ).run(id, name, email.toLowerCase().trim(), hash, role, phone || null, company || null, primaryCategory, secondaryCategory, pin);
+    ).run(id, name, normalizedEmail, hash, role, phone || null, company || null, primaryCategory, secondaryCategory, pin);
 
     if (role === 'contractor') {
       db.prepare(`
         INSERT OR IGNORE INTO contractor_profiles (
           id, vendor_name, contact_name, email, phone, contractor_category, contractor_secondary_category, linked_user_id, source, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'user', datetime('now'), datetime('now'))
-      `).run(id, company || name, name, email.toLowerCase().trim(), phone || null, primaryCategory, secondaryCategory, id);
+      `).run(id, company || name, name, normalizedEmail, phone || null, primaryCategory, secondaryCategory, id);
     }
 
-    logActivity({ userId: req.user.id, action: 'user_created', entityType: 'user', entityId: id, details: { name, email, role, contractor_category: primaryCategory, contractor_secondary_category: secondaryCategory } });
+    const setup = createPasswordSetupToken(db, id);
+
+    logActivity({ userId: req.user.id, action: 'user_created', entityType: 'user', entityId: id, details: { name, email: normalizedEmail, role, contractor_category: primaryCategory, contractor_secondary_category: secondaryCategory } });
 
     // Send invite email
     try {
-      await sendInviteEmail({ name, email: email.toLowerCase().trim(), tempPassword: tempPass, role, invitedBy: req.user.name, pin });
+      await sendInviteEmail({ name, email: normalizedEmail, setupUrl: setup.setupUrl, role, invitedBy: req.user.name, pin });
     } catch (emailErr) {
       console.error('Failed to send invite email:', emailErr);
     }
 
-    res.status(201).json({ id, name, email, role, pin, message: pin ? `User created. Mobile App Pin#: ${pin}. Invite sent to ${email}.` : `User created. Invite sent to ${email}.` });
+    res.status(201).json({ id, name, email: normalizedEmail, role, pin, message: `User created. Personal PIN: ${pin}. Welcome email sent to ${normalizedEmail}.` });
   } catch (err) {
     if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message });
     console.error(err);
@@ -1364,19 +1449,24 @@ router.put('/:id', authorize('super_admin', 'operations_manager'), async (req, r
     const db = getDb();
     const target = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
     if (!target) return res.status(404).json({ error: 'User not found' });
+    if (target.deleted_at) return res.status(404).json({ error: 'User not found' });
 
-    // Enforce hierarchy — cannot edit someone of equal or higher authority
-    if (!authorizeOverUser(req.user.role, target.role)) {
+    if (!canManageTargetUser(req.user, target)) {
       return res.status(403).json({ error: `You cannot modify a ${target.role.replace('_', ' ')} account` });
     }
 
     const { name, email, role, phone, company, contractor_category, contractor_secondary_category, is_active } = req.body;
-
-    // Operations Manager cannot promote someone to Super Admin
-    if (req.user.role === 'operations_manager' && role === 'super_admin') {
-      return res.status(403).json({ error: 'Operations Manager cannot assign Super Admin role' });
-    }
     const nextRole = role || target.role;
+    if (!VALID_ROLES.includes(nextRole)) return res.status(400).json({ error: 'Invalid role' });
+
+    if (req.user.role === 'operations_manager' && ['super_admin', 'operations_manager'].includes(nextRole)) {
+      return res.status(403).json({ error: 'Operations Manager cannot assign management owner roles' });
+    }
+    const normalizedEmail = email !== undefined ? normalizeEmailAddress(email) : target.email;
+    if (!normalizedEmail) return res.status(400).json({ error: 'Email is required' });
+    const existingEmail = db.prepare('SELECT id FROM users WHERE email = ? AND id != ? AND deleted_at IS NULL').get(normalizedEmail, req.params.id);
+    if (existingEmail) return res.status(409).json({ error: 'Email already in use' });
+
     const primaryCategory = nextRole === 'contractor'
       ? (contractor_category !== undefined ? validateCategory(db, contractor_category, 'contractor category') : target.contractor_category)
       : null;
@@ -1388,7 +1478,7 @@ router.put('/:id', authorize('super_admin', 'operations_manager'), async (req, r
       `UPDATE users SET name = ?, email = ?, role = ?, phone = ?, company = ?, contractor_category = ?, contractor_secondary_category = ?, is_active = ?, updated_at = datetime('now') WHERE id = ?`
     ).run(
       name || target.name,
-      email || target.email,
+      normalizedEmail,
       nextRole,
       phone ?? target.phone,
       company ?? target.company,
@@ -1416,7 +1506,7 @@ router.put('/:id', authorize('super_admin', 'operations_manager'), async (req, r
         req.params.id,
         (company ?? target.company) || name || target.name,
         name || target.name,
-        email || target.email,
+        normalizedEmail,
         phone ?? target.phone,
         primaryCategory,
         secondaryCategory,
@@ -1424,7 +1514,7 @@ router.put('/:id', authorize('super_admin', 'operations_manager'), async (req, r
       );
     }
 
-    logActivity({ userId: req.user.id, action: 'user_updated', entityType: 'user', entityId: req.params.id, details: { name, role: nextRole, contractor_category: primaryCategory, contractor_secondary_category: secondaryCategory, is_active } });
+    logActivity({ userId: req.user.id, action: 'user_updated', entityType: 'user', entityId: req.params.id, details: { name, email: normalizedEmail, role: nextRole, contractor_category: primaryCategory, contractor_secondary_category: secondaryCategory, is_active } });
     res.json({ message: 'User updated successfully' });
   } catch (err) {
     if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message });
@@ -1439,9 +1529,9 @@ router.post('/:id/lockout', authorize('super_admin', 'operations_manager'), (req
     const db = getDb();
     const target = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
     if (!target) return res.status(404).json({ error: 'User not found' });
+    if (target.deleted_at) return res.status(404).json({ error: 'User not found' });
 
-    // Cannot lock out someone of equal or higher authority
-    if (!authorizeOverUser(req.user.role, target.role)) {
+    if (!canManageTargetUser(req.user, target)) {
       return res.status(403).json({ error: `You cannot lock out a ${target.role.replace(/_/g, ' ')} account` });
     }
 
@@ -1469,8 +1559,9 @@ router.post('/:id/unlock', authorize('super_admin', 'operations_manager'), (req,
     const db = getDb();
     const target = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
     if (!target) return res.status(404).json({ error: 'User not found' });
+    if (target.deleted_at) return res.status(404).json({ error: 'User not found' });
 
-    if (!authorizeOverUser(req.user.role, target.role)) {
+    if (!canManageTargetUser(req.user, target)) {
       return res.status(403).json({ error: `You cannot unlock a ${target.role.replace(/_/g, ' ')} account` });
     }
 
@@ -1520,7 +1611,15 @@ router.post('/:id/avatar', authorize('super_admin', 'operations_manager'), (req,
     try {
       const avatarUrl = avatarPublicUrl(req.file.filename);
       const db = getDb();
-      const previous = db.prepare('SELECT avatar_url FROM users WHERE id = ?').get(targetId);
+      const previous = db.prepare('SELECT * FROM users WHERE id = ?').get(targetId);
+      if (!previous || previous.deleted_at) {
+        unlinkAvatarFile(avatarUrl);
+        return res.status(404).json({ error: 'User not found' });
+      }
+      if (!canManageTargetUser(req.user, previous)) {
+        unlinkAvatarFile(avatarUrl);
+        return res.status(403).json({ error: 'Cannot update this user photo' });
+      }
       db.prepare(`UPDATE users SET avatar_url = ?, updated_at = datetime('now') WHERE id = ?`).run(avatarUrl, targetId);
       if (previous?.avatar_url && previous.avatar_url !== avatarUrl) unlinkAvatarFile(previous.avatar_url);
       logActivity({ userId: req.user.id, action: 'avatar_updated', entityType: 'user', entityId: targetId });
@@ -1538,6 +1637,9 @@ router.put('/:id/pin', authorize('super_admin', 'operations_manager'), (req, res
     const { pin } = req.body;
     if (!pin || !/^\d{5}$/.test(pin)) return res.status(400).json({ error: 'PIN must be exactly 5 digits' });
     const db = getDb();
+    const target = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+    if (!target || target.deleted_at) return res.status(404).json({ error: 'User not found' });
+    if (!canManageTargetUser(req.user, target)) return res.status(403).json({ error: 'Cannot update this user PIN' });
     const existing = db.prepare('SELECT id FROM users WHERE pin = ? AND id != ?').get(pin, req.params.id);
     if (existing) return res.status(409).json({ error: 'PIN already in use by another user' });
     db.prepare("UPDATE users SET pin = ?, updated_at = datetime('now') WHERE id = ?").run(pin, req.params.id);
@@ -1548,21 +1650,60 @@ router.put('/:id/pin', authorize('super_admin', 'operations_manager'), (req, res
   }
 });
 
-// DELETE /api/users/:id - delete user (super_admin only, cannot delete super_admin)
-router.delete('/:id', authorize('super_admin'), (req, res) => {
+// DELETE /api/users/:id - remove a user from active management while preserving project history.
+router.delete('/:id', authorize('super_admin', 'operations_manager'), (req, res) => {
   try {
     const db = getDb();
     const target = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
     if (!target) return res.status(404).json({ error: 'User not found' });
+    if (target.deleted_at) return res.status(404).json({ error: 'User not found' });
     if (target.id === req.user.id) return res.status(400).json({ error: 'You cannot delete your own account' });
-    if (target.role === 'super_admin') return res.status(403).json({ error: 'Super Admin accounts cannot be deleted' });
+    if (!canDeleteTargetUser(req.user, target)) {
+      if (isProtectedUser(target)) {
+        return res.status(403).json({ error: 'Only Mike Seifert can delete this protected super admin account' });
+      }
+      return res.status(403).json({ error: `You cannot delete a ${target.role.replace(/_/g, ' ')} account` });
+    }
 
-    db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
-    logActivity({ userId: req.user.id, action: 'user_deleted', entityType: 'user', entityId: req.params.id, details: { name: target.name } });
-    res.json({ message: 'User deleted' });
+    db.prepare(`
+      UPDATE users
+      SET is_active = 0,
+          session_revoked_at = datetime('now'),
+          deleted_at = datetime('now'),
+          deleted_by = ?,
+          deleted_email = COALESCE(deleted_email, email),
+          email = ?,
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(req.user.id, deletedEmailForUser(target), req.params.id);
+    db.prepare("UPDATE auth_sessions SET revoked_at = datetime('now'), revoke_reason = 'user_deleted', updated_at = datetime('now') WHERE user_id = ? AND revoked_at IS NULL").run(req.params.id);
+    logActivity({ userId: req.user.id, action: 'user_deleted', entityType: 'user', entityId: req.params.id, details: { name: target.name, email: target.email, role: target.role, deletedBy: req.user.name } });
+    res.json({ message: 'User deleted from active BuildTrack access. Historical project and audit records were preserved.' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to delete user' });
+  }
+});
+
+// POST /api/users/:id/reinvite - send a fresh welcome/setup link and PIN.
+router.post('/:id/reinvite', authorize('super_admin', 'operations_manager'), async (req, res) => {
+  try {
+    const db = getDb();
+    const target = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+    if (!target) return res.status(404).json({ error: 'User not found' });
+    if (target.deleted_at) return res.status(404).json({ error: 'User not found' });
+    if (!canManageTargetUser(req.user, target)) {
+      return res.status(403).json({ error: 'Cannot re-invite this account' });
+    }
+    const pin = ensureUserPin(db, target);
+    const setup = createPasswordSetupToken(db, target.id);
+    db.prepare("UPDATE users SET is_active = 1, force_password_reset = 1, updated_at = datetime('now') WHERE id = ?").run(target.id);
+    await sendInviteEmail({ name: target.name, email: target.email, setupUrl: setup.setupUrl, role: target.role, invitedBy: req.user.name, pin, isReinvite: true });
+    logActivity({ userId: req.user.id, action: 'user_reinvited', entityType: 'user', entityId: req.params.id, details: { email: target.email, role: target.role } });
+    res.json({ message: `Welcome email re-sent to ${target.email}. Personal PIN: ${pin}.` });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to re-invite user' });
   }
 });
 
@@ -1572,16 +1713,18 @@ router.post('/:id/reset-password', authorize('super_admin', 'operations_manager'
     const db = getDb();
     const target = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
     if (!target) return res.status(404).json({ error: 'User not found' });
-    if (!authorizeOverUser(req.user.role, target.role)) {
+    if (target.deleted_at) return res.status(404).json({ error: 'User not found' });
+    if (!canManageTargetUser(req.user, target)) {
       return res.status(403).json({ error: 'Cannot reset password for this account' });
     }
-    const tempPass = Math.random().toString(36).slice(-10) + 'A1!';
-    const hash = await bcrypt.hash(tempPass, 12);
-    db.prepare(`UPDATE users SET password_hash = ?, force_password_reset = 1, updated_at = datetime('now') WHERE id = ?`).run(hash, req.params.id);
-    logActivity({ userId: req.user.id, action: 'password_reset', entityType: 'user', entityId: req.params.id });
-    res.json({ message: `Password reset. New temporary password: ${tempPass}` });
+    const setup = createPasswordSetupToken(db, target.id, 60);
+    db.prepare(`UPDATE users SET force_password_reset = 1, updated_at = datetime('now') WHERE id = ?`).run(req.params.id);
+    await sendPasswordResetEmail({ name: target.name, email: target.email, resetUrl: setup.setupUrl });
+    logActivity({ userId: req.user.id, action: 'password_reset_link_sent', entityType: 'user', entityId: req.params.id });
+    res.json({ message: `Password setup link sent to ${target.email}.` });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to reset password' });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to send password setup link' });
   }
 });
 

@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, MessageSquare, Camera, ClipboardList, Plus, Send, Trash2, Upload, FileText, Package } from 'lucide-react';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
+import { fileDropHandlers } from '../lib/fileDrop';
 import { formatEasternDateTime, formatEasternRelative } from '../lib/time';
 import { PROGRESS_MEDIA_ACCEPT } from '../lib/progressUpload';
 import VoiceTextarea from '../components/VoiceTextarea';
@@ -95,20 +96,22 @@ export default function ContractorProjectDetail() {
     finally { setAddingNote(false); }
   };
 
-  const uploadPhotos = async (files: FileList) => {
+  const uploadPhotos = async (files: FileList | File[]) => {
+    const uploadFiles = Array.from(files || []);
+    if (!uploadFiles.length) return;
     setUploading(true);
     try {
       const formData = new FormData();
-      Array.from(files).forEach(f => formData.append('photos', f));
+      uploadFiles.forEach(f => formData.append('photos', f));
       formData.append('capture_project_id', id || '');
       formData.append('client_project_id', id || '');
       formData.append('photo_type', 'progress');
       formData.append('taken_at_values', JSON.stringify(
-        Array.from(files).map(file => new Date(file.lastModified || Date.now()).toISOString())
+        uploadFiles.map(file => new Date(file.lastModified || Date.now()).toISOString())
       ));
       await api.post(`/projects/${id}/photos?type=progress`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       loadPhotos();
-      toast.success(`${files.length} progress photo${files.length > 1 ? 's' : ''} uploaded`);
+      toast.success(`${uploadFiles.length} progress photo${uploadFiles.length > 1 ? 's' : ''} uploaded`);
     } catch { toast.error('Failed to upload'); }
     finally { setUploading(false); }
   };
@@ -310,6 +313,7 @@ export default function ContractorProjectDetail() {
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={uploading}
+              {...fileDropHandlers(uploadPhotos, { accept: PROGRESS_MEDIA_ACCEPT, disabled: uploading, multiple: true })}
               style={{
                 width: '100%', padding: 16, borderRadius: 14,
                 border: '2px dashed #D1D5DB', background: uploading ? '#F9FAFB' : 'white',

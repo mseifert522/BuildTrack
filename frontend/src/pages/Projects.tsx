@@ -9,6 +9,7 @@ import { useForm } from 'react-hook-form';
 import GooglePlacesInput from '../components/GooglePlacesInput';
 import CurrencyInput from '../components/CurrencyInput';
 import AddToCalendarButton from '../components/AddToCalendarButton';
+import { fileDropHandlers } from '../lib/fileDrop';
 
 interface Project {
   id: string;
@@ -22,6 +23,7 @@ interface Project {
   budget?: number | null;
   updated_at: string;
   main_photo_url?: string | null;
+  main_photo_thumb_url?: string | null;
   lockbox_code?: string | null;
   market_status?: string | null;
   work_priority?: number | string | null;
@@ -267,7 +269,11 @@ export default function Projects() {
       const res = await api.post(`/projects/${project.id}/main-photo`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      setProjects(current => current.map(item => item.id === project.id ? { ...item, main_photo_url: res.data.main_photo_url } : item));
+      setProjects(current => current.map(item => item.id === project.id ? {
+        ...item,
+        main_photo_url: res.data.main_photo_url,
+        main_photo_thumb_url: res.data.main_photo_thumb_url || res.data.main_photo_url,
+      } : item));
       toast.success('Project house photo updated');
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to upload project photo');
@@ -409,6 +415,11 @@ export default function Projects() {
                 <label
                   className={`relative h-24 w-32 rounded-xl border border-blue-200 shadow-md flex items-center justify-center flex-shrink-0 overflow-hidden sm:h-20 sm:w-28 lg:h-24 lg:w-32 ${canManageProjectActions && !p.main_photo_url ? 'z-20 cursor-pointer' : 'z-0 cursor-pointer'}`}
                   style={{ background: 'linear-gradient(135deg, #EFF6FF, #DBEAFE)' }}
+                  {...fileDropHandlers(files => uploadProjectPhoto(p, files[0]), {
+                    accept: 'image/*',
+                    disabled: !canManageProjectActions || uploadingPhoto === p.id || !!p.main_photo_url,
+                    multiple: false,
+                  })}
                   onClick={e => {
                     if (canManageProjectActions && !p.main_photo_url) e.stopPropagation();
                   }}
@@ -429,7 +440,18 @@ export default function Projects() {
                     }}
                   />
                   {p.main_photo_url ? (
-                    <img src={p.main_photo_url} alt={p.address} className="w-full h-full object-cover" />
+                    <img
+                      src={p.main_photo_thumb_url || p.main_photo_url}
+                      alt={p.address}
+                      loading="lazy"
+                      decoding="async"
+                      className="w-full h-full object-cover"
+                      onError={event => {
+                        if (!p.main_photo_url || event.currentTarget.dataset.fallback === '1') return;
+                        event.currentTarget.dataset.fallback = '1';
+                        event.currentTarget.src = p.main_photo_url;
+                      }}
+                    />
                   ) : (
                     <>
                       <MapPin className="w-6 h-6 text-blue-600" />
@@ -600,6 +622,14 @@ export default function Projects() {
                                 <label
                                   role="menuitem"
                                   className={`flex min-h-11 w-full items-center gap-2 rounded-xl px-3 py-2 text-left font-bold transition-colors ${p.main_photo_url ? 'text-slate-400' : 'cursor-pointer text-slate-700 hover:bg-slate-50'}`}
+                                  {...fileDropHandlers(files => {
+                                    uploadProjectPhoto(p, files[0]);
+                                    setActiveActionsProjectId(null);
+                                  }, {
+                                    accept: 'image/*',
+                                    disabled: uploadingPhoto === p.id || !!p.main_photo_url,
+                                    multiple: false,
+                                  })}
                                 >
                                   <input
                                     type="file"
@@ -744,7 +774,10 @@ export default function Projects() {
             </select>
           </div>
 
-          <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-gray-300 bg-gray-50 px-4 py-5 text-center transition-colors hover:border-blue-400 hover:bg-blue-50">
+          <label
+            className="flex min-h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-gray-300 bg-gray-50 px-4 py-5 text-center transition-colors hover:border-blue-400 hover:bg-blue-50"
+            {...fileDropHandlers(files => setDocumentFiles(files), { multiple: true })}
+          >
             <Upload className="h-6 w-6 text-blue-600" />
             <span className="text-sm font-black text-gray-900">
               {documentFiles.length > 0

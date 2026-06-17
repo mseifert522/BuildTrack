@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from
 import { Toaster } from 'react-hot-toast';
 import { useAuthStore, canManageUsers, canAccessSettings, canAccessSecurity } from './store/authStore';
 import Layout from './components/Layout';
+import GlobalImageLightbox from './components/GlobalImageLightbox';
 import { Loading } from './components/ui';
 import {
   isLegacyContractorAppPath,
@@ -19,6 +20,7 @@ import { BUILDTRACK_TRUTH_ICON_SRC } from './lib/branding';
 
 const Login = lazy(() => import('./pages/Login'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
+const OperationsCalendar = lazy(() => import('./pages/OperationsCalendar'));
 const Projects = lazy(() => import('./pages/Projects'));
 const ProjectDetail = lazy(() => import('./pages/ProjectDetail'));
 const PunchList = lazy(() => import('./pages/PunchList'));
@@ -26,7 +28,6 @@ const Photos = lazy(() => import('./pages/Photos'));
 const Invoices = lazy(() => import('./pages/Invoices'));
 const InvoiceBuilder = lazy(() => import('./pages/InvoiceBuilder'));
 const Contractors = lazy(() => import('./pages/Contractors'));
-const Suppliers = lazy(() => import('./pages/Suppliers'));
 const Users = lazy(() => import('./pages/Users'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Security = lazy(() => import('./pages/Security'));
@@ -529,6 +530,7 @@ function MobileHostRoutes() {
 
       {/* Management users can reach the full management surface from the mobile host. */}
       <Route path="/dashboard" element={<ManagementMobileRoute><Layout><Dashboard /></Layout></ManagementMobileRoute>} />
+      <Route path="/operations-calendar" element={<ManagementMobileRoute><Layout><OperationsCalendar /></Layout></ManagementMobileRoute>} />
       <Route path="/projects" element={<ManagementMobileRoute><Layout><Projects /></Layout></ManagementMobileRoute>} />
       <Route path="/projects/:id" element={<ManagementMobileRoute><Layout><ProjectDetail /></Layout></ManagementMobileRoute>} />
       <Route path="/projects/:projectId/invoices/new" element={<ManagementMobileRoute><Layout><InvoiceBuilder /></Layout></ManagementMobileRoute>} />
@@ -536,7 +538,7 @@ function MobileHostRoutes() {
       <Route path="/punch-list" element={<ManagementMobileRoute><Layout><PunchList /></Layout></ManagementMobileRoute>} />
       <Route path="/desktop/photos" element={<ManagementMobileRoute><Layout><Photos /></Layout></ManagementMobileRoute>} />
       <Route path="/contractors" element={<ManagementMobileRoute><Layout><Contractors /></Layout></ManagementMobileRoute>} />
-      <Route path="/suppliers" element={<ManagementMobileRoute><Layout><Suppliers /></Layout></ManagementMobileRoute>} />
+      <Route path="/suppliers" element={<ManagementMobileRoute><Layout><Contractors /></Layout></ManagementMobileRoute>} />
       <Route path="/invoices" element={<ManagementMobileRoute><Layout><Invoices /></Layout></ManagementMobileRoute>} />
       <Route path="/users" element={<UpperManagementMobileRoute allowed={canManageUsers}><Layout><Users /></Layout></UpperManagementMobileRoute>} />
       <Route path="/settings" element={<UpperManagementMobileRoute allowed={canAccessSettings}><Layout><Settings /></Layout></UpperManagementMobileRoute>} />
@@ -550,6 +552,13 @@ function MobileHostRoutes() {
 }
 
 export default function App() {
+  useEffect(() => {
+    const path = window.location.pathname;
+    if (isMobileAppHost() || /^\/(mobile|app)(\/|$)/.test(path)) {
+      void import('./styles/mobile-heavy.css');
+    }
+  }, []);
+
   useEffect(() => {
     const handleWindowError = (event: ErrorEvent) => {
       const errorLike = event.error || event.message;
@@ -578,6 +587,7 @@ export default function App() {
         <DeviceHostRedirect />
         <SessionTimeout />
         <MobileGestureShortcuts />
+        <GlobalImageLightbox />
         <Toaster
           position="top-center"
           toastOptions={{
@@ -632,6 +642,11 @@ export default function App() {
             <Layout><Dashboard /></Layout>
           </DesktopRoute>
         } />
+        <Route path="/operations-calendar" element={
+          <DesktopRoute>
+            <Layout><OperationsCalendar /></Layout>
+          </DesktopRoute>
+        } />
         <Route path="/projects" element={
           <DesktopRoute>
             <Layout><Projects /></Layout>
@@ -676,7 +691,7 @@ export default function App() {
         } />
         <Route path="/suppliers" element={
           <DesktopRoute>
-            <Layout><Suppliers /></Layout>
+            <Layout><Contractors /></Layout>
           </DesktopRoute>
         } />
         {/* Users: super_admin and operations_manager only */}

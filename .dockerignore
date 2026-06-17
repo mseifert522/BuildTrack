@@ -7,9 +7,14 @@ backend/data
 backend/uploads
 logs
 *.log
+.codex-backups
+\\
 *.bak
 *.bak-*
 *.backup
 *.backup-*
+*.before
+*.before-*
+*.codex-backup-*
 .env
 .env.*

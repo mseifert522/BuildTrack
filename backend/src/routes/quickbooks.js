@@ -1,6 +1,9 @@
 const express = require('express');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 const { getDb } = require('../db/schema');
 const { authenticate, authorize } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
@@ -17,11 +20,20 @@ const AUTO_SYNC_DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
 const DEFAULT_EXCLUDED_BILL_VENDORS = ['great lakes mortgage fund'];
 const PAYMENT_APPROVAL_STATUS = 'approved_for_payment';
 const PAYMENT_APPROVAL_DEFAULT_STATUS = 'not_approved';
+const PAYMENT_APPROVAL_DELETED_STATUS = 'deleted_from_buildtrack';
 const PAYDAY_ANCHOR_UTC_MS = Date.UTC(2026, 5, 12, 12, 0, 0);
 const PAYMENT_QUEUE_NOTIFY_DEFAULT_HOUR_ET = 8;
 const PAYMENT_QUEUE_NOTIFY_DEFAULT_POLL_MS = 5 * 60 * 1000;
+const qboBillPdfUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    files: 1,
+    fileSize: Math.max(Number.parseInt(process.env.MAX_FILE_SIZE_MB || '20', 10), 1) * 1024 * 1024,
+  },
+});
 let autoSyncStarted = false;
 let activeSyncPromise = null;
+let activeBillPdfSyncPromise = null;
 let paymentQueueSchedulerStarted = false;
 let paymentQueueSchedulerRunning = false;
 
@@ -65,6 +77,363 @@ function qboConfig() {
       clientSecret ? null : 'QBO_CLIENT_SECRET',
     ].filter(Boolean),
   };
+}
+
+function sanitizeFilename(filename) {
+  const base = path.basename(String(filename || 'invoice.pdf'));
+  return base.replace(/[^a-zA-Z0-9._ -]/g, '_').slice(0, 180) || 'invoice.pdf';
+}
+
+function safePathSegment(value) {
+  return String(value || '').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'bill';
+}
+
+function headerFilename(filename) {
+  return sanitizeFilename(filename).replace(/["\\\r\n]/g, '_');
+}
+
+function quickBooksBillAttachmentRoot() {
+  return path.resolve(process.env.UPLOADS_PATH || './uploads', 'quickbooks-bill-attachments');
+}
+
+function deleteQuickBooksBillAttachmentFiles(qboId, attachments = []) {
+  const root = quickBooksBillAttachmentRoot();
+  const resolvedRoot = path.resolve(root);
+  const dir = path.resolve(root, safePathSegment(qboId));
+  if (!dir.startsWith(`${resolvedRoot}${path.sep}`)) return;
+
+  for (const attachment of attachments) {
+    const filename = String(attachment?.filename || '').trim();
+    if (!filename) continue;
+    const filePath = path.resolve(dir, filename);
+    if (!filePath.startsWith(`${dir}${path.sep}`)) continue;
+    try {
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch (err) {
+      console.warn('[QBO] Failed to remove deleted bill PDF:', err.message);
+    }
+  }
+
+  try {
+    fs.rmdirSync(dir);
+  } catch (_) {
+    // Directory may not exist or may still contain retained files.
+  }
+}
+
+function isPdfLike({ mimeType, name, buffer } = {}) {
+  const type = String(mimeType || '').toLowerCase();
+  const filename = String(name || '').toLowerCase();
+  const header = buffer && Buffer.isBuffer(buffer) ? buffer.slice(0, 5).toString('utf8') : '';
+  return type.includes('pdf') || filename.endsWith('.pdf') || header === '%PDF-';
+}
+
+function formatBytesValue(value) {
+  const size = Number(value || 0);
+  if (!Number.isFinite(size) || size <= 0) return null;
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatQuickBooksBillAttachment(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    source: 'quickbooks_bill_attachment',
+    label: 'Vendor PDF',
+    qbo_bill_id: row.qbo_bill_id,
+    qbo_attachable_id: row.qbo_attachable_id || null,
+    original_name: row.original_name,
+    mime_type: row.mime_type,
+    size: row.size,
+    size_label: formatBytesValue(row.size),
+    qbo_file_access_uri: row.qbo_file_access_uri || null,
+    uploaded_by: row.uploaded_by,
+    uploaded_by_name: row.uploaded_by_name || null,
+    created_at: row.created_at,
+    url: `/api/quickbooks/bills/${encodeURIComponent(row.qbo_bill_id)}/attachments/${encodeURIComponent(row.id)}?inline=1`,
+  };
+}
+
+function getQuickBooksBillAttachment(db, qboId, attachmentId = null) {
+  const where = attachmentId
+    ? 'qba.qbo_bill_id = ? AND qba.id = ?'
+    : 'qba.qbo_bill_id = ?';
+  const params = attachmentId ? [qboId, attachmentId] : [qboId];
+  return db.prepare(`
+    SELECT qba.*, u.name as uploaded_by_name
+    FROM quickbooks_bill_attachments qba
+    LEFT JOIN users u ON u.id = qba.uploaded_by
+    WHERE ${where}
+    ORDER BY datetime(qba.created_at) DESC, qba.created_at DESC
+    LIMIT 1
+  `).get(...params);
+}
+
+function getLatestQuickBooksBillPdfAttachment(db, qboId) {
+  return db.prepare(`
+    SELECT qba.*, u.name as uploaded_by_name
+    FROM quickbooks_bill_attachments qba
+    LEFT JOIN users u ON u.id = qba.uploaded_by
+    WHERE qba.qbo_bill_id = ?
+      AND (
+        lower(COALESCE(qba.mime_type, '')) LIKE '%pdf%'
+        OR lower(COALESCE(qba.original_name, qba.filename, '')) LIKE '%.pdf'
+      )
+    ORDER BY datetime(qba.created_at) DESC, qba.created_at DESC
+    LIMIT 1
+  `).get(String(qboId || ''));
+}
+
+function quickBooksBillPdfSyncMaxBytes() {
+  const requested = Number.parseInt(process.env.QBO_BILL_PDF_SYNC_MAX_MB || process.env.MAX_FILE_SIZE_MB || '50', 10);
+  const mb = Number.isFinite(requested) && requested > 0 ? Math.min(requested, 100) : 50;
+  return mb * 1024 * 1024;
+}
+
+function quickBooksAttachableRefs(attachable) {
+  return Array.isArray(attachable?.AttachableRef) ? attachable.AttachableRef : [];
+}
+
+function quickBooksAttachableBillIds(attachable) {
+  return quickBooksAttachableRefs(attachable)
+    .filter(ref => String(ref?.EntityRef?.type || ref?.EntityRef?.Type || '').toLowerCase() === 'bill')
+    .map(ref => String(ref?.EntityRef?.value || ref?.EntityRef?.Value || '').trim())
+    .filter(Boolean);
+}
+
+function quickBooksAttachableIsPdf(attachable) {
+  const contentType = String(attachable?.ContentType || '').toLowerCase();
+  const filename = String(attachable?.FileName || '').toLowerCase();
+  return contentType.includes('pdf') || filename.endsWith('.pdf');
+}
+
+function quickBooksAttachableDownloadUri(attachable) {
+  return attachable?.FileAccessUri || attachable?.FileAccessURI || attachable?.TempDownloadUri || '';
+}
+
+function quickBooksAttachableFilename(qboId, attachable) {
+  return sanitizeFilename(attachable?.FileName || `quickbooks-bill-${qboId}-${attachable?.Id || 'attachment'}.pdf`);
+}
+
+function quickBooksAttachmentFilePath(qboId, filename) {
+  const root = quickBooksBillAttachmentRoot();
+  const resolvedRoot = path.resolve(root);
+  const dir = path.resolve(root, safePathSegment(qboId));
+  if (!dir.startsWith(`${resolvedRoot}${path.sep}`)) throw new Error('Invalid QuickBooks attachment path');
+  const filePath = path.resolve(dir, filename);
+  if (!filePath.startsWith(`${dir}${path.sep}`)) throw new Error('Invalid QuickBooks attachment filename');
+  return { dir, filePath };
+}
+
+async function qboDownloadAttachment(db, connection, uri) {
+  const value = String(uri || '').trim();
+  if (!value) throw new Error('QuickBooks attachment has no download URI');
+  const accessToken = await refreshAccessToken(db, connection);
+  let url = value;
+  if (!/^https?:\/\//i.test(url)) {
+    url = `${qboApiBase(connection.environment)}${url.startsWith('/') ? '' : '/'}${url}`;
+  }
+  const response = await fetch(url, {
+    headers: {
+      Accept: 'application/pdf,*/*',
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+  if (!response.ok) {
+    const err = new Error(`QuickBooks attachment download failed (${response.status})`);
+    err.statusCode = response.status;
+    throw err;
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const contentType = response.headers.get('content-type') || 'application/pdf';
+  return { buffer, contentType };
+}
+
+function quickBooksBillPdfTargets(db, { scope = 'open_missing', qboIds = [] } = {}) {
+  const params = [];
+  const where = [`COALESCE(qb.payment_approval_status, '${PAYMENT_APPROVAL_DEFAULT_STATUS}') != '${PAYMENT_APPROVAL_DELETED_STATUS}'`];
+  if (qboIds.length) {
+    where.push(`qb.qbo_id IN (${qboIds.map(() => '?').join(', ')})`);
+    params.push(...qboIds.map(id => String(id)));
+  } else if (scope === 'open' || scope === 'open_missing') {
+    where.push("qb.payment_status != 'paid'");
+    where.push(`COALESCE(qb.payment_approval_status, '${PAYMENT_APPROVAL_DEFAULT_STATUS}') != '${PAYMENT_APPROVAL_STATUS}'`);
+  }
+  if (scope === 'missing' || scope === 'open_missing') {
+    where.push(`
+      NOT EXISTS (
+        SELECT 1 FROM quickbooks_bill_attachments qba
+        WHERE qba.qbo_bill_id = qb.qbo_id
+          AND (
+            lower(COALESCE(qba.mime_type, '')) LIKE '%pdf%'
+            OR lower(COALESCE(qba.original_name, qba.filename, '')) LIKE '%.pdf'
+          )
+      )
+    `);
+  }
+  return db.prepare(`
+    SELECT qb.qbo_id, qb.doc_number, qb.vendor_name, qb.matched_invoice_id, qb.project_id
+    FROM quickbooks_bills qb
+    WHERE ${where.join(' AND ')}
+    ORDER BY date(COALESCE(qb.txn_date, qb.due_date, qb.last_seen_at)) DESC,
+      lower(COALESCE(qb.vendor_name, '')) ASC,
+      qb.qbo_id ASC
+  `).all(...params);
+}
+
+async function fetchQuickBooksBillPdfAttachables(db, connection) {
+  const attachables = await fetchAllQboEntities(db, connection, 'Attachable');
+  const byBillId = new Map();
+  for (const attachable of attachables) {
+    if (!attachable?.Id || !quickBooksAttachableIsPdf(attachable)) continue;
+    for (const billId of quickBooksAttachableBillIds(attachable)) {
+      if (!byBillId.has(billId)) byBillId.set(billId, []);
+      byBillId.get(billId).push(attachable);
+    }
+  }
+  return { attachables, byBillId };
+}
+
+async function storeQuickBooksBillPdfAttachment(db, connection, bill, attachable, { force = false, userId = null } = {}) {
+  const qboId = String(bill.qbo_id || '').trim();
+  const attachableId = String(attachable?.Id || '').trim();
+  if (!qboId || !attachableId) return { status: 'skipped', reason: 'missing_ids' };
+
+  const existing = db.prepare(`
+    SELECT *
+    FROM quickbooks_bill_attachments
+    WHERE qbo_bill_id = ? AND qbo_attachable_id = ?
+    LIMIT 1
+  `).get(qboId, attachableId);
+  const id = existing?.id || uuidv4();
+  const storedName = existing?.filename || `${id}.pdf`;
+  const originalName = quickBooksAttachableFilename(qboId, attachable);
+  const downloadUri = quickBooksAttachableDownloadUri(attachable);
+  const { dir, filePath } = quickBooksAttachmentFilePath(qboId, storedName);
+  const existingFileUsable = existing?.filename && fs.existsSync(filePath) && !force;
+
+  let size = Number(existing?.size || attachable?.Size || 0);
+  let mimeType = existing?.mime_type || attachable?.ContentType || 'application/pdf';
+  let downloaded = false;
+  if (!existingFileUsable) {
+    if (!downloadUri) return { status: 'skipped', reason: 'missing_download_uri', attachable_id: attachableId };
+    const downloadedFile = await qboDownloadAttachment(db, connection, downloadUri);
+    if (downloadedFile.buffer.length > quickBooksBillPdfSyncMaxBytes()) {
+      return { status: 'skipped', reason: 'file_too_large', attachable_id: attachableId };
+    }
+    if (!isPdfLike({ mimeType: downloadedFile.contentType, name: originalName, buffer: downloadedFile.buffer })) {
+      return { status: 'skipped', reason: 'not_pdf_content', attachable_id: attachableId };
+    }
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(filePath, downloadedFile.buffer);
+    size = downloadedFile.buffer.length;
+    mimeType = downloadedFile.contentType || attachable?.ContentType || 'application/pdf';
+    downloaded = true;
+  }
+
+  if (existing) {
+    db.prepare(`
+      UPDATE quickbooks_bill_attachments
+      SET original_name = ?,
+          mime_type = ?,
+          size = ?,
+          source = 'quickbooks',
+          qbo_file_access_uri = ?,
+          qbo_metadata_json = ?,
+          uploaded_by = COALESCE(uploaded_by, ?)
+      WHERE id = ?
+    `).run(
+      originalName,
+      mimeType,
+      size,
+      attachable?.FileAccessUri || attachable?.TempDownloadUri || null,
+      JSON.stringify(attachable || {}),
+      userId,
+      existing.id
+    );
+    return { status: downloaded ? 'redownloaded' : 'updated', attachable_id: attachableId };
+  }
+
+  db.prepare(`
+    INSERT INTO quickbooks_bill_attachments (
+      id, qbo_bill_id, filename, original_name, mime_type, size, uploaded_by,
+      qbo_attachable_id, source, qbo_file_access_uri, qbo_metadata_json
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'quickbooks', ?, ?)
+  `).run(
+    id,
+    qboId,
+    storedName,
+    originalName,
+    mimeType,
+    size,
+    userId,
+    attachableId,
+    attachable?.FileAccessUri || attachable?.TempDownloadUri || null,
+    JSON.stringify(attachable || {})
+  );
+  return { status: 'downloaded', attachable_id: attachableId };
+}
+
+function getMatchedInvoicePdfSummary(db, invoiceId) {
+  if (!invoiceId) return null;
+  const attachment = db.prepare(`
+    SELECT ia.*, u.name as uploaded_by_name
+    FROM invoice_attachments ia
+    LEFT JOIN users u ON u.id = ia.uploaded_by
+    WHERE ia.invoice_id = ?
+      AND (
+        lower(COALESCE(ia.mime_type, '')) LIKE '%pdf%'
+        OR lower(COALESCE(ia.original_name, ia.filename, '')) LIKE '%.pdf'
+      )
+    ORDER BY datetime(ia.created_at) DESC, ia.created_at DESC
+    LIMIT 1
+  `).get(invoiceId);
+  if (attachment) {
+    return {
+      id: attachment.id,
+      source: 'invoice_attachment',
+      label: 'Invoice PDF',
+      invoice_id: attachment.invoice_id,
+      project_id: attachment.project_id,
+      original_name: attachment.original_name,
+      mime_type: attachment.mime_type,
+      size: attachment.size,
+      size_label: formatBytesValue(attachment.size),
+      uploaded_by: attachment.uploaded_by,
+      uploaded_by_name: attachment.uploaded_by_name || null,
+      created_at: attachment.created_at,
+      url: `/api/projects/${encodeURIComponent(attachment.project_id)}/invoices/${encodeURIComponent(attachment.invoice_id)}/attachments/${encodeURIComponent(attachment.id)}?inline=1`,
+    };
+  }
+
+  const invoice = db.prepare('SELECT id, project_id, invoice_number FROM invoices WHERE id = ?').get(invoiceId);
+  if (!invoice?.project_id) return null;
+  return {
+    id: invoice.id,
+    source: 'generated_invoice_pdf',
+    label: 'BuildTrack PDF',
+    invoice_id: invoice.id,
+    project_id: invoice.project_id,
+    original_name: `invoice-${invoice.invoice_number || invoice.id}.pdf`,
+    mime_type: 'application/pdf',
+    size: null,
+    size_label: null,
+    uploaded_by: null,
+    uploaded_by_name: null,
+    created_at: null,
+    url: `/api/projects/${encodeURIComponent(invoice.project_id)}/invoices/${encodeURIComponent(invoice.id)}/pdf`,
+  };
+}
+
+function quickBooksBillPdfSummary(db, bill) {
+  const manual = getLatestQuickBooksBillPdfAttachment(db, bill?.qbo_id);
+  const pdf = manual ? formatQuickBooksBillAttachment(manual) : getMatchedInvoicePdfSummary(db, bill?.matched_invoice_id);
+  return pdf
+    ? { available: true, ...pdf }
+    : { available: false, source: null, label: 'No PDF on file' };
 }
 
 function encryptionKey() {
@@ -413,9 +782,21 @@ function stableBillLineId(bill, line, index) {
 
 function findProjectForBillLine(db, bill, line, invoice = null) {
   const classRef = billLineClassRef(line);
+  const customerRef = billLineCustomerRef(line);
   const lineScopedBill = { ...bill, Line: [line] };
-  const project = findProjectForBill(db, lineScopedBill, invoice, classRef);
-  return { project, classRef };
+  const lineHasScopedMatchHint = Boolean(
+    classRef?.value ||
+    classRef?.name ||
+    customerRef?.value ||
+    customerRef?.name
+  );
+  const project = findProjectForBill(
+    db,
+    lineScopedBill,
+    lineHasScopedMatchHint ? null : invoice,
+    classRef
+  );
+  return { project, classRef, lineHasScopedMatchHint };
 }
 
 function billMatchText(bill, classRef) {
@@ -697,6 +1078,7 @@ function upsertBillsAndPayments(db, connection, bills, payments) {
       const invoice = findInvoiceForBill(db, bill);
       const existingBillApproval = getExistingBillApproval.get(String(bill.Id));
       const paymentApprovalStatusAtSync = existingBillApproval?.payment_approval_status || PAYMENT_APPROVAL_DEFAULT_STATUS;
+      const deletedFromBuildTrack = paymentApprovalStatusAtSync === PAYMENT_APPROVAL_DELETED_STATUS;
       const classRef = primaryBillClassRef(bill);
       const project = findProjectForBill(db, bill, invoice, classRef);
       if (project && classRef) rememberProjectClass(db, project, classRef);
@@ -728,6 +1110,10 @@ function upsertBillsAndPayments(db, connection, bills, payments) {
         metadataTime(bill, 'CreateTime'),
         metadataTime(bill, 'LastUpdatedTime')
       );
+      if (deletedFromBuildTrack) {
+        deleteBillLines.run(String(bill.Id));
+        continue;
+      }
       if (invoice) {
         updateInvoice.run(
           String(bill.Id),
@@ -753,7 +1139,11 @@ function upsertBillsAndPayments(db, connection, bills, payments) {
         const lineNum = Number(line?.LineNum || index + 1);
         const categoryRef = billLineCategoryRef(line);
         const customerRef = billLineCustomerRef(line);
-        const { project: lineProject, classRef: lineClassRef } = findProjectForBillLine(db, bill, line, invoice);
+        const {
+          project: lineProject,
+          classRef: lineClassRef,
+          lineHasScopedMatchHint,
+        } = findProjectForBillLine(db, bill, line, invoice);
         if (lineProject && lineClassRef) rememberProjectClass(db, lineProject, lineClassRef);
         insertBillLine.run(
           id,
@@ -771,7 +1161,7 @@ function upsertBillsAndPayments(db, connection, bills, payments) {
           lineClassRef?.name || null,
           customerRef?.value || null,
           customerRef?.name || null,
-          lineProject?.id || invoice?.project_id || null,
+          lineProject?.id || (!lineHasScopedMatchHint ? invoice?.project_id : null),
           JSON.stringify(line || {})
         );
       });
@@ -798,9 +1188,10 @@ function splitLinesFullyMatchedSql(billAlias = 'qb') {
 function statusSummary(db) {
   const excludedVendors = excludedQuickBooksBillVendors();
   const excludedVendorPlaceholders = excludedVendors.map(() => '?').join(', ');
-  const excludedVendorWhere = excludedVendors.length
-    ? `WHERE lower(trim(COALESCE(qb.vendor_name, ''))) NOT IN (${excludedVendorPlaceholders})`
-    : '';
+  const where = [`COALESCE(qb.payment_approval_status, '${PAYMENT_APPROVAL_DEFAULT_STATUS}') != '${PAYMENT_APPROVAL_DELETED_STATUS}'`];
+  if (excludedVendors.length) {
+    where.push(`lower(trim(COALESCE(qb.vendor_name, ''))) NOT IN (${excludedVendorPlaceholders})`);
+  }
   const billStats = db.prepare(`
     SELECT
       COUNT(*) as bill_count,
@@ -828,7 +1219,7 @@ function statusSummary(db) {
           AND COALESCE(payment_approval_status, '${PAYMENT_APPROVAL_DEFAULT_STATUS}') = '${PAYMENT_APPROVAL_STATUS}'
         THEN balance ELSE 0 END), 0), 2) as approved_payment_balance
     FROM quickbooks_bills qb
-    ${excludedVendorWhere}
+    WHERE ${where.join(' AND ')}
   `).get(...excludedVendors);
   return {
     bill_count: Number(billStats?.bill_count || 0),
@@ -866,6 +1257,7 @@ function quickBooksBillSelectSql() {
       qb.matched_invoice_id,
       qb.project_id,
       qb.qbo_updated_at,
+      qb.first_seen_at,
       qb.last_seen_at,
       i.invoice_number,
       i.external_invoice_number,
@@ -919,6 +1311,7 @@ function attachQuickBooksBillLines(db, rows) {
       split_line_count: splitLines.length,
       matched_split_line_count: matched,
       unmatched_split_line_count: splitLines.length - matched,
+      invoice_pdf: quickBooksBillPdfSummary(db, row),
     };
   });
   return Array.isArray(rows) ? withLines : withLines[0];
@@ -1161,6 +1554,98 @@ function getAutoSyncIntervalMs() {
   return Math.max(60 * 1000, requested);
 }
 
+async function syncQuickBooksBillPdfs({ scope = 'open_missing', force = false, qboIds = [], source = 'manual', userId = null } = {}) {
+  if (activeBillPdfSyncPromise) return activeBillPdfSyncPromise;
+
+  activeBillPdfSyncPromise = (async () => {
+    const db = getDb();
+    const config = qboConfig();
+    if (!config.configured) {
+      return { skipped: true, reason: `missing_credentials:${config.missing.join(',')}` };
+    }
+    const connection = getActiveConnection(db);
+    if (!connection) return { skipped: true, reason: 'not_connected' };
+    const actorUserId = userId || connection.connected_by || paymentQueueAutomationUserId(db);
+
+    const allowedScopes = new Set(['open_missing', 'open', 'missing', 'all']);
+    const syncScope = allowedScopes.has(scope) ? scope : 'open_missing';
+    const targetIds = Array.isArray(qboIds)
+      ? Array.from(new Set(qboIds.map(id => String(id || '').trim()).filter(Boolean)))
+      : [];
+    const targets = quickBooksBillPdfTargets(db, { scope: syncScope, qboIds: targetIds });
+    const summary = {
+      message: 'QuickBooks bill PDF sync completed',
+      source,
+      scope: targetIds.length ? 'selected' : syncScope,
+      target_bills: targets.length,
+      qbo_attachables_seen: 0,
+      qbo_pdf_attachables_seen: 0,
+      bills_with_qbo_pdf: 0,
+      missing_in_quickbooks: 0,
+      downloaded: 0,
+      redownloaded: 0,
+      updated: 0,
+      skipped: 0,
+      skipped_reasons: {},
+      missing_samples: [],
+    };
+    if (!targets.length) return summary;
+
+    const { attachables, byBillId } = await fetchQuickBooksBillPdfAttachables(db, connection);
+    summary.qbo_attachables_seen = attachables.length;
+    summary.qbo_pdf_attachables_seen = Array.from(byBillId.values()).reduce((count, items) => count + items.length, 0);
+
+    for (const bill of targets) {
+      const billAttachables = byBillId.get(String(bill.qbo_id)) || [];
+      if (!billAttachables.length) {
+        summary.missing_in_quickbooks += 1;
+        if (summary.missing_samples.length < 10) {
+          summary.missing_samples.push({
+            qbo_id: bill.qbo_id,
+            vendor_name: bill.vendor_name || null,
+            doc_number: bill.doc_number || null,
+          });
+        }
+        continue;
+      }
+      summary.bills_with_qbo_pdf += 1;
+      for (const attachable of billAttachables) {
+        try {
+          const stored = await storeQuickBooksBillPdfAttachment(db, connection, bill, attachable, { force, userId: actorUserId });
+          if (stored.status === 'downloaded') summary.downloaded += 1;
+          else if (stored.status === 'redownloaded') summary.redownloaded += 1;
+          else if (stored.status === 'updated') summary.updated += 1;
+          else {
+            summary.skipped += 1;
+            summary.skipped_reasons[stored.reason || 'unknown'] = (summary.skipped_reasons[stored.reason || 'unknown'] || 0) + 1;
+          }
+        } catch (err) {
+          summary.skipped += 1;
+          summary.skipped_reasons[err.message || 'download_failed'] = (summary.skipped_reasons[err.message || 'download_failed'] || 0) + 1;
+          console.warn(`[QBO] Failed to sync bill PDF ${bill.qbo_id}/${attachable?.Id || 'unknown'}:`, err.message);
+        }
+      }
+    }
+
+    if (actorUserId) {
+      logActivity({
+        userId: actorUserId,
+        action: 'quickbooks_bill_pdf_sync_completed',
+        entityType: 'quickbooks_connection',
+        entityId: connection.realm_id,
+        details: summary,
+      });
+    }
+    return summary;
+  })();
+
+  try {
+    return await activeBillPdfSyncPromise;
+  } finally {
+    activeBillPdfSyncPromise = null;
+  }
+}
+
 async function syncQuickBooksBills({ source = 'manual', userId = null } = {}) {
   if (activeSyncPromise) return activeSyncPromise;
 
@@ -1183,6 +1668,13 @@ async function syncQuickBooksBills({ source = 'manual', userId = null } = {}) {
       ]);
       const companyName = connection.company_name || await fetchCompanyName(db, connection);
       const result = upsertBillsAndPayments(db, connection, bills, payments);
+      let billPdfSync = null;
+      if (process.env.QBO_BILL_PDF_SYNC_ON_BILL_SYNC !== 'false') {
+        billPdfSync = await syncQuickBooksBillPdfs({ scope: 'open_missing', source, userId }).catch(err => {
+          console.warn('[QBO] Bill PDF sync skipped after bill sync:', err.message);
+          return { skipped: true, reason: err.message || 'pdf_sync_failed' };
+        });
+      }
       db.prepare(`
         UPDATE quickbooks_connections
         SET company_name = COALESCE(?, company_name),
@@ -1205,6 +1697,7 @@ async function syncQuickBooksBills({ source = 'manual', userId = null } = {}) {
             matched: result.matched,
             ignored_bills: result.ignored,
             marked_paid_from_friday_queue: result.markedPaidFromQueue,
+            bill_pdfs: billPdfSync,
           },
         });
       }
@@ -1216,6 +1709,7 @@ async function syncQuickBooksBills({ source = 'manual', userId = null } = {}) {
         matched_invoices: result.matched,
         marked_paid_from_friday_queue: result.markedPaidFromQueue,
         ignored_bills: result.ignored,
+        bill_pdfs: billPdfSync,
         stats: statusSummary(db),
       };
     } catch (err) {
@@ -1488,6 +1982,139 @@ router.post('/sync', authorize(...QUICKBOOKS_ADMIN_ROLES), async (req, res) => {
   }
 });
 
+router.post('/bills/attachments/sync', authorize(...QUICKBOOKS_ADMIN_ROLES), async (req, res) => {
+  try {
+    const requestedScope = String(req.body?.scope || 'open_missing').trim();
+    const force = req.body?.force === true;
+    const qboIds = Array.isArray(req.body?.qbo_ids) ? req.body.qbo_ids : [];
+    const result = await syncQuickBooksBillPdfs({
+      scope: requestedScope,
+      force,
+      qboIds,
+      source: 'manual',
+      userId: req.user.id,
+    });
+    if (result.skipped && result.reason === 'not_connected') {
+      return res.status(409).json({ error: 'QuickBooks is not connected yet.' });
+    }
+    if (result.skipped) {
+      return res.status(503).json({ error: `QuickBooks bill PDF sync skipped: ${result.reason}` });
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message || 'QuickBooks bill PDF sync failed' });
+  }
+});
+
+router.post('/bills/:qboId/attachments', authorize(...QUICKBOOKS_ADMIN_ROLES), qboBillPdfUpload.single('invoice_pdf'), (req, res) => {
+  try {
+    const db = getDb();
+    const qboId = String(req.params.qboId || '').trim();
+    const bill = db.prepare(`
+      SELECT qb.*, i.project_id as invoice_project_id
+      FROM quickbooks_bills qb
+      LEFT JOIN invoices i ON i.id = qb.matched_invoice_id
+      WHERE qb.qbo_id = ?
+    `).get(qboId);
+    if (!bill) return res.status(404).json({ error: 'QuickBooks bill not found' });
+
+    const file = req.file;
+    if (!file?.buffer?.length) return res.status(400).json({ error: 'Upload a PDF invoice file.' });
+    if (!isPdfLike({ mimeType: file.mimetype, name: file.originalname, buffer: file.buffer })) {
+      return res.status(400).json({ error: 'Only PDF invoice files can be uploaded here.' });
+    }
+
+    const id = uuidv4();
+    const originalName = sanitizeFilename(file.originalname || `quickbooks-bill-${qboId}.pdf`);
+    const storedName = `${id}.pdf`;
+    const dir = path.join(quickBooksBillAttachmentRoot(), safePathSegment(qboId));
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, storedName), file.buffer);
+
+    db.prepare(`
+      INSERT INTO quickbooks_bill_attachments (id, qbo_bill_id, filename, original_name, mime_type, size, uploaded_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      qboId,
+      storedName,
+      originalName,
+      file.mimetype || 'application/pdf',
+      file.size || file.buffer.length,
+      req.user.id
+    );
+
+    logActivity({
+      userId: req.user.id,
+      projectId: bill.project_id || bill.invoice_project_id || null,
+      action: 'quickbooks_bill_pdf_uploaded',
+      entityType: 'quickbooks_bill',
+      entityId: qboId,
+      details: {
+        doc_number: bill.doc_number || null,
+        vendor_name: bill.vendor_name || null,
+        original_name: originalName,
+        size: file.size || file.buffer.length,
+      },
+    });
+
+    res.status(201).json(getQuickBooksBillRow(db, qboId));
+  } catch (err) {
+    console.error('[QBO] Failed to upload bill PDF:', err);
+    res.status(500).json({ error: 'Failed to upload invoice PDF' });
+  }
+});
+
+router.get('/bills/:qboId/attachments/:attachmentId', authorize(...QUICKBOOKS_ADMIN_ROLES), (req, res) => {
+  try {
+    const db = getDb();
+    const qboId = String(req.params.qboId || '').trim();
+    const bill = db.prepare(`
+      SELECT qb.*, i.project_id as invoice_project_id
+      FROM quickbooks_bills qb
+      LEFT JOIN invoices i ON i.id = qb.matched_invoice_id
+      WHERE qb.qbo_id = ?
+    `).get(qboId);
+    if (!bill) return res.status(404).json({ error: 'QuickBooks bill not found' });
+
+    const attachment = getQuickBooksBillAttachment(db, qboId, String(req.params.attachmentId || '').trim());
+    if (!attachment) return res.status(404).json({ error: 'Invoice PDF not found' });
+    const root = quickBooksBillAttachmentRoot();
+    const filePath = path.resolve(root, safePathSegment(qboId), attachment.filename);
+    const resolvedRoot = path.resolve(root);
+    if (!filePath.startsWith(`${resolvedRoot}${path.sep}`) || !fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Invoice PDF file missing' });
+    }
+
+    const inline = String(req.query.inline || req.query.preview || '') === '1';
+    logActivity({
+      userId: req.user.id,
+      projectId: bill.project_id || bill.invoice_project_id || null,
+      action: inline ? 'quickbooks_bill_pdf_viewed' : 'quickbooks_bill_pdf_downloaded',
+      entityType: 'quickbooks_bill_attachment',
+      entityId: attachment.id,
+      details: {
+        qbo_bill_id: qboId,
+        doc_number: bill.doc_number || null,
+        vendor_name: bill.vendor_name || null,
+        original_name: attachment.original_name,
+        size: attachment.size,
+      },
+    });
+
+    if (inline) {
+      res.setHeader('Content-Type', attachment.mime_type || 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${headerFilename(attachment.original_name)}"`);
+      res.setHeader('Cache-Control', 'private, max-age=300');
+      return res.sendFile(filePath);
+    }
+    return res.download(filePath, attachment.original_name);
+  } catch (err) {
+    console.error('[QBO] Failed to load bill PDF:', err);
+    res.status(500).json({ error: 'Failed to load invoice PDF' });
+  }
+});
+
 router.get('/bills', authorize(...QUICKBOOKS_ADMIN_ROLES), (req, res) => {
   const db = getDb();
   const status = String(req.query.status || '').toLowerCase();
@@ -1495,7 +2122,7 @@ router.get('/bills', authorize(...QUICKBOOKS_ADMIN_ROLES), (req, res) => {
   const requestedLimit = Number(req.query.limit || 500);
   const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(1000, Math.floor(requestedLimit))) : 500;
   const params = [];
-  const where = [];
+  const where = [`COALESCE(qb.payment_approval_status, '${PAYMENT_APPROVAL_DEFAULT_STATUS}') != '${PAYMENT_APPROVAL_DELETED_STATUS}'`];
   const excludedVendors = excludedQuickBooksBillVendors();
   if (['paid', 'partial', 'unpaid'].includes(status)) {
     where.push('qb.payment_status = ?');
@@ -1525,6 +2152,67 @@ router.get('/bills', authorize(...QUICKBOOKS_ADMIN_ROLES), (req, res) => {
     LIMIT ?
   `).all(...params, limit);
   res.json(attachQuickBooksBillLines(db, attachQuickBooksBillPaymentDates(db, rows)));
+});
+
+router.delete('/bills/:qboId', authorize(...QUICKBOOKS_ADMIN_ROLES), (req, res) => {
+  try {
+    const db = getDb();
+    const qboId = String(req.params.qboId || '').trim();
+    const bill = db.prepare(`
+      SELECT qb.*, i.project_id as invoice_project_id
+      FROM quickbooks_bills qb
+      LEFT JOIN invoices i ON i.id = qb.matched_invoice_id
+      WHERE qb.qbo_id = ?
+    `).get(qboId);
+    if (!bill) return res.status(404).json({ error: 'QuickBooks bill not found.' });
+
+    const isPaid = String(bill.payment_status || '').toLowerCase() === 'paid' || Number(bill.balance || 0) <= 0;
+    if (isPaid) {
+      return res.status(409).json({ error: 'Paid QuickBooks bills cannot be deleted from Open Bills.' });
+    }
+    if (bill.payment_approval_status === PAYMENT_APPROVAL_STATUS) {
+      return res.status(409).json({ error: 'Remove this bill from the Friday payment queue before deleting it.' });
+    }
+
+    const attachments = db.prepare('SELECT id, filename, original_name FROM quickbooks_bill_attachments WHERE qbo_bill_id = ?').all(qboId);
+    const removeBill = db.transaction(() => {
+      db.prepare('DELETE FROM quickbooks_bill_lines WHERE qbo_bill_id = ?').run(qboId);
+      db.prepare('DELETE FROM quickbooks_bill_attachments WHERE qbo_bill_id = ?').run(qboId);
+      db.prepare(`
+        UPDATE quickbooks_bills
+        SET payment_approval_status = ?,
+            payment_approved_at = NULL,
+            payment_approved_by = NULL,
+            payment_run_date = NULL,
+            payment_approval_notified_at = NULL,
+            payment_approval_notified_by = NULL,
+            updated_at = datetime('now')
+        WHERE qbo_id = ?
+      `).run(PAYMENT_APPROVAL_DELETED_STATUS, qboId);
+    });
+    removeBill();
+    deleteQuickBooksBillAttachmentFiles(qboId, attachments);
+
+    logActivity({
+      userId: req.user.id,
+      projectId: bill.project_id || bill.invoice_project_id || null,
+      action: 'quickbooks_bill_deleted',
+      entityType: 'quickbooks_bill',
+      entityId: qboId,
+      details: {
+        doc_number: bill.doc_number || null,
+        vendor_name: bill.vendor_name || null,
+        total_amt: Number(bill.total_amt || 0),
+        balance: Number(bill.balance || 0),
+        attachment_count: attachments.length,
+      },
+    });
+
+    res.json({ message: 'Open bill deleted', qbo_id: qboId, stats: statusSummary(db) });
+  } catch (err) {
+    console.error('[QBO] Failed to delete open bill:', err);
+    res.status(500).json({ error: 'Failed to delete open bill.' });
+  }
 });
 
 router.put('/bills/:qboId/approve-for-pay', authorize(...QUICKBOOKS_ADMIN_ROLES), (req, res) => {
@@ -1703,5 +2391,7 @@ function startQuickBooksPaymentQueueScheduler() {
 router.startQuickBooksAutoSync = startQuickBooksAutoSync;
 router.startQuickBooksPaymentQueueScheduler = startQuickBooksPaymentQueueScheduler;
 router.sendScheduledPaymentQueueEmail = sendScheduledPaymentQueueEmail;
+router.syncQuickBooksBills = syncQuickBooksBills;
+router.syncQuickBooksBillPdfs = syncQuickBooksBillPdfs;
 
 module.exports = router;

@@ -40,7 +40,12 @@ logs/
 /tmp/*.log
 
 # ── Local production backup artifacts ──
+.codex-backups/
+\\
 *.bak
 *.bak-*
 *.backup
 *.backup-*
+*.before
+*.before-*
+*.codex-backup-*

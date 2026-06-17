@@ -9,6 +9,7 @@ import {
   ClipboardList, CheckCircle2, AlertTriangle, Paperclip,
 } from 'lucide-react';
 import VoiceTextarea from '../components/VoiceTextarea';
+import { fileDropHandlers } from '../lib/fileDrop';
 import { notifyMobileDataChanged } from '../lib/mobileEvents';
 
 interface LineItem {
@@ -632,7 +633,14 @@ export default function MobileInvoice() {
               </div>
             </div>
             <div className="px-5 py-4">
-              <label className="flex min-h-[52px] cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed px-4 py-3 text-sm font-black transition-all active:scale-95" style={{ background: 'rgba(217,157,38,0.06)', borderColor: 'rgba(217,157,38,0.45)', color: '#B45309' }}>
+              <label
+                className="flex min-h-[52px] cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed px-4 py-3 text-sm font-black transition-all active:scale-95"
+                style={{ background: 'rgba(217,157,38,0.06)', borderColor: 'rgba(217,157,38,0.45)', color: '#B45309' }}
+                {...fileDropHandlers(files => setAttachmentFiles(current => [...current, ...files]), {
+                  accept: 'image/*,application/pdf',
+                  multiple: true,
+                })}
+              >
                 <Paperclip className="w-4 h-4" />
                 Add Photos or PDFs
                 <input

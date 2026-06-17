@@ -5,7 +5,7 @@ import api from '../lib/api';
 import { Loading, StatusBadge, Modal } from '../components/ui';
 import Avatar from '../components/Avatar';
 import VoiceTextarea from '../components/VoiceTextarea';
-import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, ClipboardList, Activity, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle, Send, Phone, Mail, Building2, AlertTriangle, Check, Paperclip, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, CalendarDays, Search, GripVertical, CheckCircle2, XCircle, Database, ListFilter } from 'lucide-react';
+import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, ClipboardList, Activity, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle, Send, Phone, Mail, Building2, AlertTriangle, Check, Paperclip, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, CalendarDays, Search, GripVertical, CheckCircle2, XCircle, Database, ListFilter, Bot } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useForm } from 'react-hook-form';
 import { format } from 'date-fns';
@@ -13,6 +13,7 @@ import GooglePlacesInput from '../components/GooglePlacesInput';
 import CurrencyInput from '../components/CurrencyInput';
 import { formatEasternDate, formatEasternDateTime } from '../lib/time';
 import AddToCalendarButton from '../components/AddToCalendarButton';
+import { fileDropHandlers } from '../lib/fileDrop';
 import {
   appendProgressUploadAudit,
   isSupportedProgressMediaFile,
@@ -37,6 +38,24 @@ type ProgressLightboxState = {
   items: ProgressLightboxItem[];
   index: number;
 };
+
+function aiAgentMeta(record: any) {
+  const agentName = String(record?.created_by_agent || '').trim();
+  if (!agentName) return null;
+  return {
+    agentName,
+    source: String(record?.source || '').trim() || 'AI bridge',
+    rawTranscript: String(record?.raw_transcript || '').trim(),
+    requestId: String(record?.agent_request_id || '').trim(),
+  };
+}
+
+function scopeTextLines(value: any) {
+  return String(value || '')
+    .split(/\r?\n/)
+    .map(line => line.replace(/^\s*\d+[\.)-]?\s*/, '').trim())
+    .filter(Boolean);
+}
 
 type ContractorDirectoryProject = {
   id?: string | null;
@@ -390,6 +409,7 @@ export default function ProjectDetail() {
   const [editingNoteText, setEditingNoteText] = useState('');
   const [editingNoteType, setEditingNoteType] = useState('general');
   const [editingNoteVisibility, setEditingNoteVisibility] = useState<'private' | 'public'>('private');
+  const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
   const [uploadingMainPhoto, setUploadingMainPhoto] = useState(false);
   const [activatingPunchList, setActivatingPunchList] = useState(false);
   const [activity, setActivity] = useState<any[]>([]);
@@ -496,6 +516,7 @@ export default function ProjectDetail() {
   };
 
   const canChangeStatus = user && canChangeProjectStatus(user.role);
+  const canDeleteProjectNotes = Boolean(user && ['super_admin', 'operations_manager'].includes(user.role));
 
   const onEditProject = async (data: any) => {
     try {
@@ -569,12 +590,13 @@ export default function ProjectDetail() {
     });
   };
 
-  const attachProgressPicturesToExistingNote = async (files?: FileList | null) => {
+  const attachProgressPicturesToExistingNote = async (files?: FileList | File[] | null, explicitNoteId?: string) => {
     const selectedFiles = Array.from(files || []);
-    if (!attachNoteId || selectedFiles.length === 0) return;
-    setAttachingNoteId(attachNoteId);
+    const targetNoteId = explicitNoteId || attachNoteId;
+    if (!targetNoteId || selectedFiles.length === 0) return;
+    setAttachingNoteId(targetNoteId);
     try {
-      await uploadProgressPicturesToNote(attachNoteId, selectedFiles, isMobileCaptureContext() ? 'device_camera' : 'desktop');
+      await uploadProgressPicturesToNote(targetNoteId, selectedFiles, isMobileCaptureContext() ? 'device_camera' : 'desktop');
       toast.success(`${selectedFiles.length} progress picture${selectedFiles.length === 1 ? '' : 's'} attached`);
       await loadNotes();
     } catch (err: any) {
@@ -694,6 +716,25 @@ export default function ProjectDetail() {
       loadNotes();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to update note');
+    }
+  };
+
+  const deleteProjectNote = async (noteId: string) => {
+    if (!id || !canDeleteProjectNotes || deletingNoteId) return;
+    if (!window.confirm('Delete this note? Attached photos will stay in the project photo history.')) return;
+    setDeletingNoteId(noteId);
+    try {
+      await api.delete(`/projects/${id}/notes/${noteId}`);
+      setNotes(current => current.filter(note => note.id !== noteId));
+      if (editingNoteId === noteId) {
+        setEditingNoteId(null);
+        setEditingNoteText('');
+      }
+      toast.success('Note deleted');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to delete note');
+    } finally {
+      setDeletingNoteId(null);
     }
   };
 
@@ -907,6 +948,10 @@ export default function ProjectDetail() {
         <button
           type="button"
           onClick={chooseNoteProgressPictures}
+          {...fileDropHandlers(files => {
+            setNotePhotoSource('desktop');
+            setNotePhotoFiles(files);
+          }, { accept: PROGRESS_MEDIA_ACCEPT, multiple: true })}
           className="inline-flex min-h-[46px] cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 sm:min-w-[150px]"
         >
           <Camera className="w-4 h-4" />
@@ -1080,6 +1125,18 @@ export default function ProjectDetail() {
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <span className={`text-xs px-2 py-0.5 rounded-full border font-black ${note.note_type === 'field' ? 'border-emerald-300/40 bg-emerald-500/15 text-emerald-100' : note.note_type === 'office' ? 'border-blue-300/40 bg-blue-500/15 text-blue-100' : 'border-slate-500 bg-slate-800 text-slate-200'}`}>{note.note_type}</span>
+                  {canDeleteProjectNotes && (
+                    <button
+                      type="button"
+                      onClick={() => deleteProjectNote(note.id)}
+                      disabled={deletingNoteId === note.id}
+                      className="inline-flex items-center gap-1 rounded-full border border-red-300/45 bg-red-500/15 px-2 py-0.5 text-xs font-black text-red-100 transition hover:border-red-200 hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-60"
+                      title="Delete note"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                      {deletingNoteId === note.id ? 'Deleting' : 'Delete'}
+                    </button>
+                  )}
                 </div>
               </div>
               {editingNoteId === note.id ? (
@@ -1178,6 +1235,14 @@ export default function ProjectDetail() {
                     attachExistingNoteInputRef.current?.click();
                   }}
                   disabled={attachingNoteId === note.id}
+                  {...fileDropHandlers(files => {
+                    setAttachNoteId(note.id);
+                    void attachProgressPicturesToExistingNote(files, note.id);
+                  }, {
+                    accept: PROGRESS_MEDIA_ACCEPT,
+                    disabled: attachingNoteId === note.id,
+                    multiple: true,
+                  })}
                   className="mt-2 ml-3 inline-flex items-center gap-1 text-xs font-bold text-amber-200 hover:text-white hover:underline disabled:opacity-50"
                 >
                   <ImagePlus className="w-3 h-3" />
@@ -1420,7 +1485,14 @@ export default function ProjectDetail() {
           <div className="grid sm:grid-cols-2 gap-4">
             <div className="sm:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-2">Main House Photo</label>
-              <label className="flex items-center gap-3 p-3 rounded-xl border border-dashed border-gray-300 cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors">
+              <label
+                className="flex items-center gap-3 p-3 rounded-xl border border-dashed border-gray-300 cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors"
+                {...fileDropHandlers(files => handleMainPhotoUpload(files[0]), {
+                  accept: 'image/*',
+                  disabled: uploadingMainPhoto,
+                  multiple: false,
+                })}
+              >
                 <input
                   type="file"
                   accept="image/*"
@@ -3224,8 +3296,12 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
     setShowEditor(true);
   };
 
+  const setScopeAttachmentFiles = (files?: FileList | File[] | null) => {
+    setScopeAttachments(Array.from(files || []));
+  };
+
   const handleScopeAttachmentChange = (event: ChangeEvent<HTMLInputElement>) => {
-    setScopeAttachments(Array.from(event.currentTarget.files || []));
+    setScopeAttachmentFiles(event.currentTarget.files);
   };
 
   const startScopeDictation = () => {
@@ -3582,6 +3658,12 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
   const materialCost = (materialList: any[]) =>
     materialList.reduce((sum, material) => sum + Number(material.actual_cost || material.estimated_cost || 0), 0);
 
+  const aiAgentScopes = scopes.filter(scope => aiAgentMeta(scope));
+  const aiAgentLineCount = aiAgentScopes.reduce((sum, scope) => {
+    const executionLines = scopePlanItems(scope.id);
+    return sum + (executionLines.length || scopeTextLines(scope.scope_of_work).length);
+  }, 0);
+
   const statusColors: Record<string, string> = {
     not_started: 'bg-slate-800 text-slate-200 border-slate-600',
     in_progress: 'bg-blue-500/15 text-blue-100 border-blue-300/40',
@@ -3706,12 +3788,13 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
     }
   };
 
-  const uploadStepPhoto = async (itemId: string, files?: FileList | null) => {
-    if (!files || files.length === 0) return;
+  const uploadStepPhoto = async (itemId: string, files?: FileList | File[] | null) => {
+    const uploadFiles = Array.from(files || []);
+    if (!uploadFiles.length) return;
     setUploadingPhoto(itemId);
     try {
       const formData = new FormData();
-      Array.from(files).forEach(file => formData.append('photos', file));
+      uploadFiles.forEach(file => formData.append('photos', file));
       formData.append('construction_plan_item_id', itemId);
       formData.append('caption', 'Scope execution photo');
       await api.post(`/projects/${projectId}/photos`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
@@ -3841,13 +3924,13 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
 
   return (
     <div className="space-y-5">
-      <div className="bg-white rounded-2xl border border-gray-200 p-5" style={{ boxShadow: '0 10px 30px rgba(17,24,39,0.08)' }}>
-        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-          <div>
-            <h3 className="font-black text-gray-900">Scope of Work</h3>
-            <p className="text-sm text-gray-500 mt-1">Central scope sections for {project?.address}. Use one scope per house area, project phase, or work section.</p>
+      <div className="bt-scope-work-panel rounded-2xl border p-4">
+        <div className="bt-scope-work-header flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="bt-scope-work-title">Scope of Work</h3>
+            <p className="bt-scope-work-subtitle">Central scope sections for {project?.address}. Use one scope per house area, project phase, or work section.</p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="bt-scope-work-actions flex flex-wrap gap-2">
               <AddToCalendarButton
                 label="Add to Calendar"
                 defaultTitle={`Scope reminder - ${project?.address || project?.job_name || 'project'}`}
@@ -3857,35 +3940,35 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                 sourceType="scope_of_work"
                 sourceId={projectId}
                 contextLabel={`Scope of Work - ${project?.address || project?.job_name || 'Project'}`}
-                buttonClassName="inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-2.5 text-sm font-black text-cyan-800 hover:bg-cyan-100"
+                buttonClassName="bt-scope-work-action bt-scope-work-action--calendar inline-flex items-center justify-center gap-2"
               />
             {canManage && (
               <>
-              <button type="button" onClick={() => openVendorQuoteModal()} disabled={scopes.length === 0} className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-amber-300 bg-amber-50 text-amber-800 text-sm font-black hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50">
+              <button type="button" onClick={() => openVendorQuoteModal()} disabled={scopes.length === 0} className="bt-scope-work-action bt-scope-work-action--quote inline-flex items-center justify-center gap-2">
                 <Send className="w-4 h-4" /> Request Quote
               </button>
-              <button type="button" onClick={openBulkScopes} className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-800 text-sm font-black hover:bg-emerald-100">
+              <button type="button" onClick={openBulkScopes} className="bt-scope-work-action bt-scope-work-action--bulk inline-flex items-center justify-center gap-2">
                 <ClipboardList className="w-4 h-4" /> Add Bulk Scope of Work
               </button>
-              <button type="button" onClick={openAddScope} className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-black hover:bg-blue-700">
+              <button type="button" onClick={openAddScope} className="bt-scope-work-action bt-scope-work-action--add inline-flex items-center justify-center gap-2">
                 <Plus className="w-4 h-4" /> Add Scope Section
               </button>
               </>
             )}
           </div>
         </div>
-        <div className="grid sm:grid-cols-3 gap-3 mt-4">
-          <div className="rounded-xl bg-blue-50 p-3">
-            <p className="text-xl font-black text-blue-700">{scopes.length}</p>
-            <p className="text-xs font-semibold text-blue-700">Scope sections</p>
+        <div className="bt-scope-work-stats grid sm:grid-cols-3 gap-2 mt-3">
+          <div className="bt-scope-work-stat bt-scope-work-stat--total rounded-xl">
+            <p className="bt-scope-work-stat-value">{scopes.length}</p>
+            <p className="bt-scope-work-stat-label">Scope sections</p>
           </div>
-          <div className="rounded-xl bg-green-50 p-3">
-            <p className="text-xl font-black text-green-700">{activeCount}</p>
-            <p className="text-xs font-semibold text-green-700">Active scopes</p>
+          <div className="bt-scope-work-stat bt-scope-work-stat--active rounded-xl">
+            <p className="bt-scope-work-stat-value">{activeCount}</p>
+            <p className="bt-scope-work-stat-label">Active scopes</p>
           </div>
-          <div className="rounded-xl bg-gray-50 p-3">
-            <p className="text-xl font-black text-gray-700">{completedCount}</p>
-            <p className="text-xs font-semibold text-gray-700">Completed scopes</p>
+          <div className="bt-scope-work-stat bt-scope-work-stat--complete rounded-xl">
+            <p className="bt-scope-work-stat-value">{completedCount}</p>
+            <p className="bt-scope-work-stat-label">Completed scopes</p>
           </div>
         </div>
       </div>
@@ -3894,6 +3977,118 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
         <Loading />
       ) : (
         <div className="space-y-3">
+          <section className="overflow-hidden rounded-2xl border border-violet-300/45 bg-gradient-to-br from-slate-950 via-violet-950 to-blue-950 text-white shadow-[0_18px_44px_rgba(49,46,129,0.32)]">
+            <div className="flex flex-col gap-3 border-b border-white/10 p-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="flex min-w-0 items-start gap-3">
+                <span className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl border border-violet-200/35 bg-violet-400/15 text-violet-100">
+                  <Bot className="h-5 w-5" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-[11px] font-black uppercase tracking-wide text-violet-200">Telegram AI Agent Scope</p>
+                  <h4 className="mt-1 text-base font-black text-white">Scope of Work Entered by AI Agents</h4>
+                  <p className="mt-1 text-sm font-semibold leading-5 text-violet-100/85">
+                    Scopes posted through Benito, Hermes, or another approved agent appear here before the regular scope list.
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:min-w-64">
+                <div className="rounded-xl border border-violet-200/25 bg-white/10 p-3">
+                  <p className="text-xl font-black text-white">{aiAgentScopes.length}</p>
+                  <p className="text-[11px] font-black uppercase tracking-wide text-violet-100">AI scopes</p>
+                </div>
+                <div className="rounded-xl border border-cyan-200/25 bg-white/10 p-3">
+                  <p className="text-xl font-black text-white">{aiAgentLineCount}</p>
+                  <p className="text-[11px] font-black uppercase tracking-wide text-cyan-100">Line items</p>
+                </div>
+              </div>
+            </div>
+
+            {aiAgentScopes.length === 0 ? (
+              <div className="p-4">
+                <div className="rounded-xl border border-dashed border-violet-200/35 bg-black/18 p-4">
+                  <p className="text-sm font-black text-violet-50">No AI-agent scope has posted to this property yet.</p>
+                  <p className="mt-1 text-xs font-semibold leading-5 text-violet-100/80">
+                    Once Hermes sends a valid BuildTrack agent key and this property address, the created scope will show here with the agent name, request ID, transcript, and line items.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3 p-4">
+                {aiAgentScopes.map(scope => {
+                  const meta = aiAgentMeta(scope);
+                  const executionItems = scopePlanItems(scope.id);
+                  const fallbackLines = scopeTextLines(scope.scope_of_work);
+                  const visibleLines = executionItems.length
+                    ? executionItems.map((item, index) => ({
+                        id: item.id || `${scope.id}-${index}`,
+                        text: item.title || item.description || `Line ${index + 1}`,
+                        meta: [item.category, item.location, String(item.status || '').replace(/_/g, ' ')].filter(Boolean).join(' - '),
+                      }))
+                    : fallbackLines.map((line, index) => ({
+                        id: `${scope.id}-scope-line-${index}`,
+                        text: line,
+                        meta: '',
+                      }));
+
+                  return (
+                    <article key={scope.id} className="rounded-xl border border-white/10 bg-slate-950/55 p-4 shadow-inner">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="inline-flex items-center gap-1 rounded-full border border-violet-200/40 bg-violet-500/20 px-2.5 py-1 text-[11px] font-black text-violet-50">
+                              <Bot className="h-3.5 w-3.5" />
+                              {meta?.agentName || 'AI Agent'}
+                            </span>
+                            <span className="rounded-full border border-white/10 bg-white/10 px-2.5 py-1 text-[11px] font-black capitalize text-slate-100">
+                              {String(scope.status || 'active').replace(/_/g, ' ')}
+                            </span>
+                            <span className="text-[11px] font-bold uppercase tracking-wide text-violet-200/80">
+                              {formatEasternDateTime(scope.created_at, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time
+                            </span>
+                          </div>
+                          <h5 className="mt-3 text-lg font-black text-white">{scope.scope_title || 'AI Generated Scope of Work'}</h5>
+                          <p className="mt-1 text-xs font-semibold text-violet-100/80">
+                            Source: {meta?.source || 'AI bridge'}{meta?.requestId ? ` - Request: ${meta.requestId}` : ''}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => toggleScopeExpansion(scope.id)}
+                          className="inline-flex min-h-10 items-center justify-center rounded-xl border border-violet-200/30 bg-white/10 px-3 text-xs font-black text-violet-50 transition hover:bg-white/15"
+                        >
+                          {expandedScopeIds.has(scope.id) ? 'Hide Details' : 'Open Full Scope'}
+                        </button>
+                      </div>
+
+                      <div className="mt-4 space-y-2">
+                        {visibleLines.length ? visibleLines.map((line, index) => (
+                          <div key={line.id} className="grid grid-cols-[2rem_minmax(0,1fr)] gap-2 rounded-lg border border-white/10 bg-black/24 px-3 py-2">
+                            <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-violet-400/18 text-xs font-black text-violet-50">{index + 1}</span>
+                            <span className="min-w-0">
+                              <span className="block text-sm font-black leading-5 text-white">{line.text}</span>
+                              {line.meta && <span className="mt-0.5 block text-[11px] font-bold uppercase tracking-wide text-violet-200/75">{line.meta}</span>}
+                            </span>
+                          </div>
+                        )) : (
+                          <p className="rounded-lg border border-white/10 bg-black/24 px-3 py-3 text-sm font-semibold italic text-violet-100/80">
+                            This AI scope does not have visible line items yet.
+                          </p>
+                        )}
+                      </div>
+
+                      {meta?.rawTranscript && (
+                        <details className="mt-4 rounded-lg border border-white/10 bg-black/18 p-3">
+                          <summary className="cursor-pointer text-xs font-black uppercase tracking-wide text-violet-100">Original Telegram transcript</summary>
+                          <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-violet-50/90">{meta.rawTranscript}</p>
+                        </details>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
           {legacyScope && scopes.length === 0 && (
             <div className="bg-white rounded-2xl border border-amber-200 p-4">
               <p className="text-xs font-black uppercase tracking-wide text-amber-700">Original project scope note</p>
@@ -3931,6 +4126,7 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                 const scopePhotos = Array.isArray(scope.photos) ? scope.photos : [];
                 const scopeLightboxItems = buildScopePhotoLightboxItems(projectId, scopePhotos);
                 const scopeTimelineLabel = scopeTimelineRangeLabel(scope);
+                const scopeAiMeta = aiAgentMeta(scope);
                 const scopeId = String(scope.id);
                 const dropPosition = scopeDropTarget?.id === scopeId ? scopeDropTarget.position : null;
                 const isDraggingScope = draggingScopeId === scopeId;
@@ -3965,6 +4161,12 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                         <div className="mt-0.5 flex flex-wrap items-center gap-1">
                           <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-black uppercase tracking-wide ${scopeCardStyle.section}`}>{scope.section_name || 'General'}</span>
                           <span className={`rounded-full px-2 py-0.5 text-[11px] font-black capitalize shadow-sm ${scopeStatusColors[scope.status] || scopeStatusColors.active}`}>{String(scope.status || 'active').replace(/_/g, ' ')}</span>
+                          {scopeAiMeta && (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-violet-200/40 bg-violet-500/20 px-2 py-0.5 text-[11px] font-black text-violet-100" title={scopeAiMeta.rawTranscript || undefined}>
+                              <Bot className="h-3 w-3" />
+                              AI Agent: {scopeAiMeta.agentName}
+                            </span>
+                          )}
                           {scopeTimelineLabel && (
                             <span className="inline-flex items-center gap-1 rounded-full border border-cyan-300/35 bg-cyan-400/15 px-2 py-0.5 text-[11px] font-black text-cyan-100">
                               <CalendarDays className="h-3 w-3" />
@@ -4136,6 +4338,13 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                         <p className="mt-3 text-[11px] font-bold uppercase tracking-wide text-slate-500">
                           Updated {formatEasternDateTime(scope.updated_at || scope.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time
                         </p>
+                        {scopeAiMeta && (
+                          <div className="mt-3 rounded-lg border border-violet-300/25 bg-violet-500/10 p-3">
+                            <p className="text-xs font-black uppercase tracking-wide text-violet-100">Created by AI Agent: {scopeAiMeta.agentName}</p>
+                            <p className="mt-1 text-xs font-semibold text-violet-100/85">Source: {scopeAiMeta.source}{scopeAiMeta.requestId ? ` | Request: ${scopeAiMeta.requestId}` : ''}</p>
+                            {scopeAiMeta.rawTranscript && <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-violet-50/90">{scopeAiMeta.rawTranscript}</p>}
+                          </div>
+                        )}
                       </div>
                       <div className="mt-4 grid gap-3 sm:grid-cols-3">
                         <div className="rounded-xl border border-blue-300/30 bg-blue-400/10 p-3">
@@ -4231,7 +4440,14 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                                       <button type="button" onClick={() => quickStatus(item, 'completed', { verification_status: 'approved' })} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300/40 bg-emerald-500/15 px-2.5 py-2 text-xs font-black text-emerald-100">
                                         <Check className="h-3.5 w-3.5" /> Approve
                                       </button>
-                                      <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-blue-300/40 bg-blue-500/15 px-2.5 py-2 text-xs font-black text-blue-100">
+                                      <label
+                                        className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-blue-300/40 bg-blue-500/15 px-2.5 py-2 text-xs font-black text-blue-100"
+                                        {...fileDropHandlers(files => uploadStepPhoto(item.id, files), {
+                                          accept: 'image/*',
+                                          disabled: uploadingPhoto === item.id,
+                                          multiple: true,
+                                        })}
+                                      >
                                         <input type="file" accept="image/*" capture="environment" multiple className="hidden" disabled={uploadingPhoto === item.id} onChange={event => { uploadStepPhoto(item.id, event.target.files); event.currentTarget.value = ''; }} />
                                         <Camera className="h-3.5 w-3.5" />
                                         {uploadingPhoto === item.id ? 'Uploading' : 'Photo'}
@@ -4725,6 +4941,10 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
               <button
                 type="button"
                 onClick={() => scopeAttachmentInputRef.current?.click()}
+                {...fileDropHandlers(setScopeAttachmentFiles, {
+                  accept: '.pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.webp,.heic,image/*,application/pdf',
+                  multiple: true,
+                })}
                 className="inline-flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm font-black text-amber-800 hover:bg-amber-100"
               >
                 <Paperclip className="h-4 w-4" /> Attach Doc
@@ -4961,12 +5181,13 @@ function ConstructionPlanBoard({ projectId, canManage }: { projectId: string; ca
     }
   };
 
-  const uploadStepPhoto = async (itemId: string, files?: FileList | null) => {
-    if (!files || files.length === 0) return;
+  const uploadStepPhoto = async (itemId: string, files?: FileList | File[] | null) => {
+    const uploadFiles = Array.from(files || []);
+    if (!uploadFiles.length) return;
     setUploadingPhoto(itemId);
     try {
       const formData = new FormData();
-      Array.from(files).forEach(file => formData.append('photos', file));
+      uploadFiles.forEach(file => formData.append('photos', file));
       formData.append('construction_plan_item_id', itemId);
       formData.append('caption', 'Construction plan photo');
       await api.post(`/projects/${projectId}/photos`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
@@ -5155,7 +5376,15 @@ function ConstructionPlanBoard({ projectId, canManage }: { projectId: string; ca
                               <Check className="w-3.5 h-3.5" /> Approve
                             </button>
                           )}
-                          <label onClick={e => e.stopPropagation()} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold text-blue-700 bg-blue-50 border border-blue-100 cursor-pointer">
+                          <label
+                            onClick={e => e.stopPropagation()}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold text-blue-700 bg-blue-50 border border-blue-100 cursor-pointer"
+                            {...fileDropHandlers(files => uploadStepPhoto(item.id, files), {
+                              accept: 'image/*',
+                              disabled: uploadingPhoto === item.id,
+                              multiple: true,
+                            })}
+                          >
                             <input type="file" accept="image/*" capture="environment" multiple className="hidden" disabled={uploadingPhoto === item.id} onChange={e => { uploadStepPhoto(item.id, e.target.files); e.currentTarget.value = ''; }} />
                             <Camera className="w-3.5 h-3.5" />
                             {uploadingPhoto === item.id ? 'Uploading...' : 'Add Photo'}
@@ -5394,12 +5623,13 @@ function ConstructionPlanTab({ projectId, canManage }: { projectId: string; canM
     }
   };
 
-  const uploadStepPhoto = async (itemId: string, files?: FileList | null) => {
-    if (!files || files.length === 0) return;
+  const uploadStepPhoto = async (itemId: string, files?: FileList | File[] | null) => {
+    const uploadFiles = Array.from(files || []);
+    if (!uploadFiles.length) return;
     setUploadingPhoto(itemId);
     try {
       const formData = new FormData();
-      Array.from(files).forEach(file => formData.append('photos', file));
+      uploadFiles.forEach(file => formData.append('photos', file));
       formData.append('construction_plan_item_id', itemId);
       formData.append('caption', 'Construction plan photo');
       await api.post(`/projects/${projectId}/photos`, formData, {
@@ -5577,7 +5807,14 @@ function ConstructionPlanTab({ projectId, canManage }: { projectId: string; canM
                         <select value={item.status} onChange={e => updateStep(item, { status: e.target.value })} className="px-2 py-1.5 rounded-lg border border-gray-300 text-xs bg-white">
                           {['not_started', 'in_progress', 'waiting_materials', 'needs_review', 'completed'].map(status => <option key={status} value={status}>{status.replace(/_/g, ' ')}</option>)}
                         </select>
-                        <label className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold text-blue-700 bg-blue-50 border border-blue-100 cursor-pointer">
+                        <label
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold text-blue-700 bg-blue-50 border border-blue-100 cursor-pointer"
+                          {...fileDropHandlers(files => uploadStepPhoto(item.id, files), {
+                            accept: 'image/*',
+                            disabled: uploadingPhoto === item.id,
+                            multiple: true,
+                          })}
+                        >
                           <input type="file" accept="image/*" capture="environment" multiple className="hidden" disabled={uploadingPhoto === item.id} onChange={e => { uploadStepPhoto(item.id, e.target.files); e.currentTarget.value = ''; }} />
                           <Camera className="w-3.5 h-3.5" />
                           {uploadingPhoto === item.id ? 'Uploading...' : 'Add Photo'}
@@ -5690,18 +5927,19 @@ function PunchListTab({
     } catch (err) { toast.error('Failed to update'); }
   };
 
-  const uploadItemPhoto = async (itemId: string, files?: FileList | null) => {
-    if (!files || files.length === 0) return;
+  const uploadItemPhoto = async (itemId: string, files?: FileList | File[] | null) => {
+    const uploadFiles = Array.from(files || []);
+    if (!uploadFiles.length) return;
     setUploadingItemPhoto(itemId);
     try {
       const formData = new FormData();
-      Array.from(files).forEach(file => formData.append('photos', file));
+      uploadFiles.forEach(file => formData.append('photos', file));
       formData.append('punch_list_item_id', itemId);
       formData.append('caption', 'Punch list item photo');
       await api.post(`/projects/${projectId}/photos`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      toast.success(`${files.length} punch list photo${files.length === 1 ? '' : 's'} uploaded`);
+      toast.success(`${uploadFiles.length} punch list photo${uploadFiles.length === 1 ? '' : 's'} uploaded`);
       load();
     } catch {
       toast.error('Failed to upload punch list photo');
@@ -5785,7 +6023,9 @@ function PunchListTab({
 
       {loading ? <Loading /> : (
         <div className="space-y-2">
-          {items.map(item => (
+          {items.map(item => {
+            const itemAiMeta = aiAgentMeta(item);
+            return (
             <div key={item.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
               <div className="p-4 flex items-start gap-3">
                 <button
@@ -5801,8 +6041,13 @@ function PunchListTab({
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${priorityColors[item.priority]}`}>{item.priority}</span>
                   </div>
                   {item.description && <p className="text-xs text-gray-500 mt-0.5 truncate">{item.description}</p>}
-                  <div className="flex items-center gap-2 mt-1.5">
+                  <div className="flex flex-wrap items-center gap-2 mt-1.5">
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColors[item.status]}`}>{item.status.replace(/_/g, ' ')}</span>
+                    {itemAiMeta && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-xs font-black text-violet-700" title={itemAiMeta.rawTranscript || undefined}>
+                        <Bot className="h-3 w-3" /> AI Agent: {itemAiMeta.agentName}
+                      </span>
+                    )}
                     {item.assigned_to_name && <span className="text-xs text-gray-500">→ {item.assigned_to_name}</span>}
                     {item.due_date && <span className="text-xs text-gray-400">{format(new Date(item.due_date), 'MMM d')}</span>}
                     {item.photo_count > 0 && <span className="text-xs text-blue-500">{item.photo_count} photos</span>}
@@ -5817,11 +6062,25 @@ function PunchListTab({
                       <p className="text-sm text-gray-700 whitespace-pre-wrap">{item.description}</p>
                     </div>
                   )}
+                  {itemAiMeta && (
+                    <div className="mb-3 rounded-lg border border-violet-100 bg-violet-50 p-3">
+                      <p className="text-xs font-black uppercase tracking-wide text-violet-700">Created by AI Agent: {itemAiMeta.agentName}</p>
+                      <p className="mt-1 text-xs font-semibold text-violet-700">Source: {itemAiMeta.source}{itemAiMeta.requestId ? ` | Request: ${itemAiMeta.requestId}` : ''}</p>
+                      {itemAiMeta.rawTranscript && <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-violet-900">{itemAiMeta.rawTranscript}</p>}
+                    </div>
+                  )}
                   <div className="flex gap-2 flex-wrap">
                     {['not_started', 'in_progress', 'waiting_materials', 'needs_review', 'completed'].map(s => (
                       <button key={s} disabled={!isActive} onClick={() => updateStatus(item.id, s)} className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${item.status === s ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{s.replace(/_/g, ' ')}</button>
                     ))}
-                    <label className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-blue-700 bg-blue-50 border border-blue-100 cursor-pointer hover:bg-blue-100 transition-colors">
+                    <label
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-blue-700 bg-blue-50 border border-blue-100 cursor-pointer hover:bg-blue-100 transition-colors"
+                      {...fileDropHandlers(files => uploadItemPhoto(item.id, files), {
+                        accept: 'image/*',
+                        disabled: !isActive || uploadingItemPhoto === item.id,
+                        multiple: true,
+                      })}
+                    >
                       <input
                         type="file"
                         accept="image/*"
@@ -5889,7 +6148,8 @@ function PunchListTab({
                 </div>
               )}
             </div>
-          ))}
+          );
+          })}
           {items.length === 0 && <div className="text-center py-12 bg-white rounded-xl border border-gray-200"><ClipboardList className="w-8 h-8 text-gray-300 mx-auto mb-2" /><p className="text-gray-400 text-sm">No punch list items</p></div>}
         </div>
       )}

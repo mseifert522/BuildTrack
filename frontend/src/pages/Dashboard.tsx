@@ -7,7 +7,8 @@ import Avatar from '../components/Avatar';
 import {
   Activity,
   Plus, MapPin, CalendarDays,
-  Mail, Send, Edit2, ChevronLeft, ChevronRight, ChevronDown
+  Mail, Edit2, ChevronLeft, ChevronRight, Trash2, CheckCircle2, Clock, ListFilter,
+  Maximize2, Minimize2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { EASTERN_TIME_ZONE, formatEasternDate, formatEasternDateTime, formatEasternRelative, formatEasternTime, parseBuildTrackTimestamp } from '../lib/time';
@@ -139,7 +140,7 @@ interface OperationsCalendarEvent {
 }
 
 type CalendarQueueFilter = 'upcoming' | 'completed';
-type CalendarViewMode = 'today' | 'week' | 'month';
+type CalendarViewMode = 'today' | 'week' | 'month' | 'list';
 
 type CalendarEditForm = {
   title: string;
@@ -408,6 +409,13 @@ const calendarRangeForView = (viewMode: CalendarViewMode, anchorDateKey: string)
     return calendarRangeFromWeekStartKey(formatLocalDateInput(anchorDate));
   }
 
+  if (viewMode === 'list') {
+    return {
+      start: formatLocalDateInput(anchorDate),
+      end: formatLocalDateInput(addCalendarDays(anchorDate, 13)),
+    };
+  }
+
   const monthStart = startOfCalendarMonth(anchorDate);
   const monthEnd = endOfCalendarMonth(anchorDate);
   const visibleStart = startOfCalendarWeek(monthStart);
@@ -477,49 +485,43 @@ const sortCalendarEventsForRange = (events: OperationsCalendarEvent[]) =>
 const getCalendarProjectLabel = (event: OperationsCalendarEvent) =>
   event.project_address || event.project_job_name || event.project_id || 'BuildTrack';
 
-const defaultReminderTime = () => {
-  const date = new Date(Date.now() + 30 * 60 * 1000);
-  const roundedMinutes = Math.ceil(date.getMinutes() / 15) * 15;
-  if (roundedMinutes >= 60) {
-    date.setHours(date.getHours() + 1);
-    date.setMinutes(0, 0, 0);
-  } else {
-    date.setMinutes(roundedMinutes, 0, 0);
-  }
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+const calendarPreference = {
+  get(key: string, fallback: boolean) {
+    if (typeof window === 'undefined') return fallback;
+    return window.localStorage.getItem(key) === null
+      ? fallback
+      : window.localStorage.getItem(key) === 'true';
+  },
+  set(key: string, value: boolean) {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(key, String(value));
+  },
 };
 
-const splitReminderEmails = (value: string) =>
-  value
-    .split(/[\s,;]+/)
-    .map(item => item.trim())
-    .filter(Boolean);
+interface DashboardProps {
+  calendarOnly?: boolean;
+}
 
-const localDateTimeToIso = (date: string, time: string) => new Date(`${date}T${time || '09:00'}`).toISOString();
-
-
-export default function Dashboard() {
+export default function Dashboard({ calendarOnly = false }: DashboardProps) {
   const { user } = useAuthStore();
   const navigate = useNavigate();
   const [activityFeed, setActivityFeed] = useState<DashboardActivityFeedItem[]>([]);
+  const [deletingActivityNoteId, setDeletingActivityNoteId] = useState<string | null>(null);
   const [calendarEvents, setCalendarEvents] = useState<OperationsCalendarEvent[]>([]);
-  const [showCalendarReminderComposer, setShowCalendarReminderComposer] = useState(false);
-  const [reminderTitle, setReminderTitle] = useState('');
-  const [reminderRecipients, setReminderRecipients] = useState('');
-  const [reminderMessage, setReminderMessage] = useState('');
-  const [reminderScheduleType, setReminderScheduleType] = useState<'now' | 'once' | 'weekly' | 'monthly'>('once');
-  const [reminderDate, setReminderDate] = useState(formatLocalDateInput());
-  const [reminderTime, setReminderTime] = useState(defaultReminderTime());
-  const [reminderEventType, setReminderEventType] = useState('other');
-  const [reminderPriority, setReminderPriority] = useState('normal');
-  const [savingCalendarReminder, setSavingCalendarReminder] = useState(false);
   const [calendarCompletionNotes, setCalendarCompletionNotes] = useState<Record<string, string>>({});
   const [savingCalendarEventId, setSavingCalendarEventId] = useState('');
   const [expandedCalendarNoteId, setExpandedCalendarNoteId] = useState<string | null>(null);
   const [calendarQueueFilter, setCalendarQueueFilter] = useState<CalendarQueueFilter>('upcoming');
-  const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>('week');
+  const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>(calendarOnly ? 'month' : 'week');
   const [calendarAnchorDateKey, setCalendarAnchorDateKey] = useState(() => formatLocalDateInput());
-  const [calendarExpanded, setCalendarExpanded] = useState(true);
+  const [calendarExpanded, setCalendarExpanded] = useState(() => (
+    calendarOnly ? true : calendarPreference.get('bt.operationsCalendar.v2.expanded', true)
+  ));
+  const [calendarFiltersExpanded, setCalendarFiltersExpanded] = useState(false);
+  const [calendarSearch, setCalendarSearch] = useState('');
+  const [calendarPriorityFilter, setCalendarPriorityFilter] = useState('all');
+  const [calendarStatusFilter, setCalendarStatusFilter] = useState('all');
+  const [calendarReminderFilter, setCalendarReminderFilter] = useState('all');
   const [editingCalendarEvent, setEditingCalendarEvent] = useState<OperationsCalendarEvent | null>(null);
   const [calendarEditForm, setCalendarEditForm] = useState<CalendarEditForm>(blankCalendarEditForm);
   const [savingCalendarEdit, setSavingCalendarEdit] = useState(false);
@@ -528,12 +530,17 @@ export default function Dashboard() {
   const liveTodayKey = formatLocalDateInput(liveNow);
   const [lastCalendarTodayKey, setLastCalendarTodayKey] = useState(() => liveTodayKey);
   const calendarQueryRange = calendarRangeForView(calendarViewMode, calendarAnchorDateKey);
-  const canAccessOperationsCalendar = Boolean(user && ['super_admin', 'operations_manager', 'project_manager'].includes(user.role));
+  const canAccessOperationsCalendar = Boolean(calendarOnly && user && ['super_admin', 'operations_manager', 'project_manager'].includes(user.role));
+  const canDeleteProjectNotes = Boolean(user && ['super_admin', 'operations_manager'].includes(user.role));
 
   useEffect(() => {
     const timer = window.setInterval(() => setLiveNow(new Date()), 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    calendarPreference.set('bt.operationsCalendar.v2.expanded', calendarExpanded);
+  }, [calendarExpanded]);
 
   useEffect(() => {
     if (liveTodayKey === lastCalendarTodayKey) return;
@@ -545,7 +552,9 @@ export default function Dashboard() {
     const load = async () => {
       try {
         const [feedRes, calendarRes] = await Promise.all([
-          api.get('/dashboard/activity-feed?limit=25').catch(() => ({ data: { items: [] } })),
+          calendarOnly
+            ? Promise.resolve({ data: { items: [] } })
+            : api.get('/dashboard/activity-feed?limit=25').catch(() => ({ data: { items: [] } })),
           canAccessOperationsCalendar
             ? api.get(`/calendar/events?start=${encodeURIComponent(calendarQueryRange.start)}&end=${encodeURIComponent(calendarQueryRange.end)}`).catch(() => ({ data: { events: [] } }))
             : Promise.resolve({ data: { events: [] } }),
@@ -564,7 +573,7 @@ export default function Dashboard() {
       }
     };
     load();
-  }, [user?.id, user?.role, canAccessOperationsCalendar, calendarQueryRange.start, calendarQueryRange.end]);
+  }, [user?.id, user?.role, calendarOnly, canAccessOperationsCalendar, calendarQueryRange.start, calendarQueryRange.end]);
 
   if (loading) return <Loading />;
 
@@ -575,22 +584,25 @@ export default function Dashboard() {
     .replace(/\sAM$/, ' A.M.')
     .replace(/\sPM$/, ' P.M.')} Eastern Time`;
 
-  const openCalendarReminderComposer = () => {
-    setReminderTitle('BuildTrack reminder');
-    setReminderRecipients('');
-    setReminderMessage('');
-    setReminderScheduleType('once');
-    setReminderDate(formatLocalDateInput());
-    setReminderTime(defaultReminderTime());
-    setReminderEventType('other');
-    setReminderPriority('normal');
-    setShowCalendarReminderComposer(true);
-  };
-
   const refreshCalendarEvents = async (anchorDateKey = calendarAnchorDateKey, viewMode = calendarViewMode) => {
     const range = calendarRangeForView(viewMode, anchorDateKey);
     const res = await api.get(`/calendar/events?start=${encodeURIComponent(range.start)}&end=${encodeURIComponent(range.end)}`);
     setCalendarEvents(Array.isArray(res.data?.events) ? res.data.events : []);
+  };
+
+  const deleteDashboardNote = async (item: DashboardActivityFeedItem) => {
+    if (!item.project_id || item.feed_type !== 'note' || !canDeleteProjectNotes || deletingActivityNoteId) return;
+    if (!window.confirm('Delete this note? Attached photos will stay in the project photo history.')) return;
+    setDeletingActivityNoteId(item.id);
+    try {
+      await api.delete(`/projects/${item.project_id}/notes/${item.id}`);
+      setActivityFeed(current => current.filter(feedItem => !(feedItem.feed_type === 'note' && feedItem.id === item.id)));
+      toast.success('Note deleted');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to delete note');
+    } finally {
+      setDeletingActivityNoteId(null);
+    }
   };
 
   const calendarNoteDraft = (event: OperationsCalendarEvent) =>
@@ -672,6 +684,31 @@ export default function Dashboard() {
     }
   };
 
+  const deleteCalendarEntry = async () => {
+    if (!editingCalendarEvent) return;
+    if (editingCalendarEvent.source === 'construction_task') {
+      toast.error('Construction tasks cannot be deleted from the calendar. Mark them complete or edit the task instead.');
+      return;
+    }
+    const confirmed = window.confirm(`Delete "${editingCalendarEvent.title || 'this calendar event'}"? This cannot be undone.`);
+    if (!confirmed) return;
+
+    setSavingCalendarEdit(true);
+    setSavingCalendarEventId(editingCalendarEvent.id);
+    try {
+      await api.delete(`/calendar/events/${editingCalendarEvent.id}`);
+      setEditingCalendarEvent(null);
+      setCalendarEditForm(blankCalendarEditForm);
+      await refreshCalendarEvents(calendarAnchorDateKey, calendarViewMode);
+      toast.success('Calendar event deleted');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to delete calendar event');
+    } finally {
+      setSavingCalendarEdit(false);
+      setSavingCalendarEventId('');
+    }
+  };
+
   const saveCalendarEventUpdate = async (event: OperationsCalendarEvent, patch: Record<string, any>) => {
     setSavingCalendarEventId(event.id);
     try {
@@ -690,57 +727,6 @@ export default function Dashboard() {
     }
   };
 
-  const saveCalendarEmailReminder = async () => {
-    const recipients = splitReminderEmails(reminderRecipients);
-    if (!reminderTitle.trim()) {
-      toast.error('Reminder title is required');
-      return;
-    }
-    if (!recipients.length) {
-      toast.error('Enter at least one reminder email');
-      return;
-    }
-    if (reminderScheduleType !== 'now' && (!reminderDate || !reminderTime)) {
-      toast.error('Choose the reminder date and time');
-      return;
-    }
-
-    setSavingCalendarReminder(true);
-    try {
-      const scheduledFor = reminderDate || formatLocalDateInput();
-      const sendAt = reminderScheduleType === 'now' ? new Date().toISOString() : localDateTimeToIso(reminderDate, reminderTime);
-      const res = await api.post('/calendar/events', {
-        title: reminderTitle.trim(),
-        description: reminderMessage.trim() || null,
-        event_type: reminderEventType,
-        scheduled_for: scheduledFor,
-        due_time: reminderTime || null,
-        priority: reminderPriority,
-        source_type: 'manual',
-        email_reminder: {
-          enabled: true,
-          recipients,
-          subject: reminderTitle.trim(),
-          message: reminderMessage.trim() || reminderTitle.trim(),
-          schedule_type: reminderScheduleType,
-          send_at: sendAt,
-        },
-      });
-      if (res.data?.warning) {
-        toast.error(res.data.warning);
-      } else {
-        toast.success(reminderScheduleType === 'now' ? 'Reminder email sent' : 'Email reminder scheduled');
-      }
-      setShowCalendarReminderComposer(false);
-      setCalendarAnchorDateKey(scheduledFor);
-      await refreshCalendarEvents(scheduledFor, calendarViewMode);
-    } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Failed to save email reminder');
-    } finally {
-      setSavingCalendarReminder(false);
-    }
-  };
-
   const todayKey = liveTodayKey;
   const calendarAnchorDate = localDateInputToNoonDate(calendarAnchorDateKey);
   const currentWeekStartDate = calendarAnchorDate;
@@ -754,17 +740,16 @@ export default function Dashboard() {
     ? formatEasternDate(`${calendarAnchorDateKey}T12:00:00`, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
     : calendarViewMode === 'week'
       ? `Week of ${formatCalendarWeekRange(currentWeekStartDate, currentWeekEndDate)}`
-      : calendarMonthLabelFormatter.format(calendarMonthStartDate);
+      : calendarViewMode === 'list'
+        ? `${formatCalendarBadgeDate(calendarQueryRange.start).label} - ${formatCalendarBadgeDate(calendarQueryRange.end).label}`
+        : calendarMonthLabelFormatter.format(calendarMonthStartDate);
   const calendarViewKicker = calendarViewMode === 'today'
     ? (calendarAnchorDateKey === todayKey ? "Today's schedule" : 'Daily schedule')
     : calendarViewMode === 'week'
       ? 'Weekly schedule'
-      : 'Monthly schedule';
-  const jumpToCalendarDate = (dateKey: string) => {
-    if (!dateKey) return;
-    setCalendarAnchorDateKey(dateKey);
-    setExpandedCalendarNoteId(null);
-  };
+      : calendarViewMode === 'list'
+        ? 'Agenda list'
+        : 'Monthly schedule';
   const changeCalendarViewMode = (viewMode: CalendarViewMode) => {
     setCalendarViewMode(viewMode);
     if (viewMode === 'today') setCalendarAnchorDateKey(todayKey);
@@ -775,6 +760,7 @@ export default function Dashboard() {
       const anchor = localDateInputToNoonDate(current);
       if (calendarViewMode === 'today') return formatLocalDateInput(addCalendarDays(anchor, offset));
       if (calendarViewMode === 'week') return formatLocalDateInput(addCalendarDays(anchor, offset * 7));
+      if (calendarViewMode === 'list') return formatLocalDateInput(addCalendarDays(anchor, offset * 14));
       return formatLocalDateInput(addCalendarMonths(anchor, offset));
     });
     setExpandedCalendarNoteId(null);
@@ -791,20 +777,55 @@ export default function Dashboard() {
     event.status !== 'completed' && isCurrentViewEvent(event)
   );
   const completedCalendarEvents = calendarEvents.filter(event => event.status === 'completed' && isCurrentViewEvent(event));
-  const displayedCalendarEvents = calendarQueueFilter === 'completed' ? completedCalendarEvents : upcomingCalendarEvents;
+  const baseDisplayedCalendarEvents = calendarQueueFilter === 'completed' ? completedCalendarEvents : upcomingCalendarEvents;
+  const normalizedCalendarSearch = calendarSearch.trim().toLowerCase();
+  const displayedCalendarEvents = baseDisplayedCalendarEvents.filter(event => {
+    if (calendarPriorityFilter !== 'all' && event.priority !== calendarPriorityFilter) return false;
+    if (calendarStatusFilter !== 'all' && editableCalendarStatus(event.status) !== calendarStatusFilter) return false;
+    if (calendarReminderFilter === 'enabled' && Number(event.email_reminder_count || 0) === 0) return false;
+    if (calendarReminderFilter === 'disabled' && Number(event.email_reminder_count || 0) > 0) return false;
+    if (!normalizedCalendarSearch) return true;
+    const haystack = [
+      event.title,
+      event.description,
+      event.project_address,
+      event.project_job_name,
+      event.vendor_name,
+      event.event_type,
+      event.status,
+      event.priority,
+    ].filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(normalizedCalendarSearch);
+  });
   const calendarViewEventCount = displayedCalendarEvents.length;
   const todayOpenCalendarEvents = calendarEvents.filter(event =>
     event.status !== 'completed' && calendarDateKeyForEvent(event) === todayKey
   );
+  const thisWeekEndKey = formatLocalDateInput(addCalendarDays(localDateInputToNoonDate(todayKey), 6));
+  const thisWeekCalendarEvents = calendarEvents.filter(event => {
+    const dateKey = calendarDateKeyForEvent(event);
+    return event.status !== 'completed' && Boolean(dateKey && dateKey >= todayKey && dateKey <= thisWeekEndKey);
+  });
+  const overdueCalendarEvents = calendarEvents.filter(event => {
+    const dateKey = calendarDateKeyForEvent(event);
+    return event.status !== 'completed' && event.status !== 'cancelled' && Boolean(dateKey && dateKey < todayKey);
+  });
   const highPriorityCalendarEvents = displayedCalendarEvents.filter(event =>
     event.priority === 'critical' || event.priority === 'high'
   );
-  const timedCalendarEvents = displayedCalendarEvents.filter(event => Boolean(event.due_time));
+  const completedInViewCalendarEvents = completedCalendarEvents.filter(event => isCurrentViewEvent(event));
+  const activeCalendarFiltersCount = [
+    normalizedCalendarSearch,
+    calendarPriorityFilter !== 'all',
+    calendarStatusFilter !== 'all',
+    calendarReminderFilter !== 'all',
+  ].filter(Boolean).length;
   const calendarSummaryCards = [
-    { label: 'Today', value: todayOpenCalendarEvents.length, detail: 'Open company items', tone: 'from-slate-950 via-blue-950 to-cyan-900 border-cyan-300/35 text-white' },
-    { label: calendarQueueFilter === 'completed' ? 'Completed' : 'In View', value: calendarViewEventCount, detail: calendarViewTitle, tone: 'from-slate-950 via-indigo-950 to-violet-900 border-violet-300/35 text-white' },
-    { label: 'High Priority', value: highPriorityCalendarEvents.length, detail: 'Critical or high', tone: 'from-slate-950 via-rose-950 to-fuchsia-950 border-rose-300/35 text-white' },
-    { label: 'Timed', value: timedCalendarEvents.length, detail: 'Scheduled by hour', tone: 'from-slate-950 via-teal-950 to-emerald-900 border-teal-300/35 text-white' },
+    { label: 'Today', value: todayOpenCalendarEvents.length, detail: 'Open items today', tone: 'bt-calendar-summary-chip--blue' },
+    { label: 'This Week', value: thisWeekCalendarEvents.length, detail: `${todayKey} to ${thisWeekEndKey}`, tone: 'bt-calendar-summary-chip--cyan' },
+    { label: 'High Priority', value: highPriorityCalendarEvents.length, detail: 'Critical or high in view', tone: 'bt-calendar-summary-chip--red' },
+    { label: 'Overdue', value: overdueCalendarEvents.length, detail: 'Past due in loaded range', tone: 'bt-calendar-summary-chip--amber' },
+    { label: 'Completed', value: completedInViewCalendarEvents.length, detail: 'Completed in view', tone: 'bt-calendar-summary-chip--green' },
   ];
   const canCreateCalendarReminders = Boolean(user && isAdminRole(user.role));
   const calendarTypeLabel = (type?: string) => {
@@ -820,52 +841,52 @@ export default function Dashboard() {
   const calendarEventTone = (event: OperationsCalendarEvent) => {
     if (event.status === 'completed') {
       return {
-        card: 'border-emerald-200/45 bg-gradient-to-br from-emerald-950 via-teal-900 to-green-800 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.20),inset_0_-2px_4px_rgba(0,0,0,0.32),0_8px_18px_rgba(16,185,129,0.18)] hover:border-emerald-100/70 hover:brightness-110',
-        rail: 'bg-emerald-300 shadow-[0_0_12px_rgba(110,231,183,0.45)]',
-        chip: 'border border-white/20 bg-white/14 text-white shadow-sm',
-        time: 'bg-black/22 text-white ring-white/24',
+        card: 'bt-calendar-event-card bt-calendar-event-card--completed',
+        rail: 'bt-calendar-event-rail bt-calendar-event-rail--completed',
+        chip: 'bt-calendar-badge bt-calendar-badge--completed',
+        time: 'bt-calendar-time-badge',
       };
     }
 
     if (event.priority === 'critical' || event.priority === 'high') {
       return {
-        card: 'border-rose-200/45 bg-gradient-to-br from-rose-950 via-fuchsia-950 to-purple-950 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.20),inset_0_-2px_4px_rgba(0,0,0,0.32),0_8px_18px_rgba(244,63,94,0.18)] hover:border-rose-100/70 hover:brightness-110',
-        rail: 'bg-rose-300 shadow-[0_0_12px_rgba(253,164,175,0.45)]',
-        chip: 'border border-white/20 bg-white/14 text-white shadow-sm',
-        time: 'bg-black/22 text-white ring-white/24',
+        card: 'bt-calendar-event-card bt-calendar-event-card--priority',
+        rail: 'bt-calendar-event-rail bt-calendar-event-rail--priority',
+        chip: 'bt-calendar-badge bt-calendar-badge--priority',
+        time: 'bt-calendar-time-badge',
       };
     }
 
     const tones: Record<string, { card: string; rail: string; chip: string; time: string }> = {
       task: {
-        card: 'border-sky-200/45 bg-gradient-to-br from-slate-950 via-blue-900 to-cyan-900 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.20),inset_0_-2px_4px_rgba(0,0,0,0.32),0_8px_18px_rgba(14,165,233,0.16)] hover:border-sky-100/70 hover:brightness-110',
-        rail: 'bg-cyan-300 shadow-[0_0_12px_rgba(103,232,249,0.45)]',
-        chip: 'border border-white/20 bg-white/14 text-white shadow-sm',
-        time: 'bg-black/22 text-white ring-white/24',
+        card: 'bt-calendar-event-card bt-calendar-event-card--task',
+        rail: 'bt-calendar-event-rail bt-calendar-event-rail--task',
+        chip: 'bt-calendar-badge bt-calendar-badge--task',
+        time: 'bt-calendar-time-badge',
       },
       maintenance: {
-        card: 'border-amber-200/45 bg-gradient-to-br from-stone-950 via-amber-900 to-orange-900 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.20),inset_0_-2px_4px_rgba(0,0,0,0.32),0_8px_18px_rgba(245,158,11,0.16)] hover:border-amber-100/70 hover:brightness-110',
-        rail: 'bg-amber-300 shadow-[0_0_12px_rgba(252,211,77,0.45)]',
-        chip: 'border border-white/20 bg-white/14 text-white shadow-sm',
-        time: 'bg-black/22 text-white ring-white/24',
+        card: 'bt-calendar-event-card bt-calendar-event-card--maintenance',
+        rail: 'bt-calendar-event-rail bt-calendar-event-rail--maintenance',
+        chip: 'bt-calendar-badge bt-calendar-badge--maintenance',
+        time: 'bt-calendar-time-badge',
       },
       inspection: {
-        card: 'border-violet-200/45 bg-gradient-to-br from-slate-950 via-violet-950 to-indigo-900 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.20),inset_0_-2px_4px_rgba(0,0,0,0.32),0_8px_18px_rgba(99,102,241,0.16)] hover:border-violet-100/70 hover:brightness-110',
-        rail: 'bg-violet-300 shadow-[0_0_12px_rgba(196,181,253,0.45)]',
-        chip: 'border border-white/20 bg-white/14 text-white shadow-sm',
-        time: 'bg-black/22 text-white ring-white/24',
+        card: 'bt-calendar-event-card bt-calendar-event-card--inspection',
+        rail: 'bt-calendar-event-rail bt-calendar-event-rail--inspection',
+        chip: 'bt-calendar-badge bt-calendar-badge--inspection',
+        time: 'bt-calendar-time-badge',
       },
       note: {
-        card: 'border-teal-200/45 bg-gradient-to-br from-slate-950 via-teal-950 to-cyan-900 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.20),inset_0_-2px_4px_rgba(0,0,0,0.32),0_8px_18px_rgba(6,182,212,0.16)] hover:border-teal-100/70 hover:brightness-110',
-        rail: 'bg-teal-300 shadow-[0_0_12px_rgba(94,234,212,0.45)]',
-        chip: 'border border-white/20 bg-white/14 text-white shadow-sm',
-        time: 'bg-black/22 text-white ring-white/24',
+        card: 'bt-calendar-event-card bt-calendar-event-card--note',
+        rail: 'bt-calendar-event-rail bt-calendar-event-rail--note',
+        chip: 'bt-calendar-badge bt-calendar-badge--note',
+        time: 'bt-calendar-time-badge',
       },
       other: {
-        card: 'border-blue-200/45 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.20),inset_0_-2px_4px_rgba(0,0,0,0.32),0_8px_18px_rgba(59,130,246,0.15)] hover:border-blue-100/70 hover:brightness-110',
-        rail: 'bg-blue-300 shadow-[0_0_12px_rgba(147,197,253,0.45)]',
-        chip: 'border border-white/20 bg-white/14 text-white shadow-sm',
-        time: 'bg-black/22 text-white ring-white/24',
+        card: 'bt-calendar-event-card bt-calendar-event-card--other',
+        rail: 'bt-calendar-event-rail bt-calendar-event-rail--other',
+        chip: 'bt-calendar-badge bt-calendar-badge--other',
+        time: 'bt-calendar-time-badge',
       },
     };
 
@@ -885,98 +906,120 @@ export default function Dashboard() {
     const saving = savingCalendarEventId === event.id;
     const tone = calendarEventTone(event);
     const timeLabel = formatCalendarDueTimeLabel(event.due_time);
+    const statusLabel = formatCompactLabel(editableCalendarStatus(event.status));
+    const priorityLabel = formatCompactLabel(event.priority || 'normal');
 
     return (
       <article
         key={event.id}
-        className={`bt-calendar-task-card group relative min-h-[74px] overflow-hidden rounded-[10px] border px-2.5 py-2 text-left transition-all hover:-translate-y-0.5 ${
-          complete
-            ? tone.card
-            : noteExpanded
-              ? 'border-cyan-100/70 bg-gradient-to-br from-slate-950 via-cyan-950 to-blue-950 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.20),inset_0_-2px_4px_rgba(0,0,0,0.32),0_10px_22px_rgba(14,165,233,0.22)] ring-1 ring-cyan-300/35'
-              : tone.card
-        }`}
+        className={`bt-calendar-task-card group relative overflow-hidden rounded-xl border px-3 py-3 text-left transition ${tone.card} ${noteExpanded ? 'bt-calendar-event-card--open' : ''}`}
       >
-        <span className={`absolute bottom-2 left-0 top-2 w-1 rounded-r-full ${tone.rail}`} />
-        <div className="space-y-1.5 pl-2">
-          <div className="flex min-w-0 items-center gap-2">
-            <input
-              type="checkbox"
-              checked={complete}
-              disabled={saving}
-              onChange={inputEvent => {
-                void saveCalendarEventUpdate(event, {
-                  status: inputEvent.currentTarget.checked ? 'completed' : 'scheduled',
-                  completion_note: noteDraft,
-                });
-              }}
-              className="h-3.5 w-3.5 flex-shrink-0 rounded border-white/60 bg-white/90 accent-emerald-500 shadow-sm"
-              aria-label={`${complete ? 'Mark incomplete' : 'Mark complete'}: ${projectLabel} - ${event.title}`}
-            />
-
+        <span className={`absolute bottom-3 left-0 top-3 w-1 rounded-r-full ${tone.rail}`} />
+        <div className="space-y-2 pl-2">
+          <div className="flex min-w-0 items-start gap-2">
             <button
               type="button"
               onClick={() => setExpandedCalendarNoteId(noteExpanded ? null : event.id)}
-              className="min-w-0 flex-1 rounded-md text-left focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
+              className="min-w-0 flex-1 rounded-md text-left focus:outline-none focus:ring-2 focus:ring-blue-500"
               aria-expanded={noteExpanded}
             >
-              <p className={`truncate text-[13px] font-black leading-4 tracking-normal drop-shadow-sm ${complete ? 'text-white/80 line-through decoration-white/80' : 'text-white'}`} title={event.title}>
+              <p className={`truncate text-sm font-black leading-5 ${complete ? 'text-slate-500 line-through decoration-slate-400' : 'text-slate-950'}`} title={event.title}>
                 {event.title || 'Untitled calendar item'}
               </p>
-              <p className="mt-0.5 truncate text-[10px] font-extrabold leading-3 text-white/82" title={projectLabel}>
+              <p className="mt-0.5 truncate text-xs font-semibold leading-4 text-slate-600" title={projectLabel}>
                 {projectLabel}
               </p>
             </button>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => void saveCalendarEventUpdate(event, {
+                status: complete ? 'scheduled' : 'completed',
+                completion_note: noteDraft,
+              })}
+              className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border transition focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50 ${complete ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-slate-300 bg-white text-slate-500 hover:border-emerald-300 hover:text-emerald-700'}`}
+              aria-label={`${complete ? 'Mark scheduled' : 'Mark complete'}: ${projectLabel} - ${event.title}`}
+              title={complete ? 'Mark scheduled' : 'Mark complete'}
+            >
+              <CheckCircle2 className="h-4 w-4" />
+            </button>
           </div>
 
-          <div className="flex min-w-0 flex-nowrap items-center gap-1.5">
-            <span className={`inline-flex h-6 items-center justify-center rounded-md px-2 text-[9px] font-black leading-none ring-1 shadow-sm ${event.due_time ? tone.time : 'bg-black/22 text-white ring-white/24'}`}>
+          {calendarOnly ? (
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <div className="bt-calendar-meta-line min-w-0 flex-1">
+                <span>{timeLabel}</span>
+                <span>{calendarTypeLabel(event.event_type)}</span>
+                {(event.priority === 'critical' || event.priority === 'high') ? (
+                  <span className="text-amber-800">{priorityLabel} priority</span>
+                ) : null}
+                {complete ? <span className="text-emerald-700">Completed</span> : (
+                  <span>{statusLabel}</span>
+                )}
+                {Number(event.email_reminder_count || 0) > 0 ? <span>Email reminder</span> : null}
+              </div>
+              <button
+                type="button"
+                onClick={() => setExpandedCalendarNoteId(noteExpanded ? null : event.id)}
+                className="inline-flex min-h-8 items-center rounded-md border border-slate-300 bg-white px-3 text-xs font-medium text-slate-700 transition hover:bg-slate-50"
+                aria-expanded={noteExpanded}
+              >
+                {noteExpanded ? 'Close' : 'Details'}
+              </button>
+            </div>
+          ) : (
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <span className={`inline-flex min-h-6 items-center gap-1 rounded-full px-2 text-[11px] font-black leading-none ${tone.time}`}>
+              <Clock className="h-3 w-3" />
               {timeLabel}
             </span>
-            <span className={`rounded-md px-2 py-1 text-[9px] font-black uppercase leading-none ${tone.chip}`}>
+            <span className={`rounded-full px-2 py-1 text-[10px] font-black uppercase leading-none ${tone.chip}`}>
               {calendarTypeLabel(event.event_type)}
             </span>
-            {event.priority === 'critical' || event.priority === 'high' ? (
-              <span className="rounded-md border border-white/20 bg-white/14 px-2 py-1 text-[9px] font-black uppercase leading-none text-white shadow-sm">
-                {event.priority}
-              </span>
-            ) : null}
+            <span className={`rounded-full px-2 py-1 text-[10px] font-black uppercase leading-none ${event.priority === 'critical' || event.priority === 'high' ? 'bt-calendar-badge bt-calendar-badge--priority' : 'bt-calendar-badge bt-calendar-badge--neutral'}`}>
+              {priorityLabel}
+            </span>
+            <span className={`rounded-full px-2 py-1 text-[10px] font-black uppercase leading-none ${complete ? 'bt-calendar-badge bt-calendar-badge--completed' : 'bt-calendar-badge bt-calendar-badge--neutral'}`}>
+              {statusLabel}
+            </span>
             {Number(event.email_reminder_count || 0) > 0 ? (
-              <span className="rounded-md border border-white/20 bg-white/14 px-2 py-1 text-[9px] font-black uppercase leading-none text-white shadow-sm">
-                Email
+              <span className="bt-calendar-badge bt-calendar-badge--reminder inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-black uppercase leading-none">
+                <Mail className="h-3 w-3" />
+                Reminder
               </span>
             ) : null}
             <button
               type="button"
               onClick={() => setExpandedCalendarNoteId(noteExpanded ? null : event.id)}
-              className="ml-auto inline-flex h-6 items-center rounded-md border border-white/24 bg-black/20 px-2 text-[9px] font-black uppercase tracking-wide text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_8px_rgba(2,6,23,0.18)] transition hover:bg-white/16"
+              className="ml-auto inline-flex min-h-7 items-center rounded-lg border border-slate-300 bg-white px-2 text-[10px] font-black uppercase tracking-wide text-slate-700 transition hover:bg-slate-50"
               aria-expanded={noteExpanded}
             >
               {noteExpanded ? 'Hide' : 'Details'}
             </button>
           </div>
+          )}
         </div>
         {noteExpanded && (
-          <div className="mt-3 grid gap-2 border-t border-white/30 pt-3">
+          <div className="mt-3 grid gap-2 border-t border-slate-200 pt-3">
             {event.description ? (
-              <p className="whitespace-pre-wrap rounded-md border border-white/20 bg-white/16 px-3 py-2 text-[12px] font-bold leading-5 text-white shadow-inner">
+              <p className="whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold leading-5 text-slate-700">
                 {event.description}
               </p>
             ) : null}
             {event.vendor_name ? (
-              <p className="break-words text-[12px] font-bold leading-4 text-white/90">
+              <p className="break-words text-sm font-semibold leading-5 text-slate-600">
                 Vendor: {event.vendor_name}
               </p>
             ) : null}
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-[11px] font-bold text-white/80">
+              <span className="text-xs font-semibold text-slate-500">
                 Created for {projectLabel}
               </span>
               <button
                 type="button"
                 onClick={() => openCalendarEntryEditor(event)}
                 disabled={saving}
-                className="inline-flex h-8 flex-shrink-0 items-center gap-1 rounded-md border border-white/30 bg-white/20 px-2 text-[10px] font-black uppercase tracking-wide text-white transition hover:bg-white/30 disabled:opacity-50"
+                className="inline-flex h-8 flex-shrink-0 items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2 text-[10px] font-black uppercase tracking-wide text-blue-700 transition hover:bg-blue-100 disabled:opacity-50"
                 title="Edit calendar entry"
                 aria-label={`Edit calendar entry: ${projectLabel} - ${event.title}`}
               >
@@ -988,14 +1031,14 @@ export default function Dashboard() {
               value={noteDraft}
               onChange={inputEvent => updateCalendarCompletionNote(event.id, inputEvent.target.value)}
               rows={2}
-              className="w-full resize-y rounded-md border border-white/30 bg-white px-3 py-2 text-sm font-semibold leading-5 text-slate-950 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-white/70"
+              className="w-full resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold leading-5 text-slate-950 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="Add note..."
             />
             <span className="flex justify-end gap-1.5">
               <button
                 type="button"
                 onClick={() => setExpandedCalendarNoteId(null)}
-                className="rounded border border-white/35 bg-white/18 px-2 py-1 text-[10px] font-black text-white hover:bg-white/28"
+                className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-[10px] font-black text-slate-700 hover:bg-slate-50"
               >
                 Close
               </button>
@@ -1003,7 +1046,7 @@ export default function Dashboard() {
                 type="button"
                 disabled={saving}
                 onClick={() => void saveCalendarEventUpdate(event, { status: complete ? 'completed' : event.status, completion_note: noteDraft })}
-                className="rounded border border-white/40 bg-emerald-600 px-2 py-1 text-[10px] font-black text-white shadow-sm hover:bg-emerald-500 disabled:opacity-60"
+                className="rounded-lg border border-emerald-600 bg-emerald-600 px-2 py-1 text-[10px] font-black text-white shadow-sm hover:bg-emerald-500 disabled:opacity-60"
               >
                 {saving ? 'Saving' : 'Save'}
               </button>
@@ -1024,9 +1067,9 @@ export default function Dashboard() {
     return (
       <div
         key={event.id}
-        className={`bt-calendar-month-pill group relative flex min-w-0 items-start gap-1.5 overflow-hidden rounded-lg border px-1.5 py-1.5 ${tone.card}`}
+        className={`bt-calendar-month-pill group relative flex min-w-0 items-start gap-1.5 overflow-hidden rounded-lg border px-2 py-2 ${tone.card}`}
       >
-        <span className={`absolute bottom-1.5 left-0 top-1.5 w-0.5 rounded-r-full ${tone.rail}`} />
+        <span className={`absolute bottom-2 left-0 top-2 w-0.5 rounded-r-full ${tone.rail}`} />
         <input
           type="checkbox"
           checked={complete}
@@ -1037,19 +1080,19 @@ export default function Dashboard() {
               completion_note: noteDraft,
             });
           }}
-          className="ml-1 mt-0.5 h-3.5 w-3.5 flex-shrink-0 rounded border-white/70 bg-white/95 accent-emerald-600 shadow-sm"
+          className="ml-1 mt-0.5 h-3.5 w-3.5 flex-shrink-0 rounded border-slate-300 bg-white accent-emerald-600 shadow-sm"
           aria-label={`${complete ? 'Mark incomplete' : 'Mark complete'}: ${projectLabel} - ${event.title}`}
         />
         <button
           type="button"
           onClick={() => openCalendarEntryEditor(event)}
-          className="min-w-0 flex-1 rounded text-left focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
+          className="min-w-0 flex-1 rounded text-left focus:outline-none focus:ring-2 focus:ring-blue-500"
           title={`${formatCalendarDueTimeLabel(event.due_time)} - ${event.title}`}
         >
-          <span className={`block text-[10px] font-black leading-3 drop-shadow-sm ${complete ? 'text-white/90 line-through decoration-white/80' : 'text-white'}`}>
+          <span className={`block text-[11px] font-black leading-4 ${complete ? 'text-slate-500 line-through decoration-slate-400' : 'text-slate-950'}`}>
             {event.title}
           </span>
-          <span className="mt-0.5 block truncate text-[9px] font-bold text-white/90">
+          <span className="mt-0.5 block truncate text-[10px] font-bold text-slate-600">
             {formatCalendarDueTimeLabel(event.due_time)}
           </span>
         </button>
@@ -1057,7 +1100,7 @@ export default function Dashboard() {
           type="button"
           onClick={() => openCalendarEntryEditor(event)}
           disabled={saving}
-          className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border border-white/45 bg-white/20 text-white opacity-0 shadow-sm transition hover:bg-white/30 group-hover:opacity-100 group-focus-within:opacity-100 disabled:opacity-50"
+          className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded border border-slate-300 bg-white text-slate-600 opacity-0 shadow-sm transition hover:bg-slate-50 group-hover:opacity-100 group-focus-within:opacity-100 disabled:opacity-50"
           aria-label={`Edit calendar entry: ${projectLabel} - ${event.title}`}
           title="Edit"
         >
@@ -1067,27 +1110,11 @@ export default function Dashboard() {
     );
   };
 
-  const renderCalendarEmptyState = (dateKey: string, label: string) => (
-    <div className="bt-calendar-empty-state rounded-[10px] border border-white/10 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950/80 px-3 py-4 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_8px_18px_rgba(2,6,23,0.18)]">
-      <CalendarDays className="mx-auto h-6 w-6 text-slate-500" />
-      <p className="mt-2 text-xs font-black text-slate-200">No calendar items scheduled</p>
-      <p className="mt-1 text-[11px] font-bold text-slate-500">{label}</p>
-      <div className="mt-3 flex justify-center">
-        <AddToCalendarButton
-          label="Add calendar item"
-          ariaLabel={`Add task or event on ${label}`}
-          icon="plus"
-          defaultTitle="BuildTrack task"
-          defaultDescription={`Created directly from the ${label} calendar space.`}
-          defaultDate={dateKey}
-          defaultEventType="task"
-          sourceType="dashboard_day"
-          contextLabel={`Calendar space: ${label}`}
-          modalTitle={`Add Item - ${label}`}
-          buttonClassName="inline-flex min-h-8 items-center justify-center gap-2 rounded-md border border-cyan-300/35 bg-gradient-to-r from-slate-900 via-blue-900 to-cyan-900 px-3 text-[11px] font-black text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_6px_14px_rgba(14,165,233,0.16)] transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
-          onSaved={() => refreshCalendarEvents(calendarAnchorDateKey, calendarViewMode)}
-        />
-      </div>
+  const renderCalendarEmptyState = (_dateKey: string, label: string) => (
+    <div className="bt-calendar-empty-state rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center">
+      <CalendarDays className="mx-auto h-6 w-6 text-slate-400" />
+      <p className="mt-2 text-sm font-black text-slate-700">No scheduled items for this period</p>
+      <p className="mt-1 text-xs font-semibold text-slate-500">{label}</p>
     </div>
   );
 
@@ -1096,51 +1123,35 @@ export default function Dashboard() {
     const schedule = buildCalendarDayScheduleBucket(todayEvents);
 
     return (
-      <div className="grid gap-3 p-3 xl:grid-cols-[240px_minmax(0,1fr)]">
-        <aside className="rounded-2xl border border-cyan-300/20 bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_16px_34px_rgba(2,6,23,0.24)]">
-          <p className="text-[11px] font-black uppercase tracking-wide text-cyan-200">Selected day</p>
-          <h3 className="mt-2 text-3xl font-black leading-none text-white">
+      <div className="grid gap-4 bg-slate-50 p-4 xl:grid-cols-[260px_minmax(0,1fr)]">
+        <aside className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <p className="text-xs font-black uppercase tracking-wide text-blue-700">Selected day</p>
+          <h3 className="mt-2 text-4xl font-black leading-none text-slate-950">
             {formatCalendarBadgeDate(calendarAnchorDateKey).day}
           </h3>
-          <p className="mt-2 text-sm font-black text-slate-200">
+          <p className="mt-2 text-sm font-black text-slate-700">
             {formatEasternDate(`${calendarAnchorDateKey}T12:00:00`, { weekday: 'long', month: 'long', day: 'numeric' })}
           </p>
           <div className="mt-4 grid grid-cols-2 gap-2">
-            <div className="rounded-xl border border-cyan-300/25 bg-gradient-to-br from-slate-950 via-blue-900 to-cyan-900 px-3 py-2 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.14),0_8px_16px_rgba(14,165,233,0.14)]">
-              <p className="text-[10px] font-black uppercase tracking-wide text-white/85">Items</p>
-              <p className="mt-1 text-xl font-black text-white">{todayEvents.length}</p>
+            <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2">
+              <p className="text-[10px] font-black uppercase tracking-wide text-blue-700">Items</p>
+              <p className="mt-1 text-xl font-black text-slate-950">{todayEvents.length}</p>
             </div>
-            <div className="rounded-xl border border-emerald-300/25 bg-gradient-to-br from-slate-950 via-teal-900 to-emerald-900 px-3 py-2 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.14),0_8px_16px_rgba(16,185,129,0.14)]">
-              <p className="text-[10px] font-black uppercase tracking-wide text-white/85">Done</p>
-              <p className="mt-1 text-xl font-black text-white">{todayEvents.filter(event => event.status === 'completed').length}</p>
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
+              <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700">Done</p>
+              <p className="mt-1 text-xl font-black text-slate-950">{todayEvents.filter(event => event.status === 'completed').length}</p>
             </div>
-          </div>
-          <div className="mt-4">
-            <AddToCalendarButton
-              label="Add item today"
-              ariaLabel={`Add task or event on ${formatCalendarBadgeDate(calendarAnchorDateKey).label}`}
-              icon="plus"
-              defaultTitle="BuildTrack task"
-              defaultDescription={`Created directly from the ${formatCalendarBadgeDate(calendarAnchorDateKey).label} calendar space.`}
-              defaultDate={calendarAnchorDateKey}
-              defaultEventType="task"
-              sourceType="dashboard_day"
-              contextLabel={`Calendar space: ${formatCalendarBadgeDate(calendarAnchorDateKey).label}`}
-              modalTitle={`Add Item - ${formatCalendarBadgeDate(calendarAnchorDateKey).label}`}
-              buttonClassName="inline-flex min-h-9 w-full items-center justify-center gap-2 rounded-lg border border-cyan-300/35 bg-gradient-to-r from-slate-900 via-blue-900 to-cyan-900 px-3 text-xs font-black text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_8px_16px_rgba(14,165,233,0.16)] transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
-              onSaved={() => refreshCalendarEvents(calendarAnchorDateKey, calendarViewMode)}
-            />
           </div>
         </aside>
 
-        <div className="bt-calendar-day-agenda min-w-0 rounded-2xl border border-white/10 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_16px_34px_rgba(2,6,23,0.24)]">
+        <div className="bt-calendar-day-agenda min-w-0 rounded-2xl border border-slate-200 bg-white shadow-sm">
           {todayEvents.length === 0 ? (
             <div className="p-4">{renderCalendarEmptyState(calendarAnchorDateKey, formatCalendarBadgeDate(calendarAnchorDateKey).label)}</div>
           ) : (
-            <div className="space-y-3 p-3">
+            <div className="space-y-3 p-4">
               {schedule.untimed.length > 0 ? (
-                <div className="bt-calendar-agenda-group grid gap-3 rounded-xl border border-white/10 bg-black/18 p-3 shadow-inner md:grid-cols-[88px_minmax(0,1fr)]">
-                  <div className="px-1 text-left text-[11px] font-black uppercase tracking-wide text-cyan-200 md:text-right">
+                <div className="bt-calendar-agenda-group grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-[96px_minmax(0,1fr)]">
+                  <div className="px-1 text-left text-xs font-black uppercase tracking-wide text-slate-500 md:text-right">
                     No time
                   </div>
                   <div className="space-y-2">
@@ -1152,8 +1163,8 @@ export default function Dashboard() {
                 const hourEvents = schedule.byHour[hour] || [];
                 if (!hourEvents.length) return null;
                 return (
-                  <div key={hour} className="bt-calendar-agenda-group grid gap-3 rounded-xl border border-white/10 bg-black/18 p-3 shadow-inner md:grid-cols-[88px_minmax(0,1fr)]">
-                    <div className="px-1 text-left text-[11px] font-black text-slate-300 md:text-right">
+                  <div key={hour} className="bt-calendar-agenda-group grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-[96px_minmax(0,1fr)]">
+                    <div className="px-1 text-left text-xs font-black text-slate-500 md:text-right">
                       {formatCalendarHourLabel(hour)}
                     </div>
                     <div className="space-y-2">
@@ -1169,79 +1180,101 @@ export default function Dashboard() {
     );
   };
 
-  const renderCalendarWeekView = () => (
-    <div className="overflow-x-auto bg-gradient-to-br from-[#050914] via-[#0B1224] to-[#101B34]">
-      <div className="grid min-w-[860px] grid-cols-7 items-start gap-2.5 p-3">
-        {calendarVisibleWeekDays.map(day => {
-          const dayEvents = sortCalendarEventsForDay(calendarEventsByDate[day.key] || []);
-          const badgeDate = formatCalendarBadgeDate(day.key);
-          const dayYear = day.key.slice(0, 4);
+  const renderCalendarWeekView = () => {
+    const daySchedules = calendarVisibleWeekDays.map(day => ({
+      day,
+      events: sortCalendarEventsForDay(calendarEventsByDate[day.key] || []),
+      schedule: buildCalendarDayScheduleBucket(calendarEventsByDate[day.key] || []),
+    }));
+    const hasEvents = daySchedules.some(day => day.events.length > 0);
 
-          return (
-            <section key={day.key} className={`min-w-0 overflow-hidden rounded-xl border shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_12px_26px_rgba(2,6,23,0.28)] ${day.isToday ? 'border-cyan-300/70 bg-gradient-to-br from-[#082F49] via-[#0F3B5F] to-[#172554] ring-1 ring-cyan-300/35' : 'border-slate-600/70 bg-gradient-to-br from-[#101827] via-[#111B2E] to-[#172033]'}`}>
-              <header className={`border-b px-3 py-2.5 ${day.isToday ? 'border-cyan-300/35 bg-gradient-to-r from-cyan-950 via-blue-950 to-slate-950 text-white' : 'border-white/10 bg-gradient-to-r from-slate-950 via-blue-950 to-indigo-950 text-white'}`}>
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="text-[10px] font-black uppercase tracking-[0.16em] text-white/85">
-                      {day.weekday}
-                    </p>
-                    <p className="mt-1 text-2xl font-black leading-none text-white drop-shadow-sm">
-                      {day.dayNumber}
-                    </p>
-                    <p className="mt-1 text-[9px] font-bold uppercase tracking-wide text-white/80">
-                      {badgeDate.month} {dayYear}
-                    </p>
-                  </div>
-                  <div className="flex items-start gap-1.5">
-                    <span className={`rounded-full px-2 py-1 text-[10px] font-black leading-none shadow-sm ${dayEvents.length > 0 ? 'bg-cyan-300 text-slate-950 ring-1 ring-cyan-100/70' : 'bg-white/10 text-white ring-1 ring-white/18'}`}>
-                      {dayEvents.length}
+    if (!hasEvents) {
+      return <div className="bg-slate-50 p-4">{renderCalendarEmptyState(calendarAnchorDateKey, calendarViewTitle)}</div>;
+    }
+
+    return (
+      <div className="overflow-x-auto bg-slate-50">
+        <div className="min-w-[980px] p-4">
+          <div className="grid grid-cols-[92px_repeat(7,minmax(118px,1fr))] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-r border-slate-200 bg-slate-100 px-3 py-3 text-xs font-black uppercase tracking-wide text-slate-500">
+              Time
+            </div>
+            {daySchedules.map(({ day, events }) => {
+              const badgeDate = formatCalendarBadgeDate(day.key);
+              return (
+                <div key={day.key} className={`border-b border-r border-slate-200 px-3 py-3 last:border-r-0 ${day.isToday ? 'bg-blue-50' : 'bg-white'}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCalendarViewMode('today');
+                        setCalendarAnchorDateKey(day.key);
+                        setExpandedCalendarNoteId(null);
+                      }}
+                      className="rounded-lg text-left focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      title={`Open daily schedule for ${badgeDate.label}`}
+                    >
+                      <span className="block text-xs font-black uppercase tracking-wide text-slate-500">{day.weekday}</span>
+                      <span className="mt-0.5 block text-2xl font-black text-slate-950">{day.dayNumber}</span>
+                    </button>
+                    <span className={`rounded-full px-2 py-1 text-[10px] font-black ${events.length ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                      {events.length}
                     </span>
-                    <AddToCalendarButton
-                      label={`Add calendar item on ${badgeDate.label}`}
-                      ariaLabel={`Add task or event on ${badgeDate.label}`}
-                      icon="plus"
-                      iconOnly
-                      defaultTitle="BuildTrack task"
-                      defaultDescription={`Created directly from the ${badgeDate.label} calendar space.`}
-                      defaultDate={day.key}
-                      defaultEventType="task"
-                      sourceType="dashboard_day"
-                      contextLabel={`Calendar space: ${badgeDate.label}`}
-                      modalTitle={`Add Item - ${badgeDate.label}`}
-                      buttonClassName="inline-flex h-7 w-7 min-w-7 items-center justify-center rounded-md border border-white/20 bg-white/10 text-xs font-black text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.14),0_4px_10px_rgba(2,6,23,0.18)] transition hover:bg-white/18 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
-                      onSaved={() => refreshCalendarEvents(calendarAnchorDateKey, calendarViewMode)}
-                    />
                   </div>
                 </div>
-              </header>
-              <div className="space-y-2 p-2.5">
-                {dayEvents.length ? dayEvents.map(renderCalendarDayTask) : renderCalendarEmptyState(day.key, badgeDate.label)}
+              );
+            })}
+
+            <div className="border-r border-slate-200 bg-slate-50 px-3 py-3 text-xs font-black uppercase tracking-wide text-slate-500">
+              All day
+            </div>
+            {daySchedules.map(({ day, schedule }) => (
+              <div key={`${day.key}-untimed`} className="min-h-[68px] border-r border-slate-200 p-2 last:border-r-0">
+                {schedule.untimed.map(renderCalendarMonthEventPill)}
               </div>
-            </section>
-          );
-        })}
+            ))}
+
+            {calendarScheduleHours.map(hour => (
+              <div key={`${hour}-row`} className="contents">
+                <div key={`${hour}-label`} className="border-t border-r border-slate-200 bg-slate-50 px-3 py-3 text-xs font-black text-slate-500">
+                  {formatCalendarHourLabel(hour)}
+                </div>
+                {daySchedules.map(({ day, schedule }) => {
+                  const hourEvents = schedule.byHour[hour] || [];
+                  return (
+                    <div key={`${day.key}-${hour}`} className="min-h-[76px] border-t border-r border-slate-200 p-2 last:border-r-0">
+                      <div className="space-y-1.5">
+                        {hourEvents.map(renderCalendarMonthEventPill)}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderCalendarMonthView = () => (
-    <div className="overflow-x-auto bg-gradient-to-br from-[#050914] via-[#0B1224] to-[#101B34]">
-      <div className="min-w-[760px] p-3">
-        <div className="grid grid-cols-7 overflow-hidden rounded-t-xl border border-b-0 border-slate-600/70 bg-gradient-to-r from-slate-950 via-blue-950 to-indigo-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.10)]">
+    <div className="overflow-x-auto bg-slate-50">
+      <div className="min-w-[820px] p-4">
+        <div className="grid grid-cols-7 overflow-hidden rounded-t-2xl border border-b-0 border-slate-200 bg-slate-100">
           {calendarWeekdayLabels.map(dayLabel => (
-            <div key={dayLabel} className="border-r border-white/10 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-white last:border-r-0">
+            <div key={dayLabel} className="border-r border-slate-200 px-3 py-2 text-[11px] font-black uppercase tracking-wide text-slate-600 last:border-r-0">
               {dayLabel}
             </div>
           ))}
         </div>
-        <div className="grid grid-cols-7 overflow-hidden rounded-b-xl border border-slate-600/70 shadow-[0_14px_30px_rgba(2,6,23,0.28)]">
+        <div className="grid grid-cols-7 overflow-hidden rounded-b-2xl border border-slate-200 bg-white shadow-sm">
           {calendarVisibleMonthDays.map(day => {
             const dayEvents = sortCalendarEventsForDay(calendarEventsByDate[day.key] || []);
             const badgeDate = formatCalendarBadgeDate(day.key);
             return (
               <section
                 key={day.key}
-                className={`min-h-[132px] border-r border-b border-white/10 p-2 last:border-r-0 ${day.isToday ? 'bg-gradient-to-br from-cyan-950 via-blue-950 to-slate-950 ring-1 ring-inset ring-cyan-300/45' : day.isCurrentMonth ? 'bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950/70' : 'bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 opacity-70'}`}
+                className={`min-h-[142px] border-r border-b border-slate-200 p-2 last:border-r-0 ${day.isToday ? 'bg-blue-50 ring-1 ring-inset ring-blue-300' : day.isCurrentMonth ? 'bg-white' : 'bg-slate-50'}`}
               >
                 <header className="mb-2 flex items-center justify-between gap-2">
                   <button
@@ -1251,32 +1284,17 @@ export default function Dashboard() {
                       setCalendarAnchorDateKey(day.key);
                       setExpandedCalendarNoteId(null);
                     }}
-                    className={`rounded-lg px-2 py-1 text-left text-xs font-black transition focus:outline-none focus:ring-2 focus:ring-cyan-300/50 ${day.isCurrentMonth ? 'text-white hover:bg-white/10' : 'text-slate-500 hover:bg-white/5'}`}
+                    className={`rounded-lg px-2 py-1 text-left text-sm font-black transition focus:outline-none focus:ring-2 focus:ring-blue-500 ${day.isCurrentMonth ? 'text-slate-950 hover:bg-slate-100' : 'text-slate-400 hover:bg-slate-100'}`}
                     title={`Open daily schedule for ${badgeDate.label}`}
                   >
                     {day.dayNumber}
                   </button>
                   <div className="flex items-center gap-1">
                     {dayEvents.length ? (
-                      <span className="rounded-full bg-gradient-to-r from-cyan-400 to-blue-500 px-1.5 py-0.5 text-[9px] font-black text-white ring-1 ring-cyan-100/40 shadow-sm">
+                      <span className="rounded-full bg-blue-600 px-1.5 py-0.5 text-[9px] font-black text-white shadow-sm">
                         {dayEvents.length}
                       </span>
                     ) : null}
-                    <AddToCalendarButton
-                      label={`Add calendar item on ${badgeDate.label}`}
-                      ariaLabel={`Add task or event on ${badgeDate.label}`}
-                      icon="plus"
-                      iconOnly
-                      defaultTitle="BuildTrack task"
-                      defaultDescription={`Created directly from the ${badgeDate.label} calendar space.`}
-                      defaultDate={day.key}
-                      defaultEventType="task"
-                      sourceType="dashboard_day"
-                      contextLabel={`Calendar space: ${badgeDate.label}`}
-                      modalTitle={`Add Item - ${badgeDate.label}`}
-                      buttonClassName="inline-flex h-6 w-6 min-w-6 items-center justify-center rounded-md border border-white/20 bg-white/10 text-[10px] font-black text-white shadow-sm transition hover:bg-white/18 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
-                      onSaved={() => refreshCalendarEvents(calendarAnchorDateKey, calendarViewMode)}
-                    />
                   </div>
                 </header>
                 <div className="space-y-1.5">
@@ -1291,102 +1309,139 @@ export default function Dashboard() {
   );
 
   const renderCollapsedCalendarPreview = () => {
-    const previewEvents = sortCalendarEventsForRange(displayedCalendarEvents).slice(0, 4);
-    const hiddenCount = Math.max(displayedCalendarEvents.length - previewEvents.length, 0);
-    const selectedLabel = calendarViewMode === 'today'
-      ? formatCalendarBadgeDate(calendarAnchorDateKey).label
-      : calendarViewTitle;
-    const previewKicker = calendarViewMode === 'today'
-      ? (calendarAnchorDateKey === todayKey ? "Today's schedule" : 'Selected day')
-      : calendarViewKicker;
+    const nextSevenEndKey = formatLocalDateInput(addCalendarDays(localDateInputToNoonDate(todayKey), 6));
+    const todayAgenda = sortCalendarEventsForDay(displayedCalendarEvents.filter(event => calendarDateKeyForEvent(event) === todayKey));
+    const upcomingAgenda = sortCalendarEventsForRange(displayedCalendarEvents.filter(event => {
+      const dateKey = calendarDateKeyForEvent(event);
+      return Boolean(dateKey && dateKey > todayKey && dateKey <= nextSevenEndKey);
+    })).slice(0, 8);
+    const hiddenCount = Math.max(displayedCalendarEvents.length - todayAgenda.length - upcomingAgenda.length, 0);
+    const renderCompactAgendaItem = (event: OperationsCalendarEvent) => {
+      const dateKey = calendarDateKeyForEvent(event) || todayKey;
+      const badgeDate = formatCalendarBadgeDate(dateKey);
+      const projectLabel = getCalendarProjectLabel(event);
+      const tone = calendarEventTone(event);
+
+      return (
+        <button
+          key={event.id}
+          type="button"
+          onClick={() => {
+          setCalendarAnchorDateKey(dateKey);
+          setCalendarViewMode('today');
+          setCalendarExpanded(true);
+          openCalendarEntryEditor(event);
+        }}
+          className={`bt-calendar-preview-task group relative min-w-0 overflow-hidden rounded-xl border px-3 py-2.5 text-left transition focus:outline-none focus:ring-2 focus:ring-blue-500 ${tone.card}`}
+        >
+          <span className={`absolute bottom-3 left-0 top-3 w-1 rounded-r-full ${tone.rail}`} />
+          <span className="block pl-2">
+            <span className="flex min-w-0 items-center justify-between gap-2">
+              <span className="min-w-0 truncate text-sm font-black text-slate-950">{event.title || 'Untitled calendar item'}</span>
+              <span className={`flex-shrink-0 rounded-full px-2 py-1 text-[10px] font-black ${tone.time}`}>
+                {formatCalendarDueTimeLabel(event.due_time)}
+              </span>
+            </span>
+            <span className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
+              <span className="truncate text-xs font-semibold text-slate-600">{projectLabel}</span>
+              <span className={`rounded-full px-2 py-1 text-[10px] font-black uppercase leading-none ${tone.chip}`}>
+                {calendarTypeLabel(event.event_type)}
+              </span>
+              <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-black uppercase text-slate-600">
+                {badgeDate.month} {badgeDate.day}
+              </span>
+            </span>
+          </span>
+        </button>
+      );
+    };
 
     return (
-      <div className="bt-calendar-preview bg-gradient-to-br from-[#050914] via-[#0B1224] to-[#101B34] p-3">
-        <div className="grid gap-3 xl:grid-cols-[260px_minmax(0,1fr)_auto] xl:items-stretch">
-          <div className="bt-calendar-day-card rounded-2xl border border-cyan-300/20 bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_12px_22px_rgba(2,6,23,0.22)]">
-            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-cyan-200">{previewKicker}</p>
-            <h4 className="mt-2 text-xl font-black leading-tight text-white">{calendarViewTitle}</h4>
-            <div className="mt-3 inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-slate-950 via-blue-950 to-cyan-950 px-3 py-1 text-xs font-black text-white ring-1 ring-cyan-300/25 shadow-sm">
-              <span className="h-1.5 w-1.5 rounded-full bg-cyan-300" />
-              {calendarViewEventCount} {calendarViewEventCount === 1 ? 'item' : 'items'}
+      <div className="bt-calendar-preview bg-slate-50 p-4">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)] xl:items-stretch">
+          <div className="bt-calendar-preview-list rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-black uppercase tracking-wide text-blue-700">Today's agenda</p>
+                <h4 className="mt-1 text-xl font-black text-slate-950">{formatCalendarBadgeDate(todayKey).label}</h4>
+              </div>
+              <span className="rounded-full bg-blue-600 px-2.5 py-1 text-xs font-black text-white">{todayAgenda.length}</span>
             </div>
-            <p className="mt-3 text-xs font-bold leading-5 text-slate-400">{selectedLabel}</p>
+            <div className="grid gap-2">
+              {todayAgenda.length ? todayAgenda.map(renderCompactAgendaItem) : renderCalendarEmptyState(todayKey, 'Today')}
+            </div>
           </div>
 
-          <div className="bt-calendar-preview-list min-w-0 rounded-2xl border border-white/10 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_12px_22px_rgba(2,6,23,0.22)]">
-            {previewEvents.length ? (
-              <div className="grid gap-2 xl:grid-cols-2">
-                {previewEvents.map(event => {
-                  const complete = event.status === 'completed';
-                  const projectLabel = getCalendarProjectLabel(event);
-                  const dateKey = calendarDateKeyForEvent(event) || calendarAnchorDateKey;
-                  const badgeDate = formatCalendarBadgeDate(dateKey);
-                  const tone = calendarEventTone(event);
-
-                  return (
-                    <button
-                      key={event.id}
-                      type="button"
-                      onClick={() => {
-                        setCalendarAnchorDateKey(dateKey);
-                        setCalendarViewMode('today');
-                        setCalendarExpanded(true);
-                        openCalendarEntryEditor(event);
-                      }}
-                      className={`bt-calendar-preview-task group relative min-w-0 overflow-hidden rounded-[10px] border px-3 py-2 text-left transition focus:outline-none focus:ring-2 focus:ring-cyan-300/50 ${tone.card}`}
-                    >
-                      <span className={`absolute bottom-2 left-0 top-2 w-1 rounded-r-full ${tone.rail}`} />
-                      <span className="block pl-2">
-                        <span className="flex items-center justify-between gap-2">
-                          <span className={`min-w-0 truncate text-sm font-black leading-5 ${complete ? 'text-white/90 line-through decoration-white/80' : 'text-white'}`}>
-                            {event.title}
-                          </span>
-                          <span className={`flex-shrink-0 rounded-md px-2 py-1 text-[10px] font-black leading-none ring-1 ${tone.time}`}>
-                            {formatCalendarDueTimeLabel(event.due_time)}
-                          </span>
-                        </span>
-                        <span className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
-                          <span className="truncate text-[11px] font-bold text-white/90">{projectLabel}</span>
-                            <span className={`rounded-md px-1.5 py-0.5 text-[9px] font-black uppercase leading-none ${tone.chip}`}>
-                            {calendarTypeLabel(event.event_type)}
-                          </span>
-                          {calendarViewMode !== 'today' ? (
-                            <span className="rounded-md bg-white/22 px-1.5 py-0.5 text-[9px] font-black uppercase text-white ring-1 ring-white/35">
-                              {badgeDate.month} {badgeDate.day}
-                            </span>
-                          ) : null}
-                        </span>
-                      </span>
-                    </button>
-                  );
-                })}
+          <div className="bt-calendar-preview-list min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-black uppercase tracking-wide text-slate-500">Upcoming 7 days</p>
+                <h4 className="mt-1 text-xl font-black text-slate-950">{formatCalendarBadgeDate(todayKey).label} - {formatCalendarBadgeDate(nextSevenEndKey).label}</h4>
               </div>
-            ) : (
-              renderCalendarEmptyState(calendarAnchorDateKey, selectedLabel)
-            )}
+              <span className="rounded-full bg-slate-900 px-2.5 py-1 text-xs font-black text-white">{upcomingAgenda.length}</span>
+            </div>
+            {upcomingAgenda.length ? (
+              <div className="grid gap-2 lg:grid-cols-2">
+                {upcomingAgenda.map(renderCompactAgendaItem)}
+              </div>
+            ) : renderCalendarEmptyState(todayKey, 'Upcoming 7 days')}
             {hiddenCount > 0 ? (
               <button
                 type="button"
-                onClick={() => setCalendarExpanded(true)}
-                className="mt-3 inline-flex min-h-8 items-center rounded-lg border border-cyan-300/35 bg-gradient-to-r from-slate-950 via-blue-950 to-cyan-950 px-3 text-xs font-black text-white shadow-sm transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
+                onClick={() => {
+                  setCalendarExpanded(true);
+                }}
+                className="mt-3 inline-flex min-h-9 items-center rounded-lg border border-blue-600 bg-blue-600 px-3 text-xs font-black text-white shadow-sm transition hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
               >
                 View {hiddenCount} more
               </button>
             ) : null}
           </div>
 
-          <div className="flex min-w-[170px] flex-col justify-center gap-2 rounded-2xl border border-teal-300/20 bg-gradient-to-br from-slate-950 via-teal-950 to-cyan-950 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_12px_22px_rgba(2,6,23,0.22)]">
-            <button
-              type="button"
-              onClick={() => setCalendarExpanded(true)}
-              className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-cyan-300/35 bg-gradient-to-r from-slate-950 via-blue-950 to-cyan-950 px-3 text-sm font-black text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_8px_16px_rgba(14,165,233,0.16)] transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
-              aria-expanded={calendarExpanded}
-            >
-              Expand calendar
-              <ChevronDown className="h-4 w-4 rotate-180" />
-            </button>
-          </div>
         </div>
+      </div>
+    );
+  };
+
+  const renderCalendarListView = () => {
+    const grouped = sortCalendarEventsForRange(displayedCalendarEvents).reduce<Record<string, OperationsCalendarEvent[]>>((groups, event) => {
+      const dateKey = calendarDateKeyForEvent(event) || calendarAnchorDateKey;
+      if (!groups[dateKey]) groups[dateKey] = [];
+      groups[dateKey].push(event);
+      return groups;
+    }, {});
+    const dateKeys = Object.keys(grouped).sort();
+
+    return (
+      <div className="bg-slate-50 p-4">
+        {dateKeys.length === 0 ? (
+          renderCalendarEmptyState(calendarAnchorDateKey, calendarViewTitle)
+        ) : (
+          <div className="space-y-4">
+            {dateKeys.map(dateKey => {
+              const badgeDate = formatCalendarBadgeDate(dateKey);
+              const dateEvents = grouped[dateKey] || [];
+              return (
+                <section key={dateKey} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                  <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
+                    <div>
+                      <p className="text-xs font-black uppercase tracking-wide text-slate-500">
+                        {formatEasternDate(`${dateKey}T12:00:00`, { weekday: 'long' })}
+                      </p>
+                      <h4 className="text-lg font-black text-slate-950">{badgeDate.label}</h4>
+                    </div>
+                    <span className="rounded-full bg-slate-900 px-2.5 py-1 text-xs font-black text-white">
+                      {dateEvents.length} {dateEvents.length === 1 ? 'item' : 'items'}
+                    </span>
+                  </header>
+                  <div className="grid gap-2 p-4 md:grid-cols-2">
+                    {dateEvents.map(renderCalendarDayTask)}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   };
@@ -1394,6 +1449,7 @@ export default function Dashboard() {
   const renderSelectedCalendarView = () => {
     if (calendarViewMode === 'today') return renderCalendarTodayView();
     if (calendarViewMode === 'week') return renderCalendarWeekView();
+    if (calendarViewMode === 'list') return renderCalendarListView();
     return renderCalendarMonthView();
   };
 
@@ -1511,6 +1567,21 @@ export default function Dashboard() {
                       Open
                     </span>
                   ) : null}
+                  {canDeleteProjectNotes && item.feed_type === 'note' && item.project_id ? (
+                    <button
+                      type="button"
+                      onClick={event => {
+                        event.stopPropagation();
+                        void deleteDashboardNote(item);
+                      }}
+                      disabled={deletingActivityNoteId === item.id}
+                      className="inline-flex items-center gap-1 rounded-md border border-red-300/40 bg-red-500/15 px-3 py-1.5 text-[11px] font-black uppercase tracking-wide text-red-100 transition hover:border-red-200 hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-60"
+                      title="Delete note"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      {deletingActivityNoteId === item.id ? 'Deleting' : 'Delete'}
+                    </button>
+                  ) : null}
                 </div>
               </div>
             );
@@ -1521,8 +1592,9 @@ export default function Dashboard() {
   );
 
   return (
-    <div className="bt-desktop-page bt-dashboard-page" style={{ minHeight: '100%' }}>
+    <div className={`bt-desktop-page ${calendarOnly ? 'bt-calendar-route-page' : 'bt-dashboard-page'}`} style={{ minHeight: '100%' }}>
       {/* Hero header bar */}
+      {!calendarOnly && (
       <div
         className="bt-dashboard-hero border-b px-4 py-4 md:px-6"
       >
@@ -1558,10 +1630,169 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+      )}
 
-      <div className="mx-auto max-w-[1720px] space-y-5 px-4 py-4 md:px-6">
+      <div className={`mx-auto ${calendarOnly ? 'max-w-none p-0' : 'max-w-[1720px] space-y-5 px-4 py-4 md:px-6'}`}>
         {/* Operations schedule */}
         {canAccessOperationsCalendar && (
+        calendarOnly ? (
+        <section className="bt-ops-calendar-pro" aria-label="Operations calendar">
+          <div className="bt-ops-calendar-pro__header">
+            <div className="min-w-0">
+              <h1 className="bt-ops-calendar-pro__title">Operations Calendar</h1>
+              <p className="bt-ops-calendar-pro__subtitle">
+                Plan field work, inspections, deliveries, and reminders across all active jobsites.
+              </p>
+            </div>
+            <AddToCalendarButton
+              label="Add event"
+              defaultTitle="BuildTrack operations reminder"
+              defaultDescription="Created from the operations calendar."
+              defaultDate={calendarAnchorDateKey}
+              sourceType="dashboard"
+              contextLabel="Operations calendar"
+              allowEmailReminder={canCreateCalendarReminders}
+              modalTitle="Add calendar event"
+              buttonClassName="bt-ops-action-button bt-ops-action-button--primary"
+              onSaved={refreshCalendarEvents}
+            />
+          </div>
+          <div className="bt-ops-calendar-pro__stats">
+            <div className="bt-ops-calendar-pro__stat"><span>Today</span><strong>{todayOpenCalendarEvents.length}</strong></div>
+            <div className="bt-ops-calendar-pro__stat"><span>This week</span><strong>{thisWeekCalendarEvents.length}</strong></div>
+            <div className={`bt-ops-calendar-pro__stat${overdueCalendarEvents.length ? ' bt-ops-calendar-pro__stat--alert' : ''}`}>
+              <span>Overdue</span><strong>{overdueCalendarEvents.length}</strong>
+            </div>
+            <div className="bt-ops-calendar-pro__stat"><span>In view</span><strong>{calendarViewEventCount}</strong></div>
+          </div>
+          <div className="bt-ops-calendar-pro__controls">
+            <label className="bt-ops-calendar-pro__search">
+              <span className="sr-only">Search calendar</span>
+              <input
+                value={calendarSearch}
+                onChange={event => setCalendarSearch(event.target.value)}
+                placeholder="Search title, jobsite, or notes..."
+              />
+            </label>
+            <div className="bt-ops-calendar-pro__queue" role="group" aria-label="Calendar queue">
+              {([
+                { key: 'upcoming', label: 'Upcoming', count: upcomingCalendarEvents.length },
+                { key: 'completed', label: 'Completed', count: completedCalendarEvents.length },
+              ] as const).map(filter => (
+                <button
+                  key={filter.key}
+                  type="button"
+                  onClick={() => {
+                    setCalendarQueueFilter(filter.key);
+                    setExpandedCalendarNoteId(null);
+                  }}
+                  aria-pressed={calendarQueueFilter === filter.key}
+                >
+                  {filter.label} ({filter.count})
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="bt-ops-calendar-pro__filters-toggle"
+              onClick={() => setCalendarFiltersExpanded(current => !current)}
+              aria-expanded={calendarFiltersExpanded}
+            >
+              Filters{activeCalendarFiltersCount ? ` (${activeCalendarFiltersCount})` : ''}
+            </button>
+          </div>
+          {calendarFiltersExpanded ? (
+            <div className="bt-ops-calendar-pro__filters-panel">
+              <div className="bt-ops-calendar-pro__filter-grid">
+                <label>
+                  <span className="mb-1 block text-xs font-medium text-slate-600">Priority</span>
+                  <select value={calendarPriorityFilter} onChange={event => setCalendarPriorityFilter(event.target.value)}>
+                    <option value="all">All priorities</option>
+                    <option value="critical">Critical</option>
+                    <option value="high">High</option>
+                    <option value="normal">Normal</option>
+                    <option value="low">Low</option>
+                  </select>
+                </label>
+                <label>
+                  <span className="mb-1 block text-xs font-medium text-slate-600">Status</span>
+                  <select value={calendarStatusFilter} onChange={event => setCalendarStatusFilter(event.target.value)}>
+                    <option value="all">All statuses</option>
+                    <option value="scheduled">Scheduled</option>
+                    <option value="in_progress">In progress</option>
+                    <option value="completed">Completed</option>
+                    <option value="cancelled">Canceled</option>
+                  </select>
+                </label>
+                <label>
+                  <span className="mb-1 block text-xs font-medium text-slate-600">Reminders</span>
+                  <select value={calendarReminderFilter} onChange={event => setCalendarReminderFilter(event.target.value)}>
+                    <option value="all">All reminder states</option>
+                    <option value="enabled">Email enabled</option>
+                    <option value="disabled">No email reminder</option>
+                  </select>
+                </label>
+                <div className="flex items-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCalendarSearch('');
+                      setCalendarPriorityFilter('all');
+                      setCalendarStatusFilter('all');
+                      setCalendarReminderFilter('all');
+                    }}
+                    disabled={activeCalendarFiltersCount === 0}
+                    className="bt-ops-calendar-pro__clear-filters"
+                  >
+                    Clear filters
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          <div className="bt-ops-calendar-pro__shell">
+            <div className="bt-ops-calendar-pro__toolbar">
+              <div className="min-w-0">
+                <h3>{calendarViewTitle}</h3>
+                <p>{calendarViewEventCount} {calendarViewEventCount === 1 ? 'event' : 'events'} · {calendarViewKicker}</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="bt-ops-calendar-pro__view-switch" role="group" aria-label="Calendar view">
+                  {([
+                    { key: 'today', label: 'Day' },
+                    { key: 'week', label: 'Week' },
+                    { key: 'month', label: 'Month' },
+                    { key: 'list', label: 'List' },
+                  ] as const).map(view => (
+                    <button
+                      key={view.key}
+                      type="button"
+                      onClick={() => changeCalendarViewMode(view.key)}
+                      aria-pressed={calendarViewMode === view.key}
+                    >
+                      {view.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="bt-ops-calendar-pro__nav flex items-center gap-1.5">
+                  <button type="button" onClick={() => moveCalendarPeriod(-1)} aria-label={`Previous ${calendarViewMode}`}>
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                  <button type="button" className="bt-ops-calendar-pro__today" onClick={jumpToTodayCalendarView}>
+                    Today
+                  </button>
+                  <button type="button" onClick={() => moveCalendarPeriod(1)} aria-label={`Next ${calendarViewMode}`}>
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div id="jobsite-operations-calendar-body" className="bt-ops-calendar-pro__body">
+              {renderSelectedCalendarView()}
+            </div>
+          </div>
+        </section>
+        ) : (
         <section
           className="bt-dashboard-ops-panel relative overflow-hidden"
           aria-label="Operations schedule"
@@ -1570,30 +1801,24 @@ export default function Dashboard() {
           <div className="bt-dashboard-ops-header relative grid min-h-8 gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-end">
             <div className="min-w-0">
               <p className="bt-section-kicker">Operations schedule</p>
-              <h2 className="truncate text-2xl font-black tracking-tight" style={{ color: 'var(--bt-text)' }}>Jobsite Operations Calendar</h2>
-              <p className="mt-1 text-sm font-semibold text-slate-300">
-                Weekly field schedule, task completion, and operational reminders.
+              <h2 className="truncate text-2xl font-black tracking-tight text-slate-950">Operations Calendar</h2>
+              <p className="mt-1 text-sm font-semibold text-slate-700">
+                Schedule jobsites, field visits, tasks, inspections, material deliveries, and reminders.
               </p>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
               <AddToCalendarButton
-                label="Add to Calendar"
+                label="Add Event"
                 defaultTitle="BuildTrack operations reminder"
                 defaultDescription="Created from the dashboard."
+                defaultDate={calendarAnchorDateKey}
                 sourceType="dashboard"
                 contextLabel="Dashboard operations calendar"
+                allowEmailReminder={canCreateCalendarReminders}
+                modalTitle="Add Event"
+                buttonClassName="bt-ops-action-button bt-ops-action-button--primary"
                 onSaved={refreshCalendarEvents}
               />
-              {canCreateCalendarReminders && (
-                <button
-                  type="button"
-                  onClick={openCalendarReminderComposer}
-                  className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-600/80 bg-slate-900/80 px-3 py-2 text-sm font-black text-slate-100 transition-colors hover:border-cyan-300/70 hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
-                >
-                  <Mail className="h-3.5 w-3.5" />
-                  Email Reminder
-                </button>
-              )}
             </div>
           </div>
           <div className="bt-calendar-filter-row mt-2 flex flex-wrap items-center gap-2">
@@ -1610,54 +1835,112 @@ export default function Dashboard() {
                     setCalendarQueueFilter(filter.key);
                     setExpandedCalendarNoteId(null);
                   }}
-                    className="inline-flex min-h-10 items-center gap-2 rounded-full border px-4 py-2 text-sm font-black shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-300/60"
-                    style={{
-                    background: active ? 'linear-gradient(135deg, #6D28D9, #0F766E)' : 'rgba(31,27,55,0.92)',
-                    borderColor: active ? 'rgba(196,181,253,0.50)' : 'transparent',
-                    color: active ? '#FFFFFF' : '#E5E7EB',
-                  }}
+                  className={`inline-flex min-h-10 items-center gap-2 rounded-full border px-4 py-2 text-sm font-black shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-blue-300/60 ${active ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white text-slate-800 hover:border-blue-300 hover:bg-blue-50'}`}
                   aria-pressed={active}
                 >
                   {filter.label}
-                  <span
-                    className="rounded-full px-2 py-0.5 text-[11px] font-black"
-                    style={{
-                      background: active ? '#F8FAFC' : 'rgba(196,181,253,0.16)',
-                      color: active ? '#0F172A' : '#F8FAFC',
-                    }}
-                  >
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-black ${active ? 'bg-white text-slate-950' : 'bg-slate-100 text-slate-700'}`}>
                     {filter.count}
                   </span>
                 </button>
               );
             })}
           </div>
-          <div className="mt-3 grid gap-2 grid-cols-2 lg:grid-cols-4">
+          <div className="mt-3 grid gap-2 grid-cols-2 lg:grid-cols-5">
             {calendarSummaryCards.map(card => (
               <div
                 key={card.label}
-                className={`rounded-xl border bg-gradient-to-br px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.14),inset_0_-2px_5px_rgba(0,0,0,0.35),0_10px_28px_rgba(2,6,23,0.26)] ${card.tone}`}
+                className={`bt-calendar-summary-chip rounded-xl border px-3 py-2.5 ${card.tone}`}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-[10px] font-black uppercase tracking-wide opacity-80">{card.label}</p>
-                    <p className="mt-1 truncate text-[11px] font-bold text-white/85">{card.detail}</p>
+                    <p className="text-[10px] font-black uppercase tracking-wide">{card.label}</p>
+                    <p className="mt-1 truncate text-[11px] font-bold opacity-75">{card.detail}</p>
                   </div>
-                  <p className="text-2xl font-black text-white">{card.value}</p>
+                  <p className="text-2xl font-black">{card.value}</p>
                 </div>
               </div>
             ))}
           </div>
-          <div className="bt-calendar-shell mt-4 overflow-hidden rounded-[18px] border border-cyan-300/20 bg-gradient-to-br from-[#040816] via-[#071226] to-[#0E1A33] shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_22px_52px_rgba(2,6,23,0.38)]">
-            <div className="bt-calendar-toolbar flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-3" style={{ background: 'linear-gradient(90deg, #071226, #123B72 50%, #0F3B46)' }}>
+          <div className="bt-calendar-filter-panel mt-3 grid gap-2 rounded-2xl border border-slate-200 bg-white/85 p-3 shadow-sm lg:grid-cols-[minmax(220px,1fr)_160px_160px_180px_auto]">
+            <label className="block min-w-0">
+              <span className="mb-1 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide text-slate-700">
+                <ListFilter className="h-3.5 w-3.5" />
+                Search
+              </span>
+              <input
+                value={calendarSearch}
+                onChange={event => setCalendarSearch(event.target.value)}
+                className="min-h-10 w-full rounded-lg border border-slate-600 bg-white px-3 text-sm font-semibold text-slate-950 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-300"
+                placeholder="Title, jobsite, notes..."
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[10px] font-black uppercase tracking-wide text-slate-700">Priority</span>
+              <select
+                value={calendarPriorityFilter}
+                onChange={event => setCalendarPriorityFilter(event.target.value)}
+                className="min-h-10 w-full rounded-lg border border-slate-600 bg-white px-3 text-sm font-bold text-slate-950 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-300"
+              >
+                <option value="all">All priorities</option>
+                <option value="critical">Critical</option>
+                <option value="high">High</option>
+                <option value="normal">Normal</option>
+                <option value="low">Low</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[10px] font-black uppercase tracking-wide text-slate-700">Status</span>
+              <select
+                value={calendarStatusFilter}
+                onChange={event => setCalendarStatusFilter(event.target.value)}
+                className="min-h-10 w-full rounded-lg border border-slate-600 bg-white px-3 text-sm font-bold text-slate-950 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-300"
+              >
+                <option value="all">All statuses</option>
+                <option value="scheduled">Scheduled</option>
+                <option value="in_progress">In Progress</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Canceled</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[10px] font-black uppercase tracking-wide text-slate-700">Reminders</span>
+              <select
+                value={calendarReminderFilter}
+                onChange={event => setCalendarReminderFilter(event.target.value)}
+                className="min-h-10 w-full rounded-lg border border-slate-600 bg-white px-3 text-sm font-bold text-slate-950 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-300"
+              >
+                <option value="all">All reminder states</option>
+                <option value="enabled">Email enabled</option>
+                <option value="disabled">No email reminder</option>
+              </select>
+            </label>
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setCalendarSearch('');
+                  setCalendarPriorityFilter('all');
+                  setCalendarStatusFilter('all');
+                  setCalendarReminderFilter('all');
+                }}
+                disabled={activeCalendarFiltersCount === 0}
+                className="min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-xs font-black uppercase tracking-wide text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Clear Filters
+              </button>
+            </div>
+          </div>
+          <div className="bt-calendar-shell mt-4 overflow-hidden rounded-[18px] border border-slate-200 bg-white shadow-xl shadow-slate-950/20">
+            <div className="bt-calendar-toolbar sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3">
               <div className="min-w-0">
-                <p className="text-[11px] font-black uppercase tracking-wide text-white/80">{calendarViewKicker}</p>
-                <h3 className="mt-0.5 text-lg font-black text-white drop-shadow-sm">{calendarViewTitle}</h3>
+                <p className="text-[11px] font-black uppercase tracking-wide text-blue-700">{calendarViewKicker}</p>
+                <h3 className="mt-0.5 text-lg font-black text-slate-950">{calendarViewTitle}</h3>
               </div>
               <div className="flex flex-wrap items-center justify-end gap-1.5">
-                <div className="mr-1 inline-flex rounded-xl border border-white/15 bg-black/25 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.10)]">
+                <div className="mr-1 inline-flex rounded-xl border border-slate-200 bg-slate-100 p-1 shadow-inner">
                   {([
-                    { key: 'today', label: 'Today' },
+                    { key: 'today', label: 'Day' },
                     { key: 'week', label: 'Week' },
                     { key: 'month', label: 'Month' },
                   ] as const).map(view => {
@@ -1667,7 +1950,7 @@ export default function Dashboard() {
                         key={view.key}
                         type="button"
                         onClick={() => changeCalendarViewMode(view.key)}
-                        className={`min-h-8 rounded-lg px-3 text-xs font-black transition focus:outline-none focus:ring-2 focus:ring-cyan-300/50 ${active ? 'bg-gradient-to-r from-slate-950 via-blue-950 to-cyan-950 text-white ring-1 ring-cyan-300/35 shadow-sm' : 'text-white/78 hover:bg-white/10 hover:text-white'}`}
+                        className={`min-h-8 rounded-lg px-3 text-xs font-black transition focus:outline-none focus:ring-2 focus:ring-blue-500 ${active ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white hover:text-slate-950'}`}
                         aria-pressed={active}
                       >
                         {view.label}
@@ -1678,7 +1961,7 @@ export default function Dashboard() {
                 <button
                   type="button"
                   onClick={() => moveCalendarPeriod(-1)}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-black/25 text-white shadow-sm transition hover:bg-white/12"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 shadow-sm transition hover:bg-slate-50"
                   title={`Previous ${calendarViewMode}`}
                   aria-label={`Previous ${calendarViewMode}`}
                 >
@@ -1687,41 +1970,31 @@ export default function Dashboard() {
                 <button
                   type="button"
                   onClick={jumpToTodayCalendarView}
-                  className="inline-flex min-h-8 items-center rounded-lg border border-cyan-300/30 bg-gradient-to-r from-slate-950 via-blue-950 to-cyan-950 px-2.5 text-xs font-black text-white shadow-sm transition hover:brightness-110"
+                  className="inline-flex min-h-8 items-center rounded-lg border border-blue-600 bg-blue-600 px-2.5 text-xs font-black text-white shadow-sm transition hover:bg-blue-500"
                 >
                   Today
                 </button>
-                <label className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-white/15 bg-black/25 px-2 text-xs font-black text-white shadow-sm">
-                  <span>Date</span>
-                  <input
-                    type="date"
-                    value={calendarAnchorDateKey}
-                    onChange={event => jumpToCalendarDate(event.target.value)}
-                    className="h-6 rounded-md border border-white/15 bg-slate-950 px-1.5 text-xs font-bold text-white outline-none focus:border-cyan-300"
-                    aria-label="Choose calendar date"
-                  />
-                </label>
                 <button
                   type="button"
                   onClick={() => moveCalendarPeriod(1)}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-black/25 text-white shadow-sm transition hover:bg-white/12"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 shadow-sm transition hover:bg-slate-50"
                   title={`Next ${calendarViewMode}`}
                   aria-label={`Next ${calendarViewMode}`}
                 >
                   <ChevronRight className="h-4 w-4" />
                 </button>
-                <span className="rounded-lg border border-white/15 bg-black/25 px-2.5 py-1 text-xs font-black text-white shadow-sm">
+                <span className="rounded-lg border border-slate-300 bg-slate-50 px-2.5 py-1 text-xs font-black text-slate-700 shadow-sm">
                   {calendarViewEventCount} {calendarViewEventCount === 1 ? 'item' : 'items'}
                 </span>
                 <button
                   type="button"
                   onClick={() => setCalendarExpanded(current => !current)}
-                  className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-teal-300/25 bg-gradient-to-r from-slate-950 via-teal-950 to-cyan-950 px-2.5 text-xs font-black text-white shadow-sm transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
+                  className="bt-calendar-toggle-button inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 text-xs font-black text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   aria-expanded={calendarExpanded}
                   aria-controls="jobsite-operations-calendar-body"
                 >
-                  {calendarExpanded ? 'Collapse' : 'Expand'}
-                  <ChevronDown className={`h-4 w-4 transition-transform ${calendarExpanded ? '' : 'rotate-180'}`} />
+                  {calendarExpanded ? 'Hide Calendar' : 'Expand Calendar'}
+                  {calendarExpanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
                 </button>
               </div>
             </div>
@@ -1730,15 +2003,36 @@ export default function Dashboard() {
             </div>
           </div>
         </section>
+        ))}
+
+        {calendarOnly && !canAccessOperationsCalendar && (
+          <section
+            className="bt-dashboard-ops-panel relative overflow-hidden"
+            aria-label="Operations calendar access"
+          >
+            <div className="bt-dashboard-ops-strip absolute inset-x-0 top-0 h-1" />
+            <div className="relative flex min-h-[360px] flex-col items-center justify-center gap-3 px-6 py-12 text-center">
+              <CalendarDays className="h-10 w-10 text-slate-400" />
+              <div>
+                <p className="bt-section-kicker">Operations calendar</p>
+                <h2 className="mt-1 text-2xl font-black text-slate-950">Calendar access required</h2>
+                <p className="mt-2 max-w-xl text-sm font-semibold text-slate-700">
+                  This calendar is available to Super Admin, Operations Manager, and Project Manager users.
+                </p>
+              </div>
+            </div>
+          </section>
         )}
 
-        {renderActivityFeedPanel()}
+        {!calendarOnly && renderActivityFeedPanel()}
 
         {/* Footer */}
+        {!calendarOnly && (
         <div className="flex items-center justify-between py-2">
           <p className="text-xs text-gray-400">© 2026 New Urban Development · BuildTrack Platform</p>
           <p className="text-xs text-gray-400">Live time: {liveEasternTimeLabel}</p>
         </div>
+        )}
       </div>
 
       <Modal
@@ -1850,7 +2144,21 @@ export default function Dashboard() {
             />
           </label>
 
-          <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3">
+            <div>
+              {editingCalendarEvent?.source !== 'construction_task' && (
+                <button
+                  type="button"
+                  onClick={deleteCalendarEntry}
+                  disabled={savingCalendarEdit}
+                  className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 text-sm font-black text-red-700 transition hover:bg-red-100 disabled:opacity-60"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete Event
+                </button>
+              )}
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
             <button
               type="button"
               onClick={closeCalendarEntryEditor}
@@ -1868,138 +2176,7 @@ export default function Dashboard() {
               <Edit2 className="h-4 w-4" />
               {savingCalendarEdit ? 'Saving' : 'Save Entry'}
             </button>
-          </div>
-        </div>
-      </Modal>
-
-      <Modal
-        isOpen={showCalendarReminderComposer}
-        onClose={() => setShowCalendarReminderComposer(false)}
-        title="Calendar Email Reminder"
-        description="Send from info@newurbandev.com now or schedule a one-time, weekly, or monthly reminder."
-        size="xl"
-      >
-        <div className="space-y-4">
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-            <p className="text-xs font-black uppercase tracking-wide text-amber-800">Sender</p>
-            <p className="mt-1 text-sm font-bold text-amber-900">info@newurbandev.com</p>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
-            <label className="block">
-              <span className="text-xs font-black uppercase tracking-wide text-slate-600">Reminder title</span>
-              <input
-                value={reminderTitle}
-                onChange={event => setReminderTitle(event.target.value)}
-                className="mt-1 min-h-[44px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-950 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
-                placeholder="Reminder title"
-              />
-            </label>
-            <label className="block">
-              <span className="text-xs font-black uppercase tracking-wide text-slate-600">Calendar type</span>
-              <select
-                value={reminderEventType}
-                onChange={event => setReminderEventType(event.target.value)}
-                className="mt-1 min-h-[44px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-950 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
-              >
-                <option value="other">Calendar</option>
-                <option value="task">Task</option>
-                <option value="inspection">Inspection</option>
-                <option value="maintenance">Maintenance</option>
-                <option value="note">Note</option>
-              </select>
-            </label>
-          </div>
-
-          <label className="block">
-            <span className="text-xs font-black uppercase tracking-wide text-slate-600">Recipients</span>
-            <textarea
-              value={reminderRecipients}
-              onChange={event => setReminderRecipients(event.target.value)}
-              rows={3}
-              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-950 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
-              placeholder="contractor@email.com, team@company.com"
-            />
-            <span className="mt-1 block text-xs font-semibold text-slate-500">Enter any email address. Separate multiple recipients with commas, spaces, or new lines.</span>
-          </label>
-
-          <label className="block">
-            <span className="text-xs font-black uppercase tracking-wide text-slate-600">Reminder message</span>
-            <VoiceTextarea
-              value={reminderMessage}
-              onChange={event => setReminderMessage(event.target.value)}
-              rows={4}
-              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-950 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
-              placeholder="Write the reminder message that should be emailed."
-            />
-          </label>
-
-          <div className="grid gap-3 md:grid-cols-4">
-            <label className="block">
-              <span className="text-xs font-black uppercase tracking-wide text-slate-600">Send schedule</span>
-              <select
-                value={reminderScheduleType}
-                onChange={event => setReminderScheduleType(event.target.value as 'now' | 'once' | 'weekly' | 'monthly')}
-                className="mt-1 min-h-[44px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-950 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
-              >
-                <option value="now">Send now</option>
-                <option value="once">One time</option>
-                <option value="weekly">Weekly</option>
-                <option value="monthly">Monthly</option>
-              </select>
-            </label>
-            <label className="block">
-              <span className="text-xs font-black uppercase tracking-wide text-slate-600">Date</span>
-              <input
-                type="date"
-                value={reminderDate}
-                onChange={event => setReminderDate(event.target.value)}
-                disabled={reminderScheduleType === 'now'}
-                className="mt-1 min-h-[44px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-950 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
-              />
-            </label>
-            <label className="block">
-              <span className="text-xs font-black uppercase tracking-wide text-slate-600">Time</span>
-              <input
-                type="time"
-                value={reminderTime}
-                onChange={event => setReminderTime(event.target.value)}
-                disabled={reminderScheduleType === 'now'}
-                className="mt-1 min-h-[44px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-950 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
-              />
-            </label>
-            <label className="block">
-              <span className="text-xs font-black uppercase tracking-wide text-slate-600">Priority</span>
-              <select
-                value={reminderPriority}
-                onChange={event => setReminderPriority(event.target.value)}
-                className="mt-1 min-h-[44px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-950 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
-              >
-                <option value="normal">Normal</option>
-                <option value="high">High</option>
-                <option value="critical">Critical</option>
-                <option value="low">Low</option>
-              </select>
-            </label>
-          </div>
-
-          <div className="flex flex-col gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
-            <button
-              type="button"
-              onClick={() => setShowCalendarReminderComposer(false)}
-              className="bt-btn bt-btn-secondary"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={saveCalendarEmailReminder}
-              disabled={savingCalendarReminder}
-              className="bt-btn bt-btn-primary"
-            >
-              {reminderScheduleType === 'now' ? <Send className="h-4 w-4" /> : <CalendarDays className="h-4 w-4" />}
-              {savingCalendarReminder ? 'Saving' : reminderScheduleType === 'now' ? 'Send Now' : 'Schedule Reminder'}
-            </button>
+            </div>
           </div>
         </div>
       </Modal>

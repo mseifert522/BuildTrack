@@ -14,6 +14,7 @@ import {
   Link as LinkIcon,
   MapPin,
   MessageSquare,
+  PackageCheck,
   Phone,
   Plus,
   Search,
@@ -21,6 +22,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Trash2,
+  UserRound,
   Users,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -67,6 +69,9 @@ interface ContractorRow {
   created_at?: string | null;
   updated_at?: string | null;
   source?: string | null;
+  is_supplier?: boolean | number | null;
+  supplier_marked_at?: string | null;
+  supplier_marked_by?: string | null;
   project_addresses: string[];
   connected_projects?: ConnectedProject[];
   connected_project_count: number;
@@ -132,6 +137,7 @@ interface ContractorNote {
 }
 
 interface ContractorNotePreview {
+  id?: string;
   note: string;
   user_name: string;
   user_avatar_url?: string | null;
@@ -154,6 +160,21 @@ const fallbackCategories = [
   'Foundations',
   'Excavators',
   'Framing',
+];
+
+const supplierCategoryDefaults = [
+  'General Building Materials',
+  'Lumber',
+  'Roofing Materials',
+  'Electrical Supplies',
+  'Plumbing Supplies',
+  'HVAC Supplies',
+  'Drywall',
+  'Flooring',
+  'Paint',
+  'Appliances',
+  'Portable Toilets',
+  'Tool Rentals',
 ];
 
 const money = (value?: number | null) =>
@@ -179,8 +200,153 @@ const contractorAddressLine = (value?: string | null) => {
   return address || 'No address on file';
 };
 
+const directoryAddressLine = (value?: string | null) => {
+  const address = (value || '').replace(/\s+/g, ' ').trim();
+  return address || 'No address listed';
+};
+
+const directoryContactLine = (contractor: ContractorRow) =>
+  (contractor.contact_name || contractor.company || '').trim() || 'No contact person';
+
+const directoryPhoneLine = (contractor: ContractorRow) =>
+  (contractor.phone || '').trim() || 'No phone listed';
+
+const uniqueTextList = (values: Array<string | null | undefined>) => {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  values.forEach(value => {
+    const name = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!name) return;
+    const key = name.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    result.push(name);
+  });
+  return result;
+};
+
+const normalizeDirectoryValue = (value?: string | null) =>
+  String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '').trim();
+
+const supplierFlag = (contractor: ContractorRow) => Boolean(Number(contractor.is_supplier || 0));
+
+const supplierOnlyRecord = (contractor: ContractorRow) =>
+  supplierFlag(contractor)
+  && String(contractor.source || '').toLowerCase() === 'manual_supplier'
+  && !contractor.connected_project_count
+  && !contractor.invoice_count;
+
+const directoryRecordLabel = (contractor: ContractorRow) => {
+  if (supplierOnlyRecord(contractor)) return 'Supplier record';
+  if (supplierFlag(contractor)) return 'Contractor / Supplier record';
+  return 'Contractor record';
+};
+
+const directoryIdentityKeys = (contractor: ContractorRow) => {
+  const name = normalizeDirectoryValue(contractor.vendor_name || contractor.name);
+  const email = normalizeDirectoryValue(contractor.email);
+  const phone = normalizeDirectoryValue(contractor.phone);
+  const address = normalizeDirectoryValue(contractor.billing_address);
+  const account = normalizeDirectoryValue(contractor.account_number);
+  const keys = [
+    contractor.id ? `id:${contractor.id}` : '',
+    email ? `email:${email}` : '',
+    phone && name ? `phone-name:${phone}:${name}` : '',
+    account && name ? `account-name:${account}:${name}` : '',
+    address && name ? `address-name:${address}:${name}` : '',
+    name ? `name:${name}` : '',
+  ].filter(Boolean);
+  return keys.length ? keys : [`row:${contractor.id || contractor.source || contractor.created_at || contractor.updated_at || 'unknown'}`];
+};
+
+const directoryRowScore = (contractor: ContractorRow) => [
+  contractor.name,
+  contractor.vendor_name,
+  contractor.contact_name,
+  contractor.email,
+  contractor.phone,
+  contractor.company,
+  contractor.billing_address,
+  contractor.account_number,
+  contractor.contractor_status,
+  contractor.onboarding_status,
+  contractor.bank_name,
+].filter(Boolean).length
+  + (contractor.contractor_categories?.length || 0)
+  + (contractor.connected_projects?.length || 0)
+  + (contractor.project_addresses?.length || 0)
+  + Number(Boolean(contractor.total_paid))
+  + Number(Boolean(contractor.invoice_count))
+  + Number(Boolean(contractor.note_count));
+
+const newerInvoice = (a?: ContractorInvoice | null, b?: ContractorInvoice | null) =>
+  dateValue(b?.updated_at || b?.created_at) > dateValue(a?.updated_at || a?.created_at) ? b : a;
+
+const mergeDirectoryRows = (current: ContractorRow, incoming: ContractorRow): ContractorRow => {
+  const primary = directoryRowScore(incoming) > directoryRowScore(current) ? incoming : current;
+  const secondary = primary === incoming ? current : incoming;
+  const connectedProjects = [...(primary.connected_projects || []), ...(secondary.connected_projects || [])]
+    .filter((project, index, list) => {
+      const key = `${project.id || ''}|${project.address || ''}`.toLowerCase();
+      return key.trim() && list.findIndex(item => `${item.id || ''}|${item.address || ''}`.toLowerCase() === key) === index;
+    });
+
+  return {
+    ...secondary,
+    ...primary,
+    is_supplier: supplierFlag(current) || supplierFlag(incoming),
+    contractor_categories: uniqueTextList([
+      ...(current.contractor_categories || []),
+      ...(incoming.contractor_categories || []),
+      current.contractor_category,
+      incoming.contractor_category,
+      current.contractor_secondary_category,
+      incoming.contractor_secondary_category,
+    ]),
+    project_addresses: uniqueTextList([
+      ...(current.project_addresses || []),
+      ...(incoming.project_addresses || []),
+    ]),
+    connected_projects: connectedProjects,
+    connected_project_count: Math.max(
+      Number(current.connected_project_count || 0),
+      Number(incoming.connected_project_count || 0),
+      connectedProjects.length
+    ),
+    invoice_count: Math.max(Number(current.invoice_count || 0), Number(incoming.invoice_count || 0)),
+    total_paid: Math.max(Number(current.total_paid || 0), Number(incoming.total_paid || 0)),
+    note_count: Math.max(Number(current.note_count || 0), Number(incoming.note_count || 0)),
+    last_paid_invoice: newerInvoice(current.last_paid_invoice, incoming.last_paid_invoice),
+    last_invoice: newerInvoice(current.last_invoice, incoming.last_invoice),
+  };
+};
+
+const dedupeDirectoryRows = (rows: ContractorRow[]) => {
+  const result: ContractorRow[] = [];
+  const keyToIndex = new Map<string, number>();
+
+  rows.forEach(row => {
+    const keys = directoryIdentityKeys(row);
+    const existingIndex = keys
+      .map(key => keyToIndex.get(key))
+      .find((index): index is number => typeof index === 'number');
+
+    if (existingIndex === undefined) {
+      const index = result.length;
+      result.push(row);
+      keys.forEach(key => keyToIndex.set(key, index));
+      return;
+    }
+
+    result[existingIndex] = mergeDirectoryRows(result[existingIndex], row);
+    directoryIdentityKeys(result[existingIndex]).forEach(key => keyToIndex.set(key, existingIndex));
+  });
+
+  return result;
+};
+
 const contractorFilterFieldClass =
-  'bt-directory-field h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-950 shadow-sm outline-none placeholder:text-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-200';
+  'bt-directory-field bt-directory-filter-field h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-950 shadow-sm outline-none placeholder:text-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-200';
 
 const isSetupComplete = (contractor: ContractorRow) =>
   contractor.onboarding_status === 'submitted' || Boolean(contractor.onboarding_submitted_at);
@@ -222,6 +388,16 @@ const emptyContractorForm = {
   contractor_categories: [] as string[],
 };
 
+const emptySupplierForm = {
+  name: '',
+  contact: '',
+  email: '',
+  phone: '',
+  billing_address: '',
+  account_number: '',
+  categories: [] as string[],
+};
+
 export default function Contractors() {
   const navigate = useNavigate();
   const { user: currentUser } = useAuthStore();
@@ -246,14 +422,18 @@ export default function Contractors() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [addingContractor, setAddingContractor] = useState(false);
+  const [addingSupplier, setAddingSupplier] = useState(false);
   const [addForm, setAddForm] = useState(emptyContractorForm);
+  const [supplierForm, setSupplierForm] = useState(emptySupplierForm);
   const [editingContractor, setEditingContractor] = useState<ContractorRow | null>(null);
   const [editForm, setEditForm] = useState(emptyContractorForm);
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [projectFilter, setProjectFilter] = useState('');
   const [savingAdd, setSavingAdd] = useState(false);
+  const [savingSupplier, setSavingSupplier] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
   const [deletingContractorId, setDeletingContractorId] = useState<string | null>(null);
+  const [deletingContractorNoteId, setDeletingContractorNoteId] = useState<string | null>(null);
   const [requestingSetupId, setRequestingSetupId] = useState<string | null>(null);
   const [setupLinks, setSetupLinks] = useState<Record<string, { url: string; expires_at?: string }>>({});
   const [setupShareEmails, setSetupShareEmails] = useState<Record<string, string>>({});
@@ -265,6 +445,7 @@ export default function Contractors() {
   const [loading1099DetailsId, setLoading1099DetailsId] = useState<string | null>(null);
   const canAddCategories = currentUser ? ['super_admin', 'operations_manager'].includes(currentUser.role) : false;
   const canReveal1099Details = currentUser ? ['super_admin', 'operations_manager'].includes(currentUser.role) : false;
+  const canDeleteNotes = currentUser ? ['super_admin', 'operations_manager'].includes(currentUser.role) : false;
 
   const loadDirectory = async () => {
     const [directoryRes, projectsRes] = await Promise.all([
@@ -295,7 +476,14 @@ export default function Contractors() {
       ...(Array.isArray(contractor.contractor_categories) ? contractor.contractor_categories : []),
       contractor.contractor_category,
       contractor.contractor_secondary_category,
-    ]);
+    ]).filter(item => item.toLowerCase() !== 'supplier');
+
+  const combinedDirectoryRows = useMemo(() => dedupeDirectoryRows(contractors), [contractors]);
+
+  const supplierCategoryOptions = useMemo(
+    () => uniqueCategoryList([...supplierCategoryDefaults, ...categories]),
+    [categories]
+  );
 
   useEffect(() => {
     loadDirectory()
@@ -366,7 +554,7 @@ export default function Contractors() {
             ...contractor,
             note_count: Number(contractor.note_count || 0) + 1,
             latest_note_at: res.data.created_at,
-            latest_notes: [{ note: res.data.note, user_name: res.data.user_name, user_avatar_url: res.data.user_avatar_url || null, created_at: res.data.created_at }, ...(contractor.latest_notes || [])].slice(0, 2),
+            latest_notes: [{ id: res.data.id, note: res.data.note, user_name: res.data.user_name, user_avatar_url: res.data.user_avatar_url || null, created_at: res.data.created_at }, ...(contractor.latest_notes || [])].slice(0, 2),
           }
         : contractor
       ));
@@ -378,6 +566,9 @@ export default function Contractors() {
   };
 
   const deleteContractorNote = async (contractorId: string, noteId: string) => {
+    if (!canDeleteNotes || deletingContractorNoteId) return;
+    if (!window.confirm('Delete this contractor/supplier note?')) return;
+    setDeletingContractorNoteId(noteId);
     try {
       await api.delete(`/users/contractors/${contractorId}/notes/${noteId}`);
       setContractorNotes(prev => ({
@@ -385,11 +576,18 @@ export default function Contractors() {
         [contractorId]: (prev[contractorId] || []).filter(note => note.id !== noteId),
       }));
       setContractors(prev => prev.map(contractor => contractor.id === contractorId
-        ? { ...contractor, note_count: Math.max(Number(contractor.note_count || 1) - 1, 0) }
+        ? {
+            ...contractor,
+            note_count: Math.max(Number(contractor.note_count || 1) - 1, 0),
+            latest_notes: (contractor.latest_notes || []).filter(note => note.id !== noteId),
+          }
         : contractor
       ));
+      toast.success('Note deleted');
     } catch {
       toast.error('Failed to delete note');
+    } finally {
+      setDeletingContractorNoteId(null);
     }
   };
 
@@ -494,6 +692,49 @@ export default function Contractors() {
     </div>
   );
 
+  const setSupplierCategorySelection = (categoryName: string, selected: boolean) => {
+    setSupplierForm(prev => {
+      const nextCategories = selected
+        ? uniqueCategoryList([...(prev.categories || []), categoryName])
+        : (prev.categories || []).filter(item => item !== categoryName);
+      return { ...prev, categories: nextCategories };
+    });
+  };
+
+  const renderSupplierCategorySelector = () => (
+    <div className="sm:col-span-2">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <label className="block text-sm font-bold text-gray-700">Supplier Categories</label>
+        <span className="rounded-full bg-white px-2.5 py-1 text-xs font-black text-blue-700 ring-1 ring-blue-100">
+          {supplierForm.categories.length} selected
+        </span>
+      </div>
+      <div className="grid max-h-48 gap-2 overflow-y-auto rounded-xl border border-gray-200 bg-gray-50 p-3 sm:grid-cols-2 lg:grid-cols-3">
+        {supplierCategoryOptions.map(item => {
+          const selected = supplierForm.categories.includes(item);
+          return (
+            <label
+              key={item}
+              className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold transition-colors"
+              style={{
+                background: selected ? '#EFF6FF' : '#FFFFFF',
+                borderColor: selected ? '#93C5FD' : '#E5E7EB',
+                color: selected ? '#1D4ED8' : '#374151',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={selected}
+                onChange={event => setSupplierCategorySelection(item, event.target.checked)}
+              />
+              <span className="truncate">{item}</span>
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+
   const saveEdit = async () => {
     if (!editingContractor || !editForm.vendor_name.trim()) {
       toast.error('Contractor name is required');
@@ -542,8 +783,43 @@ export default function Contractors() {
     }
   };
 
+  const closeSupplierModal = () => {
+    setAddingSupplier(false);
+    setSupplierForm(emptySupplierForm);
+  };
+
+  const saveSupplier = async () => {
+    if (!supplierForm.name.trim()) {
+      toast.error('Supplier name is required');
+      return;
+    }
+
+    setSavingSupplier(true);
+    try {
+      const categoriesForPayload = supplierForm.categories.length
+        ? supplierForm.categories
+        : ['General Building Materials'];
+      await api.post('/users/suppliers', {
+        name: supplierForm.name.trim(),
+        contact: supplierForm.contact.trim(),
+        email: supplierForm.email.trim(),
+        phone: supplierForm.phone.trim(),
+        billing_address: supplierForm.billing_address.trim(),
+        account_number: supplierForm.account_number.trim(),
+        categories: categoriesForPayload,
+      });
+      await loadDirectory();
+      toast.success('Supplier added');
+      closeSupplierModal();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to add supplier');
+    } finally {
+      setSavingSupplier(false);
+    }
+  };
+
   const deleteContractor = async (contractor: ContractorRow) => {
-    const confirmed = window.confirm(`Delete ${contractor.name} from the contractor directory? Contractor notes and project links for this contractor will also be removed.`);
+    const confirmed = window.confirm(`Delete ${contractor.name} from the combined directory? Notes and project links for this record will also be removed.`);
     if (!confirmed) return;
 
     setDeletingContractorId(contractor.id);
@@ -603,7 +879,7 @@ export default function Contractors() {
     const from = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : null;
     const to = dateTo ? new Date(`${dateTo}T23:59:59`).getTime() : null;
 
-    const rows = contractors.filter((contractor) => {
+    const rows = combinedDirectoryRows.filter((contractor) => {
       const contractorCategories = contractorCategoryList(contractor);
       const lastPaid = contractor.last_paid_invoice;
       const lastPaidAmount = Number(lastPaid?.total || 0);
@@ -657,7 +933,7 @@ export default function Contractors() {
       if (sortBy === 'category') return categoryLabel(a).localeCompare(categoryLabel(b));
       return a.name.localeCompare(b.name);
     });
-  }, [contractors, query, nameSearch, category, paidFilter, dateFrom, dateTo, minAmount, maxAmount, sortBy]);
+  }, [combinedDirectoryRows, query, nameSearch, category, paidFilter, dateFrom, dateTo, minAmount, maxAmount, sortBy]);
 
   const filteredProjectOptions = projects.filter(project => {
     const q = projectFilter.trim().toLowerCase();
@@ -759,17 +1035,20 @@ export default function Contractors() {
   if (loading) return <Loading />;
 
   return (
-    <div className="bt-desktop-page bt-directory-page bt-contractors-page min-h-full px-6 py-6 md:px-8">
-      <div className="max-w-7xl mx-auto space-y-5">
-        <div className="bt-directory-hero flex flex-col xl:flex-row xl:items-end xl:justify-between gap-4">
+    <div className="bt-desktop-page bt-directory-page bt-contractors-page bt-suppliers-page min-h-full px-6 py-6 md:px-8">
+      <div className="mx-auto max-w-7xl space-y-5">
+        <div className="bt-directory-hero flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div className="bt-directory-title-block">
-            <p className="bt-directory-kicker">Field labor directory</p>
-            <h1 className="text-2xl font-black tracking-tight">Contractors</h1>
-            <p className="text-sm mt-1">
-              {filteredContractors.length} of {contractors.length} contractor records
+            <p className="bt-directory-kicker">Materials and vendor directory</p>
+            <h1 className="text-2xl font-black tracking-tight">Contractors / Suppliers</h1>
+            <p className="mt-1 text-sm">
+              {filteredContractors.length} shown of {combinedDirectoryRows.length} combined records
             </p>
           </div>
-          <div className="bt-directory-actions flex flex-col sm:flex-row gap-3 w-full xl:w-auto">
+          <div className="bt-directory-actions flex w-full flex-col gap-2 sm:flex-row xl:w-auto">
+            <div className="inline-flex min-h-11 items-center justify-center rounded-lg border border-slate-500 bg-slate-950/50 px-4 text-sm font-black text-blue-100 shadow-sm">
+              Combined directory
+            </div>
             <button
               type="button"
               onClick={openAdd}
@@ -778,26 +1057,40 @@ export default function Contractors() {
               <Plus className="w-4 h-4" />
               Add Contractor
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSupplierForm({
+                  ...emptySupplierForm,
+                  categories: ['General Building Materials'],
+                });
+                setAddingSupplier(true);
+              }}
+              className="bt-directory-primary-action"
+            >
+              <Plus className="w-4 h-4" />
+              Add Supplier
+            </button>
             <div
-              className="bt-directory-search flex items-center gap-2 px-3 py-2.5 rounded-lg w-full sm:w-[460px] bg-white border border-slate-300 shadow-sm"
+              className="bt-directory-search flex min-h-11 w-full items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 shadow-sm sm:w-[420px]"
             >
               <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search contractor, project, invoice, phone, or email"
+                placeholder="Search contractors, suppliers, project, phone, or email"
                 className="w-full bg-transparent text-sm outline-none text-gray-900 placeholder:text-gray-500"
               />
             </div>
           </div>
         </div>
 
-        <div className="bt-toolbar bt-directory-filter-panel">
-          <div className="flex items-center gap-2 mb-3">
+        <div className="bt-toolbar bt-directory-filter-panel bt-directory-filter-panel-3d">
+          <div className="bt-directory-filter-title-row flex items-center gap-2 mb-3">
             <SlidersHorizontal className="w-4 h-4 text-slate-500" />
             <p className="text-sm font-black text-slate-900">Filters</p>
           </div>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-3">
+          <div className="bt-directory-filter-grid grid sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-3">
             <select value={category} onChange={(e) => setCategory(e.target.value)} className={contractorFilterFieldClass}>
               <option value="">All categories</option>
               {categories.map((item) => <option key={item} value={item}>{item}</option>)}
@@ -807,12 +1100,12 @@ export default function Contractors() {
               <option value="paid">Has paid job</option>
               <option value="unpaid">No paid job</option>
             </select>
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={contractorFilterFieldClass} style={{ colorScheme: 'light' }} aria-label="Start date" />
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={contractorFilterFieldClass} style={{ colorScheme: 'light' }} aria-label="End date" />
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={contractorFilterFieldClass} style={{ colorScheme: 'dark' }} aria-label="Start date" />
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={contractorFilterFieldClass} style={{ colorScheme: 'dark' }} aria-label="End date" />
             <input type="number" min="0" value={minAmount} onChange={(e) => setMinAmount(e.target.value)} placeholder="Min paid" className={contractorFilterFieldClass} />
             <input type="number" min="0" value={maxAmount} onChange={(e) => setMaxAmount(e.target.value)} placeholder="Max paid" className={contractorFilterFieldClass} />
             <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className={contractorFilterFieldClass}>
-              <option value="newest">Sort: Newest contractors</option>
+              <option value="newest">Sort: Newest records</option>
               <option value="name">Sort: Name</option>
               <option value="category">Sort: Category</option>
               <option value="last_paid_date">Sort: Last paid date</option>
@@ -820,14 +1113,14 @@ export default function Contractors() {
               <option value="total_paid">Sort: Total paid</option>
             </select>
           </div>
-          <div className="mt-4 border-t border-slate-200 pt-4">
-            <label className="block text-xs font-black uppercase tracking-wide text-slate-500 mb-2">Find contractor by name</label>
-            <div className="bt-directory-search bt-directory-search-wide flex items-center gap-2 px-3 py-2.5 rounded-xl border border-gray-300 bg-white">
+          <div className="bt-directory-filter-search-block mt-4 border-t border-slate-200 pt-4">
+            <label className="bt-directory-filter-label block text-xs font-black uppercase tracking-wide text-slate-500 mb-2">Find contractor or supplier by name</label>
+            <div className="bt-directory-search bt-directory-search-wide bt-directory-filter-search flex items-center gap-2 px-3 py-2.5 rounded-xl border border-gray-300 bg-white">
               <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
               <input
                 value={nameSearch}
                 onChange={(e) => setNameSearch(e.target.value)}
-                placeholder="Type contractor, company, or contact name"
+                placeholder="Type contractor, supplier, company, or contact name"
                 className="w-full bg-transparent text-sm outline-none text-gray-900 placeholder:text-gray-500"
               />
             </div>
@@ -841,11 +1134,20 @@ export default function Contractors() {
         ) : filteredContractors.length === 0 ? (
           <div className="rounded-2xl p-12 text-center" style={{ background: 'white', boxShadow: '0 2px 16px rgba(0,0,0,0.07)' }}>
             <Users className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-            <p className="text-sm font-bold text-gray-500">No contractors match these filters</p>
+            <p className="text-sm font-bold text-gray-500">No contractor or supplier records match these filters</p>
           </div>
         ) : (
-          <div className="bt-table-wrap bt-directory-list space-y-3 p-2">
-            {filteredContractors.map((contractor) => {
+          <div className="bt-table-wrap bt-directory-list p-2">
+            <div className="bt-directory-list-header hidden rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-black uppercase tracking-wide text-slate-500 xl:grid xl:grid-cols-[minmax(210px,1.1fr)_minmax(220px,1fr)_minmax(260px,1.25fr)_minmax(190px,0.9fr)_minmax(160px,0.75fr)_80px] xl:gap-4">
+              <span>Name</span>
+              <span>Category</span>
+              <span>Address</span>
+              <span>Contact Person</span>
+              <span>Phone Number</span>
+              <span className="text-right">Open</span>
+            </div>
+            <div className="mt-2 space-y-2">
+              {filteredContractors.map((contractor) => {
               const lastPaid = contractor.last_paid_invoice;
               const connectedProjects = contractor.connected_projects || [];
               const setupComplete = isSetupComplete(contractor);
@@ -855,9 +1157,11 @@ export default function Contractors() {
               const SetupIcon = setupComplete ? CheckCircle2 : setupPending ? Clock3 : ShieldCheck;
               const statusMeta = contractorStatusMeta(contractor.contractor_status);
               const contractorCategories = contractorCategoryList(contractor);
-              const contractorTypeLabel = contractorCategories.length ? contractorCategories.join(' / ') : 'Uncategorized';
               const isExpanded = expandedContractorId === contractor.id;
-              const addressLine = contractorAddressLine(contractor.billing_address);
+              const addressLine = directoryAddressLine(contractor.billing_address);
+              const contactLine = directoryContactLine(contractor);
+              const phoneLine = directoryPhoneLine(contractor);
+              const recordLabel = directoryRecordLabel(contractor);
               return (
                 <div
                   key={contractor.id}
@@ -867,7 +1171,7 @@ export default function Contractors() {
                     setExpandedContractorId(current => current === contractor.id ? null : contractor.id);
                   }}
                   className={`bt-directory-card overflow-hidden rounded-lg border border-l-4 transition-colors cursor-pointer ${isExpanded ? 'is-expanded border-blue-300 border-l-blue-600 bg-blue-50 ring-1 ring-blue-100' : 'border-slate-200 border-l-slate-400 bg-white hover:border-blue-200 hover:bg-slate-50'}`}
-                  title={isExpanded ? 'Click to collapse contractor details' : 'Click to expand contractor details'}
+                  title={isExpanded ? 'Click to collapse directory details' : 'Click to expand directory details'}
                 >
                   <div>
                     <div
@@ -880,42 +1184,50 @@ export default function Contractors() {
                         setExpandedContractorId(current => current === contractor.id ? null : contractor.id);
                       }}
                       aria-expanded={isExpanded}
-                      className="bt-directory-row grid w-full grid-cols-1 items-center gap-3 px-4 py-3 text-left md:grid-cols-[minmax(190px,0.95fr)_minmax(150px,0.75fr)_minmax(150px,0.65fr)_minmax(260px,1.25fr)_auto] md:px-5"
+                      className="bt-directory-row grid w-full grid-cols-1 gap-3 px-4 py-4 text-left xl:grid-cols-[minmax(210px,1.1fr)_minmax(220px,1fr)_minmax(260px,1.25fr)_minmax(190px,0.9fr)_minmax(160px,0.75fr)_80px] xl:items-center xl:gap-4"
                     >
                       <div className="flex min-w-0 items-center gap-3">
-                        <div className="bt-directory-avatar h-9 w-9 flex-shrink-0 rounded-lg flex items-center justify-center bg-slate-100 text-slate-700 text-xs font-black ring-1 ring-slate-200">
+                        <div className="bt-directory-avatar flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-slate-100 text-xs font-black text-slate-700 ring-1 ring-slate-200">
                           {initials(contractor.name)}
                         </div>
                         <div className="min-w-0">
-                          <div className="flex min-w-0 flex-wrap items-center gap-2">
-                            <p className="truncate text-sm font-black text-gray-950">{contractor.name}</p>
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                openContractorNoteEntry(contractor.id);
-                              }}
-                              className="inline-flex flex-shrink-0 items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[11px] font-black text-amber-800 shadow-sm transition hover:bg-amber-100"
-                              title={`Enter note for ${contractor.name}`}
-                              aria-label={`Enter note for ${contractor.name}`}
-                            >
-                              <MessageSquare className="h-3.5 w-3.5" />
-                              Enter Note
-                            </button>
-                          </div>
+                          <h2 className="truncate text-sm font-black text-gray-950">{contractor.name}</h2>
+                          <p className="mt-1 text-xs font-semibold text-gray-500">{recordLabel}</p>
                         </div>
                       </div>
-                      <div className="flex min-w-0 items-center gap-2 text-sm font-black text-slate-800">
-                        <Building2 className="h-4 w-4 flex-shrink-0 text-slate-400" />
-                        <span className="truncate" title={contractorTypeLabel}>{contractorTypeLabel}</span>
-                      </div>
-                      <div className="flex min-w-0 items-center gap-2 text-sm font-bold text-gray-700">
-                        <Phone className="h-4 w-4 flex-shrink-0 text-gray-400" />
-                        <span className="truncate">{contractor.phone || 'No phone on file'}</span>
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        {contractorCategories.length > 0 ? (
+                          <>
+                            {contractorCategories.slice(0, 2).map(item => (
+                              <span key={item} className="bt-directory-chip inline-flex max-w-full items-center gap-1.5 truncate rounded px-2.5 py-1 text-xs font-black text-blue-100 ring-1 ring-blue-400/40" title={item}>
+                                <PackageCheck className="h-3.5 w-3.5 flex-shrink-0" />
+                                <span className="truncate">{item}</span>
+                              </span>
+                            ))}
+                            {contractorCategories.length > 2 ? (
+                              <span className="bt-directory-chip inline-flex rounded px-2.5 py-1 text-xs font-black text-blue-100 ring-1 ring-blue-400/40">
+                                +{contractorCategories.length - 2}
+                              </span>
+                            ) : null}
+                          </>
+                        ) : (
+                          <span className="bt-directory-chip inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-black text-blue-100 ring-1 ring-blue-400/40">
+                            <PackageCheck className="h-3.5 w-3.5" />
+                            Uncategorized
+                          </span>
+                        )}
                       </div>
                       <div className="flex min-w-0 items-center gap-2 text-sm font-semibold text-gray-600">
                         <MapPin className="h-4 w-4 flex-shrink-0 text-gray-400" />
                         <span className="truncate">{addressLine}</span>
+                      </div>
+                      <div className="flex min-w-0 items-center gap-2 text-sm font-semibold text-gray-600">
+                        <UserRound className="h-4 w-4 flex-shrink-0 text-gray-400" />
+                        <span className="truncate">{contactLine}</span>
+                      </div>
+                      <div className="flex min-w-0 items-center gap-2 text-sm font-bold text-gray-700">
+                        <Phone className="h-4 w-4 flex-shrink-0 text-gray-400" />
+                        <span className="truncate">{phoneLine}</span>
                       </div>
                       <div className="bt-directory-row-action flex items-center justify-end gap-2 text-xs font-black text-blue-700">
                         <span>{isExpanded ? 'Hide details' : 'Expand'}</span>
@@ -931,7 +1243,7 @@ export default function Contractors() {
                         <div className="rounded-2xl border border-amber-200 bg-white p-4 shadow-sm">
                           <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                             <div>
-                              <p className="text-xs font-black uppercase tracking-wide text-amber-700">New Contractor Note</p>
+                              <p className="text-xs font-black uppercase tracking-wide text-amber-700">New Directory Note</p>
                               <p className="text-sm font-black text-gray-950">{contractor.name}</p>
                             </div>
                             <button
@@ -1166,9 +1478,26 @@ export default function Contractors() {
                           <div className="space-y-2">
                             {(contractor.latest_notes || []).slice(0, 2).map((note, index) => (
                               <div key={`${note.created_at}-${index}`} className="rounded-lg bg-white border border-slate-200 px-2.5 py-2 hover:border-amber-200">
-                                <div className="mb-1.5 flex items-center gap-2">
-                                  <Avatar src={note.user_avatar_url} name={note.user_name} size={24} roundedClassName="rounded-full" />
-                                  <p className="truncate text-[11px] font-black text-gray-700">{note.user_name}</p>
+                                <div className="mb-1.5 flex items-center justify-between gap-2">
+                                  <div className="flex min-w-0 items-center gap-2">
+                                    <Avatar src={note.user_avatar_url} name={note.user_name} size={24} roundedClassName="rounded-full" />
+                                    <p className="truncate text-[11px] font-black text-gray-700">{note.user_name}</p>
+                                  </div>
+                                  {canDeleteNotes && note.id ? (
+                                    <button
+                                      type="button"
+                                      onClick={event => {
+                                        event.stopPropagation();
+                                        deleteContractorNote(contractor.id, note.id!);
+                                      }}
+                                      disabled={deletingContractorNoteId === note.id}
+                                      className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] font-black text-red-500 transition hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                      title="Delete note"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                      {deletingContractorNoteId === note.id ? 'Deleting' : 'Delete'}
+                                    </button>
+                                  ) : null}
                                 </div>
                                 <p
                                   className="text-xs font-semibold text-gray-700"
@@ -1253,8 +1582,8 @@ export default function Contractors() {
                       <div className="rounded-2xl border border-slate-300 bg-white p-4">
                         <div className="flex items-center justify-between gap-3 mb-3">
                           <div>
-                            <p className="text-sm font-black text-gray-900">Contractor Notes</p>
-                            <p className="text-xs text-gray-500">Internal notes for this contractor record</p>
+                            <p className="text-sm font-black text-gray-900">Directory Notes</p>
+                            <p className="text-xs text-gray-500">Internal notes for this directory record</p>
                           </div>
                         </div>
                         <div className="flex flex-col md:flex-row gap-3">
@@ -1282,7 +1611,7 @@ export default function Contractors() {
                           {loadingNotes[contractor.id] ? (
                             <p className="text-sm text-gray-400">Loading notes...</p>
                           ) : (contractorNotes[contractor.id] || []).length === 0 ? (
-                            <p className="text-sm text-gray-400">No contractor notes yet</p>
+                            <p className="text-sm text-gray-400">No notes yet</p>
                           ) : (contractorNotes[contractor.id] || []).map((note) => (
                             <div key={note.id} className="flex items-start gap-3 rounded-xl border border-gray-100 p-3">
                               <Avatar src={note.user_avatar_url} name={note.user_name} size={36} />
@@ -1291,13 +1620,18 @@ export default function Contractors() {
                                   <p className="text-sm font-black text-gray-900">{note.user_name}</p>
                                   <div className="flex items-center gap-2">
                                     <span className="text-xs text-gray-400 whitespace-nowrap">{formatEasternDateTime(note.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} ET</span>
-                                    <button
-                                      type="button"
-                                      onClick={() => deleteContractorNote(contractor.id, note.id)}
-                                      className="p-1 rounded-lg text-red-400 hover:bg-red-50 hover:text-red-600"
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
+                                    {canDeleteNotes && (
+                                      <button
+                                        type="button"
+                                        onClick={() => deleteContractorNote(contractor.id, note.id)}
+                                        disabled={deletingContractorNoteId === note.id}
+                                        className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-black text-red-500 transition hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                        title="Delete note"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                        {deletingContractorNoteId === note.id ? 'Deleting' : 'Delete'}
+                                      </button>
+                                    )}
                                   </div>
                                 </div>
                                 <p className="text-sm text-gray-700 whitespace-pre-wrap mt-1">{note.note}</p>
@@ -1313,8 +1647,83 @@ export default function Contractors() {
               );
             })}
           </div>
+          </div>
         )}
       </div>
+
+      <Modal isOpen={addingSupplier} onClose={closeSupplierModal} title="Add Supplier" size="lg">
+        <div className="space-y-5">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <label className="mb-1 block text-sm font-bold text-gray-700">Supplier Name *</label>
+              <input
+                value={supplierForm.name}
+                onChange={event => setSupplierForm(prev => ({ ...prev, name: event.target.value }))}
+                className="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-bold text-gray-700">Contact Person</label>
+              <input
+                value={supplierForm.contact}
+                onChange={event => setSupplierForm(prev => ({ ...prev, contact: event.target.value }))}
+                className="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-bold text-gray-700">Phone</label>
+              <input
+                value={supplierForm.phone}
+                onChange={event => setSupplierForm(prev => ({ ...prev, phone: event.target.value }))}
+                className="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-bold text-gray-700">Email</label>
+              <input
+                value={supplierForm.email}
+                onChange={event => setSupplierForm(prev => ({ ...prev, email: event.target.value }))}
+                className="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-bold text-gray-700">Account Number</label>
+              <input
+                value={supplierForm.account_number}
+                onChange={event => setSupplierForm(prev => ({ ...prev, account_number: event.target.value }))}
+                className="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="mb-1 block text-sm font-bold text-gray-700">Address</label>
+              <textarea
+                value={supplierForm.billing_address}
+                onChange={event => setSupplierForm(prev => ({ ...prev, billing_address: event.target.value }))}
+                rows={3}
+                className="w-full resize-none rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            {renderSupplierCategorySelector()}
+          </div>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={closeSupplierModal}
+              className="flex-1 rounded-xl border border-gray-300 py-2.5 text-sm font-bold text-gray-700 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={saveSupplier}
+              disabled={savingSupplier}
+              className="flex-1 rounded-xl bg-blue-600 py-2.5 text-sm font-black text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {savingSupplier ? 'Saving...' : 'Add Supplier'}
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {selectedContractor && (() => {
         const contractor = selectedContractor;
@@ -1339,7 +1748,7 @@ export default function Contractors() {
           <Modal
             isOpen={!!selectedContractor}
             onClose={() => setSelectedContractorId(null)}
-            title="Contractor Details"
+            title="Directory Record Details"
             size="xl"
           >
             <div className="space-y-5">
@@ -1647,7 +2056,7 @@ export default function Contractors() {
                   </div>
                 ) : (
                   <div className="rounded-xl border border-dashed border-gray-200 bg-white p-5 text-sm font-semibold text-gray-400">
-                    No assigned projects on this contractor record.
+                    No assigned projects on this record.
                   </div>
                 )}
               </div>
@@ -1656,7 +2065,7 @@ export default function Contractors() {
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <MessageSquare className="h-4 w-4 text-gray-400" />
-                    <h3 className="text-sm font-black text-gray-900">Contractor Notes</h3>
+                    <h3 className="text-sm font-black text-gray-900">Directory Notes</h3>
                   </div>
                   <div className="flex flex-wrap items-center justify-end gap-2">
                     <button
@@ -1680,7 +2089,7 @@ export default function Contractors() {
                   <div className="mb-4 rounded-2xl border border-amber-200 bg-white p-4 shadow-sm">
                     <div className="mb-3 flex items-center justify-between gap-3">
                       <div>
-                        <p className="text-xs font-black uppercase tracking-wide text-amber-700">New Contractor Note</p>
+                        <p className="text-xs font-black uppercase tracking-wide text-amber-700">New Directory Note</p>
                         <p className="text-sm font-bold text-gray-500">Type or use the microphone to add this note.</p>
                       </div>
                       <button
@@ -1723,7 +2132,21 @@ export default function Contractors() {
                             <Avatar src={note.user_avatar_url} name={note.user_name} size={32} roundedClassName="rounded-full" />
                             <p className="truncate text-sm font-black text-gray-900">{note.user_name}</p>
                           </div>
-                          <p className="flex-shrink-0 text-xs font-semibold text-gray-400">{formatEasternDateTime(note.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} ET</p>
+                          <div className="flex flex-shrink-0 items-center gap-2">
+                            <p className="text-xs font-semibold text-gray-400">{formatEasternDateTime(note.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} ET</p>
+                            {canDeleteNotes && (
+                              <button
+                                type="button"
+                                onClick={() => deleteContractorNote(contractor.id, note.id)}
+                                disabled={deletingContractorNoteId === note.id}
+                                className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-black text-red-500 transition hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                title="Delete note"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                {deletingContractorNoteId === note.id ? 'Deleting' : 'Delete'}
+                              </button>
+                            )}
+                          </div>
                         </div>
                         <p className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-700">{note.note}</p>
                       </div>
@@ -1738,14 +2161,28 @@ export default function Contractors() {
                             <Avatar src={note.user_avatar_url} name={note.user_name} size={32} roundedClassName="rounded-full" />
                             <p className="truncate text-sm font-black text-gray-900">{note.user_name}</p>
                           </div>
-                          <p className="flex-shrink-0 text-xs font-semibold text-gray-400">{formatEasternDateTime(note.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} ET</p>
+                          <div className="flex flex-shrink-0 items-center gap-2">
+                            <p className="text-xs font-semibold text-gray-400">{formatEasternDateTime(note.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} ET</p>
+                            {canDeleteNotes && note.id && (
+                              <button
+                                type="button"
+                                onClick={() => deleteContractorNote(contractor.id, note.id!)}
+                                disabled={deletingContractorNoteId === note.id}
+                                className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-black text-red-500 transition hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                title="Delete note"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                {deletingContractorNoteId === note.id ? 'Deleting' : 'Delete'}
+                              </button>
+                            )}
+                          </div>
                         </div>
                         <p className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-700">{note.note}</p>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <p className="rounded-xl border border-gray-100 bg-white p-4 text-sm font-semibold text-gray-400">No contractor notes yet.</p>
+                  <p className="rounded-xl border border-gray-100 bg-white p-4 text-sm font-semibold text-gray-400">No notes yet.</p>
                 )}
               </div>
             </div>

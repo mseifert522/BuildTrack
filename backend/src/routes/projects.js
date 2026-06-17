@@ -2,12 +2,13 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
+const sharp = require('sharp');
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/schema');
 const { authenticate, authorize, authorizeUpperManagement, blockProjectManagerMutation, authorizeProjectAccess } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
 const { logDataAccess } = require('../utils/dataAccessAudit');
-const { getNoteEditPermission } = require('../utils/projectNotes');
+const { getNoteDeletePermission, getNoteEditPermission } = require('../utils/projectNotes');
 const { recordWorkItemEvent } = require('../utils/workItemEvents');
 
 const router = express.Router();
@@ -17,6 +18,10 @@ const MANAGEMENT_ROLES = ['super_admin', 'operations_manager', 'project_manager'
 const PROJECT_STATUS_ADMIN_ROLES = ['super_admin', 'operations_manager'];
 const PROJECT_STATUSES = ['not_started', 'active_rehab', 'rehab_completed', 'long_term_holding', 'commercial', 'wholesale'];
 const PROJECT_MARKET_STATUSES = ['not_on_market', 'on_market'];
+const PROJECT_MAIN_UPLOAD_PREFIX = '/uploads/project-main/';
+const PROJECT_MAIN_THUMB_DIR = 'thumbs';
+const PROJECT_MAIN_THUMB_WIDTH = 360;
+const PROJECT_MAIN_THUMB_HEIGHT = 270;
 
 function canViewProjectBudget(user) {
   return MANAGEMENT_ROLES.includes(String(user?.role || ''));
@@ -26,6 +31,77 @@ function sanitizeProjectForUser(project, user) {
   if (!project || canViewProjectBudget(user)) return project;
   const { budget, ...safeProject } = project;
   return safeProject;
+}
+
+function projectMainUploadDir() {
+  return path.join(__dirname, '../../uploads/project-main');
+}
+
+function projectMainThumbFileName(fileName) {
+  if (!fileName) return null;
+  const parsed = path.parse(path.basename(fileName));
+  return `${parsed.name}.card.webp`;
+}
+
+function projectMainThumbUrl(mainPhotoUrl) {
+  const value = String(mainPhotoUrl || '').trim();
+  if (!value.startsWith(PROJECT_MAIN_UPLOAD_PREFIX)) return null;
+  const fileName = path.basename(value);
+  const thumbName = projectMainThumbFileName(fileName);
+  return thumbName ? `${PROJECT_MAIN_UPLOAD_PREFIX}${PROJECT_MAIN_THUMB_DIR}/${thumbName}` : null;
+}
+
+function withProjectMainThumbnail(project) {
+  if (!project) return project;
+  return {
+    ...project,
+    main_photo_thumb_url: projectMainThumbUrl(project.main_photo_url) || project.main_photo_url || null,
+  };
+}
+
+function projectMainThumbPath(mainPhotoUrl) {
+  const thumbUrl = projectMainThumbUrl(mainPhotoUrl);
+  if (!thumbUrl) return null;
+  return path.join(projectMainUploadDir(), PROJECT_MAIN_THUMB_DIR, path.basename(thumbUrl));
+}
+
+async function createProjectMainThumbnail(sourcePath, thumbPath) {
+  if (!sourcePath || !thumbPath || !fs.existsSync(sourcePath)) return null;
+  if (fs.existsSync(thumbPath)) return thumbPath;
+  fs.mkdirSync(path.dirname(thumbPath), { recursive: true });
+  const tempPath = `${thumbPath}.${Date.now()}.tmp`;
+  try {
+    await sharp(sourcePath)
+      .rotate()
+      .resize(PROJECT_MAIN_THUMB_WIDTH, PROJECT_MAIN_THUMB_HEIGHT, {
+        fit: 'cover',
+        position: 'centre',
+        withoutEnlargement: true,
+      })
+      .webp({ quality: 76, effort: 4 })
+      .toFile(tempPath);
+    fs.renameSync(tempPath, thumbPath);
+    return thumbPath;
+  } catch (err) {
+    try {
+      if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+    } catch (_) {
+      // Ignore temp cleanup errors.
+    }
+    console.warn('Failed to create project card thumbnail:', err.message || err);
+    return null;
+  }
+}
+
+async function ensureProjectMainThumbnail(mainPhotoUrl) {
+  const value = String(mainPhotoUrl || '').trim();
+  if (!value.startsWith(PROJECT_MAIN_UPLOAD_PREFIX)) return null;
+  const fileName = path.basename(value);
+  const sourcePath = path.join(projectMainUploadDir(), fileName);
+  const thumbPath = projectMainThumbPath(value);
+  if (!thumbPath) return null;
+  const createdPath = await createProjectMainThumbnail(sourcePath, thumbPath);
+  return createdPath ? projectMainThumbUrl(value) : null;
 }
 
 function toFlag(value) {
@@ -252,7 +328,7 @@ function lifecycleFromStatus(status, fallback = 'under_construction') {
 
 const mainPhotoStorage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const dir = path.join(__dirname, '../../uploads/project-main');
+    const dir = projectMainUploadDir();
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     cb(null, dir);
   },
@@ -296,11 +372,14 @@ const scopeEstimateUpload = multer({
 function removeOldMainPhoto(url) {
   if (!url || !url.startsWith('/uploads/project-main/')) return;
   const fileName = path.basename(url);
-  const filePath = path.join(__dirname, '../../uploads/project-main', fileName);
-  try {
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-  } catch (_) {
-    // Best-effort cleanup; do not block saving the new project photo.
+  const filePath = path.join(projectMainUploadDir(), fileName);
+  const thumbPath = projectMainThumbPath(url);
+  for (const candidate of [filePath, thumbPath]) {
+    try {
+      if (candidate && fs.existsSync(candidate)) fs.unlinkSync(candidate);
+    } catch (_) {
+      // Best-effort cleanup; do not block saving the new project photo.
+    }
   }
 }
 
@@ -323,6 +402,8 @@ const REVIEW_ACTIONS = [
   'project_scope_created',
   'project_scope_updated',
   'project_scope_deleted',
+  'agent_bridge_scope_of_work_created',
+  'agent_bridge_punch_list_created',
   'material_created',
   'material_updated',
   'material_deleted',
@@ -340,6 +421,11 @@ const REVIEW_ACTIONS = [
 function parseDetails(details) {
   if (!details) return {};
   try { return JSON.parse(details); } catch (_) { return {}; }
+}
+
+function displayActivitySource(source) {
+  const cleaned = String(source || 'agent bridge').replace(/[_-]+/g, ' ').trim();
+  return cleaned ? cleaned.charAt(0).toUpperCase() + cleaned.slice(1) : 'Agent bridge';
 }
 
 function summarizeActivity(row) {
@@ -384,6 +470,18 @@ function summarizeActivity(row) {
       return `Updated scope of work${details.scope_title ? `: ${details.scope_title}` : ''}`;
     case 'project_scope_deleted':
       return 'Deleted scope of work';
+    case 'agent_bridge_scope_of_work_created': {
+      const count = Number(details.count || 0);
+      const itemLabel = count === 1 ? 'item' : 'items';
+      const countText = count ? `${count} ` : '';
+      return `${details.agent_name || 'AI Agent'} created ${countText}Scope of Work ${itemLabel} from ${displayActivitySource(details.source)}`;
+    }
+    case 'agent_bridge_punch_list_created': {
+      const count = Number(details.count || 0);
+      const itemLabel = count === 1 ? 'item' : 'items';
+      const countText = count ? `${count} ` : '';
+      return `${details.agent_name || 'AI Agent'} created ${countText}Punch List ${itemLabel} from ${displayActivitySource(details.source)}`;
+    }
     case 'material_created':
       return `Added material${details.material_name ? `: ${details.material_name}` : ''}`;
     case 'material_updated':
@@ -520,13 +618,13 @@ router.get('/', (req, res) => {
     const openItems = db.prepare("SELECT COUNT(*) as cnt FROM punch_list_items WHERE project_id = ? AND status != 'completed'").get(p.id);
     const activeScopes = db.prepare("SELECT COUNT(*) as cnt FROM project_scopes WHERE project_id = ? AND status = 'active'").get(p.id);
     const activeFieldWork = db.prepare("SELECT COUNT(*) as cnt FROM construction_plan_items WHERE project_id = ? AND status != 'completed'").get(p.id);
-    return sanitizeProjectForUser({
+    return sanitizeProjectForUser(withProjectMainThumbnail({
       ...p,
       assigned_count: assignedCount.cnt,
       open_punch_items: openItems.cnt,
       active_scope_count: activeScopes.cnt,
       field_work_task_count: activeFieldWork.cnt,
-    }, req.user);
+    }), req.user);
   });
 
   logDataAccess(req, {
@@ -651,7 +749,7 @@ router.get('/:id', authorizeProjectAccess, (req, res) => {
   });
 
   res.json(sanitizeProjectForUser({
-    ...project,
+    ...withProjectMainThumbnail(project),
     assignments,
     punch_stats: punchStats,
     recent_photos: recentPhotos,
@@ -1349,7 +1447,7 @@ router.delete('/:id/materials/:materialId', authorize(...MANAGEMENT_ROLES), auth
 
 // POST /api/projects/:id/main-photo - upload one primary house photo for project cards
 router.post('/:id/main-photo', authorizeUpperManagement, authorizeProjectAccess, (req, res) => {
-  mainPhotoUpload.single('photo')(req, res, (err) => {
+  mainPhotoUpload.single('photo')(req, res, async (err) => {
     if (err) return res.status(400).json({ error: err.message });
     if (!req.file) return res.status(400).json({ error: 'No photo uploaded' });
 
@@ -1359,6 +1457,7 @@ router.post('/:id/main-photo', authorizeUpperManagement, authorizeProjectAccess,
       if (!project) return res.status(404).json({ error: 'Project not found' });
 
       const mainPhotoUrl = `/uploads/project-main/${req.file.filename}`;
+      const mainPhotoThumbUrl = await ensureProjectMainThumbnail(mainPhotoUrl);
       db.prepare("UPDATE projects SET main_photo_url = ?, updated_at = datetime('now') WHERE id = ?").run(mainPhotoUrl, req.params.id);
       removeOldMainPhoto(project.main_photo_url);
       logActivity({
@@ -1369,7 +1468,11 @@ router.post('/:id/main-photo', authorizeUpperManagement, authorizeProjectAccess,
         entityId: req.params.id,
         details: { main_photo_updated: true },
       });
-      res.json({ main_photo_url: mainPhotoUrl, message: 'Project photo updated' });
+      res.json({
+        main_photo_url: mainPhotoUrl,
+        main_photo_thumb_url: mainPhotoThumbUrl || mainPhotoUrl,
+        message: 'Project photo updated',
+      });
     } catch (saveErr) {
       console.error(saveErr);
       res.status(500).json({ error: 'Failed to save project photo' });
@@ -1731,6 +1834,21 @@ router.put('/:id/notes/:noteId', authorizeProjectAccess, (req, res) => {
   `).get(req.params.noteId, req.params.id);
 
   res.json(attachPhotosToNotes(db, updated ? [updated] : [], req.user)[0] || updated);
+});
+
+// DELETE /api/projects/:id/notes/:noteId - Super Admin and Operations Manager can delete any project note.
+router.delete('/:id/notes/:noteId', authorizeProjectAccess, (req, res) => {
+  const db = getDb();
+  const existing = db.prepare('SELECT * FROM project_notes WHERE id = ? AND project_id = ?').get(req.params.noteId, req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Note not found' });
+
+  const permission = getNoteDeletePermission(req.user, existing);
+  if (!permission.allowed) return res.status(permission.status).json({ error: permission.error });
+
+  db.prepare('UPDATE photos SET note_id = NULL WHERE note_id = ?').run(req.params.noteId);
+  db.prepare('DELETE FROM project_notes WHERE id = ? AND project_id = ?').run(req.params.noteId, req.params.id);
+  logActivity({ userId: req.user.id, projectId: req.params.id, action: 'note_deleted', entityType: 'note', entityId: req.params.noteId });
+  res.json({ message: 'Note deleted' });
 });
 
 module.exports = router;

@@ -1,19 +1,29 @@
 import { useEffect, useRef, useState } from 'react';
+
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore, roleLabels, canManageUsers, canAccessSettings, canAccessSecurity } from '../store/authStore';
 import {
   LayoutDashboard, FolderOpen, ClipboardList, FileText,
   Users, Settings, LogOut, Menu, X, Bell, ChevronRight,
-  Camera, Search, Trash2, Truck, ShieldCheck, MessageSquare,
-  ArrowLeft
+  Camera, Search, Trash2, ShieldCheck, MessageSquare,
+  ArrowLeft, CalendarDays
 } from 'lucide-react';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
 import Avatar from './Avatar';
 import { BUILDTRACK_TRUTH_ICON_SRC } from '../lib/branding';
+import { fileDropHandlers } from '../lib/fileDrop';
 import { formatEasternRelative, parseBuildTrackTimestamp } from '../lib/time';
 
 interface LayoutProps { children: React.ReactNode; }
+
+interface NavItem {
+  to: string;
+  icon: typeof LayoutDashboard;
+  label: string;
+  stackedLabel?: string[];
+  match?: string[];
+}
 
 interface SearchResult {
   type: string;
@@ -103,6 +113,7 @@ function notificationLink(log: ActivityLog) {
 }
 
 export default function Layout({ children }: LayoutProps) {
+  useEffect(() => { void import('../styles/desktop-heavy.css'); }, []);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -230,8 +241,7 @@ export default function Layout({ children }: LayoutProps) {
     navigate(result.url);
   };
 
-  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const uploadAvatarFile = async (file?: File) => {
     if (!file) return;
     setUploadingAvatar(true);
     try {
@@ -250,6 +260,10 @@ export default function Layout({ children }: LayoutProps) {
     }
   };
 
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    await uploadAvatarFile(e.target.files?.[0]);
+  };
+
   const handleRemoveAvatar = async () => {
     try {
       await api.delete('/users/me/avatar');
@@ -261,23 +275,25 @@ export default function Layout({ children }: LayoutProps) {
   };
 
   // Sidebar nav items
-  const navItems = [
+  const navItems: NavItem[] = [
     { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+    { to: '/operations-calendar', icon: CalendarDays, label: 'Calendar' },
     { to: '/projects', icon: FolderOpen, label: 'Projects' },
     { to: '/invoices', icon: FileText, label: 'Invoices' },
-    { to: '/contractors', icon: Users, label: 'Contractors' },
-    { to: '/suppliers', icon: Truck, label: 'Suppliers' },
+    { to: '/contractors', icon: Users, label: 'Vendors', match: ['/contractors', '/suppliers'] },
     ...(user && canAccessSecurity(user.role) ? [{ to: '/security', icon: ShieldCheck, label: 'Security' }] : []),
   ];
 
-  const isActive = (path: string) => location.pathname.startsWith(path);
+  const isActive = (path: string, matchPaths: string[] = [path]) =>
+    matchPaths.some(matchPath => location.pathname.startsWith(matchPath));
 
   const pageTitles: Record<string, string> = {
     '/dashboard': 'Dashboard',
+    '/operations-calendar': 'Calendar',
     '/projects': 'Projects',
     '/invoices': 'Invoices',
-    '/contractors': 'Contractors',
-    '/suppliers': 'Suppliers',
+    '/contractors': 'Vendors',
+    '/suppliers': 'Vendors',
     '/security': 'Security',
     '/users': 'Users',
     '/settings': 'Settings',
@@ -331,44 +347,36 @@ export default function Layout({ children }: LayoutProps) {
         )}
       </div>
 
-      {/* Nav section label */}
-      {!collapsed && (
-        <div className="px-4 pt-5 pb-2">
-          <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.25)' }}>
-            Navigation
-          </p>
-        </div>
-      )}
-
       {/* Nav items */}
-      <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto">
-        {navItems.map(({ to, icon: Icon, label }) => {
-          const active = isActive(to);
+      <nav className="bt-sidebar-nav-list flex-1 px-3 pt-5 pb-2 overflow-y-auto" aria-label="Primary navigation">
+        {navItems.map(({ to, icon: Icon, label, stackedLabel, match }) => {
+          const active = isActive(to, match);
           return (
             <Link
               key={to}
               to={to}
               onClick={() => setSidebarOpen(false)}
               title={collapsed ? label : undefined}
-              className="flex items-center gap-3 rounded-xl text-sm font-medium transition-all duration-150 relative group"
+              className={`bt-sidebar-nav-item ${active ? 'is-active' : ''} ${collapsed ? 'is-collapsed' : ''} flex items-center gap-3 rounded-xl text-sm font-medium transition-all duration-150 relative group`}
               style={{
                 padding: collapsed ? '10px 0' : '10px 12px',
                 justifyContent: collapsed ? 'center' : 'flex-start',
-                background: active
-                  ? 'rgba(231,139,74,0.12)'
-                  : 'transparent',
-                color: active ? '#F4A261' : 'rgba(220,222,224,0.68)',
-                borderLeft: active ? '3px solid #E78B4A' : '3px solid transparent',
               }}
             >
-              <Icon className="w-5 h-5 flex-shrink-0" style={{ opacity: active ? 1 : 0.7 }} />
+              <Icon className="bt-sidebar-nav-icon w-5 h-5 flex-shrink-0" />
               {!collapsed && (
-                <span className="flex-1 truncate" style={{ color: active ? '#FFFFFF' : 'rgba(255,255,255,0.72)' }}>
-                  {label}
+                <span
+                  className={`bt-sidebar-nav-label flex-1 min-w-0 ${stackedLabel ? 'leading-tight' : 'truncate'}`}
+                >
+                  {stackedLabel ? stackedLabel.map(line => (
+                    <span key={line} className="block whitespace-nowrap">
+                      {line}
+                    </span>
+                  )) : label}
                 </span>
               )}
               {active && !collapsed && (
-                <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: '#E78B4A' }} />
+                <span className="bt-sidebar-nav-dot w-1.5 h-1.5 rounded-full flex-shrink-0" />
               )}
               {collapsed && (
                 <div
@@ -451,11 +459,11 @@ export default function Layout({ children }: LayoutProps) {
     <div className="bt-desktop-shell bt-horizontal-lock flex h-screen max-w-full overflow-hidden" style={{ background: 'var(--bt-bg)' }}>
       {/* Desktop Sidebar */}
       <aside
-        className="hidden lg:flex flex-col flex-shrink-0 transition-all duration-300"
+        className="bt-sidebar-frame hidden lg:flex flex-col flex-shrink-0 transition-all duration-300"
         style={{
           width: W,
-          background: '#080A0C',
-          boxShadow: '1px 0 0 #2E343B',
+          background: 'linear-gradient(180deg, #101417 0%, #07090B 54%, #0C0F12 100%)',
+          boxShadow: '1px 0 0 rgba(255,255,255,0.08), 18px 0 38px rgba(0,0,0,0.20)',
         }}
       >
         <SidebarContent collapsed={sidebarCollapsed} />
@@ -470,10 +478,10 @@ export default function Layout({ children }: LayoutProps) {
             onClick={() => setSidebarOpen(false)}
           />
           <aside
-            className="absolute left-0 top-0 bottom-0 flex flex-col"
+            className="bt-sidebar-frame absolute left-0 top-0 bottom-0 flex flex-col"
             style={{
               width: 260,
-              background: 'linear-gradient(180deg, #0D1117 0%, #181D25 50%, #0D1117 100%)',
+              background: 'linear-gradient(180deg, #101417 0%, #07090B 54%, #0C0F12 100%)',
               boxShadow: '8px 0 32px rgba(0,0,0,0.4)',
             }}
           >
@@ -521,11 +529,10 @@ export default function Layout({ children }: LayoutProps) {
             {showBackToDashboard && (
               <Link
                 to="/dashboard"
-                className="hidden min-h-9 flex-shrink-0 items-center gap-2 rounded-md border px-3 py-2 text-xs font-black uppercase tracking-wide transition-colors sm:inline-flex"
-                style={{ background: '#1E1610', borderColor: '#E78B4A', color: '#FFD0A8' }}
+                className="bt-back-dashboard-button hidden flex-shrink-0 items-center gap-1.5 sm:inline-flex"
                 aria-label="Back to Dashboard"
               >
-                <ArrowLeft className="h-4 w-4" />
+                <ArrowLeft className="h-3.5 w-3.5" />
                 Back to Dashboard
               </Link>
             )}
@@ -775,7 +782,15 @@ export default function Layout({ children }: LayoutProps) {
                     <div className="p-4 border-b" style={{ borderColor: '#343A42' }}>
                       <div className="flex items-center gap-3">
                         {/* Avatar with upload overlay */}
-                        <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+                        <div
+                          className="relative group cursor-pointer"
+                          onClick={() => fileInputRef.current?.click()}
+                          {...fileDropHandlers(files => uploadAvatarFile(files[0]), {
+                            accept: 'image/*',
+                            disabled: uploadingAvatar,
+                            multiple: false,
+                          })}
+                        >
                           <Avatar src={user?.avatar_url} name={user?.name} size={52} />
                           <div className="absolute inset-0 rounded-xl bg-black bg-opacity-0 group-hover:bg-opacity-40 transition-all flex items-center justify-center">
                             <Camera className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -803,6 +818,11 @@ export default function Layout({ children }: LayoutProps) {
                         <button
                           onClick={() => fileInputRef.current?.click()}
                           disabled={uploadingAvatar}
+                          {...fileDropHandlers(files => uploadAvatarFile(files[0]), {
+                            accept: 'image/*',
+                            disabled: uploadingAvatar,
+                            multiple: false,
+                          })}
                           className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-colors"
                           style={{ background: '#171A1D', color: '#E7E0D7', border: '1px solid #343A42' }}
                         >

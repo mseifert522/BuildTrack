@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import api from '../lib/api';
 import { useAuthStore } from '../store/authStore';
+import { fileDropHandlers } from '../lib/fileDrop';
 import {
   appendProgressUploadAudit,
   PROGRESS_MEDIA_ACCEPT,
@@ -1084,7 +1085,7 @@ export default function MobilePhotos() {
     }
   };
 
-  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const queuePickedFiles = (filesInput: FileList | File[] | null, source: ProgressCaptureSource = 'library') => {
     if (!projectContextReady) {
       if (fileInputRef.current) fileInputRef.current.value = '';
       if (cameraInputRef.current) cameraInputRef.current.value = '';
@@ -1099,9 +1100,8 @@ export default function MobilePhotos() {
       return;
     }
 
-    const files = Array.from(event.target.files || []);
+    const files = Array.from(filesInput || []);
     if (!files.length) return;
-    const source = event.currentTarget === cameraInputRef.current ? 'device_camera' : 'library';
     const captureLocation = source === 'device_camera' && captureLocationRef.current && Date.now() - captureLocationRef.current.recordedAt < CAPTURE_LOCATION_MAX_AGE_MS
       ? captureLocationRef.current
       : null;
@@ -1111,8 +1111,18 @@ export default function MobilePhotos() {
       triggerShotFeedback(files.length === 1 ? 'Photo added' : `${files.length} photos added`);
       void getCaptureLocation(false);
     }
+  };
+
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const source = event.currentTarget === cameraInputRef.current ? 'device_camera' : 'library';
+    queuePickedFiles(event.target.files, source);
     event.currentTarget.value = '';
   };
+
+  const uploadDropHandlers = fileDropHandlers(files => queuePickedFiles(files, 'library'), {
+    accept: PROGRESS_MEDIA_ACCEPT,
+    multiple: true,
+  });
 
   const cancelUpload = () => {
     clearUploadQueue();
@@ -1349,6 +1359,7 @@ export default function MobilePhotos() {
           </button>
           <button
             onClick={openUploadOptions}
+            {...uploadDropHandlers}
             style={{ minHeight: 44, width: '100%', border: '1px solid rgba(255,255,255,0.16)', borderRadius: 13, padding: '9px 14px', background: 'rgba(255,255,255,0.09)', color: 'white', fontSize: 12, fontWeight: 850, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, whiteSpace: 'normal', textAlign: 'center', lineHeight: 1.15 }}
           >
             <ImagePlus size={16} color="#D99D26" />
@@ -1375,7 +1386,7 @@ export default function MobilePhotos() {
         style={{ display: 'none' }}
       />
 
-      <div className="mobile-content" style={{ padding: 14, paddingBottom: 92 }}>
+      <div className="mobile-content" style={{ padding: 14, paddingBottom: 92 }} {...uploadDropHandlers}>
         {!selectedProject && (
           <button
             onClick={() => setShowProjectSelector(true)}
@@ -1680,6 +1691,7 @@ export default function MobilePhotos() {
               <button
                 onClick={openFilePicker}
                 type="button"
+                {...uploadDropHandlers}
                 style={{ minHeight: 44, border: '1px solid #F3D08A', borderRadius: 12, background: '#FFFBEB', color: '#92400E', fontSize: 12, fontWeight: 850, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
               >
                 <ImagePlus size={15} color="#D99D26" />
@@ -1939,6 +1951,7 @@ export default function MobilePhotos() {
                   setShowUploadOptions(false);
                   openFilePicker();
                 }}
+                {...uploadDropHandlers}
                 style={{ minHeight: 58, border: '1px solid #E5E7EB', borderRadius: 16, background: '#F9FAFB', color: '#111827', padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left' }}
               >
                 <ImagePlus size={21} color="#D99D26" />

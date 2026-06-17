@@ -240,36 +240,46 @@ async function sendContractorSubmissionPdfEmail({ contractorName, contactName, c
   });
 }
 
-async function sendInviteEmail({ name, email, tempPassword, role, invitedBy, pin }) {
+async function sendInviteEmail({ name, email, setupUrl, role, invitedBy, pin, isReinvite = false }) {
   const transporter = createTransporter();
   const roleLabel = role.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+  const safeName = escapeHtml(name || 'there');
+  const safeEmail = escapeHtml(email);
+  const safeInvitedBy = escapeHtml(invitedBy || 'BuildTrack');
+  const safeRoleLabel = escapeHtml(roleLabel);
+  const safeSetupUrl = escapeHtml(setupUrl || BRAND.url);
+  const safePin = pin ? escapeHtml(pin) : '';
 
   const html = emailWrapper(`
-    <h2 style="color: #111827; font-size: 20px; font-weight: 700; margin: 0 0 8px;">Welcome to BuildTrack, ${name}!</h2>
+    <h2 style="color: #111827; font-size: 20px; font-weight: 700; margin: 0 0 8px;">${isReinvite ? 'Your BuildTrack access is ready' : `Welcome to BuildTrack, ${safeName}!`}</h2>
     <p style="color: #6B7280; font-size: 14px; line-height: 1.6; margin: 0 0 24px;">
-      You've been invited by <strong>${invitedBy}</strong> to join the BuildTrack platform as a <strong>${roleLabel}</strong>.
+      ${isReinvite ? `${safeInvitedBy} sent you a fresh BuildTrack access link.` : `You've been invited by <strong>${safeInvitedBy}</strong> to join the BuildTrack platform as a <strong>${safeRoleLabel}</strong>.`}
     </p>
     <div style="background: #F9FAFB; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
-      <p style="font-size: 12px; color: #6B7280; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 12px;">Your Login Credentials</p>
+      <p style="font-size: 12px; color: #6B7280; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 12px;">Your BuildTrack Access</p>
       <table style="width: 100%;">
-        <tr><td style="padding: 6px 0; font-size: 13px; color: #6B7280;">Email</td><td style="padding: 6px 0; font-size: 13px; color: #111827; font-weight: 600;">${email}</td></tr>
-        <tr><td style="padding: 6px 0; font-size: 13px; color: #6B7280;">Temporary Password</td><td style="padding: 6px 0; font-size: 13px; color: #111827; font-weight: 600; font-family: monospace;">${tempPassword}</td></tr>
-        ${pin ? `<tr><td style="padding: 6px 0; font-size: 13px; color: #6B7280;">Mobile App Pin#</td><td style="padding: 6px 0; font-size: 13px; color: #111827; font-weight: 600; font-family: monospace; font-size: 18px; letter-spacing: 4px;">${pin}</td></tr>` : ''}
+        <tr><td style="padding: 6px 0; font-size: 13px; color: #6B7280;">Email</td><td style="padding: 6px 0; font-size: 13px; color: #111827; font-weight: 600;">${safeEmail}</td></tr>
+        <tr><td style="padding: 6px 0; font-size: 13px; color: #6B7280;">Role</td><td style="padding: 6px 0; font-size: 13px; color: #111827; font-weight: 600;">${safeRoleLabel}</td></tr>
+        ${pin ? `<tr><td style="padding: 6px 0; font-size: 13px; color: #6B7280;">Personal PIN</td><td style="padding: 6px 0; font-size: 18px; color: #111827; font-weight: 800; font-family: monospace; letter-spacing: 4px;">${safePin}</td></tr>` : ''}
       </table>
     </div>
-    ${pin ? `<a href="${BRAND.mobileUrl}" style="display: block; text-align: center; background: #181D25; color: white; padding: 14px 24px; border-radius: 12px; text-decoration: none; font-weight: 700; font-size: 14px; margin-bottom: 8px;">Open BuildTrack Mobile App</a>` : ''}
-    <a href="${BRAND.url}" style="display: block; text-align: center; background: ${BRAND.color}; color: white; padding: 14px 24px; border-radius: 12px; text-decoration: none; font-weight: 700; font-size: 14px; margin-bottom: 16px;">
-      Sign In to BuildTrack
+    <a href="${safeSetupUrl}" style="display: block; text-align: center; background: ${BRAND.color}; color: white; padding: 14px 24px; border-radius: 12px; text-decoration: none; font-weight: 700; font-size: 14px; margin-bottom: 14px;">
+      Create Your Password
     </a>
+    <p style="color: #6B7280; font-size: 12px; line-height: 1.6; margin: 0 0 14px;">
+      If the button does not open, copy and paste this secure link into your browser:<br />
+      <span style="word-break: break-all; color: #111827;">${safeSetupUrl}</span>
+    </p>
+    ${pin ? `<p style="color: #6B7280; font-size: 12px; line-height: 1.6; margin: 0 0 14px;">Keep your personal PIN private. Contractor accounts can use it for quick mobile access; management accounts still use password and verification-code sign-in for security.</p>` : ''}
     <p style="color: #9CA3AF; font-size: 12px; text-align: center; margin: 0;">
-      You'll be asked to change your password on first login.
+      This link opens BuildTrack directly and lets you choose your own password.
     </p>
   `);
 
   await transporter.sendMail({
     from: process.env.EMAIL_FROM || `BuildTrack <noreply@newurbandev.com>`,
     to: email,
-    subject: `You're invited to BuildTrack — ${BRAND.name}`,
+    subject: isReinvite ? `Your BuildTrack welcome link` : `You're invited to BuildTrack - ${BRAND.name}`,
     html,
   });
 }
