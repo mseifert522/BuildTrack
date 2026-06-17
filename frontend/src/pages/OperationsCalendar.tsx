@@ -109,7 +109,7 @@ const CATEGORY_OPTIONS: CategoryOption[] = [
   { id: 'site_visit', label: 'Site Visit', backendType: 'maintenance', color: '#7E8C72', text: '#FFFFFF' },
   { id: 'delivery', label: 'Delivery', backendType: 'maintenance', color: '#C2773F', text: '#FFFFFF' },
   { id: 'crew_schedule', label: 'Crew Schedule', backendType: 'task', color: '#2E3338', text: '#FFFFFF' },
-  { id: 'internal_task', label: 'Internal Task', backendType: 'task', color: '#E7E0D4', text: '#2E3338' },
+  { id: 'internal_task', label: 'Task', backendType: 'task', color: '#E7E0D4', text: '#2E3338' },
   { id: 'maintenance', label: 'Maintenance', backendType: 'maintenance', color: '#B88A5B', text: '#FFFFFF' },
   { id: 'other', label: 'Other', backendType: 'other', color: '#6F767D', text: '#FFFFFF' },
 ];
@@ -176,7 +176,16 @@ function projectLabel(project?: ProjectOption | null) {
 }
 
 function eventProjectLabel(event: CalendarEvent) {
-  return event.project_job_name || event.project_address || 'Unassigned site';
+  return event.project_job_name || event.project_address || '';
+}
+
+function eventMetaLabel(event: CalendarEvent) {
+  return [eventTimeLabel(event), eventProjectLabel(event)].filter(Boolean).join(' - ');
+}
+
+function eventChipPrefix(event: CalendarEvent, category: CategoryOption) {
+  if (event.due_time) return eventTimeLabel(event);
+  return category.id === 'internal_task' ? '' : category.label;
 }
 
 function categoryFromBackend(event: CalendarEvent): CategoryId {
@@ -217,7 +226,11 @@ function parseDetails(description?: string | null): ParsedDetails {
       const value = rest.join(':').trim();
       const normalizedKey = key.toLowerCase();
       if (normalizedKey === 'category') {
-        const match = CATEGORY_OPTIONS.find(option => option.label.toLowerCase() === value.toLowerCase() || option.id === value);
+        const normalizedValue = value.toLowerCase();
+        const legacyCategory = normalizedValue === 'internal task' ? 'internal_task' : null;
+        const match = CATEGORY_OPTIONS.find(option =>
+          option.label.toLowerCase() === normalizedValue || option.id === value || option.id === legacyCategory
+        );
         if (match) details.category = match.id;
         return;
       }
@@ -983,7 +996,7 @@ function TimedDayColumn({
           >
             <span className="ops-time-event__bar" style={{ backgroundColor: category.color }} />
             <span className="ops-time-event__title">{event.title}</span>
-            <span className="ops-time-event__meta">{eventTimeLabel(event)} - {eventProjectLabel(event)}</span>
+            <span className="ops-time-event__meta">{eventMetaLabel(event)}</span>
           </button>
         );
       })}
@@ -1005,6 +1018,7 @@ function EventChip({
   onDragStart?: (event: DragEvent<HTMLElement>) => void;
 }) {
   const category = categoryById(categoryFromBackend(event));
+  const prefix = eventChipPrefix(event, category);
   return (
     <button
       type="button"
@@ -1015,7 +1029,7 @@ function EventChip({
       onDragStart={onDragStart}
       title={`${event.title} - ${eventTimeLabel(event)}`}
     >
-      <span>{event.due_time ? eventTimeLabel(event) : category.label}</span>
+      {prefix && <span>{prefix}</span>}
       <strong>{event.title}</strong>
     </button>
   );
