@@ -759,7 +759,7 @@ export default function Layout({ children }: LayoutProps) {
               >
                 <Avatar src={user?.avatar_url} name={user?.name} size={30} />
                 <div className="hidden min-w-0 text-left sm:block">
-                  <p className="truncate text-[13px] font-bold leading-4 text-gray-900">{user?.name}</p>
+                  <p className="truncate text-[13px] font-bold leading-4" style={{ color: '#F8FAFC' }}>{user?.name}</p>
                   <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
                     <p className="truncate text-[11px] font-semibold leading-3" style={{ color: '#F4A261' }}>
                       {user ? roleLabels[user.role] : ''}
@@ -792,18 +792,18 @@ export default function Layout({ children }: LayoutProps) {
                           })}
                         >
                           <Avatar src={user?.avatar_url} name={user?.name} size={52} />
-                          <div className="absolute inset-0 rounded-xl bg-black bg-opacity-0 group-hover:bg-opacity-40 transition-all flex items-center justify-center">
+                          <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/0 transition-colors group-hover:bg-black/40">
                             <Camera className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
                           </div>
                           {uploadingAvatar && (
-                            <div className="absolute inset-0 rounded-xl bg-black bg-opacity-50 flex items-center justify-center">
+                            <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/50">
                               <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                             </div>
                           )}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="font-bold text-gray-900 text-sm truncate">{user?.name}</p>
-                          <p className="text-xs text-gray-500 truncate">{user?.email}</p>
+                          <p className="truncate text-sm font-bold" style={{ color: '#F8FAFC' }}>{user?.name}</p>
+                          <p className="truncate text-xs font-medium" style={{ color: '#B8BEC6' }}>{user?.email}</p>
                           <span
                             className="inline-block mt-1 text-xs px-2 py-0.5 rounded-full font-medium"
                             style={{ background: '#FEF3C7', color: '#92400E' }}
@@ -858,9 +858,10 @@ export default function Layout({ children }: LayoutProps) {
                         <Link
                           to="/users"
                           onClick={() => setProfileOpen(false)}
-                          className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                          className="flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors hover:bg-white/5"
+                          style={{ color: '#D8DEE6' }}
                         >
-                          <Users className="w-4 h-4 text-gray-400" />
+                          <Users className="w-4 h-4" style={{ color: '#AEB6C2' }} />
                           User Management
                         </Link>
                       )}
@@ -868,9 +869,10 @@ export default function Layout({ children }: LayoutProps) {
                         <Link
                           to="/settings"
                           onClick={() => setProfileOpen(false)}
-                          className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                          className="flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors hover:bg-white/5"
+                          style={{ color: '#D8DEE6' }}
                         >
-                          <Settings className="w-4 h-4 text-gray-400" />
+                          <Settings className="w-4 h-4" style={{ color: '#AEB6C2' }} />
                           Settings
                         </Link>
                       )}
