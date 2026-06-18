@@ -421,6 +421,7 @@ export default function Contractors() {
   const [savingNotes, setSavingNotes] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [choosingVendorType, setChoosingVendorType] = useState(false);
   const [addingContractor, setAddingContractor] = useState(false);
   const [addingSupplier, setAddingSupplier] = useState(false);
   const [addForm, setAddForm] = useState(emptyContractorForm);
@@ -615,6 +616,23 @@ export default function Contractors() {
     setSelectedProjectIds([]);
     setProjectFilter('');
     setAddingContractor(true);
+  };
+
+  const openAddSupplier = () => {
+    setSupplierForm({
+      ...emptySupplierForm,
+      categories: ['General Building Materials'],
+    });
+    setAddingSupplier(true);
+  };
+
+  const chooseVendorType = (type: 'contractor' | 'supplier') => {
+    setChoosingVendorType(false);
+    if (type === 'contractor') {
+      openAdd();
+      return;
+    }
+    openAddSupplier();
   };
 
   const setFormCategorySelection = (target: 'add' | 'edit', categoryName: string, selected: boolean) => {
@@ -1042,30 +1060,13 @@ export default function Contractors() {
             <h1 className="text-2xl font-black tracking-tight">Contractors / Suppliers</h1>
           </div>
           <div className="bt-directory-actions flex w-full flex-col gap-2 sm:flex-row xl:w-auto">
-            <div className="inline-flex min-h-11 items-center justify-center rounded-lg border border-slate-500 bg-slate-950/50 px-4 text-sm font-black text-blue-100 shadow-sm">
-              Combined directory
-            </div>
             <button
               type="button"
-              onClick={openAdd}
+              onClick={() => setChoosingVendorType(true)}
               className="bt-directory-primary-action"
             >
               <Plus className="w-4 h-4" />
-              Add Contractor
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setSupplierForm({
-                  ...emptySupplierForm,
-                  categories: ['General Building Materials'],
-                });
-                setAddingSupplier(true);
-              }}
-              className="bt-directory-primary-action"
-            >
-              <Plus className="w-4 h-4" />
-              Add Supplier
+              Add Vendor
             </button>
             <div className="bt-directory-search-stack flex w-full flex-col gap-1 sm:w-[420px]">
               <div
@@ -1651,6 +1652,25 @@ export default function Contractors() {
           </div>
         )}
       </div>
+
+      <Modal isOpen={choosingVendorType} onClose={() => setChoosingVendorType(false)} title="Add Vendor" size="sm">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => chooseVendorType('contractor')}
+            className="rounded-xl border border-slate-300 bg-white px-4 py-4 text-sm font-black text-slate-900 shadow-sm hover:border-blue-400 hover:bg-blue-50"
+          >
+            Contractor
+          </button>
+          <button
+            type="button"
+            onClick={() => chooseVendorType('supplier')}
+            className="rounded-xl border border-slate-300 bg-white px-4 py-4 text-sm font-black text-slate-900 shadow-sm hover:border-blue-400 hover:bg-blue-50"
+          >
+            Supplier
+          </button>
+        </div>
+      </Modal>
 
       <Modal isOpen={addingSupplier} onClose={closeSupplierModal} title="Add Supplier" size="lg">
         <div className="space-y-5">
