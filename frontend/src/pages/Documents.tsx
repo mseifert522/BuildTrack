@@ -109,7 +109,7 @@ export default function Documents() {
             <input
               value={query}
               onChange={event => setQuery(event.target.value)}
-              placeholder="Search address, job, or document"
+              aria-label="Search documents"
               className="w-full bg-transparent text-sm outline-none text-gray-900 placeholder:text-gray-500"
             />
           </div>

@@ -1634,7 +1634,6 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
               <input
                 value={calendarSearch}
                 onChange={event => setCalendarSearch(event.target.value)}
-                placeholder="Search title, jobsite, or notes..."
               />
             </label>
             <div className="bt-ops-calendar-pro__queue" role="group" aria-label="Calendar queue">
@@ -1835,7 +1834,6 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
                 value={calendarSearch}
                 onChange={event => setCalendarSearch(event.target.value)}
                 className="min-h-10 w-full rounded-lg border border-slate-600 bg-white px-3 text-sm font-semibold text-slate-950 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-300"
-                placeholder="Title, jobsite, notes..."
               />
             </label>
             <label className="block">

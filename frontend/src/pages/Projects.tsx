@@ -333,7 +333,7 @@ export default function Projects() {
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Search by address or job name..."
+              aria-label="Search projects"
               className="w-full rounded-xl border border-gray-300 bg-white py-2.5 pl-9 pr-4 text-sm font-semibold text-slate-950 placeholder:text-slate-500 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
               style={{ colorScheme: 'light' }}
             />

@@ -522,7 +522,7 @@ export default function Layout({ children }: LayoutProps) {
                   setSearchOpen(true);
                 }}
                 onFocus={() => setSearchOpen(true)}
-                placeholder="Search anything in BuildTrack..."
+                aria-label="Search BuildTrack"
                 className="w-full rounded-md py-2 pl-10 pr-10 text-sm font-medium placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
                 style={{
                   background: '#111315',

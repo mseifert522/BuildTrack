@@ -2052,7 +2052,7 @@ function ProjectContractorAssignmentPanel({
             <input
               value={query}
               onChange={event => setQuery(event.target.value)}
-              placeholder="Search contractor, category, phone, email, or address"
+              aria-label="Search contractors"
               className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-slate-950 outline-none placeholder:text-slate-500"
             />
           </div>
@@ -4894,8 +4894,8 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                 <input
                   value={quoteContractorSearch}
                   onChange={event => setQuoteContractorSearch(event.currentTarget.value)}
+                  aria-label="Search contractors"
                   className="w-full rounded-xl border border-slate-300 bg-slate-50 py-2.5 pl-9 pr-3 text-sm font-bold text-slate-900 outline-none focus:border-emerald-400 focus:bg-white"
-                  placeholder="Search contractor..."
                 />
               </div>
             </div>
@@ -7453,7 +7453,7 @@ function PhotoBucketPickerModal({
             <input
               value={query}
               onChange={event => setQuery(event.target.value)}
-              placeholder="Search photos"
+              aria-label="Search photos"
               className="min-w-0 flex-1 bg-transparent text-sm font-bold text-slate-950 outline-none placeholder:text-slate-400"
             />
           </div>

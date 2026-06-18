@@ -101,7 +101,7 @@ export default function PunchList() {
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Search punch list items..."
+            aria-label="Search punch list items"
             className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>

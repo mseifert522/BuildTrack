@@ -261,7 +261,7 @@ export default function Suppliers() {
               <input
                 value={query}
                 onChange={event => setQuery(event.target.value)}
-                placeholder="Search suppliers"
+                aria-label="Search suppliers"
                 className="w-full bg-transparent text-sm font-semibold text-gray-900 outline-none placeholder:text-gray-400"
               />
             </div>

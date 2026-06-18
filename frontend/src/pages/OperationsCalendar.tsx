@@ -593,7 +593,6 @@ export default function OperationsCalendar() {
             <input
               value={search}
               onChange={event => setSearch(event.target.value)}
-              placeholder="Search title, site, crew"
             />
           </label>
           <button

@@ -756,7 +756,6 @@ export default function Security() {
             <input
               value={securitySearch}
               onChange={event => setSecuritySearch(event.target.value)}
-              placeholder="Search user, IP, device, browser, or access method"
               className="min-h-11 w-full rounded-xl border border-gray-300 bg-white py-2.5 pl-9 pr-3 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </label>

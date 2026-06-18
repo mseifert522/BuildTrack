@@ -1078,7 +1078,7 @@ export default function Contractors() {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search contractors, suppliers, project, phone, or email"
+                aria-label="Search contractors and suppliers"
                 className="w-full bg-transparent text-sm outline-none text-gray-900 placeholder:text-gray-500"
               />
             </div>
@@ -2247,7 +2247,7 @@ export default function Contractors() {
               <input
                 value={projectFilter}
                 onChange={e => setProjectFilter(e.target.value)}
-                placeholder="Filter projects by address or job name"
+                aria-label="Filter projects by address or job name"
                 className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -2348,7 +2348,7 @@ export default function Contractors() {
               <input
                 value={projectFilter}
                 onChange={e => setProjectFilter(e.target.value)}
-                placeholder="Filter projects by address or job name"
+                aria-label="Filter projects by address or job name"
                 className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>

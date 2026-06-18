@@ -1272,7 +1272,7 @@ export default function MobilePhotos() {
           <input
             value={projectSearch}
             onChange={event => setProjectSearch(event.target.value)}
-            placeholder="Search project or address"
+            aria-label="Search projects"
             style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', color: '#111827', fontSize: 14 }}
           />
         </div>
