@@ -1286,6 +1286,77 @@
   box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.55);
 }
 
+.bt-directory-name-search-block {
+  margin-top: 18px !important;
+  padding: 16px 14px 14px !important;
+  border-top: 1px solid rgba(148, 163, 184, 0.24) !important;
+  border-radius: 6px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.042), rgba(255, 255, 255, 0.012)),
+    rgba(7, 11, 17, 0.34);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 1px 0 rgba(0, 0, 0, 0.55) !important;
+}
+
+.bt-directory-name-search-label {
+  margin: 0 0 10px !important;
+  padding-left: 2px;
+  color: #F8FAFC !important;
+  font-size: 12px;
+  line-height: 1.2;
+  letter-spacing: 0.025em;
+}
+
+.bt-directory-name-search-field {
+  min-height: 46px;
+  border: 1px solid rgba(148, 163, 184, 0.48) !important;
+  border-radius: 8px !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018)),
+    #0B1118 !important;
+  padding: 0 13px !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 1px 2px rgba(0, 0, 0, 0.36) !important;
+}
+
+.bt-directory-name-search-field:hover {
+  border-color: rgba(203, 213, 225, 0.68) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 0 0 1px rgba(96, 165, 250, 0.14),
+    0 1px 2px rgba(0, 0, 0, 0.36) !important;
+}
+
+.bt-directory-name-search-field:focus-within {
+  border-color: rgba(96, 165, 250, 0.86) !important;
+  outline: 2px solid rgba(96, 165, 250, 0.24) !important;
+  outline-offset: 2px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    0 0 0 1px rgba(96, 165, 250, 0.22),
+    0 8px 18px rgba(15, 23, 42, 0.28) !important;
+}
+
+.bt-directory-name-search-field svg {
+  color: #BFDBFE !important;
+  filter: none !important;
+}
+
+.bt-directory-name-search-field input,
+.bt-directory-name-search-field input:hover,
+.bt-directory-name-search-field input:focus {
+  min-height: 44px;
+  border: 0 !important;
+  background: transparent !important;
+  color: #F8FAFC !important;
+  -webkit-text-fill-color: #F8FAFC;
+  box-shadow: none !important;
+  outline: 0 !important;
+  padding: 0 !important;
+}
+
 .bt-directory-filter-search svg {
   color: #FFFFFF !important;
   filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.75));

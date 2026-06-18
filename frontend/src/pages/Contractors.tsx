@@ -1115,9 +1115,9 @@ export default function Contractors() {
               <option value="total_paid">Sort: Total paid</option>
             </select>
           </div>
-          <div className="bt-directory-filter-search-block mt-4 border-t border-slate-200 pt-4">
-            <label htmlFor="contractor-name-search" className="bt-directory-filter-label block text-xs font-black uppercase tracking-wide text-slate-500 mb-2">Find contractor or supplier by name</label>
-            <div className="bt-directory-search bt-directory-search-wide bt-directory-filter-search flex items-center gap-2 px-3 py-2.5 rounded-xl border border-gray-300 bg-white">
+          <div className="bt-directory-filter-search-block bt-directory-name-search-block mt-4 border-t border-slate-200 pt-4">
+            <label htmlFor="contractor-name-search" className="bt-directory-filter-label bt-directory-name-search-label block text-xs font-black uppercase tracking-wide text-slate-500 mb-2">Find contractor or supplier by name</label>
+            <div className="bt-directory-search bt-directory-search-wide bt-directory-filter-search bt-directory-name-search-field flex items-center gap-2 px-3 py-2.5 rounded-xl border border-gray-300 bg-white">
               <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
               <input
                 id="contractor-name-search"
