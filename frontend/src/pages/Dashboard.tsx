@@ -1498,7 +1498,7 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
             const statusStyle = getProjectStatusStyle(item.project_status || undefined);
             const summary = getActivitySummary(item);
             const projectTarget = item.project_id ? `/projects/${item.project_id}` : '';
-            const projectLabel = item.project_address || item.project_job_name || 'BuildTrack';
+            const projectLabel = item.project_address || item.project_job_name || '';
             return (
               <div
                 key={`${item.feed_type}-${item.id}`}
@@ -1547,16 +1547,20 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
                     >
                       {statusStyle.label}
                     </span>
+                    {projectLabel && (
+                      <span
+                        className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black text-cyan-50 sm:max-w-[360px]"
+                        style={{ background: 'rgba(8, 145, 178, 0.14)', borderColor: 'rgba(103, 232, 249, 0.32)' }}
+                        title={projectLabel}
+                      >
+                        <MapPin className="h-3.5 w-3.5 flex-shrink-0 text-cyan-200" />
+                        <span className="truncate">{projectLabel}</span>
+                      </span>
+                    )}
                   </div>
-                  <p className="mt-2 whitespace-pre-wrap break-words rounded-lg border border-cyan-300/10 bg-slate-950/25 px-3 py-3 text-sm font-black leading-7 text-white shadow-inner sm:text-[15px]">
+                  <p className="mt-4 whitespace-pre-wrap break-words rounded-lg border border-cyan-300/10 bg-slate-950/25 px-3 py-3 text-sm font-black leading-7 text-white shadow-inner sm:text-[15px]">
                     {summary}
                   </p>
-                  {projectLabel && (
-                    <div className="mt-2 flex items-center gap-2">
-                      <MapPin className="h-4 w-4 flex-shrink-0 text-cyan-200" />
-                      <p className="truncate text-xs font-black text-slate-100">{projectLabel}</p>
-                    </div>
-                  )}
                 </div>
                 <div className="flex flex-shrink-0 flex-col items-end gap-2 text-right">
                   <span className="rounded-full bg-blue-500/15 px-2.5 py-1 text-[11px] font-black text-blue-100 ring-1 ring-blue-300/25">
