@@ -2174,10 +2174,10 @@ router.delete('/bills/:qboId', authorize(...QUICKBOOKS_ADMIN_ROLES), (req, res) 
       return res.status(409).json({ error: 'Remove this bill from the Friday payment queue before deleting it.' });
     }
 
-    const attachments = db.prepare('SELECT id, filename, original_name FROM quickbooks_bill_attachments WHERE qbo_bill_id = ?').all(qboId);
+    const retainedAttachmentCount = db.prepare('SELECT COUNT(*) AS count FROM quickbooks_bill_attachments WHERE qbo_bill_id = ?').get(qboId)?.count || 0;
     const removeBill = db.transaction(() => {
       db.prepare('DELETE FROM quickbooks_bill_lines WHERE qbo_bill_id = ?').run(qboId);
-      db.prepare('DELETE FROM quickbooks_bill_attachments WHERE qbo_bill_id = ?').run(qboId);
+      // Preserve uploaded PDFs; the bill is soft-deleted and may reappear after a QBO resync.
       db.prepare(`
         UPDATE quickbooks_bills
         SET payment_approval_status = ?,
@@ -2191,7 +2191,6 @@ router.delete('/bills/:qboId', authorize(...QUICKBOOKS_ADMIN_ROLES), (req, res) 
       `).run(PAYMENT_APPROVAL_DELETED_STATUS, qboId);
     });
     removeBill();
-    deleteQuickBooksBillAttachmentFiles(qboId, attachments);
 
     logActivity({
       userId: req.user.id,
@@ -2204,7 +2203,8 @@ router.delete('/bills/:qboId', authorize(...QUICKBOOKS_ADMIN_ROLES), (req, res) 
         vendor_name: bill.vendor_name || null,
         total_amt: Number(bill.total_amt || 0),
         balance: Number(bill.balance || 0),
-        attachment_count: attachments.length,
+        attachment_count: retainedAttachmentCount,
+        attachments_preserved: true,
       },
     });
 
