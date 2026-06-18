@@ -439,6 +439,10 @@ const DEFAULT_QUICKBOOKS_INVOICE_SORT: QuickBooksInvoiceSortState = {
   key: 'bill_date',
   direction: 'desc',
 };
+const DEFAULT_QUICKBOOKS_AWAITING_APPROVAL_SORT: QuickBooksInvoiceSortState = {
+  key: 'bill_date',
+  direction: 'asc',
+};
 const QUICKBOOKS_INVOICE_FILTER_OPTIONS: { value: QuickBooksInvoiceFilterMode; label: string }[] = [
   { value: 'all', label: 'No project filter' },
   { value: 'project', label: 'Project only' },
@@ -1153,9 +1157,12 @@ export default function Invoices() {
   );
   const quickBooksInvoiceFilterInUse = quickBooksInvoiceProjectFilterInUse || quickBooksInvoicePeriodInUse;
   const quickBooksInvoiceFilterActive = (quickBooksInvoiceProjectFilterInUse && quickBooksInvoiceFilterReady) || quickBooksInvoicePeriodInUse;
+  const quickBooksDefaultSortForStatus = deferredQuickBooksBillFilter === 'open'
+    ? DEFAULT_QUICKBOOKS_AWAITING_APPROVAL_SORT
+    : DEFAULT_QUICKBOOKS_INVOICE_SORT;
   const quickBooksEffectiveInvoiceSort = quickBooksInvoiceSort || (
     quickBooksInvoiceFilterInUse || deferredQuickBooksBillFilter === 'all' || deferredQuickBooksBillFilter === 'open'
-      ? DEFAULT_QUICKBOOKS_INVOICE_SORT
+      ? quickBooksDefaultSortForStatus
       : null
   );
   const quickBooksInvoiceScopeRows = useMemo(() => {
