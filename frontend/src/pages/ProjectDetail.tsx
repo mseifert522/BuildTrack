@@ -864,7 +864,6 @@ export default function ProjectDetail() {
       <div className="bt-project-notes-header mb-3 flex items-center justify-between gap-3 rounded-xl border border-cyan-300/25 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 px-3 py-2.5 shadow-[0_8px_22px_rgba(37,99,235,0.18)]">
         <div className="min-w-0">
           <h3 className="text-base font-black text-white sm:text-lg">Project Notes</h3>
-          <p className="mt-0.5 text-sm font-semibold text-blue-100/90">Office, field, and general updates for this project</p>
         </div>
         <div className="flex flex-shrink-0 items-center gap-2">
           <button
@@ -876,15 +875,6 @@ export default function ProjectDetail() {
             <Send className="h-3.5 w-3.5" />
             Save
           </button>
-          {compact && (
-          <button
-            type="button"
-            onClick={() => setTab('notes')}
-            className="text-sm font-bold text-cyan-100 hover:text-white hover:underline"
-          >
-            Open notes
-          </button>
-          )}
         </div>
       </div>
       <div className="bt-project-note-composer mb-4 rounded-2xl border border-amber-300/35 bg-gradient-to-br from-slate-950 via-slate-900 to-amber-950 p-3 shadow-[0_14px_34px_rgba(245,158,11,0.14)]">
