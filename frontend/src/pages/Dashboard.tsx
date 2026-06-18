@@ -6,7 +6,7 @@ import { Loading, Modal } from '../components/ui';
 import Avatar from '../components/Avatar';
 import {
   Activity,
-  Plus, MapPin, CalendarDays,
+  MapPin, CalendarDays,
   Mail, Edit2, ChevronLeft, ChevronRight, Trash2, CheckCircle2, Clock, ListFilter,
   Maximize2, Minimize2
 } from 'lucide-react';
@@ -1622,15 +1622,6 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
               {' - '}
               {roleLabels[user?.role || '']}
             </p>
-          </div>
-          <div className="bt-dashboard-hero-actions hidden items-center gap-3 md:flex">
-            <Link
-              to="/projects"
-              className="bt-btn bt-btn-primary"
-            >
-              <Plus className="w-4 h-4" />
-              New Project
-            </Link>
           </div>
         </div>
       </div>
