@@ -777,6 +777,19 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
     setCalendarAnchorDateKey(todayKey);
     setExpandedCalendarNoteId(null);
   };
+  const buildOperationsCalendarPath = (dateKey?: string, eventId?: string) => {
+    const params = new URLSearchParams();
+    if (dateKey) params.set('date', dateKey);
+    if (eventId) params.set('event', eventId);
+    const query = params.toString();
+    return query ? `/operations-calendar?${query}` : '/operations-calendar';
+  };
+  const openOperationsCalendarDate = (dateKey = calendarAnchorDateKey) => {
+    navigate(buildOperationsCalendarPath(dateKey));
+  };
+  const openOperationsCalendarEvent = (event: OperationsCalendarEvent) => {
+    navigate(buildOperationsCalendarPath(calendarDateKeyForEvent(event) || calendarAnchorDateKey, event.id));
+  };
   const isCurrentViewEvent = (event: OperationsCalendarEvent) => {
     const eventDateKey = calendarDateKeyForEvent(event);
     return Boolean(eventDateKey && eventDateKey >= calendarViewRangeStartKey && eventDateKey <= calendarViewRangeEndKey);
@@ -1699,9 +1712,10 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
                 <button
                   key={event.id}
                   type="button"
-                  onClick={() => openCalendarEntryEditor(event)}
+                  onClick={() => openOperationsCalendarEvent(event)}
                   className="bt-dashboard-mini-calendar-module__agenda-item"
-                  title={event.title || 'Untitled calendar item'}
+                  title={`Open in calendar: ${event.title || 'Untitled calendar item'}`}
+                  aria-label={`Open calendar item: ${event.title || 'Untitled calendar item'}`}
                 >
                   <span className={tone.rail} />
                   <span>
@@ -1723,7 +1737,7 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
       </div>
       <button
         type="button"
-        onClick={() => navigate('/operations-calendar')}
+        onClick={() => openOperationsCalendarDate(calendarAnchorDateKey)}
         className="bt-dashboard-mini-calendar-module__open"
       >
         Open Calendar

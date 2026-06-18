@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState, type DragEvent, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   addDays,
   addMonths,
@@ -133,6 +134,11 @@ const END_HOUR = 20;
 const HOUR_HEIGHT = 68;
 const HOURS = Array.from({ length: END_HOUR - START_HOUR }, (_, index) => START_HOUR + index);
 const ALL_CATEGORIES = CATEGORY_OPTIONS.map(option => option.id);
+const ROUTE_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+function safeRouteDateKey(value?: string | null) {
+  return value && ROUTE_DATE_PATTERN.test(value) ? value : '';
+}
 
 function dateKey(date: Date) {
   return format(date, 'yyyy-MM-dd');
@@ -338,8 +344,12 @@ function positionFor(event: CalendarEvent) {
 }
 
 export default function OperationsCalendar() {
+  const [searchParams] = useSearchParams();
+  const routeDateKey = safeRouteDateKey(searchParams.get('date'));
+  const routeEventId = searchParams.get('event') || '';
+  const handledRouteEventRef = useRef('');
   const [view, setView] = useState<CalendarView>('month');
-  const [selectedDate, setSelectedDate] = useState(() => new Date());
+  const [selectedDate, setSelectedDate] = useState(() => routeDateKey ? parseDate(routeDateKey) : new Date());
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [loading, setLoading] = useState(true);
@@ -394,6 +404,12 @@ export default function OperationsCalendar() {
   }, [loadEvents]);
 
   useEffect(() => {
+    if (!routeDateKey) return;
+    setView('month');
+    setSelectedDate(parseDate(routeDateKey));
+  }, [routeDateKey]);
+
+  useEffect(() => {
     let mounted = true;
     api.get('/projects')
       .then(response => {
@@ -408,6 +424,25 @@ export default function OperationsCalendar() {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!routeEventId) return;
+
+    const launchKey = `${routeDateKey || ''}:${routeEventId}`;
+    if (handledRouteEventRef.current === launchKey) return;
+
+    const routeEvent = events.find(event => event.id === routeEventId);
+    if (!routeEvent) return;
+
+    setView('month');
+    setSelectedDate(parseDate(routeEvent.scheduled_for));
+    setSearch('');
+    setAssigneeFilter('all');
+    setCategoryFilters(new Set(ALL_CATEGORIES));
+    setForm(formFromEvent(routeEvent));
+    setModalOpen(true);
+    handledRouteEventRef.current = launchKey;
+  }, [events, routeDateKey, routeEventId]);
 
   const filteredEvents = useMemo(() => {
     const query = search.trim().toLowerCase();
