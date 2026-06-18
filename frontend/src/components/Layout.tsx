@@ -358,7 +358,7 @@ export default function Layout({ children }: LayoutProps) {
               onClick={() => setSidebarOpen(false)}
               title={collapsed ? label : undefined}
               aria-current={active ? 'page' : undefined}
-              className={`bt-sidebar-nav-item ${active ? 'is-active' : ''} ${collapsed ? 'is-collapsed' : ''} flex items-center gap-3 rounded-xl text-sm font-medium transition-all duration-150 relative group`}
+              className={`bt-sidebar-nav-item ${active ? 'is-active' : ''} ${collapsed ? 'is-collapsed' : ''} flex items-center gap-3 rounded-xl text-sm font-medium relative group`}
               style={{
                 padding: collapsed ? '10px 0' : '10px 12px',
                 justifyContent: collapsed ? 'center' : 'flex-start',
@@ -381,7 +381,7 @@ export default function Layout({ children }: LayoutProps) {
               )}
               {collapsed && (
                 <div
-                  className="absolute left-full ml-3 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50"
+                  className="absolute left-full ml-3 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none z-50"
                   style={{ background: '#1E2530', color: 'white', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}
                 >
                   {label}
