@@ -397,9 +397,8 @@ export default function Projects() {
               <div
                 key={p.id}
                 onClick={() => navigate(`/projects/${p.id}`)}
-                className={`bt-project-card group relative isolate flex w-full min-w-0 cursor-pointer flex-col items-stretch gap-4 overflow-visible rounded-[1.35rem] border border-slate-300 bg-gradient-to-br from-white via-white to-blue-50/45 p-5 transition-all hover:border-blue-400 hover:bg-blue-50/35 hover:shadow-xl sm:flex-row sm:items-center sm:gap-5 ${isActionsOpen ? 'z-50' : 'z-0'}`}
+                className={`bt-project-card group relative isolate flex w-full min-w-0 cursor-pointer flex-col items-stretch gap-4 overflow-visible rounded-[1.35rem] border p-5 transition-all sm:flex-row sm:items-center sm:gap-5 ${isActionsOpen ? 'z-50' : 'z-0'}`}
                 style={{
-                  boxShadow: '0 10px 28px rgba(15,23,42,0.10), 0 1px 0 rgba(15,23,42,0.04)',
                   borderLeft: `5px solid ${priority ? (priority <= 5 ? '#F59E0B' : '#2563EB') : '#2563EB'}`,
                 }}
               >

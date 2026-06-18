@@ -266,6 +266,115 @@ textarea,
   transform: translateY(-1px);
 }
 
+/* Vivid 3D project cards: distinct rows without sacrificing text contrast. */
+.bt-projects-page .bt-project-card {
+  --bt-project-card-from: #DBEAFE;
+  --bt-project-card-via: #BAE6FD;
+  --bt-project-card-to: #E0F2FE;
+  --bt-project-card-edge: #0284C7;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.76), rgba(255, 255, 255, 0.22) 44%, rgba(255, 255, 255, 0.08) 100%),
+    linear-gradient(135deg, var(--bt-project-card-from) 0%, var(--bt-project-card-via) 48%, var(--bt-project-card-to) 100%) !important;
+  border-color: color-mix(in srgb, var(--bt-project-card-edge) 46%, #FFFFFF) !important;
+  color: #07111F;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.88),
+    inset 0 -2px 0 color-mix(in srgb, var(--bt-project-card-edge) 24%, transparent),
+    0 3px 0 color-mix(in srgb, var(--bt-project-card-edge) 36%, rgba(15, 23, 42, 0.20)),
+    0 18px 34px rgba(15, 23, 42, 0.14) !important;
+}
+
+.bt-projects-page .bt-project-card:nth-of-type(6n + 1) {
+  --bt-project-card-from: #DDF4FF;
+  --bt-project-card-via: #BDEBFF;
+  --bt-project-card-to: #DCEBFF;
+  --bt-project-card-edge: #0284C7;
+}
+
+.bt-projects-page .bt-project-card:nth-of-type(6n + 2) {
+  --bt-project-card-from: #D1FAE5;
+  --bt-project-card-via: #A7F3D0;
+  --bt-project-card-to: #CCFBF1;
+  --bt-project-card-edge: #059669;
+}
+
+.bt-projects-page .bt-project-card:nth-of-type(6n + 3) {
+  --bt-project-card-from: #FEF3C7;
+  --bt-project-card-via: #FDE68A;
+  --bt-project-card-to: #FFEDD5;
+  --bt-project-card-edge: #D97706;
+}
+
+.bt-projects-page .bt-project-card:nth-of-type(6n + 4) {
+  --bt-project-card-from: #EDE9FE;
+  --bt-project-card-via: #DDD6FE;
+  --bt-project-card-to: #E0E7FF;
+  --bt-project-card-edge: #7C3AED;
+}
+
+.bt-projects-page .bt-project-card:nth-of-type(6n + 5) {
+  --bt-project-card-from: #FFE4E6;
+  --bt-project-card-via: #FED7AA;
+  --bt-project-card-to: #FFF1F2;
+  --bt-project-card-edge: #E11D48;
+}
+
+.bt-projects-page .bt-project-card:nth-of-type(6n) {
+  --bt-project-card-from: #ECFCCB;
+  --bt-project-card-via: #BBF7D0;
+  --bt-project-card-to: #DCFCE7;
+  --bt-project-card-edge: #65A30D;
+}
+
+.bt-projects-page .bt-project-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--bt-project-card-edge) 68%, #FFFFFF) !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(255, 255, 255, 0.30) 44%, rgba(255, 255, 255, 0.12) 100%),
+    linear-gradient(135deg, var(--bt-project-card-from) 0%, var(--bt-project-card-via) 42%, var(--bt-project-card-to) 100%) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.94),
+    inset 0 -2px 0 color-mix(in srgb, var(--bt-project-card-edge) 30%, transparent),
+    0 4px 0 color-mix(in srgb, var(--bt-project-card-edge) 44%, rgba(15, 23, 42, 0.22)),
+    0 24px 42px rgba(15, 23, 42, 0.18) !important;
+}
+
+.bt-projects-page .bt-project-card:focus-within {
+  outline: 3px solid color-mix(in srgb, var(--bt-project-card-edge) 60%, #FFFFFF);
+  outline-offset: 2px;
+}
+
+.bt-projects-page .bt-project-card .bt-project-title {
+  color: #06101F !important;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.58);
+}
+
+.bt-projects-page .bt-project-card .text-gray-500,
+.bt-projects-page .bt-project-card .text-slate-600 {
+  color: #243244 !important;
+}
+
+.bt-projects-page .bt-project-card .text-orange-600 {
+  color: #B43200 !important;
+}
+
+.bt-projects-page .bt-project-card label {
+  border-color: color-mix(in srgb, var(--bt-project-card-edge) 42%, #FFFFFF) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.62),
+    0 9px 18px rgba(15, 23, 42, 0.18) !important;
+}
+
+.bt-projects-page .bt-project-card [aria-haspopup="menu"] {
+  border-color: rgba(100, 116, 139, 0.36) !important;
+  background: linear-gradient(180deg, #FFFFFF 0%, #EEF2F7 100%) !important;
+  color: #0F172A !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.88),
+    0 2px 0 rgba(100, 116, 139, 0.22),
+    0 10px 18px rgba(15, 23, 42, 0.12) !important;
+}
+
 /* Keep readable Operations Calendar surfaces inside the global desktop dark theme. */
 .bt-desktop-shell .bt-dashboard-ops-panel .bg-white,
 .bt-desktop-shell .bt-dashboard-ops-panel input.bg-white,
