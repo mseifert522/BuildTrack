@@ -28,6 +28,7 @@ type Tab = 'overview' | 'progress-history' | 'construction-plan' | 'project-time
 type ProjectCalendarEvent = {
   id: string;
   source?: string | null;
+  source_id?: string | null;
   event_type?: string | null;
   title?: string | null;
   description?: string | null;
@@ -36,6 +37,9 @@ type ProjectCalendarEvent = {
   status?: string | null;
   priority?: string | null;
   completed_at?: string | null;
+  completion_note?: string | null;
+  created_by_name?: string | null;
+  created_at?: string | null;
 };
 
 type ProjectCalendarDayCell = {
@@ -467,6 +471,25 @@ function projectCalendarEventTone(event: ProjectCalendarEvent) {
   return PROJECT_CALENDAR_EVENT_TONES[String(event.event_type || 'other')] || PROJECT_CALENDAR_EVENT_TONES.other;
 }
 
+function projectCalendarValueLabel(value?: string | null, fallback = 'Not set') {
+  const text = String(value || '').trim();
+  if (!text) return fallback;
+  return text
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+function projectCalendarEventKindLabel(event: ProjectCalendarEvent) {
+  if (event.source === 'construction_task') return 'Task';
+  return projectCalendarValueLabel(event.event_type, 'Event');
+}
+
+function projectCalendarEventDateLabel(event: ProjectCalendarEvent) {
+  const dateKey = projectCalendarEventDateKey(event);
+  if (!dateKey) return 'Date not set';
+  return format(parseProjectCalendarDateKey(dateKey), 'MMM d, yyyy');
+}
+
 function buildProjectCalendarDays(anchorDateKey: string, events: ProjectCalendarEvent[]): ProjectCalendarDayCell[] {
   const todayKey = formatLocalDateInput();
   const anchor = parseProjectCalendarDateKey(anchorDateKey);
@@ -511,100 +534,187 @@ function ProjectMiniCalendarCard({
 }) {
   const anchorDate = parseProjectCalendarDateKey(anchorDateKey);
   const days = useMemo(() => buildProjectCalendarDays(anchorDateKey, events), [anchorDateKey, events]);
+  const [selectedEvent, setSelectedEvent] = useState<ProjectCalendarEvent | null>(null);
   const todayKey = formatLocalDateInput();
   const upcoming = useMemo(
     () => sortProjectCalendarEvents(events.filter(event => String(projectCalendarEventDateKey(event) || '') >= todayKey)).slice(0, 4),
     [events, todayKey],
   );
   const moveMonth = (offset: number) => onAnchorDateChange(formatLocalDateInput(addProjectCalendarMonths(anchorDate, offset)));
+  const selectedEventDescription = String(selectedEvent?.description || '').trim();
+  const selectedCompletionNote = String(selectedEvent?.completion_note || '').trim();
+
+  useEffect(() => {
+    if (selectedEvent && !events.some(event => event.id === selectedEvent.id)) setSelectedEvent(null);
+  }, [events, selectedEvent]);
 
   return (
-    <section className="rounded-xl border border-blue-900/40 bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 p-4 text-white shadow-[0_18px_42px_rgba(15,23,42,0.28)]">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-black text-white">Project Calendar</h3>
-          <p className="mt-0.5 text-xs font-semibold text-cyan-100">{events.length} {events.length === 1 ? 'project item' : 'project items'}</p>
+    <>
+      <section className="rounded-xl border border-blue-900/40 bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 p-4 text-white shadow-[0_18px_42px_rgba(15,23,42,0.28)]">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-black text-white">Project Calendar</h3>
+            <p className="mt-0.5 text-xs font-semibold text-cyan-100">{events.length} {events.length === 1 ? 'project item' : 'project items'}</p>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => moveMonth(-1)}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/10 text-cyan-50 hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-cyan-300"
+              aria-label="Previous month"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => onAnchorDateChange(formatLocalDateInput())}
+              className="inline-flex h-8 items-center justify-center rounded-lg border border-cyan-300/30 bg-cyan-400/10 px-2.5 text-xs font-black text-cyan-50 hover:bg-cyan-400/20 focus:outline-none focus:ring-2 focus:ring-cyan-300"
+            >
+              Today
+            </button>
+            <button
+              type="button"
+              onClick={() => moveMonth(1)}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/10 text-cyan-50 hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-cyan-300"
+              aria-label="Next month"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => moveMonth(-1)}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/10 text-cyan-50 hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-cyan-300"
-            aria-label="Previous month"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => onAnchorDateChange(formatLocalDateInput())}
-            className="inline-flex h-8 items-center justify-center rounded-lg border border-cyan-300/30 bg-cyan-400/10 px-2.5 text-xs font-black text-cyan-50 hover:bg-cyan-400/20 focus:outline-none focus:ring-2 focus:ring-cyan-300"
-          >
-            Today
-          </button>
-          <button
-            type="button"
-            onClick={() => moveMonth(1)}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/10 text-cyan-50 hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-cyan-300"
-            aria-label="Next month"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
+
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <p className="text-base font-black text-cyan-50">{format(anchorDate, 'MMMM yyyy')}</p>
+          {loading && <span className="text-xs font-bold text-cyan-200">Loading</span>}
         </div>
-      </div>
 
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <p className="text-base font-black text-cyan-50">{format(anchorDate, 'MMMM yyyy')}</p>
-        {loading && <span className="text-xs font-bold text-cyan-200">Loading</span>}
-      </div>
-
-      <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-black uppercase text-cyan-200/90">
-        {PROJECT_CALENDAR_WEEKDAYS.map(day => <div key={day}>{day}</div>)}
-      </div>
-      <div className="mt-1 grid grid-cols-7 gap-1">
-        {days.map(day => (
-          <div
-            key={day.key}
-            className={`min-h-[58px] rounded-lg border p-1.5 ${day.isToday ? 'border-amber-300 bg-amber-400/20 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.25)]' : 'border-white/10 bg-white/[0.045]'} ${day.isCurrentMonth ? 'text-white' : 'text-slate-500'}`}
-          >
-            <div className="flex items-center justify-between">
-              <span className={`text-xs font-black ${day.isToday ? 'text-amber-100' : ''}`}>{day.dayNumber}</span>
-              {day.events.length > 0 && <span className="rounded-full bg-cyan-300 px-1.5 text-[9px] font-black text-slate-950">{day.events.length}</span>}
+        <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-black uppercase text-cyan-200/90">
+          {PROJECT_CALENDAR_WEEKDAYS.map(day => <div key={day}>{day}</div>)}
+        </div>
+        <div className="mt-1 grid grid-cols-7 gap-1">
+          {days.map(day => (
+            <div
+              key={day.key}
+              className={`min-h-[58px] rounded-lg border p-1.5 ${day.isToday ? 'border-amber-300 bg-amber-400/20 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.25)]' : 'border-white/10 bg-white/[0.045]'} ${day.isCurrentMonth ? 'text-white' : 'text-slate-500'}`}
+            >
+              <div className="flex items-center justify-between">
+                <span className={`text-xs font-black ${day.isToday ? 'text-amber-100' : ''}`}>{day.dayNumber}</span>
+                {day.events.length > 0 && <span className="rounded-full bg-cyan-300 px-1.5 text-[9px] font-black text-slate-950">{day.events.length}</span>}
+              </div>
+              <div className="mt-1 space-y-1">
+                {day.events.slice(0, 2).map(event => (
+                  <button
+                    key={`${day.key}-${event.id}`}
+                    type="button"
+                    onClick={() => setSelectedEvent(event)}
+                    className={`block w-full cursor-pointer truncate rounded border px-1 py-0.5 text-left text-[9px] font-black leading-tight hover:ring-1 hover:ring-cyan-100 focus:outline-none focus:ring-2 focus:ring-cyan-200 ${projectCalendarEventTone(event)}`}
+                    title={event.title || 'Calendar item'}
+                    aria-label={`View ${event.title || 'calendar item'} on ${projectCalendarEventDateLabel(event)}`}
+                  >
+                    {event.title || 'Calendar item'}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="mt-1 space-y-1">
-              {day.events.slice(0, 2).map(event => (
-                <div key={`${day.key}-${event.id}`} className={`truncate rounded border px-1 py-0.5 text-[9px] font-black leading-tight ${projectCalendarEventTone(event)}`}>
-                  {event.title || 'Calendar item'}
+          ))}
+        </div>
+
+        <div className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="text-xs font-black uppercase tracking-wide text-cyan-100">Upcoming</p>
+            <CalendarDays className="h-4 w-4 text-cyan-200" />
+          </div>
+          {upcoming.length > 0 ? (
+            <div className="space-y-2">
+              {upcoming.map(event => (
+                <button
+                  key={`upcoming-${event.id}`}
+                  type="button"
+                  onClick={() => setSelectedEvent(event)}
+                  className="flex w-full cursor-pointer items-start gap-2 rounded-lg border border-white/10 bg-white/[0.055] p-2 text-left hover:border-cyan-200/50 hover:bg-white/[0.09] focus:outline-none focus:ring-2 focus:ring-cyan-200"
+                  aria-label={`View ${event.title || 'calendar item'} on ${projectCalendarEventDateLabel(event)}`}
+                >
+                  <span className={`mt-1 h-2.5 w-2.5 flex-shrink-0 rounded-full ${event.status === 'completed' ? 'bg-emerald-300' : event.priority === 'critical' || event.priority === 'high' ? 'bg-rose-300' : 'bg-cyan-300'}`} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs font-black text-white">{event.title || 'Calendar item'}</span>
+                    <span className="mt-0.5 block text-[11px] font-semibold text-cyan-100">
+                      {format(parseProjectCalendarDateKey(projectCalendarEventDateKey(event)), 'MMM d')} · {formatProjectCalendarTime(event.due_time)}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="py-3 text-center text-xs font-bold text-slate-300">No upcoming project calendar items</p>
+          )}
+        </div>
+      </section>
+
+      <Modal
+        isOpen={Boolean(selectedEvent)}
+        onClose={() => setSelectedEvent(null)}
+        title={selectedEvent?.title || 'Calendar item'}
+        description="Project calendar item details"
+        size="md"
+      >
+        {selectedEvent && (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-cyan-200 bg-gradient-to-br from-cyan-50 to-blue-50 px-4 py-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-slate-950 px-3 py-1 text-xs font-black uppercase tracking-wide text-white">
+                  {projectCalendarEventKindLabel(selectedEvent)}
+                </span>
+                <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-slate-700 ring-1 ring-cyan-200">
+                  {projectCalendarEventDateLabel(selectedEvent)}
+                </span>
+                <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-slate-700 ring-1 ring-cyan-200">
+                  {formatProjectCalendarTime(selectedEvent.due_time)}
+                </span>
+              </div>
+              <p className="mt-3 text-lg font-black leading-snug text-slate-950">{selectedEvent.title || 'Calendar item'}</p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              {[
+                { label: 'Status', value: projectCalendarValueLabel(selectedEvent.status, 'Scheduled') },
+                { label: 'Priority', value: projectCalendarValueLabel(selectedEvent.priority, 'Normal') },
+                { label: 'Source', value: selectedEvent.source === 'construction_task' ? 'Construction task' : projectCalendarValueLabel(selectedEvent.source, 'Calendar event') },
+                { label: 'Created by', value: selectedEvent.created_by_name || 'BuildTrack' },
+              ].map(item => (
+                <div key={item.label} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">{item.label}</p>
+                  <p className="mt-1 text-sm font-black text-slate-950">{item.value}</p>
                 </div>
               ))}
             </div>
-          </div>
-        ))}
-      </div>
 
-      <div className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <p className="text-xs font-black uppercase tracking-wide text-cyan-100">Upcoming</p>
-          <CalendarDays className="h-4 w-4 text-cyan-200" />
-        </div>
-        {upcoming.length > 0 ? (
-          <div className="space-y-2">
-            {upcoming.map(event => (
-              <div key={`upcoming-${event.id}`} className="flex items-start gap-2 rounded-lg border border-white/10 bg-white/[0.055] p-2">
-                <span className={`mt-1 h-2.5 w-2.5 flex-shrink-0 rounded-full ${event.status === 'completed' ? 'bg-emerald-300' : event.priority === 'critical' || event.priority === 'high' ? 'bg-rose-300' : 'bg-cyan-300'}`} />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs font-black text-white">{event.title || 'Calendar item'}</p>
-                  <p className="mt-0.5 text-[11px] font-semibold text-cyan-100">
-                    {format(parseProjectCalendarDateKey(projectCalendarEventDateKey(event)), 'MMM d')} · {formatProjectCalendarTime(event.due_time)}
-                  </p>
-                </div>
+            {selectedEventDescription && (
+              <div className="rounded-lg border border-slate-200 bg-white px-3 py-3">
+                <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">Notes</p>
+                <p className="mt-2 whitespace-pre-wrap text-sm font-semibold leading-6 text-slate-800">{selectedEventDescription}</p>
               </div>
-            ))}
+            )}
+
+            {selectedCompletionNote && (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3">
+                <p className="text-[11px] font-black uppercase tracking-wide text-emerald-700">Completion note</p>
+                <p className="mt-2 whitespace-pre-wrap text-sm font-semibold leading-6 text-emerald-950">{selectedCompletionNote}</p>
+              </div>
+            )}
+
+            <div className="flex justify-end border-t border-slate-200 pt-4">
+              <button
+                type="button"
+                onClick={() => setSelectedEvent(null)}
+                className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-slate-950 px-4 py-2 text-sm font-black text-white hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-cyan-400"
+              >
+                Close
+              </button>
+            </div>
           </div>
-        ) : (
-          <p className="py-3 text-center text-xs font-bold text-slate-300">No upcoming project calendar items</p>
         )}
-      </div>
-    </section>
+      </Modal>
+    </>
   );
 }
 
