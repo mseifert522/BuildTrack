@@ -374,6 +374,12 @@ const isImageAttachment = (attachment?: InvoiceEmailAttachment | null) =>
     /\.(jpe?g|png|gif|webp|bmp)$/i.test(String(attachment.original_name || ''))
   ));
 
+const isImagePreviewFile = (mimeType?: string | null, filename?: string | null) =>
+  Boolean(
+    String(mimeType || '').toLowerCase().startsWith('image/') ||
+    /\.(jpe?g|png|gif|webp|bmp|tiff?)$/i.test(String(filename || ''))
+  );
+
 const attachmentKindLabel = (attachment?: InvoiceEmailAttachment | null) => {
   if (isPdfAttachment(attachment)) return 'PDF';
   if (isImageAttachment(attachment)) return 'IMG';
@@ -1407,7 +1413,10 @@ export default function Invoices() {
     return value;
   };
 
-  const qboPdfFrameSrc = qboPdfPreviewUrl && qboPdfPreview
+  const qboPdfPreviewIsImage = Boolean(
+    qboPdfPreview && isImagePreviewFile(qboPdfPreview.mime_type, qboPdfPreview.filename || qboPdfPreview.title)
+  );
+  const qboPdfFrameSrc = qboPdfPreviewUrl && qboPdfPreview && !qboPdfPreviewIsImage
     ? `${qboPdfPreviewUrl}#page=${Math.max(1, qboPdfPreview.page)}&zoom=${qboPdfPreview.zoom}&toolbar=0&navpanes=0&scrollbar=1`
     : '';
 
@@ -1415,7 +1424,7 @@ export default function Invoices() {
     setQboPdfPreview(current => {
       if (!current) return current;
       const page = patch.page !== undefined ? Math.max(1, Math.floor(patch.page || 1)) : current.page;
-      const zoom = patch.zoom !== undefined ? Math.max(50, Math.min(250, Math.round(patch.zoom))) : current.zoom;
+      const zoom = patch.zoom !== undefined ? Math.max(25, Math.min(200, Math.round(patch.zoom))) : current.zoom;
       return { ...current, page, zoom };
     });
   };
@@ -1434,7 +1443,7 @@ export default function Invoices() {
       mime_type: pdf.mime_type || 'application/pdf',
       size_label: pdf.size_label || null,
       page: 1,
-      zoom: 115,
+      zoom: 85,
     });
   };
 
@@ -2638,8 +2647,8 @@ export default function Invoices() {
           <div className="bt-invoice-pdf-viewer-panel" onClick={event => event.stopPropagation()}>
             <div className="bt-invoice-pdf-viewer-header">
               <div className="bt-invoice-pdf-title">
-                <span>Invoice PDF Viewer</span>
-                <strong>{qboPdfPreview.title || 'Invoice PDF'}</strong>
+                <span>Invoice Document Viewer</span>
+                <strong>{qboPdfPreview.title || 'Invoice document'}</strong>
                 <small>
                   {qboPdfPreview.mime_type || 'application/pdf'}
                   {qboPdfPreview.size_label ? ` - ${qboPdfPreview.size_label}` : ''}
@@ -2678,8 +2687,8 @@ export default function Invoices() {
                 <div className="bt-invoice-pdf-control-group" aria-label="Zoom controls">
                   <button
                     type="button"
-                    onClick={() => updateQboPdfViewer({ zoom: qboPdfPreview.zoom - 15 })}
-                    disabled={qboPdfPreview.zoom <= 50}
+                    onClick={() => updateQboPdfViewer({ zoom: qboPdfPreview.zoom - 10 })}
+                    disabled={qboPdfPreview.zoom <= 25}
                     aria-label="Zoom out"
                     title="Zoom out"
                   >
@@ -2688,8 +2697,8 @@ export default function Invoices() {
                   <strong>{qboPdfPreview.zoom}%</strong>
                   <button
                     type="button"
-                    onClick={() => updateQboPdfViewer({ zoom: qboPdfPreview.zoom + 15 })}
-                    disabled={qboPdfPreview.zoom >= 250}
+                    onClick={() => updateQboPdfViewer({ zoom: qboPdfPreview.zoom + 10 })}
+                    disabled={qboPdfPreview.zoom >= 200}
                     aria-label="Zoom in"
                     title="Zoom in"
                   >
@@ -2741,8 +2750,20 @@ export default function Invoices() {
                   <FileText className="h-10 w-10" />
                   <p>{qboPdfPreviewError}</p>
                 </div>
+              ) : qboPdfPreviewIsImage && qboPdfPreviewUrl ? (
+                <div className="bt-invoice-pdf-image-stage">
+                  <img
+                    src={qboPdfPreviewUrl}
+                    alt={qboPdfPreview.title || 'Invoice document preview'}
+                    style={{ width: `${qboPdfPreview.zoom}%` }}
+                  />
+                </div>
               ) : qboPdfFrameSrc ? (
-                <iframe title={qboPdfPreview.title || 'Invoice PDF'} src={qboPdfFrameSrc} />
+                <iframe
+                  key={`${qboPdfPreview.page}-${qboPdfPreview.zoom}`}
+                  title={qboPdfPreview.title || 'Invoice PDF'}
+                  src={qboPdfFrameSrc}
+                />
               ) : (
                 <div className="bt-invoice-attachment-fallback">
                   <FileText className="h-10 w-10" />

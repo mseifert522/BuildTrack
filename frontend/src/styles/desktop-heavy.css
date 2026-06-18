@@ -3568,11 +3568,12 @@
 .bt-invoice-pdf-viewer-overlay {
   position: fixed;
   inset: 0;
-  z-index: 110;
+  z-index: 1600;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  padding: 22px;
+  overflow: auto;
+  padding: clamp(72px, 8vh, 96px) 22px 26px;
   background:
     radial-gradient(circle at 50% 20%, rgba(37, 99, 235, 0.20), transparent 34%),
     rgba(2, 6, 23, 0.84);
@@ -3583,7 +3584,8 @@
   display: flex;
   flex-direction: column;
   width: min(1180px, calc(100vw - 36px));
-  height: min(860px, calc(100vh - 36px));
+  height: min(820px, calc(100vh - 122px));
+  max-height: calc(100vh - 122px);
   overflow: hidden;
   border: 3px solid transparent;
   border-radius: 14px;
@@ -3748,8 +3750,11 @@
 
 .bt-invoice-pdf-viewer-body {
   position: relative;
+  display: grid;
+  place-items: center;
   flex: 1;
   min-height: 0;
+  overflow: auto;
   background: #E5EAF1;
   padding: 12px;
 }
@@ -3758,7 +3763,7 @@
   display: block;
   width: 100%;
   height: 100%;
-  min-height: 540px;
+  min-height: 0;
   border: 2px solid rgba(15, 23, 42, 0.38);
   border-radius: 8px;
   background: #F8FAFC;
@@ -3767,14 +3772,49 @@
     0 14px 26px rgba(15, 23, 42, 0.22);
 }
 
+.bt-invoice-pdf-image-stage {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  border: 2px solid rgba(15, 23, 42, 0.38);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(148, 163, 184, 0.15) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(148, 163, 184, 0.15) 1px, transparent 1px),
+    #F8FAFC;
+  background-size: 24px 24px;
+  padding: 18px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 14px 26px rgba(15, 23, 42, 0.22);
+}
+
+.bt-invoice-pdf-image-stage img {
+  display: block;
+  flex: 0 0 auto;
+  max-width: none;
+  height: auto;
+  min-width: 220px;
+  border-radius: 5px;
+  background: #FFFFFF;
+  box-shadow:
+    0 20px 48px rgba(15, 23, 42, 0.26),
+    0 0 0 1px rgba(15, 23, 42, 0.14);
+}
+
 @media (max-width: 760px) {
   .bt-invoice-pdf-viewer-overlay {
-    padding: 10px;
+    padding: 66px 10px 12px;
   }
 
   .bt-invoice-pdf-viewer-panel {
     width: calc(100vw - 14px);
-    height: calc(100vh - 14px);
+    height: calc(100vh - 86px);
+    max-height: calc(100vh - 86px);
     border-radius: 10px;
   }
 
@@ -3793,7 +3833,11 @@
   }
 
   .bt-invoice-pdf-viewer-body iframe {
-    min-height: 420px;
+    min-height: 0;
+  }
+
+  .bt-invoice-pdf-image-stage {
+    padding: 10px;
   }
 }
 
