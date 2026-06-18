@@ -357,6 +357,7 @@ export default function Layout({ children }: LayoutProps) {
               to={to}
               onClick={() => setSidebarOpen(false)}
               title={collapsed ? label : undefined}
+              aria-current={active ? 'page' : undefined}
               className={`bt-sidebar-nav-item ${active ? 'is-active' : ''} ${collapsed ? 'is-collapsed' : ''} flex items-center gap-3 rounded-xl text-sm font-medium transition-all duration-150 relative group`}
               style={{
                 padding: collapsed ? '10px 0' : '10px 12px',

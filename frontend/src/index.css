@@ -1233,22 +1233,24 @@ textarea,
   min-height: 48px;
   isolation: isolate;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.10);
+  border: 1px solid rgba(226, 232, 240, 0.22);
   border-radius: 14px !important;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.105) 0%, rgba(255, 255, 255, 0.040) 44%, rgba(0, 0, 0, 0.18) 100%),
-    linear-gradient(135deg, #1B232B 0%, #10161C 50%, #080B0E 100%);
-  color: #F5F7FA !important;
+    linear-gradient(180deg, rgba(255, 255, 255, 0.18) 0%, rgba(255, 255, 255, 0.08) 44%, rgba(0, 0, 0, 0.08) 100%),
+    linear-gradient(135deg, #3F4A54 0%, #2C3540 52%, #20272F 100%);
+  color: #FFFFFF !important;
   padding: 8px 11px !important;
   font-size: 13.5px !important;
   font-weight: 820 !important;
   line-height: 1 !important;
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.40);
+  text-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.54),
+    0 0 8px rgba(255, 255, 255, 0.10);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.18),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.42),
-    0 3px 0 rgba(0, 0, 0, 0.34),
-    0 12px 22px rgba(0, 0, 0, 0.22);
+    inset 0 1px 0 rgba(255, 255, 255, 0.30),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.34),
+    0 3px 0 rgba(0, 0, 0, 0.28),
+    0 12px 22px rgba(0, 0, 0, 0.18);
 }
 
 .bt-sidebar-nav-item:nth-child(2) { --bt-nav-accent: #C2773F; }
@@ -1263,8 +1265,8 @@ textarea,
   inset: 2px 8px auto;
   height: 42%;
   border-radius: 999px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.03));
-  opacity: 0.78;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.30), rgba(255, 255, 255, 0.06));
+  opacity: 0.84;
   pointer-events: none;
   z-index: -1;
 }
@@ -1282,16 +1284,16 @@ textarea,
 
 .bt-sidebar-nav-item:hover {
   transform: translateY(-1px);
-  border-color: color-mix(in srgb, var(--bt-nav-accent) 56%, rgba(255, 255, 255, 0.18));
+  border-color: color-mix(in srgb, var(--bt-nav-accent) 54%, rgba(255, 255, 255, 0.36));
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.145) 0%, rgba(255, 255, 255, 0.055) 42%, rgba(0, 0, 0, 0.14) 100%),
-    linear-gradient(135deg, #25303A 0%, #151D24 52%, #0A0E12 100%);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.24) 0%, rgba(255, 255, 255, 0.11) 42%, rgba(0, 0, 0, 0.08) 100%),
+    linear-gradient(135deg, #4B5965 0%, #343F49 52%, #252E36 100%);
   color: #FFFFFF !important;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.24),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.44),
-    0 4px 0 rgba(0, 0, 0, 0.34),
-    0 16px 28px rgba(0, 0, 0, 0.28);
+    inset 0 1px 0 rgba(255, 255, 255, 0.36),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.34),
+    0 4px 0 rgba(0, 0, 0, 0.30),
+    0 16px 28px rgba(0, 0, 0, 0.22);
 }
 
 .bt-sidebar-nav-item:active {
@@ -1303,16 +1305,16 @@ textarea,
 }
 
 .bt-sidebar-nav-item.is-active {
-  border-color: rgba(255, 209, 143, 0.82);
+  border-color: rgba(255, 220, 158, 0.96);
   background:
-    linear-gradient(180deg, #F6BF66 0%, #D99D26 45%, #B46C2A 100%);
-  color: #111827 !important;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.40);
+    linear-gradient(180deg, #FFD27A 0%, #E9A72A 46%, #BE741E 100%);
+  color: #07111B !important;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.52);
   box-shadow:
-    inset 0 1px 0 rgba(255, 243, 216, 0.82),
+    inset 0 1px 0 rgba(255, 246, 224, 0.90),
     inset 0 -2px 0 rgba(100, 52, 13, 0.34),
     0 4px 0 rgba(89, 52, 16, 0.52),
-    0 16px 30px rgba(217, 157, 38, 0.30);
+    0 16px 30px rgba(217, 157, 38, 0.36);
 }
 
 .bt-sidebar-nav-item.is-collapsed {
@@ -1325,16 +1327,16 @@ textarea,
   height: 30px !important;
   box-sizing: border-box;
   padding: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(226, 232, 240, 0.26);
   border-radius: 10px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.035)),
-    rgba(255, 255, 255, 0.035);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.07)),
+    rgba(255, 255, 255, 0.07);
   color: #FFFFFF;
   stroke-width: 2.2;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.18),
-    0 6px 12px rgba(0, 0, 0, 0.24);
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 6px 12px rgba(0, 0, 0, 0.20);
 }
 
 .bt-sidebar-nav-item.is-active .bt-sidebar-nav-icon {
