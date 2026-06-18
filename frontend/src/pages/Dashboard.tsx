@@ -1476,14 +1476,9 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
             <Activity className="h-5 w-5" style={{ color: '#BBF7D0' }} />
           </div>
           <div>
-            <p className="bt-section-kicker text-[12px]">Latest company notes</p>
             <h2 className="text-xl font-black text-white">Latest Field & Office Notes</h2>
-            <p className="text-sm font-semibold text-slate-300">{activityFeed.length} recent notes across all projects</p>
           </div>
         </div>
-        <span className="hidden rounded-full border border-lime-300/30 bg-emerald-500/10 px-4 py-1.5 text-xs font-black uppercase tracking-wide text-lime-100 sm:inline-flex">
-          25 latest notes
-        </span>
       </div>
 
       {activityFeed.length === 0 ? (
