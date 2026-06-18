@@ -481,7 +481,7 @@ export default function Layout({ children }: LayoutProps) {
       <div className="bt-horizontal-lock flex-1 flex flex-col min-w-0 max-w-full overflow-hidden">
         {/* Top Header Bar */}
         <header
-          className="bt-desktop-topbar bt-horizontal-lock flex items-center justify-between gap-3 px-4 sm:gap-4 sm:px-6 flex-shrink-0"
+          className="bt-desktop-topbar bt-horizontal-lock relative z-[1000] flex items-center justify-between gap-3 px-4 sm:gap-4 sm:px-6 flex-shrink-0"
           style={{
             height: 58,
             background: '#0B0D0F',
@@ -547,8 +547,8 @@ export default function Layout({ children }: LayoutProps) {
             </div>
             {searchOpen && searchTerm.trim().length >= 2 && (
               <>
-                <div className="fixed inset-0 z-10" onClick={() => setSearchOpen(false)} />
-                <div className="absolute left-0 right-0 top-full mt-2 rounded-2xl bg-white border border-gray-200 shadow-xl z-20 overflow-hidden">
+                <div className="fixed inset-0 z-[990]" onClick={() => setSearchOpen(false)} />
+                <div className="absolute left-0 right-0 top-full z-[1010] mt-2 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl">
                   {searchLoading ? (
                     <div className="px-4 py-5 text-sm text-gray-400">Searching...</div>
                   ) : searchResults.length === 0 ? (
@@ -639,9 +639,9 @@ export default function Layout({ children }: LayoutProps) {
 
               {notificationsOpen && (
                 <>
-                  <div className="fixed inset-0 z-10" onClick={() => setNotificationsOpen(false)} />
+                  <div className="fixed inset-0 z-[990]" onClick={() => setNotificationsOpen(false)} />
                   <div
-                    className="absolute right-0 top-full z-20 mt-2 w-[22rem] max-w-[calc(100vw-1rem)] overflow-hidden rounded-md"
+                    className="absolute right-0 top-full z-[1010] mt-2 w-[22rem] max-w-[calc(100vw-1rem)] overflow-hidden rounded-md"
                     style={{ background: '#111315', border: '1px solid #E78B4A', boxShadow: '0 18px 36px rgba(0,0,0,0.38)' }}
                     role="menu"
                     aria-label="Notifications"
@@ -741,9 +741,9 @@ export default function Layout({ children }: LayoutProps) {
               {/* Profile dropdown */}
               {profileOpen && (
                 <>
-                  <div className="fixed inset-0 z-10" onClick={() => setProfileOpen(false)} />
+                  <div className="fixed inset-0 z-[990]" onClick={() => setProfileOpen(false)} />
                   <div
-                    className="absolute right-0 top-full mt-2 w-72 max-w-[calc(100vw-1rem)] rounded-md shadow-xl z-20 overflow-hidden"
+                    className="absolute right-0 top-full z-[1010] mt-2 w-72 max-w-[calc(100vw-1rem)] overflow-hidden rounded-md shadow-xl"
                     style={{ background: '#111315', border: '1px solid #E78B4A' }}
                   >
                     {/* Profile header */}
