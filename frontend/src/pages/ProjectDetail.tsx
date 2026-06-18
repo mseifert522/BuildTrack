@@ -4259,8 +4259,6 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
     }
   };
 
-  const completedCount = scopes.filter(scope => scope.status === 'completed').length;
-  const activeCount = scopes.filter(scope => scope.status === 'active').length;
   const bulkEnteredCount = bulkScopeRows.filter(row => row.scope_title.trim() || row.section_name.trim() || row.scope_of_work.trim() || row.status !== 'active').length;
   const vendorQuoteSelectedScopes = scopes.filter(scope => vendorQuoteScopeIds.includes(String(scope.id)));
   const vendorQuotePhotoCount = vendorQuoteSelectedScopes.reduce((sum, scope) => sum + (Array.isArray(scope.photos) ? scope.photos.length : 0), 0);
@@ -4294,55 +4292,6 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
 
   return (
     <div className="space-y-5">
-      <div className="bt-scope-work-panel rounded-2xl border p-4">
-        <div className="bt-scope-work-header flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-          <div className="min-w-0">
-            <h3 className="bt-scope-work-title">Scope of Work</h3>
-            <p className="bt-scope-work-subtitle">Central scope sections for {project?.address}. Use one scope per house area, project phase, or work section.</p>
-          </div>
-          <div className="bt-scope-work-actions flex flex-wrap gap-2">
-              <AddToCalendarButton
-                label="Add to Calendar"
-                defaultTitle={`Scope reminder - ${project?.address || project?.job_name || 'project'}`}
-                defaultDescription={`Scope of Work for ${project?.address || project?.job_name || 'this project'}`}
-                defaultDate={project?.target_completion || project?.start_date || null}
-                projectId={projectId}
-                sourceType="scope_of_work"
-                sourceId={projectId}
-                contextLabel={`Scope of Work - ${project?.address || project?.job_name || 'Project'}`}
-                buttonClassName="bt-scope-work-action bt-scope-work-action--calendar inline-flex items-center justify-center gap-2"
-              />
-            {canManage && (
-              <>
-              <button type="button" onClick={() => openVendorQuoteModal()} disabled={scopes.length === 0} className="bt-scope-work-action bt-scope-work-action--quote inline-flex items-center justify-center gap-2">
-                <Send className="w-4 h-4" /> Request Quote
-              </button>
-              <button type="button" onClick={openBulkScopes} className="bt-scope-work-action bt-scope-work-action--bulk inline-flex items-center justify-center gap-2">
-                <ClipboardList className="w-4 h-4" /> Add Bulk Scope of Work
-              </button>
-              <button type="button" onClick={openAddScope} className="bt-scope-work-action bt-scope-work-action--add inline-flex items-center justify-center gap-2">
-                <Plus className="w-4 h-4" /> Add Scope Section
-              </button>
-              </>
-            )}
-          </div>
-        </div>
-        <div className="bt-scope-work-stats grid sm:grid-cols-3 gap-2 mt-3">
-          <div className="bt-scope-work-stat bt-scope-work-stat--total rounded-xl">
-            <p className="bt-scope-work-stat-value">{scopes.length}</p>
-            <p className="bt-scope-work-stat-label">Scope sections</p>
-          </div>
-          <div className="bt-scope-work-stat bt-scope-work-stat--active rounded-xl">
-            <p className="bt-scope-work-stat-value">{activeCount}</p>
-            <p className="bt-scope-work-stat-label">Active scopes</p>
-          </div>
-          <div className="bt-scope-work-stat bt-scope-work-stat--complete rounded-xl">
-            <p className="bt-scope-work-stat-value">{completedCount}</p>
-            <p className="bt-scope-work-stat-label">Completed scopes</p>
-          </div>
-        </div>
-      </div>
-
       {loading ? (
         <Loading />
       ) : (
