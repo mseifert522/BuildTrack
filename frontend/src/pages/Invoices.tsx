@@ -476,6 +476,14 @@ const quickBooksPaidObservedDateKey = (bill?: QuickBooksBill | null) => (
   String(bill?.last_paid_seen_at || bill?.qbo_updated_at || bill?.last_seen_at || '')
 );
 
+const quickBooksInvoiceDateEnteredValue = (bill?: QuickBooksBill | null, invoice?: Invoice | null) => (
+  bill?.first_seen_at || invoice?.created_at || bill?.last_seen_at || bill?.qbo_updated_at || bill?.txn_date || bill?.due_date || ''
+);
+
+const quickBooksInvoiceDateEnteredSortValue = (bill?: QuickBooksBill | null, invoice?: Invoice | null) => (
+  quickBooksDateRank(quickBooksInvoiceDateEnteredValue(bill, invoice))
+);
+
 const sortQuickBooksBillsByPaidDate = (bills: QuickBooksBill[]) => [...bills].sort((a, b) => {
   const paidCompare = quickBooksDateRank(quickBooksPaidDateKey(b)) - quickBooksDateRank(quickBooksPaidDateKey(a));
   if (paidCompare !== 0) return paidCompare;
@@ -497,7 +505,7 @@ const formatQuickBooksPaidDate = (bill?: QuickBooksBill | null) => {
 };
 
 const formatQuickBooksDeiDate = (bill?: QuickBooksBill | null, invoice?: Invoice | null) => {
-  const value = bill?.first_seen_at || invoice?.created_at || bill?.last_seen_at || bill?.qbo_updated_at || bill?.txn_date || bill?.due_date || '';
+  const value = quickBooksInvoiceDateEnteredValue(bill, invoice);
   return value ? formatDateOnly(value, { month: 'short', day: 'numeric', year: 'numeric' }) : '-';
 };
 
@@ -549,12 +557,6 @@ const quickBooksInvoiceRowTieBreak = (a: QuickBooksMirrorRow, b: QuickBooksMirro
   return String(a.bill.doc_number || a.bill.qbo_id || '').localeCompare(String(b.bill.doc_number || b.bill.qbo_id || ''));
 };
 
-const quickBooksInvoiceStatusSortLabel = (bill: QuickBooksBill) => {
-  const paid = isQuickBooksBillPaid(bill);
-  if (bill.payment_approval_status === 'approved_for_payment' && !paid) return 'Queued';
-  return qboStatusLabel(bill.payment_status);
-};
-
 const quickBooksInvoiceTextSortValue = (value?: string | null) => (
   String(value || '').trim().toLocaleLowerCase()
 );
@@ -572,7 +574,7 @@ const sortQuickBooksInvoiceRows = (
   return [...rows].sort((a, b) => {
     let compare = 0;
     if (sortState.key === 'status') {
-      compare = quickBooksInvoiceStatusSortLabel(a.bill).localeCompare(quickBooksInvoiceStatusSortLabel(b.bill));
+      compare = quickBooksInvoiceDateEnteredSortValue(a.bill, a.invoice) - quickBooksInvoiceDateEnteredSortValue(b.bill, b.invoice);
     } else if (sortState.key === 'vendor') {
       compare = quickBooksInvoiceTextSortValue(a.bill.vendor_name).localeCompare(quickBooksInvoiceTextSortValue(b.bill.vendor_name));
     } else if (sortState.key === 'bill_date') {
