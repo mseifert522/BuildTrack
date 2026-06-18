@@ -370,6 +370,7 @@
 
 .bt-approve-payment-button,
 .bt-payment-run-chip {
+  appearance: none;
   display: inline-flex;
   min-height: 38px;
   align-items: center;
@@ -380,14 +381,25 @@
   background:
     linear-gradient(180deg, rgba(16,185,129,0.32), rgba(16,185,129,0.13)),
     #071713;
-  padding: 8px 10px;
+  padding: 0 12px;
   color: #D1FAE5;
+  font-family: inherit;
   font-size: 12px;
   font-weight: 950;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .bt-approve-payment-button {
   cursor: pointer;
+}
+
+.bt-approve-payment-button svg,
+.bt-payment-run-chip svg,
+.bt-qbo-delete-open-bill-button svg {
+  display: block;
+  flex: 0 0 auto;
 }
 
 .bt-approve-payment-button:hover:not(:disabled) {
@@ -417,6 +429,7 @@
 }
 
 .bt-qbo-delete-open-bill-button {
+  appearance: none;
   display: inline-flex;
   min-height: 34px;
   align-items: center;
@@ -433,8 +446,12 @@
     inset 0 -2px 0 rgba(0, 0, 0, 0.34);
   color: #FFFFFF;
   cursor: pointer;
+  font-family: inherit;
   font-size: 12px;
   font-weight: 950;
+  line-height: 1;
+  padding: 0 10px;
+  text-align: center;
   white-space: nowrap;
 }
 
