@@ -435,6 +435,7 @@ const QUICKBOOKS_FILTER_PROJECT_MODES = new Set<QuickBooksInvoiceFilterMode>(['p
 const QUICKBOOKS_FILTER_VENDOR_MODES = new Set<QuickBooksInvoiceFilterMode>(['project_vendor', 'project_vendor_date_range', 'vendor_only']);
 const QUICKBOOKS_FILTER_DATE_RANGE_MODES = new Set<QuickBooksInvoiceFilterMode>(['project_date_range', 'project_vendor_date_range']);
 const QUICKBOOKS_FILTER_EXACT_DATE_MODES = new Set<QuickBooksInvoiceFilterMode>(['project_specific_date']);
+const DEFAULT_QUICKBOOKS_INVOICE_YEAR = new Date().getFullYear();
 
 const qboStatusLabel = (status?: string | null) => {
   const value = String(status || 'unpaid').toLowerCase();
@@ -537,6 +538,11 @@ const vendorSupplierAliasCandidates = (row: ContractorSupplierDirectoryRow) => (
 const quickBooksBillFilterDate = (bill: QuickBooksBill) => (
   quickBooksDateOnly(bill.txn_date || bill.due_date || bill.qbo_updated_at || bill.last_seen_at)
 );
+
+const quickBooksBillMatchesYear = (bill: QuickBooksBill, year: number) => {
+  const billDate = quickBooksBillFilterDate(bill);
+  return Boolean(billDate && Number(billDate.slice(0, 4)) === year);
+};
 
 const quickBooksBillDueDateKey = (bill?: QuickBooksBill | null) => String(bill?.due_date || '');
 
@@ -1029,6 +1035,9 @@ export default function Invoices() {
     bill,
     invoice: bill.matched_invoice_id ? invoiceById.get(bill.matched_invoice_id) || null : null,
   })), [allQuickBooksBills, invoiceById]);
+  const quickBooksDefaultYearMirrorRows = useMemo(() => (
+    quickBooksAllMirrorRows.filter(({ bill }) => quickBooksBillMatchesYear(bill, DEFAULT_QUICKBOOKS_INVOICE_YEAR))
+  ), [quickBooksAllMirrorRows]);
   const quickBooksProjectFilterOptions = useMemo(() => {
     const options = new Map<string, string>();
     const addOption = (projectId?: string | null, address?: string | null, jobName?: string | null) => {
@@ -1105,7 +1114,8 @@ export default function Invoices() {
       : null
   );
   const quickBooksInvoiceScopeRows = useMemo(() => {
-    const filteredRows = quickBooksAllMirrorRows.filter(({ bill, invoice }) => (
+    const baseRows = quickBooksInvoiceFilter.mode === 'all' ? quickBooksDefaultYearMirrorRows : quickBooksAllMirrorRows;
+    const filteredRows = baseRows.filter(({ bill, invoice }) => (
       quickBooksBillMatchesInvoiceFilter(bill, invoice, quickBooksInvoiceFilter, quickBooksVendorSupplierAliasMap)
     ));
     return (!quickBooksInvoiceFilterNeedsProject || !quickBooksInvoiceFilter.projectId)
@@ -1115,7 +1125,7 @@ export default function Invoices() {
         .filter(scopedBill => quickBooksBillMatchesInvoiceFilter(scopedBill, invoice, quickBooksInvoiceFilter, quickBooksVendorSupplierAliasMap))
         .map(scopedBill => ({ bill: scopedBill, invoice }))
       ));
-  }, [quickBooksAllMirrorRows, quickBooksInvoiceFilter, quickBooksInvoiceFilterNeedsProject, quickBooksVendorSupplierAliasMap]);
+  }, [quickBooksAllMirrorRows, quickBooksDefaultYearMirrorRows, quickBooksInvoiceFilter, quickBooksInvoiceFilterNeedsProject, quickBooksVendorSupplierAliasMap]);
   const quickBooksStatusScopedRows = useMemo<Record<QuickBooksBillFilter, QuickBooksMirrorRow[]>>(() => ({
     open: quickBooksInvoiceScopeRows.filter(({ bill }) => quickBooksBillMatchesStatusFilter(bill, 'open')),
     friday_queue: quickBooksInvoiceScopeRows.filter(({ bill }) => quickBooksBillMatchesStatusFilter(bill, 'friday_queue')),
@@ -1202,7 +1212,7 @@ export default function Invoices() {
   const quickBooksInvoiceFilterLabel = QUICKBOOKS_INVOICE_FILTER_OPTIONS.find(option => option.value === quickBooksInvoiceFilter.mode)?.label || 'Filter';
   const quickBooksInvoiceFilterScope = quickBooksInvoiceFilter.mode === 'vendor_only' ? 'vendor / supplier' : 'project';
   const quickBooksInvoiceFilterPrompt = quickBooksInvoiceFilter.mode === 'all'
-    ? quickBooksInvoiceFilterLabel
+    ? `${DEFAULT_QUICKBOOKS_INVOICE_YEAR} invoices`
     : quickBooksInvoiceFilterNeedsProject && !quickBooksInvoiceFilter.projectId
       ? 'Select project'
       : quickBooksInvoiceFilterNeedsVendor && !quickBooksInvoiceFilter.vendor
