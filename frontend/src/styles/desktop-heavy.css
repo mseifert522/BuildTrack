@@ -1009,6 +1009,19 @@
   align-items: stretch;
 }
 
+.bt-directory-search-stack {
+  min-width: 0;
+}
+
+.bt-directory-record-count {
+  margin: 0;
+  color: #DBEAFE;
+  font-size: 13px;
+  font-weight: 950;
+  line-height: 1.3;
+  text-align: right;
+}
+
 .bt-directory-primary-action {
   display: inline-flex;
   min-height: 44px;

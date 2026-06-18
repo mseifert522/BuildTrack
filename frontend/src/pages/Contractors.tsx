@@ -1039,11 +1039,7 @@ export default function Contractors() {
       <div className="mx-auto max-w-7xl space-y-5">
         <div className="bt-directory-hero flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div className="bt-directory-title-block">
-            <p className="bt-directory-kicker">Materials and vendor directory</p>
             <h1 className="text-2xl font-black tracking-tight">Contractors / Suppliers</h1>
-            <p className="mt-1 text-sm">
-              {filteredContractors.length} shown of {combinedDirectoryRows.length} combined records
-            </p>
           </div>
           <div className="bt-directory-actions flex w-full flex-col gap-2 sm:flex-row xl:w-auto">
             <div className="inline-flex min-h-11 items-center justify-center rounded-lg border border-slate-500 bg-slate-950/50 px-4 text-sm font-black text-blue-100 shadow-sm">
@@ -1071,16 +1067,21 @@ export default function Contractors() {
               <Plus className="w-4 h-4" />
               Add Supplier
             </button>
-            <div
-              className="bt-directory-search flex min-h-11 w-full items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 shadow-sm sm:w-[420px]"
-            >
-              <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                aria-label="Search contractors and suppliers"
-                className="w-full bg-transparent text-sm outline-none text-gray-900 placeholder:text-gray-500"
-              />
+            <div className="bt-directory-search-stack flex w-full flex-col gap-1 sm:w-[420px]">
+              <div
+                className="bt-directory-search flex min-h-11 w-full items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 shadow-sm"
+              >
+                <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  aria-label="Search contractors and suppliers"
+                  className="w-full bg-transparent text-sm outline-none text-gray-900 placeholder:text-gray-500"
+                />
+              </div>
+              <p className="bt-directory-record-count" aria-live="polite">
+                {filteredContractors.length} Records
+              </p>
             </div>
           </div>
         </div>
