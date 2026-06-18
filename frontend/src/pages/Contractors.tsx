@@ -1114,13 +1114,13 @@ export default function Contractors() {
             </select>
           </div>
           <div className="bt-directory-filter-search-block mt-4 border-t border-slate-200 pt-4">
-            <label className="bt-directory-filter-label block text-xs font-black uppercase tracking-wide text-slate-500 mb-2">Find contractor or supplier by name</label>
+            <label htmlFor="contractor-name-search" className="bt-directory-filter-label block text-xs font-black uppercase tracking-wide text-slate-500 mb-2">Find contractor or supplier by name</label>
             <div className="bt-directory-search bt-directory-search-wide bt-directory-filter-search flex items-center gap-2 px-3 py-2.5 rounded-xl border border-gray-300 bg-white">
               <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
               <input
+                id="contractor-name-search"
                 value={nameSearch}
                 onChange={(e) => setNameSearch(e.target.value)}
-                placeholder="Type contractor, supplier, company, or contact name"
                 className="w-full bg-transparent text-sm outline-none text-gray-900 placeholder:text-gray-500"
               />
             </div>
