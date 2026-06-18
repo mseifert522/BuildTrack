@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useAuthStore, isAdminRole, roleLabels } from '../store/authStore';
+import { useAuthStore, isAdminRole } from '../store/authStore';
 import api from '../lib/api';
 import { Loading, Modal } from '../components/ui';
 import Avatar from '../components/Avatar';
@@ -1619,8 +1619,6 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
               {formatEasternDate(liveNowIso, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
               {' - '}
               {liveEasternTimeLabel}
-              {' - '}
-              {roleLabels[user?.role || '']}
             </p>
           </div>
         </div>
