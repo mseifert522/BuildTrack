@@ -321,6 +321,7 @@ export default function Layout({ children }: LayoutProps) {
           justifyContent: collapsed ? 'center' : 'space-between',
         }}
       >
+        {!collapsed && (
         <div className="flex items-center gap-3 min-w-0">
           <div
             className="w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 bg-slate-950"
@@ -328,23 +329,22 @@ export default function Layout({ children }: LayoutProps) {
           >
             <img src={BUILDTRACK_TRUTH_ICON_SRC} alt="BuildTrack" className="h-full w-full object-contain" />
           </div>
-          {!collapsed && (
-            <div className="min-w-0">
-              <p className="text-white font-bold text-sm leading-tight truncate">BuildTrack</p>
-              <p className="text-xs font-medium truncate" style={{ color: '#F4A261' }}>Construction Ops</p>
-            </div>
-          )}
+          <div className="min-w-0">
+            <p className="text-white font-bold text-sm leading-tight truncate">BuildTrack</p>
+            <p className="text-xs font-medium truncate" style={{ color: '#F4A261' }}>Construction Ops</p>
+          </div>
         </div>
-        {!collapsed && (
+        )}
           <button
-            onClick={() => setSidebarCollapsed(true)}
+            onClick={() => setSidebarCollapsed(current => !current)}
             className="hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border transition-colors hover:border-orange-400/70 hover:text-orange-300 lg:flex"
             style={{ color: 'rgba(255,255,255,0.48)', background: '#0E1012', borderColor: '#242A31' }}
-            aria-label="Collapse navigation menu"
+            aria-label={collapsed ? 'Expand navigation menu' : 'Collapse navigation menu'}
+            aria-expanded={!collapsed}
+            title={collapsed ? 'Expand navigation menu' : 'Collapse navigation menu'}
           >
-            <ChevronRight className="w-4 h-4 rotate-180" />
+            <ChevronRight className={`w-4 h-4 transition-transform ${collapsed ? 'rotate-0' : 'rotate-180'}`} />
           </button>
-        )}
       </div>
 
       {/* Nav items */}
@@ -440,19 +440,6 @@ export default function Layout({ children }: LayoutProps) {
         )}
       </div>
 
-      {/* Expand button when collapsed */}
-      {collapsed && (
-        <div className="px-3 pb-3">
-          <button
-            onClick={() => setSidebarCollapsed(false)}
-            className="flex h-8 w-full items-center justify-center rounded-md border transition-colors"
-            style={{ color: '#FFD0A8', background: '#1E1610', borderColor: '#E78B4A' }}
-            aria-label="Expand navigation menu"
-          >
-            <ChevronRight className="w-4 h-4" />
-          </button>
-        </div>
-      )}
     </div>
   );
 
