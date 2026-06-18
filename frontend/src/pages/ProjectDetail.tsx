@@ -126,6 +126,10 @@ function cityFromProjectAddress(address?: string | null) {
   return '';
 }
 
+function formatProjectAddressLabel(address?: string | null) {
+  return String(address || '').replace(/,\s*USA\s*$/i, '').trim();
+}
+
 function getRecognitionTranscript(results: any) {
   const finalParts: string[] = [];
   const interimParts: string[] = [];
@@ -1276,7 +1280,7 @@ export default function ProjectDetail() {
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="font-bold text-gray-900 text-lg truncate">{project.address}</h1>
+                <h1 className="font-bold text-gray-900 text-lg truncate">{formatProjectAddressLabel(project.address)}</h1>
                 <StatusBadge status={project.status} />
                 {punchlistStageActive && (
                   <span className="inline-flex items-center rounded-full border border-yellow-300 bg-yellow-400 px-3 py-1 text-sm font-black uppercase tracking-wide text-yellow-950 shadow-sm">
@@ -1284,7 +1288,6 @@ export default function ProjectDetail() {
                   </span>
                 )}
               </div>
-              <p className="text-sm text-gray-500 truncate">{project.job_name}</p>
             </div>
           </div>
 
