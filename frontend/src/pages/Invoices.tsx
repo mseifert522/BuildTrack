@@ -172,6 +172,7 @@ interface QuickBooksBillSplitLine {
 
 type QuickBooksBillFilter = 'open' | 'friday_queue' | 'paid' | 'all';
 type QuickBooksInvoiceFilterMode = 'all' | 'project' | 'project_date_range' | 'project_vendor' | 'project_vendor_date_range' | 'project_specific_date' | 'vendor_only';
+type QuickBooksInvoicePeriodMode = 'all_time' | 'year' | 'month' | 'day';
 type QuickBooksInvoiceSortKey = 'status' | 'vendor' | 'bill_date' | 'due_date' | 'bill_amount' | 'open_balance';
 type QuickBooksInvoiceSortDirection = 'asc' | 'desc';
 
@@ -182,6 +183,11 @@ interface QuickBooksInvoiceFilterState {
   startDate: string;
   endDate: string;
   exactDate: string;
+}
+
+interface QuickBooksInvoicePeriodState {
+  mode: QuickBooksInvoicePeriodMode;
+  day: string;
 }
 
 interface QuickBooksInvoiceSortState {
@@ -418,6 +424,17 @@ const DEFAULT_QUICKBOOKS_INVOICE_FILTER: QuickBooksInvoiceFilterState = {
   endDate: '',
   exactDate: '',
 };
+const quickBooksTodayDateValue = () => {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+const DEFAULT_QUICKBOOKS_INVOICE_PERIOD: QuickBooksInvoicePeriodState = {
+  mode: 'year',
+  day: quickBooksTodayDateValue(),
+};
 const DEFAULT_QUICKBOOKS_INVOICE_SORT: QuickBooksInvoiceSortState = {
   key: 'bill_date',
   direction: 'desc',
@@ -436,6 +453,13 @@ const QUICKBOOKS_FILTER_VENDOR_MODES = new Set<QuickBooksInvoiceFilterMode>(['pr
 const QUICKBOOKS_FILTER_DATE_RANGE_MODES = new Set<QuickBooksInvoiceFilterMode>(['project_date_range', 'project_vendor_date_range']);
 const QUICKBOOKS_FILTER_EXACT_DATE_MODES = new Set<QuickBooksInvoiceFilterMode>(['project_specific_date']);
 const DEFAULT_QUICKBOOKS_INVOICE_YEAR = new Date().getFullYear();
+const DEFAULT_QUICKBOOKS_INVOICE_MONTH = quickBooksTodayDateValue().slice(0, 7);
+const QUICKBOOKS_INVOICE_PERIOD_OPTIONS: { value: QuickBooksInvoicePeriodMode; label: string }[] = [
+  { value: 'year', label: `Current year (${DEFAULT_QUICKBOOKS_INVOICE_YEAR})` },
+  { value: 'all_time', label: 'All time' },
+  { value: 'month', label: 'Current month' },
+  { value: 'day', label: 'Specific day' },
+];
 
 const qboStatusLabel = (status?: string | null) => {
   const value = String(status || 'unpaid').toLowerCase();
@@ -543,6 +567,21 @@ const quickBooksBillMatchesYear = (bill: QuickBooksBill, year: number) => {
   const billDate = quickBooksBillFilterDate(bill);
   return Boolean(billDate && Number(billDate.slice(0, 4)) === year);
 };
+
+const quickBooksBillMatchesPeriod = (bill: QuickBooksBill, period: QuickBooksInvoicePeriodState) => {
+  if (period.mode === 'all_time') return true;
+  const billDate = quickBooksBillFilterDate(bill);
+  if (!billDate) return false;
+  if (period.mode === 'year') return quickBooksBillMatchesYear(bill, DEFAULT_QUICKBOOKS_INVOICE_YEAR);
+  if (period.mode === 'month') return billDate.startsWith(DEFAULT_QUICKBOOKS_INVOICE_MONTH);
+  return billDate === (period.day || quickBooksTodayDateValue());
+};
+
+const quickBooksPeriodDateLabel = (dateValue: string) => (
+  dateValue
+    ? formatDateOnly(`${dateValue}T12:00:00`, { month: 'short', day: 'numeric', year: 'numeric' })
+    : 'Selected day'
+);
 
 const quickBooksBillDueDateKey = (bill?: QuickBooksBill | null) => String(bill?.due_date || '');
 
@@ -768,6 +807,7 @@ export default function Invoices() {
   const [quickBooksBillFilter, setQuickBooksBillFilter] = useState<QuickBooksBillFilter>('open');
   const deferredQuickBooksBillFilter = useDeferredValue(quickBooksBillFilter);
   const [quickBooksInvoiceFilter, setQuickBooksInvoiceFilter] = useState<QuickBooksInvoiceFilterState>({ ...DEFAULT_QUICKBOOKS_INVOICE_FILTER });
+  const [quickBooksInvoicePeriod, setQuickBooksInvoicePeriod] = useState<QuickBooksInvoicePeriodState>({ ...DEFAULT_QUICKBOOKS_INVOICE_PERIOD });
   const [quickBooksInvoiceSort, setQuickBooksInvoiceSort] = useState<QuickBooksInvoiceSortState | null>(null);
   const [approvingQboBillId, setApprovingQboBillId] = useState<string | null>(null);
   const [removingQboBillId, setRemovingQboBillId] = useState<string | null>(null);
@@ -1035,9 +1075,9 @@ export default function Invoices() {
     bill,
     invoice: bill.matched_invoice_id ? invoiceById.get(bill.matched_invoice_id) || null : null,
   })), [allQuickBooksBills, invoiceById]);
-  const quickBooksDefaultYearMirrorRows = useMemo(() => (
-    quickBooksAllMirrorRows.filter(({ bill }) => quickBooksBillMatchesYear(bill, DEFAULT_QUICKBOOKS_INVOICE_YEAR))
-  ), [quickBooksAllMirrorRows]);
+  const quickBooksPeriodMirrorRows = useMemo(() => (
+    quickBooksAllMirrorRows.filter(({ bill }) => quickBooksBillMatchesPeriod(bill, quickBooksInvoicePeriod))
+  ), [quickBooksAllMirrorRows, quickBooksInvoicePeriod]);
   const quickBooksProjectFilterOptions = useMemo(() => {
     const options = new Map<string, string>();
     const addOption = (projectId?: string | null, address?: string | null, jobName?: string | null) => {
@@ -1106,15 +1146,20 @@ export default function Invoices() {
     && (!quickBooksInvoiceFilterNeedsDateRange || Boolean(quickBooksInvoiceFilter.startDate || quickBooksInvoiceFilter.endDate))
     && (!quickBooksInvoiceFilterNeedsExactDate || Boolean(quickBooksInvoiceFilter.exactDate))
   );
-  const quickBooksInvoiceFilterInUse = quickBooksInvoiceFilter.mode !== 'all';
-  const quickBooksInvoiceFilterActive = quickBooksInvoiceFilter.mode !== 'all' && quickBooksInvoiceFilterReady;
+  const quickBooksInvoiceProjectFilterInUse = quickBooksInvoiceFilter.mode !== 'all';
+  const quickBooksInvoicePeriodInUse = (
+    quickBooksInvoicePeriod.mode !== DEFAULT_QUICKBOOKS_INVOICE_PERIOD.mode
+    || (quickBooksInvoicePeriod.mode === 'day' && quickBooksInvoicePeriod.day !== DEFAULT_QUICKBOOKS_INVOICE_PERIOD.day)
+  );
+  const quickBooksInvoiceFilterInUse = quickBooksInvoiceProjectFilterInUse || quickBooksInvoicePeriodInUse;
+  const quickBooksInvoiceFilterActive = (quickBooksInvoiceProjectFilterInUse && quickBooksInvoiceFilterReady) || quickBooksInvoicePeriodInUse;
   const quickBooksEffectiveInvoiceSort = quickBooksInvoiceSort || (
     quickBooksInvoiceFilterInUse || deferredQuickBooksBillFilter === 'all' || deferredQuickBooksBillFilter === 'open'
       ? DEFAULT_QUICKBOOKS_INVOICE_SORT
       : null
   );
   const quickBooksInvoiceScopeRows = useMemo(() => {
-    const baseRows = quickBooksInvoiceFilter.mode === 'all' ? quickBooksDefaultYearMirrorRows : quickBooksAllMirrorRows;
+    const baseRows = quickBooksPeriodMirrorRows;
     const filteredRows = baseRows.filter(({ bill, invoice }) => (
       quickBooksBillMatchesInvoiceFilter(bill, invoice, quickBooksInvoiceFilter, quickBooksVendorSupplierAliasMap)
     ));
@@ -1125,7 +1170,7 @@ export default function Invoices() {
         .filter(scopedBill => quickBooksBillMatchesInvoiceFilter(scopedBill, invoice, quickBooksInvoiceFilter, quickBooksVendorSupplierAliasMap))
         .map(scopedBill => ({ bill: scopedBill, invoice }))
       ));
-  }, [quickBooksAllMirrorRows, quickBooksDefaultYearMirrorRows, quickBooksInvoiceFilter, quickBooksInvoiceFilterNeedsProject, quickBooksVendorSupplierAliasMap]);
+  }, [quickBooksInvoiceFilter, quickBooksInvoiceFilterNeedsProject, quickBooksPeriodMirrorRows, quickBooksVendorSupplierAliasMap]);
   const quickBooksStatusScopedRows = useMemo<Record<QuickBooksBillFilter, QuickBooksMirrorRow[]>>(() => ({
     open: quickBooksInvoiceScopeRows.filter(({ bill }) => quickBooksBillMatchesStatusFilter(bill, 'open')),
     friday_queue: quickBooksInvoiceScopeRows.filter(({ bill }) => quickBooksBillMatchesStatusFilter(bill, 'friday_queue')),
@@ -1211,8 +1256,22 @@ export default function Invoices() {
   ]);
   const quickBooksInvoiceFilterLabel = QUICKBOOKS_INVOICE_FILTER_OPTIONS.find(option => option.value === quickBooksInvoiceFilter.mode)?.label || 'Filter';
   const quickBooksInvoiceFilterScope = quickBooksInvoiceFilter.mode === 'vendor_only' ? 'vendor / supplier' : 'project';
+  const quickBooksInvoicePeriodLabel = quickBooksInvoicePeriod.mode === 'all_time'
+    ? 'all-time invoices'
+    : quickBooksInvoicePeriod.mode === 'month'
+      ? `${formatDateOnly(`${DEFAULT_QUICKBOOKS_INVOICE_MONTH}-01T12:00:00`, { month: 'long', year: 'numeric' })} invoices`
+      : quickBooksInvoicePeriod.mode === 'day'
+        ? `${quickBooksPeriodDateLabel(quickBooksInvoicePeriod.day)} invoices`
+        : `${DEFAULT_QUICKBOOKS_INVOICE_YEAR} invoices`;
+  const quickBooksInvoicePeriodMessage = quickBooksInvoicePeriod.mode === 'year'
+    ? `Default time period: ${DEFAULT_QUICKBOOKS_INVOICE_YEAR}. Counts, paid totals, open bills, and project spend use QuickBooks bill dates in this year.`
+    : quickBooksInvoicePeriod.mode === 'all_time'
+      ? 'Time period: all time. Counts, paid totals, open bills, and project spend include every mirrored QuickBooks bill.'
+      : quickBooksInvoicePeriod.mode === 'month'
+        ? `Time period: ${formatDateOnly(`${DEFAULT_QUICKBOOKS_INVOICE_MONTH}-01T12:00:00`, { month: 'long', year: 'numeric' })}. Counts, paid totals, open bills, and project spend use QuickBooks bill dates in this month.`
+        : `Time period: ${quickBooksPeriodDateLabel(quickBooksInvoicePeriod.day)}. Counts, paid totals, open bills, and project spend use that QuickBooks bill date.`;
   const quickBooksInvoiceFilterPrompt = quickBooksInvoiceFilter.mode === 'all'
-    ? `${DEFAULT_QUICKBOOKS_INVOICE_YEAR} invoices`
+    ? `${quickBooksInvoiceScopeRows.length} ${quickBooksInvoicePeriodLabel}`
     : quickBooksInvoiceFilterNeedsProject && !quickBooksInvoiceFilter.projectId
       ? 'Select project'
       : quickBooksInvoiceFilterNeedsVendor && !quickBooksInvoiceFilter.vendor
@@ -1240,11 +1299,18 @@ export default function Invoices() {
   const showFridayPaymentQueuePanel = deferredQuickBooksBillFilter === 'open' && !quickBooksInvoiceFilterInUse;
   const clearQuickBooksInvoiceFilter = () => {
     setQuickBooksInvoiceFilter({ ...DEFAULT_QUICKBOOKS_INVOICE_FILTER });
+    setQuickBooksInvoicePeriod({ ...DEFAULT_QUICKBOOKS_INVOICE_PERIOD, day: quickBooksTodayDateValue() });
     setQuickBooksBillFilter('open');
     setQuickBooksInvoiceSort(null);
   };
   const updateQuickBooksInvoiceFilter = (patch: Partial<QuickBooksInvoiceFilterState>) => {
     setQuickBooksInvoiceFilter(current => ({ ...current, ...patch }));
+  };
+  const updateQuickBooksInvoicePeriodMode = (mode: QuickBooksInvoicePeriodMode) => {
+    setQuickBooksInvoicePeriod(current => ({ ...current, mode, day: current.day || quickBooksTodayDateValue() }));
+  };
+  const updateQuickBooksInvoicePeriodDay = (day: string) => {
+    setQuickBooksInvoicePeriod(current => ({ ...current, mode: 'day', day }));
   };
   const updateQuickBooksBillFilter = (filter: QuickBooksBillFilter) => {
     setQuickBooksBillFilter(current => current === filter ? current : filter);
@@ -1784,6 +1850,27 @@ export default function Invoices() {
 
               <div className="bt-qbo-invoice-filter-panel">
                 <label>
+                  <span>Time period</span>
+                  <select
+                    value={quickBooksInvoicePeriod.mode}
+                    onChange={event => updateQuickBooksInvoicePeriodMode(event.target.value as QuickBooksInvoicePeriodMode)}
+                  >
+                    {QUICKBOOKS_INVOICE_PERIOD_OPTIONS.map(option => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                {quickBooksInvoicePeriod.mode === 'day' && (
+                  <label>
+                    <span>Specific day</span>
+                    <input
+                      type="date"
+                      value={quickBooksInvoicePeriod.day}
+                      onChange={event => updateQuickBooksInvoicePeriodDay(event.target.value)}
+                    />
+                  </label>
+                )}
+                <label>
                   <span>Invoice filter</span>
                   <select
                     value={quickBooksInvoiceFilter.mode}
@@ -1855,12 +1942,16 @@ export default function Invoices() {
                 <span className={`bt-qbo-invoice-filter-count ${quickBooksInvoiceFilterActive ? 'is-active' : ''}`}>
                   {quickBooksInvoiceFilterPrompt}
                 </span>
-                {quickBooksInvoiceFilter.mode !== 'all' && (
+                {quickBooksInvoiceFilterInUse && (
                   <button type="button" className="bt-qbo-clear-invoice-filter" onClick={clearQuickBooksInvoiceFilter}>
                     <X className="h-3.5 w-3.5" />
                     Clear
                   </button>
                 )}
+                <div className="bt-qbo-period-note">
+                  <CalendarDays className="h-4 w-4" />
+                  <span>{quickBooksInvoicePeriodMessage}</span>
+                </div>
               </div>
             </div>
 
