@@ -863,15 +863,15 @@ export default function ProjectDetail() {
       />
       <div className="bt-project-notes-header mb-3 flex items-center justify-between gap-3 rounded-xl border border-cyan-300/25 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 px-3 py-2.5 shadow-[0_8px_22px_rgba(37,99,235,0.18)]">
         <div className="min-w-0">
-          <h3 className="text-sm font-black text-white">Project Notes</h3>
-          <p className="mt-0.5 text-xs font-semibold text-blue-100/80">Office, field, and general updates for this project</p>
+          <h3 className="text-base font-black text-white sm:text-lg">Project Notes</h3>
+          <p className="mt-0.5 text-sm font-semibold text-blue-100/90">Office, field, and general updates for this project</p>
         </div>
         <div className="flex flex-shrink-0 items-center gap-2">
           <button
             type="button"
             onClick={addNote}
             disabled={!newNote.trim()}
-            className="inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 text-xs font-black text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500 sm:hidden"
+            className="inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 text-sm font-black text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500 sm:hidden"
           >
             <Send className="h-3.5 w-3.5" />
             Save
@@ -880,7 +880,7 @@ export default function ProjectDetail() {
           <button
             type="button"
             onClick={() => setTab('notes')}
-            className="text-xs font-bold text-cyan-100 hover:text-white hover:underline"
+            className="text-sm font-bold text-cyan-100 hover:text-white hover:underline"
           >
             Open notes
           </button>
@@ -892,25 +892,25 @@ export default function ProjectDetail() {
           value={newNote}
           onChange={e => setNewNote(e.target.value)}
           rows={compact ? 2 : 3}
-          className="mb-3 min-h-[178px] w-full resize-none rounded-xl border border-slate-400 bg-white px-4 py-3 text-base leading-6 text-slate-950 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:min-h-[92px] sm:py-2.5 sm:text-sm"
+          className="mb-3 min-h-[178px] w-full resize-none rounded-xl border border-cyan-300/65 bg-[#07162F] px-4 py-3 text-lg font-bold leading-7 text-white caret-cyan-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_0_0_1px_rgba(37,99,235,0.20)] placeholder:text-slate-200/85 focus:border-cyan-200 focus:outline-none focus:ring-2 focus:ring-cyan-300/70 sm:min-h-[108px] sm:py-3 sm:text-base"
           placeholder="Add a note..."
         />
         <button
           type="button"
           onClick={addNote}
           disabled={!newNote.trim()}
-          className="mb-3 inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500 sm:hidden"
+          className="mb-3 inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-base font-black text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500 sm:hidden"
         >
           <Send className="h-4 w-4" />
           Done - Submit Note
         </button>
         <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-        <select value={noteType} onChange={e => setNoteType(e.target.value)} className="min-h-[46px] w-full rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm font-bold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-auto">
+        <select value={noteType} onChange={e => setNoteType(e.target.value)} className="min-h-[46px] w-full rounded-lg border border-slate-400 bg-white px-3 py-2 text-base font-bold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-auto">
           <option value="general">General</option>
           <option value="office">Office</option>
           <option value="field">Field</option>
         </select>
-        <label className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm">
+        <label className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-lg border border-slate-400 bg-white px-3 py-2 text-base font-bold text-slate-700 shadow-sm">
           <input
             type="checkbox"
             checked={noteVisibility === 'public'}
@@ -952,7 +952,7 @@ export default function ProjectDetail() {
             setNotePhotoSource('desktop');
             setNotePhotoFiles(files);
           }, { accept: PROGRESS_MEDIA_ACCEPT, multiple: true })}
-          className="inline-flex min-h-[46px] cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 sm:min-w-[150px]"
+          className="inline-flex min-h-[46px] cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-slate-400 bg-white px-3 py-2 text-base font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 sm:min-w-[150px]"
         >
           <Camera className="w-4 h-4" />
           {notePhotoFiles.length ? `${notePhotoFiles.length} ready` : (
@@ -965,7 +965,7 @@ export default function ProjectDetail() {
         <button
           type="button"
           onClick={openCalendarComposer}
-          className="inline-flex min-h-[46px] items-center justify-center gap-1.5 rounded-lg border border-amber-400 bg-amber-50 px-3 py-2 text-sm font-black text-amber-800 shadow-sm transition-colors hover:bg-amber-100"
+          className="inline-flex min-h-[46px] items-center justify-center gap-1.5 rounded-lg border border-amber-400 bg-amber-50 px-3 py-2 text-base font-black text-amber-800 shadow-sm transition-colors hover:bg-amber-100"
         >
           <CalendarDays className="w-4 h-4" />
           Add to Calendar
@@ -973,7 +973,7 @@ export default function ProjectDetail() {
         <button
           type="button"
           onClick={addNote}
-          className="hidden min-h-[50px] w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-black text-white shadow-sm transition-colors hover:bg-blue-700 sm:col-span-1 sm:inline-flex sm:flex-1 sm:py-2"
+          className="hidden min-h-[50px] w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-base font-black text-white shadow-sm transition-colors hover:bg-blue-700 sm:col-span-1 sm:inline-flex sm:flex-1 sm:py-2"
         >
           <Send className="h-4 w-4" />
           Submit Note
@@ -1117,20 +1117,20 @@ export default function ProjectDetail() {
               <div className="bt-project-note-meta-bar mb-2 flex items-start justify-between gap-3 border-b border-blue-300/20 pb-1.5">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="text-sm font-black text-white truncate">{note.user_name}</span>
-                    <span className="text-xs font-semibold text-blue-100/80">
+                    <span className="text-base font-black text-white truncate">{note.user_name}</span>
+                    <span className="text-sm font-semibold text-blue-100/85">
                       Inserted {formatEasternDateTime(note.created_at, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time
                     </span>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  <span className={`text-xs px-2 py-0.5 rounded-full border font-black ${note.note_type === 'field' ? 'border-emerald-300/40 bg-emerald-500/15 text-emerald-100' : note.note_type === 'office' ? 'border-blue-300/40 bg-blue-500/15 text-blue-100' : 'border-slate-500 bg-slate-800 text-slate-200'}`}>{note.note_type}</span>
+                  <span className={`text-sm px-2.5 py-0.5 rounded-full border font-black ${note.note_type === 'field' ? 'border-emerald-300/40 bg-emerald-500/15 text-emerald-100' : note.note_type === 'office' ? 'border-blue-300/40 bg-blue-500/15 text-blue-100' : 'border-slate-500 bg-slate-800 text-slate-200'}`}>{note.note_type}</span>
                   {canDeleteProjectNotes && (
                     <button
                       type="button"
                       onClick={() => deleteProjectNote(note.id)}
                       disabled={deletingNoteId === note.id}
-                      className="inline-flex items-center gap-1 rounded-full border border-red-300/45 bg-red-500/15 px-2 py-0.5 text-xs font-black text-red-100 transition hover:border-red-200 hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="inline-flex items-center gap-1 rounded-full border border-red-300/45 bg-red-500/15 px-2.5 py-0.5 text-sm font-black text-red-100 transition hover:border-red-200 hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-60"
                       title="Delete note"
                     >
                       <Trash2 className="h-3 w-3" />
@@ -1145,15 +1145,15 @@ export default function ProjectDetail() {
                     value={editingNoteText}
                     onChange={e => setEditingNoteText(e.target.value)}
                     rows={3}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                    className="w-full rounded-lg border border-cyan-300/60 bg-[#07162F] px-3 py-2 text-base font-semibold leading-7 text-white caret-cyan-200 placeholder:text-slate-200/85 focus:outline-none focus:ring-2 focus:ring-cyan-300/70 resize-none"
                   />
                   <div className="flex items-center gap-2">
-                    <select value={editingNoteType} onChange={e => setEditingNoteType(e.target.value)} className="px-2 py-1.5 rounded-lg border border-gray-300 text-xs bg-white">
+                    <select value={editingNoteType} onChange={e => setEditingNoteType(e.target.value)} className="px-2 py-1.5 rounded-lg border border-gray-300 text-sm bg-white">
                       <option value="general">General</option>
                       <option value="office">Office</option>
                       <option value="field">Field</option>
                     </select>
-                    <label className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg border border-gray-300 text-xs font-bold text-gray-600 bg-white">
+                    <label className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg border border-gray-300 text-sm font-bold text-gray-600 bg-white">
                       <input
                         type="checkbox"
                         checked={editingNoteVisibility === 'public'}
@@ -1162,14 +1162,14 @@ export default function ProjectDetail() {
                       />
                       Public
                     </label>
-                    <button type="button" onClick={() => saveNoteEdit(note.id)} className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-bold">Save edit</button>
-                    <button type="button" onClick={() => setEditingNoteId(null)} className="px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-bold text-gray-600">Cancel</button>
+                    <button type="button" onClick={() => saveNoteEdit(note.id)} className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-bold">Save edit</button>
+                    <button type="button" onClick={() => setEditingNoteId(null)} className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-bold text-gray-600">Cancel</button>
                   </div>
                 </div>
               ) : (
                 <>
-                  <p className="bt-project-note-body rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-sm leading-6 text-slate-100 whitespace-pre-wrap">{note.note}</p>
-                  <span className={`inline-flex mt-2 rounded-full border px-2 py-0.5 text-xs font-bold ${note.visibility === 'public' ? 'border-emerald-300/40 bg-emerald-500/15 text-emerald-100' : 'border-slate-500 bg-slate-800 text-slate-200'}`}>
+                  <p className="bt-project-note-body rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-base font-semibold leading-7 text-slate-50 whitespace-pre-wrap sm:text-[17px]">{note.note}</p>
+                  <span className={`inline-flex mt-2 rounded-full border px-2.5 py-0.5 text-sm font-bold ${note.visibility === 'public' ? 'border-emerald-300/40 bg-emerald-500/15 text-emerald-100' : 'border-slate-500 bg-slate-800 text-slate-200'}`}>
                     {note.visibility === 'public' ? 'Public to contractors' : 'Private management note'}
                   </span>
                   {getNotePhotos(note).length > 0 && (
@@ -1204,11 +1204,11 @@ export default function ProjectDetail() {
                           );
                         })}
                       </div>
-                      <p className="bt-project-note-media-label px-1 pt-2 text-xs font-bold text-cyan-100/80">Photos attached to this note</p>
+                      <p className="bt-project-note-media-label px-1 pt-2 text-sm font-bold text-cyan-100/85">Photos attached to this note</p>
                     </div>
                   )}
                   {note.edited_at && (
-                    <p className="text-xs text-slate-400 mt-2">Edited by {note.edited_by_name || note.user_name} on {formatEasternDateTime(note.edited_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time</p>
+                    <p className="text-sm text-slate-300 mt-2">Edited by {note.edited_by_name || note.user_name} on {formatEasternDateTime(note.edited_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time</p>
                   )}
                 </>
               )}
