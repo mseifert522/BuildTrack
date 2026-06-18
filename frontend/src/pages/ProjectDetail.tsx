@@ -5,7 +5,7 @@ import api from '../lib/api';
 import { Loading, StatusBadge, Modal } from '../components/ui';
 import Avatar from '../components/Avatar';
 import VoiceTextarea from '../components/VoiceTextarea';
-import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, ClipboardList, Activity, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle, Send, Phone, Mail, Building2, AlertTriangle, Check, Paperclip, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, CalendarDays, Search, GripVertical, CheckCircle2, XCircle, Database, ListFilter, Bot } from 'lucide-react';
+import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, ClipboardList, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle, Send, Phone, Mail, Building2, AlertTriangle, Check, Paperclip, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, CalendarDays, Search, GripVertical, CheckCircle2, XCircle, Database, ListFilter, Bot } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useForm } from 'react-hook-form';
 import { format } from 'date-fns';
@@ -23,7 +23,7 @@ import {
 } from '../lib/progressUpload';
 import { getProgressMediaKind, isVideoMedia } from '../lib/progressMedia';
 
-type Tab = 'overview' | 'progress-history' | 'construction-plan' | 'project-timeline' | 'quotes' | 'punch-list' | 'photos' | 'invoices' | 'activity' | 'notes' | 'team' | 'texts';
+type Tab = 'overview' | 'progress-history' | 'construction-plan' | 'project-timeline' | 'quotes' | 'punch-list' | 'photos' | 'invoices' | 'notes' | 'team' | 'texts';
 
 type ProgressLightboxItem = {
   id: string;
@@ -416,7 +416,6 @@ export default function ProjectDetail() {
   const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
   const [uploadingMainPhoto, setUploadingMainPhoto] = useState(false);
   const [activatingPunchList, setActivatingPunchList] = useState(false);
-  const [activity, setActivity] = useState<any[]>([]);
   const [editAddress, setEditAddress] = useState('');
   const [editBudget, setEditBudget] = useState('');
   const [editPurchasePrice, setEditPurchasePrice] = useState('');
@@ -472,7 +471,6 @@ export default function ProjectDetail() {
 
   useEffect(() => {
     if (tab === 'overview' || tab === 'notes') loadNotes();
-    if (tab === 'activity') loadActivity();
   }, [tab, id]);
 
   useEffect(() => {
@@ -485,11 +483,6 @@ export default function ProjectDetail() {
   const loadNotes = async () => {
     const res = await api.get(`/projects/${id}/notes`);
     setNotes(res.data);
-  };
-
-  const loadActivity = async () => {
-    const res = await api.get(`/projects/${id}/activity`);
-    setActivity(res.data);
   };
 
   const loadUsers = async () => {
@@ -813,7 +806,6 @@ export default function ProjectDetail() {
     { id: 'photos', label: 'Photos Bucket', icon: Camera },
     { id: 'team', label: 'Assign Contractors', icon: Users },
     { id: 'texts', label: 'Text Contractors', icon: MessageSquare },
-    { id: 'activity', label: 'Activity', icon: Activity },
   ];
 
   const updateFieldWorkTask = async (taskId: string, patch: Record<string, any>) => {
@@ -1455,21 +1447,6 @@ export default function ProjectDetail() {
           <ProjectTextMessagesTab projectId={id!} project={project} />
         )}
 
-        {/* Activity Tab */}
-        {tab === 'activity' && (
-          <div className="space-y-2">
-            {activity.map(log => (
-              <div key={log.id} className="bg-white rounded-xl border border-gray-200 p-4 flex items-start gap-3">
-                <Avatar src={log.user_avatar_url} name={log.user_name} size={36} roundedClassName="rounded-full" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-gray-900"><span className="font-medium">{log.user_name}</span> {log.action.replace(/_/g, ' ')}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">{formatEasternDateTime(log.created_at, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time</p>
-                </div>
-              </div>
-            ))}
-            {activity.length === 0 && <p className="text-center text-gray-400 text-sm py-8">No activity yet</p>}
-          </div>
-        )}
       </div>
 
       {/* Edit Project Modal */}
