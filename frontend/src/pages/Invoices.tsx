@@ -479,14 +479,6 @@ const quickBooksPaidDateKey = (bill?: QuickBooksBill | null) => (
   )
 );
 
-const quickBooksPaidTieBreakDateKey = (bill?: QuickBooksBill | null) => (
-  String(bill?.txn_date || bill?.due_date || '')
-);
-
-const quickBooksPaidObservedDateKey = (bill?: QuickBooksBill | null) => (
-  String(bill?.last_paid_seen_at || bill?.qbo_updated_at || bill?.last_seen_at || '')
-);
-
 const quickBooksInvoiceDateEnteredValue = (bill?: QuickBooksBill | null, invoice?: Invoice | null) => (
   bill?.first_seen_at || invoice?.created_at || bill?.last_seen_at || bill?.qbo_updated_at || bill?.txn_date || bill?.due_date || ''
 );
@@ -494,18 +486,6 @@ const quickBooksInvoiceDateEnteredValue = (bill?: QuickBooksBill | null, invoice
 const quickBooksInvoiceDateEnteredSortValue = (bill?: QuickBooksBill | null, invoice?: Invoice | null) => (
   quickBooksDateRank(quickBooksInvoiceDateEnteredValue(bill, invoice))
 );
-
-const sortQuickBooksBillsByPaidDate = (bills: QuickBooksBill[]) => [...bills].sort((a, b) => {
-  const paidCompare = quickBooksDateRank(quickBooksPaidDateKey(b)) - quickBooksDateRank(quickBooksPaidDateKey(a));
-  if (paidCompare !== 0) return paidCompare;
-  const billDateCompare = quickBooksDateRank(quickBooksPaidTieBreakDateKey(b)) - quickBooksDateRank(quickBooksPaidTieBreakDateKey(a));
-  if (billDateCompare !== 0) return billDateCompare;
-  const observedCompare = quickBooksDateRank(quickBooksPaidObservedDateKey(b)) - quickBooksDateRank(quickBooksPaidObservedDateKey(a));
-  if (observedCompare !== 0) return observedCompare;
-  const vendorCompare = String(a.vendor_name || '').localeCompare(String(b.vendor_name || ''));
-  if (vendorCompare !== 0) return vendorCompare;
-  return String(a.doc_number || a.qbo_id || '').localeCompare(String(b.doc_number || b.qbo_id || ''));
-});
 
 const formatQuickBooksPaidDate = (bill?: QuickBooksBill | null) => {
   const value = bill?.last_paid_at || bill?.last_paid_seen_at || bill?.qbo_updated_at || bill?.last_seen_at || '';
@@ -667,6 +647,14 @@ const quickBooksBillMatchesDateRange = (bill: QuickBooksBill, startDate: string,
 const quickBooksBillMatchesExactDate = (bill: QuickBooksBill, exactDate: string) => (
   !exactDate || quickBooksBillFilterDate(bill) === exactDate
 );
+
+const quickBooksBillMatchesStatusFilter = (bill: QuickBooksBill, filter: QuickBooksBillFilter) => {
+  const paid = isQuickBooksBillPaid(bill);
+  if (filter === 'paid') return paid;
+  if (filter === 'friday_queue') return !paid && bill.payment_approval_status === 'approved_for_payment';
+  if (filter === 'open') return !paid && bill.payment_approval_status !== 'approved_for_payment';
+  return true;
+};
 
 const quickBooksBillScopedToProject = (
   bill: QuickBooksBill,
@@ -1034,58 +1022,9 @@ export default function Invoices() {
     [quickBooksBills]
   );
   const approvedPaymentTotal = approvedPaymentQueue.reduce((sum, bill) => sum + Number(bill.balance || 0), 0);
-  const paidQuickBooksBills = useMemo(
-    () => sortQuickBooksBillsByPaidDate(quickBooksBills.filter(bill => isQuickBooksBillPaid(bill))),
-    [quickBooksBills]
-  );
-  const paidQuickBooksTotal = paidQuickBooksBills.reduce((sum, bill) => sum + Number(bill.total_amt || 0), 0);
   const invoiceById = useMemo(() => new Map(invoices.map(invoice => [invoice.id, invoice])), [invoices]);
   const projectById = useMemo(() => new Map(projects.map(project => [project.id, project])), [projects]);
-  const openQuickBooksBills = useMemo(
-    () => quickBooksBills.filter(bill => !isQuickBooksBillPaid(bill) && bill.payment_approval_status !== 'approved_for_payment'),
-    [quickBooksBills]
-  );
   const allQuickBooksBills = useMemo(() => sortQuickBooksBillsByBillDate(quickBooksBills), [quickBooksBills]);
-  const filteredQuickBooksBills = useMemo(
-    () => {
-      if (deferredQuickBooksBillFilter === 'paid') return paidQuickBooksBills;
-      if (deferredQuickBooksBillFilter === 'friday_queue') return approvedPaymentQueue;
-      if (deferredQuickBooksBillFilter === 'all') return allQuickBooksBills;
-      return sortQuickBooksBillsByBillDate(openQuickBooksBills);
-    },
-    [allQuickBooksBills, approvedPaymentQueue, deferredQuickBooksBillFilter, openQuickBooksBills, paidQuickBooksBills]
-  );
-  const quickBooksBillFilterMeta: Record<QuickBooksBillFilter, { label: string; title: string; subtitle: string; count: number }> = {
-    open: {
-      label: 'Open bills',
-      title: 'QuickBooks open bills',
-      subtitle: 'Unpaid bills not yet approved for the Friday payment queue',
-      count: openQuickBooksBills.length,
-    },
-    friday_queue: {
-      label: 'Approved bills',
-      title: 'Friday payment queue',
-      subtitle: 'Approved unpaid bills waiting for QuickBooks payment',
-      count: approvedPaymentQueue.length,
-    },
-    paid: {
-      label: 'Paid bills',
-      title: 'Paid QuickBooks bills',
-      subtitle: 'Latest paid bills first by QuickBooks payment date and time',
-      count: paidQuickBooksBills.length,
-    },
-    all: {
-      label: 'Total bills',
-      title: 'All mirrored QuickBooks bills',
-      subtitle: 'Every bill currently mirrored from QuickBooks',
-      count: allQuickBooksBills.length,
-    },
-  };
-  const selectedQuickBooksBillFilter = quickBooksBillFilterMeta[deferredQuickBooksBillFilter];
-  const quickBooksStatusMirrorRows = useMemo(() => filteredQuickBooksBills.map(bill => ({
-    bill,
-    invoice: bill.matched_invoice_id ? invoiceById.get(bill.matched_invoice_id) || null : null,
-  })), [filteredQuickBooksBills, invoiceById]);
   const quickBooksAllMirrorRows = useMemo(() => allQuickBooksBills.map(bill => ({
     bill,
     invoice: bill.matched_invoice_id ? invoiceById.get(bill.matched_invoice_id) || null : null,
@@ -1165,25 +1104,62 @@ export default function Invoices() {
       ? DEFAULT_QUICKBOOKS_INVOICE_SORT
       : null
   );
-  const quickBooksBaseMirrorRows = quickBooksInvoiceFilter.mode === 'all' ? quickBooksStatusMirrorRows : quickBooksAllMirrorRows;
-  const quickBooksMirrorRows = useMemo(() => {
-    const filteredRows = quickBooksBaseMirrorRows.filter(({ bill, invoice }) => (
+  const quickBooksInvoiceScopeRows = useMemo(() => {
+    const filteredRows = quickBooksAllMirrorRows.filter(({ bill, invoice }) => (
       quickBooksBillMatchesInvoiceFilter(bill, invoice, quickBooksInvoiceFilter, quickBooksVendorSupplierAliasMap)
     ));
-    const rows = (!quickBooksInvoiceFilterNeedsProject || !quickBooksInvoiceFilter.projectId)
+    return (!quickBooksInvoiceFilterNeedsProject || !quickBooksInvoiceFilter.projectId)
       ? filteredRows
       : filteredRows.flatMap(({ bill, invoice }) => (
         quickBooksBillScopedToProject(bill, invoice, quickBooksInvoiceFilter.projectId)
         .filter(scopedBill => quickBooksBillMatchesInvoiceFilter(scopedBill, invoice, quickBooksInvoiceFilter, quickBooksVendorSupplierAliasMap))
         .map(scopedBill => ({ bill: scopedBill, invoice }))
-    ));
-    return sortQuickBooksInvoiceRows(rows, quickBooksEffectiveInvoiceSort);
-  }, [quickBooksBaseMirrorRows, quickBooksEffectiveInvoiceSort, quickBooksInvoiceFilter, quickBooksInvoiceFilterNeedsProject, quickBooksVendorSupplierAliasMap]);
+      ));
+  }, [quickBooksAllMirrorRows, quickBooksInvoiceFilter, quickBooksInvoiceFilterNeedsProject, quickBooksVendorSupplierAliasMap]);
+  const quickBooksStatusScopedRows = useMemo<Record<QuickBooksBillFilter, QuickBooksMirrorRow[]>>(() => ({
+    open: quickBooksInvoiceScopeRows.filter(({ bill }) => quickBooksBillMatchesStatusFilter(bill, 'open')),
+    friday_queue: quickBooksInvoiceScopeRows.filter(({ bill }) => quickBooksBillMatchesStatusFilter(bill, 'friday_queue')),
+    paid: quickBooksInvoiceScopeRows.filter(({ bill }) => quickBooksBillMatchesStatusFilter(bill, 'paid')),
+    all: quickBooksInvoiceScopeRows,
+  }), [quickBooksInvoiceScopeRows]);
+  const quickBooksBillFilterMeta: Record<QuickBooksBillFilter, { label: string; title: string; subtitle: string; count: number }> = {
+    open: {
+      label: 'Open bills',
+      title: 'QuickBooks open bills',
+      subtitle: 'Unpaid bills not yet approved for the Friday payment queue',
+      count: quickBooksStatusScopedRows.open.length,
+    },
+    friday_queue: {
+      label: 'Approved bills',
+      title: 'Friday payment queue',
+      subtitle: 'Approved unpaid bills waiting for QuickBooks payment',
+      count: quickBooksStatusScopedRows.friday_queue.length,
+    },
+    paid: {
+      label: 'Paid bills',
+      title: 'Paid QuickBooks bills',
+      subtitle: 'Latest paid bills first by QuickBooks payment date and time',
+      count: quickBooksStatusScopedRows.paid.length,
+    },
+    all: {
+      label: 'Total bills',
+      title: 'All mirrored QuickBooks bills',
+      subtitle: 'Every bill currently mirrored from QuickBooks',
+      count: quickBooksStatusScopedRows.all.length,
+    },
+  };
+  const selectedQuickBooksBillFilter = quickBooksBillFilterMeta[deferredQuickBooksBillFilter];
+  const quickBooksScopedApprovedPaymentTotal = quickBooksStatusScopedRows.friday_queue.reduce((sum, { bill }) => sum + quickBooksMoneyAmount(bill.balance), 0);
+  const quickBooksScopedPaidTotal = quickBooksStatusScopedRows.paid.reduce((sum, { bill }) => sum + quickBooksMoneyAmount(bill.total_amt), 0);
+  const quickBooksScopedOpenCount = quickBooksStatusScopedRows.open.length;
+  const quickBooksMirrorRows = useMemo(() => (
+    sortQuickBooksInvoiceRows(quickBooksStatusScopedRows[deferredQuickBooksBillFilter] || [], quickBooksEffectiveInvoiceSort)
+  ), [deferredQuickBooksBillFilter, quickBooksEffectiveInvoiceSort, quickBooksStatusScopedRows]);
   const quickBooksProjectSpendSummary = useMemo<QuickBooksProjectSpendSummary | null>(() => {
     if (!quickBooksInvoiceFilterNeedsProject || !quickBooksInvoiceFilter.projectId || !quickBooksInvoiceFilterReady) return null;
     const selectedProject = projectById.get(quickBooksInvoiceFilter.projectId);
     const optionLabel = quickBooksProjectFilterOptions.find(option => option.id === quickBooksInvoiceFilter.projectId)?.label;
-    const totals = quickBooksMirrorRows.reduce(
+    const totals = quickBooksInvoiceScopeRows.reduce(
       (summary, { bill }) => {
         const amounts = quickBooksBillSpendAmounts(bill);
         const className = String(bill.qbo_class_name || '').trim();
@@ -1208,7 +1184,7 @@ export default function Invoices() {
     return {
       projectLabel: optionLabel || selectedProject?.address || selectedProject?.job_name || 'Selected project',
       classLabel: Array.from(totals.classNames).sort().join(', ') || selectedProject?.address || 'Project address class',
-      billCount: quickBooksMirrorRows.length,
+      billCount: quickBooksInvoiceScopeRows.length,
       paidBillCount: totals.paidBillCount,
       unpaidBillCount: totals.unpaidBillCount,
       paidTotal: totals.paidTotal,
@@ -1220,7 +1196,7 @@ export default function Invoices() {
     quickBooksInvoiceFilter.projectId,
     quickBooksInvoiceFilterNeedsProject,
     quickBooksInvoiceFilterReady,
-    quickBooksMirrorRows,
+    quickBooksInvoiceScopeRows,
     quickBooksProjectFilterOptions,
   ]);
   const quickBooksInvoiceFilterLabel = QUICKBOOKS_INVOICE_FILTER_OPTIONS.find(option => option.value === quickBooksInvoiceFilter.mode)?.label || 'Filter';
@@ -1235,9 +1211,15 @@ export default function Invoices() {
           ? 'Select date range'
           : quickBooksInvoiceFilterNeedsExactDate && !quickBooksInvoiceFilter.exactDate
             ? 'Select bill date'
-            : `${quickBooksMirrorRows.length} ${quickBooksInvoiceFilterScope} invoice${quickBooksMirrorRows.length === 1 ? '' : 's'}`;
+            : `${quickBooksInvoiceScopeRows.length} ${quickBooksInvoiceFilterScope} invoice${quickBooksInvoiceScopeRows.length === 1 ? '' : 's'}`;
   const quickBooksTableCountLabel = quickBooksInvoiceFilterActive
-    ? `${quickBooksMirrorRows.length} Filtered`
+    ? deferredQuickBooksBillFilter === 'open'
+      ? `${quickBooksMirrorRows.length} Filtered Open`
+      : deferredQuickBooksBillFilter === 'friday_queue'
+        ? `${quickBooksMirrorRows.length} Filtered Approved`
+        : deferredQuickBooksBillFilter === 'paid'
+          ? `${quickBooksMirrorRows.length} Filtered Paid`
+          : `${quickBooksMirrorRows.length} Filtered Total`
     : deferredQuickBooksBillFilter === 'open'
       ? `${quickBooksMirrorRows.length} Awaiting Approval`
       : deferredQuickBooksBillFilter === 'friday_queue'
@@ -1246,7 +1228,11 @@ export default function Invoices() {
           ? `${quickBooksMirrorRows.length} Paid`
           : `${quickBooksMirrorRows.length} Total`;
   const showFridayPaymentQueuePanel = deferredQuickBooksBillFilter === 'open' && !quickBooksInvoiceFilterInUse;
-  const clearQuickBooksInvoiceFilter = () => setQuickBooksInvoiceFilter({ ...DEFAULT_QUICKBOOKS_INVOICE_FILTER });
+  const clearQuickBooksInvoiceFilter = () => {
+    setQuickBooksInvoiceFilter({ ...DEFAULT_QUICKBOOKS_INVOICE_FILTER });
+    setQuickBooksBillFilter('open');
+    setQuickBooksInvoiceSort(null);
+  };
   const updateQuickBooksInvoiceFilter = (patch: Partial<QuickBooksInvoiceFilterState>) => {
     setQuickBooksInvoiceFilter(current => ({ ...current, ...patch }));
   };
@@ -1737,8 +1723,8 @@ export default function Invoices() {
                 className={quickBooksBillFilter === 'friday_queue' ? 'is-active' : ''}
               >
                 <span>Approved bills</span>
-                <strong>{approvedPaymentQueue.length}</strong>
-                <small>{money(approvedPaymentTotal)} due</small>
+                <strong>{quickBooksBillFilterMeta.friday_queue.count}</strong>
+                <small>{money(quickBooksScopedApprovedPaymentTotal)} due</small>
               </button>
               <button
                 type="button"
@@ -1746,8 +1732,8 @@ export default function Invoices() {
                 className={quickBooksBillFilter === 'paid' ? 'is-active' : ''}
               >
                 <span>Paid bills</span>
-                <strong>{paidQuickBooksBills.length}</strong>
-                <small>{money(paidQuickBooksTotal)} paid</small>
+                <strong>{quickBooksBillFilterMeta.paid.count}</strong>
+                <small>{money(quickBooksScopedPaidTotal)} paid</small>
               </button>
               <button
                 type="button"
@@ -1755,8 +1741,8 @@ export default function Invoices() {
                 className={quickBooksBillFilter === 'all' ? 'is-active' : ''}
               >
                 <span>Total bills</span>
-                <strong>{quickBooksStatus?.stats?.bill_count || allQuickBooksBills.length}</strong>
-                <small>{openQuickBooksBills.length} open</small>
+                <strong>{quickBooksBillFilterMeta.all.count}</strong>
+                <small>{quickBooksScopedOpenCount} open</small>
               </button>
             </div>
 
