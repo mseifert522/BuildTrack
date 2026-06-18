@@ -218,6 +218,17 @@ interface QuickBooksMirrorRow {
   invoice: Invoice | null;
 }
 
+interface QuickBooksProjectSpendSummary {
+  projectLabel: string;
+  classLabel: string;
+  billCount: number;
+  paidBillCount: number;
+  unpaidBillCount: number;
+  paidTotal: number;
+  unpaidTotal: number;
+  total: number;
+}
+
 interface InvoiceEmailAttachment {
   id: string;
   original_name: string;
@@ -566,6 +577,33 @@ const quickBooksInvoiceMoneySortValue = (value?: number | null) => {
   return Number.isFinite(amount) ? amount : 0;
 };
 
+const quickBooksMoneyAmount = (value?: number | null) => {
+  const amount = Number(value ?? 0);
+  return Number.isFinite(amount) ? amount : 0;
+};
+
+const quickBooksProjectLineOpenBalance = (bill: QuickBooksBill, lineAmount: number) => {
+  if (isQuickBooksBillPaid(bill)) return 0;
+  const amount = Math.max(quickBooksMoneyAmount(lineAmount), 0);
+  const parentTotal = Math.max(quickBooksMoneyAmount(bill.total_amt), 0);
+  const parentBalance = Math.max(quickBooksMoneyAmount(bill.balance), 0);
+  if (!amount || !parentBalance) return 0;
+  if (parentTotal > 0 && parentBalance < parentTotal) {
+    return Math.min(amount, parentBalance * (amount / parentTotal));
+  }
+  return amount;
+};
+
+const quickBooksBillSpendAmounts = (bill: QuickBooksBill) => {
+  const total = Math.max(quickBooksMoneyAmount(bill.total_amt), 0);
+  const unpaid = Math.min(total, Math.max(quickBooksMoneyAmount(bill.balance), 0));
+  return {
+    paid: Math.max(total - unpaid, 0),
+    unpaid,
+    total,
+  };
+};
+
 const sortQuickBooksInvoiceRows = (
   rows: QuickBooksMirrorRow[],
   sortState: QuickBooksInvoiceSortState | null
@@ -645,10 +683,11 @@ const quickBooksBillScopedToProject = (
   const paid = isQuickBooksBillPaid(bill);
   return matchingLines.map((line, index) => {
     const lineAmount = Number(line.amount || 0);
+    const lineOpenBalance = quickBooksProjectLineOpenBalance(bill, lineAmount);
     return {
       ...bill,
       total_amt: lineAmount,
-      balance: paid ? 0 : lineAmount,
+      balance: paid ? 0 : lineOpenBalance,
       project_id: line.project_id || bill.project_id || null,
       project_address: line.project_address || bill.project_address || null,
       project_job_name: line.project_job_name || bill.project_job_name || null,
@@ -1062,6 +1101,7 @@ export default function Invoices() {
       ].filter(Boolean);
       options.set(projectId, labelParts.join(' - ') || projectId);
     };
+    projects.forEach(project => addOption(project.id, project.address, project.job_name));
     quickBooksBills.forEach(bill => {
       const invoice = bill.matched_invoice_id ? invoiceById.get(bill.matched_invoice_id) || null : null;
       addOption(invoice?.project_id, invoice?.address, invoice?.job_name);
@@ -1071,7 +1111,7 @@ export default function Invoices() {
     return Array.from(options.entries())
       .map(([id, label]) => ({ id, label }))
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [invoiceById, projectById, quickBooksBills]);
+  }, [invoiceById, projectById, projects, quickBooksBills]);
   const quickBooksVendorSupplierFilterOptions = useMemo(() => {
     const options = new Map<string, VendorSupplierFilterOption>();
     const addOption = (labelValue?: string | null, aliases: string[] = []) => {
@@ -1136,9 +1176,53 @@ export default function Invoices() {
         quickBooksBillScopedToProject(bill, invoice, quickBooksInvoiceFilter.projectId)
         .filter(scopedBill => quickBooksBillMatchesInvoiceFilter(scopedBill, invoice, quickBooksInvoiceFilter, quickBooksVendorSupplierAliasMap))
         .map(scopedBill => ({ bill: scopedBill, invoice }))
-      ));
+    ));
     return sortQuickBooksInvoiceRows(rows, quickBooksEffectiveInvoiceSort);
   }, [quickBooksBaseMirrorRows, quickBooksEffectiveInvoiceSort, quickBooksInvoiceFilter, quickBooksInvoiceFilterNeedsProject, quickBooksVendorSupplierAliasMap]);
+  const quickBooksProjectSpendSummary = useMemo<QuickBooksProjectSpendSummary | null>(() => {
+    if (!quickBooksInvoiceFilterNeedsProject || !quickBooksInvoiceFilter.projectId || !quickBooksInvoiceFilterReady) return null;
+    const selectedProject = projectById.get(quickBooksInvoiceFilter.projectId);
+    const optionLabel = quickBooksProjectFilterOptions.find(option => option.id === quickBooksInvoiceFilter.projectId)?.label;
+    const totals = quickBooksMirrorRows.reduce(
+      (summary, { bill }) => {
+        const amounts = quickBooksBillSpendAmounts(bill);
+        const className = String(bill.qbo_class_name || '').trim();
+        if (className) summary.classNames.add(className);
+        summary.paidTotal += amounts.paid;
+        summary.unpaidTotal += amounts.unpaid;
+        summary.total += amounts.total;
+        if (amounts.paid > 0) summary.paidBillCount += 1;
+        if (amounts.unpaid > 0) summary.unpaidBillCount += 1;
+        return summary;
+      },
+      {
+        paidTotal: 0,
+        unpaidTotal: 0,
+        total: 0,
+        paidBillCount: 0,
+        unpaidBillCount: 0,
+        classNames: new Set<string>(),
+      }
+    );
+
+    return {
+      projectLabel: optionLabel || selectedProject?.address || selectedProject?.job_name || 'Selected project',
+      classLabel: Array.from(totals.classNames).sort().join(', ') || selectedProject?.address || 'Project address class',
+      billCount: quickBooksMirrorRows.length,
+      paidBillCount: totals.paidBillCount,
+      unpaidBillCount: totals.unpaidBillCount,
+      paidTotal: totals.paidTotal,
+      unpaidTotal: totals.unpaidTotal,
+      total: totals.total,
+    };
+  }, [
+    projectById,
+    quickBooksInvoiceFilter.projectId,
+    quickBooksInvoiceFilterNeedsProject,
+    quickBooksInvoiceFilterReady,
+    quickBooksMirrorRows,
+    quickBooksProjectFilterOptions,
+  ]);
   const quickBooksInvoiceFilterLabel = QUICKBOOKS_INVOICE_FILTER_OPTIONS.find(option => option.value === quickBooksInvoiceFilter.mode)?.label || 'Filter';
   const quickBooksInvoiceFilterScope = quickBooksInvoiceFilter.mode === 'vendor_only' ? 'vendor / supplier' : 'project';
   const quickBooksInvoiceFilterPrompt = quickBooksInvoiceFilter.mode === 'all'
@@ -1789,6 +1873,44 @@ export default function Invoices() {
                 <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
                 <span>{quickBooksStatus.connection.last_sync_error}</span>
               </div>
+            )}
+
+            {quickBooksProjectSpendSummary && (
+              <section className="bt-qbo-project-spend-summary" aria-label="QuickBooks project bill spend summary">
+                <div className="bt-qbo-project-spend-summary__heading">
+                  <div>
+                    <span>Project bill spend</span>
+                    <strong>{quickBooksProjectSpendSummary.projectLabel}</strong>
+                    <small>QBO class: {quickBooksProjectSpendSummary.classLabel}</small>
+                  </div>
+                  <div>
+                    <span>Source of truth</span>
+                    <strong>QuickBooks Online</strong>
+                    <small>
+                      {quickBooksStatus?.connection?.last_sync_at
+                        ? `Synced ${formatEasternDateTime(quickBooksStatus.connection.last_sync_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`
+                        : 'Awaiting sync timestamp'}
+                    </small>
+                  </div>
+                </div>
+                <div className="bt-qbo-project-spend-summary__cards">
+                  <div>
+                    <span>Paid bills</span>
+                    <strong>{money(quickBooksProjectSpendSummary.paidTotal)}</strong>
+                    <small>{quickBooksProjectSpendSummary.paidBillCount} bill{quickBooksProjectSpendSummary.paidBillCount === 1 ? '' : 's'} paid in QBO</small>
+                  </div>
+                  <div>
+                    <span>Unpaid/open bills</span>
+                    <strong>{money(quickBooksProjectSpendSummary.unpaidTotal)}</strong>
+                    <small>{quickBooksProjectSpendSummary.unpaidBillCount} bill{quickBooksProjectSpendSummary.unpaidBillCount === 1 ? '' : 's'} still open in QBO</small>
+                  </div>
+                  <div>
+                    <span>Total project bills</span>
+                    <strong>{money(quickBooksProjectSpendSummary.total)}</strong>
+                    <small>{quickBooksProjectSpendSummary.billCount} filtered bill{quickBooksProjectSpendSummary.billCount === 1 ? '' : 's'}</small>
+                  </div>
+                </div>
+              </section>
             )}
 
             {quickBooksMirrorRows.length === 0 ? (

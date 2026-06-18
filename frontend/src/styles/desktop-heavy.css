@@ -2340,6 +2340,113 @@
   transform: translateY(-1px);
 }
 
+.bt-qbo-project-spend-summary {
+  position: relative;
+  z-index: 2;
+  margin: 12px 16px 0;
+  overflow: hidden;
+  border: 1px solid rgba(34, 197, 94, 0.46);
+  border-radius: 10px;
+  background:
+    radial-gradient(110% 120% at 8% 0%, rgba(34, 197, 94, 0.20), transparent 44%),
+    radial-gradient(86% 120% at 100% 0%, rgba(251, 191, 36, 0.16), transparent 38%),
+    linear-gradient(145deg, rgba(15, 23, 42, 0.96), rgba(6, 13, 20, 0.98)),
+    #07111B;
+  box-shadow:
+    0 18px 38px rgba(2, 6, 23, 0.34),
+    0 4px 0 rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.24);
+}
+
+.bt-qbo-project-spend-summary::before {
+  content: "";
+  display: block;
+  height: 3px;
+  background: linear-gradient(90deg, #34D399, #A3E635 50%, #FBBF24);
+}
+
+.bt-qbo-project-spend-summary__heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, auto);
+  gap: 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.24);
+  padding: 12px 14px;
+}
+
+.bt-qbo-project-spend-summary__heading > div,
+.bt-qbo-project-spend-summary__cards > div {
+  min-width: 0;
+}
+
+.bt-qbo-project-spend-summary span,
+.bt-qbo-project-spend-summary small {
+  display: block;
+}
+
+.bt-qbo-project-spend-summary span {
+  color: #A7F3D0;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.bt-qbo-project-spend-summary strong {
+  display: block;
+  overflow: hidden;
+  margin-top: 4px;
+  color: #FFFFFF;
+  font-size: 17px;
+  font-weight: 950;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bt-qbo-project-spend-summary small {
+  margin-top: 4px;
+  color: #BAE6FD;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.bt-qbo-project-spend-summary__cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px 14px 14px;
+}
+
+.bt-qbo-project-spend-summary__cards > div {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 9px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.080), rgba(255, 255, 255, 0.018)),
+    rgba(15, 23, 42, 0.72);
+  padding: 11px 12px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.10),
+    0 10px 20px rgba(2, 6, 23, 0.20);
+}
+
+.bt-qbo-project-spend-summary__cards > div:nth-child(1) {
+  border-color: rgba(52, 211, 153, 0.40);
+}
+
+.bt-qbo-project-spend-summary__cards > div:nth-child(2) {
+  border-color: rgba(251, 191, 36, 0.44);
+}
+
+.bt-qbo-project-spend-summary__cards > div:nth-child(3) {
+  border-color: rgba(96, 165, 250, 0.46);
+}
+
+.bt-qbo-project-spend-summary__cards strong {
+  font-size: 22px;
+}
+
 .bt-qbo-table-title span {
   display: block;
   color: #AFC8E8;
@@ -3672,6 +3779,15 @@
 @media (max-width: 900px) {
   .bt-invoice-section-header {
     flex-direction: column;
+  }
+
+  .bt-qbo-project-spend-summary__heading,
+  .bt-qbo-project-spend-summary__cards {
+    grid-template-columns: 1fr;
+  }
+
+  .bt-qbo-project-spend-summary strong {
+    white-space: normal;
   }
 
   .bt-invoice-email-row {
