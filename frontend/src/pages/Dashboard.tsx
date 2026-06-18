@@ -231,19 +231,7 @@ const noteTypeStyles: Record<string, { label: string; bg: string; color: string;
   field: { label: 'Field note', bg: '#ECFDF5', color: '#047857', border: '#A7F3D0', accent: '#10B981' },
 };
 
-const projectStatusStyles: Record<string, { label: string; bg: string; color: string; border: string }> = {
-  active_rehab: { label: 'Active Rehab', bg: 'rgba(16,185,129,0.12)', color: '#A7F3D0', border: 'rgba(16,185,129,0.35)' },
-  not_started: { label: 'Not Started', bg: 'rgba(148,163,184,0.14)', color: '#CBD5E1', border: 'rgba(148,163,184,0.30)' },
-  rehab_completed: { label: 'Completed', bg: 'rgba(59,130,246,0.14)', color: '#BFDBFE', border: 'rgba(59,130,246,0.35)' },
-  long_term_holding: { label: 'Long-Term Holding', bg: 'rgba(217,119,6,0.14)', color: '#FCD34D', border: 'rgba(217,119,6,0.35)' },
-  commercial: { label: 'Commercial', bg: 'rgba(14,116,144,0.14)', color: '#67E8F9', border: 'rgba(14,116,144,0.35)' },
-  completed: { label: 'Completed', bg: 'rgba(59,130,246,0.14)', color: '#BFDBFE', border: 'rgba(59,130,246,0.35)' },
-};
-
 const getNoteTypeStyle = (type?: string) => noteTypeStyles[type || 'general'] || noteTypeStyles.general;
-const getProjectStatusStyle = (status?: string) => (
-  projectStatusStyles[status || ''] || { label: 'Project', bg: 'rgba(217,157,38,0.12)', color: '#FDE68A', border: 'rgba(217,157,38,0.35)' }
-);
 
 const formatCompactLabel = (value?: string | null) =>
   (value || 'not set')
@@ -1490,7 +1478,6 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
         <div className="relative grid grid-cols-1 gap-3 p-4">
           {activityFeed.map((item) => {
             const activityStyle = getActivityTypeStyle(item);
-            const statusStyle = getProjectStatusStyle(item.project_status || undefined);
             const summary = getActivitySummary(item);
             const projectTarget = item.project_id ? `/projects/${item.project_id}` : '';
             const projectLabel = item.project_address || item.project_job_name || '';
@@ -1529,18 +1516,6 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
                     <span className="truncate text-base font-black text-white">{item.user_name}</span>
                     <span className="text-xs font-semibold text-slate-300">
                       {formatEasternDateTime(item.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
-                    </span>
-                    <span
-                      className="inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-black uppercase"
-                      style={{ background: activityStyle.bg, color: activityStyle.color, borderColor: activityStyle.border }}
-                    >
-                      {activityStyle.label}
-                    </span>
-                    <span
-                      className="inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-black"
-                      style={{ background: statusStyle.bg, color: statusStyle.color, borderColor: statusStyle.border }}
-                    >
-                      {statusStyle.label}
                     </span>
                     {projectLabel && (
                       <span
