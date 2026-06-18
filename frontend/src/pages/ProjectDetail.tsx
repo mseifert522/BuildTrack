@@ -25,6 +25,28 @@ import { getProgressMediaKind, isVideoMedia } from '../lib/progressMedia';
 
 type Tab = 'overview' | 'progress-history' | 'construction-plan' | 'project-timeline' | 'quotes' | 'punch-list' | 'photos' | 'invoices' | 'notes' | 'team' | 'texts';
 
+type ProjectCalendarEvent = {
+  id: string;
+  source?: string | null;
+  event_type?: string | null;
+  title?: string | null;
+  description?: string | null;
+  scheduled_for?: string | null;
+  due_time?: string | null;
+  status?: string | null;
+  priority?: string | null;
+  completed_at?: string | null;
+};
+
+type ProjectCalendarDayCell = {
+  key: string;
+  date: Date;
+  dayNumber: number;
+  isToday: boolean;
+  isCurrentMonth: boolean;
+  events: ProjectCalendarEvent[];
+};
+
 type ProgressLightboxItem = {
   id: string;
   src: string;
@@ -96,9 +118,23 @@ type ContractorTextMessage = {
 
 type DictationStatus = 'idle' | 'starting' | 'listening';
 const PROJECT_BUDGET_ROLES = new Set(['super_admin', 'operations_manager', 'project_manager']);
+const PROJECT_CALENDAR_ROLES = new Set(['super_admin', 'operations_manager', 'project_manager']);
+const PROJECT_CALENDAR_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+const PROJECT_CALENDAR_EVENT_TONES: Record<string, string> = {
+  task: 'border-blue-300/60 bg-blue-500/20 text-blue-50',
+  maintenance: 'border-amber-300/70 bg-amber-500/20 text-amber-50',
+  inspection: 'border-cyan-300/70 bg-cyan-500/20 text-cyan-50',
+  note: 'border-violet-300/70 bg-violet-500/20 text-violet-50',
+  other: 'border-slate-300/60 bg-slate-500/20 text-slate-50',
+};
 
 function canViewProjectBudget(role?: string | null) {
   return PROJECT_BUDGET_ROLES.has(String(role || ''));
+}
+
+function canViewProjectCalendar(role?: string | null) {
+  return PROJECT_CALENDAR_ROLES.has(String(role || ''));
 }
 
 function appendDictationText(base: string, spokenText: string) {
@@ -357,6 +393,221 @@ const formatLocalDateInput = (date = new Date()) => {
   return local.toISOString().slice(0, 10);
 };
 
+function parseProjectCalendarDateKey(value?: string | null) {
+  const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) {
+    const fallback = new Date();
+    fallback.setHours(12, 0, 0, 0);
+    return fallback;
+  }
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0, 0);
+}
+
+function addProjectCalendarDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function addProjectCalendarMonths(date: Date, months: number) {
+  const next = new Date(date);
+  next.setDate(1);
+  next.setMonth(next.getMonth() + months);
+  next.setHours(12, 0, 0, 0);
+  return next;
+}
+
+function startOfProjectCalendarWeek(date: Date) {
+  const start = new Date(date);
+  start.setHours(12, 0, 0, 0);
+  start.setDate(start.getDate() - start.getDay());
+  return start;
+}
+
+function projectCalendarMonthRange(anchorDateKey: string) {
+  const monthStart = parseProjectCalendarDateKey(anchorDateKey);
+  monthStart.setDate(1);
+  const monthEnd = new Date(monthStart);
+  monthEnd.setMonth(monthEnd.getMonth() + 1, 0);
+  const visibleStart = startOfProjectCalendarWeek(monthStart);
+  const visibleEnd = addProjectCalendarDays(startOfProjectCalendarWeek(monthEnd), 6);
+  return {
+    start: formatLocalDateInput(visibleStart),
+    end: formatLocalDateInput(visibleEnd),
+  };
+}
+
+function projectCalendarEventDateKey(event: ProjectCalendarEvent) {
+  return event.scheduled_for || (event.completed_at ? String(event.completed_at).slice(0, 10) : '');
+}
+
+function sortProjectCalendarEvents(events: ProjectCalendarEvent[]) {
+  return [...events].sort((left, right) => {
+    const dateCompare = String(projectCalendarEventDateKey(left)).localeCompare(String(projectCalendarEventDateKey(right)));
+    if (dateCompare !== 0) return dateCompare;
+    const timeCompare = String(left.due_time || '99:99').localeCompare(String(right.due_time || '99:99'));
+    if (timeCompare !== 0) return timeCompare;
+    return String(left.title || '').localeCompare(String(right.title || ''));
+  });
+}
+
+function formatProjectCalendarTime(value?: string | null) {
+  const match = String(value || '').match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return 'All day';
+  const hour = Number(match[1]);
+  const minute = match[2];
+  const suffix = hour >= 12 ? 'PM' : 'AM';
+  const hour12 = hour % 12 || 12;
+  return `${hour12}:${minute} ${suffix}`;
+}
+
+function projectCalendarEventTone(event: ProjectCalendarEvent) {
+  if (event.status === 'completed') return 'border-emerald-300/70 bg-emerald-500/20 text-emerald-50';
+  if (event.priority === 'critical' || event.priority === 'high') return 'border-rose-300/70 bg-rose-500/20 text-rose-50';
+  return PROJECT_CALENDAR_EVENT_TONES[String(event.event_type || 'other')] || PROJECT_CALENDAR_EVENT_TONES.other;
+}
+
+function buildProjectCalendarDays(anchorDateKey: string, events: ProjectCalendarEvent[]): ProjectCalendarDayCell[] {
+  const todayKey = formatLocalDateInput();
+  const anchor = parseProjectCalendarDateKey(anchorDateKey);
+  const monthStart = new Date(anchor);
+  monthStart.setDate(1);
+  const activeMonth = monthStart.getMonth();
+  const visibleStart = startOfProjectCalendarWeek(monthStart);
+  const grouped = new Map<string, ProjectCalendarEvent[]>();
+
+  events.forEach(event => {
+    const key = projectCalendarEventDateKey(event);
+    if (!key) return;
+    const current = grouped.get(key) || [];
+    current.push(event);
+    grouped.set(key, current);
+  });
+
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = addProjectCalendarDays(visibleStart, index);
+    const key = formatLocalDateInput(date);
+    return {
+      key,
+      date,
+      dayNumber: date.getDate(),
+      isToday: key === todayKey,
+      isCurrentMonth: date.getMonth() === activeMonth,
+      events: sortProjectCalendarEvents(grouped.get(key) || []),
+    };
+  });
+}
+
+function ProjectMiniCalendarCard({
+  events,
+  loading,
+  anchorDateKey,
+  onAnchorDateChange,
+}: {
+  events: ProjectCalendarEvent[];
+  loading: boolean;
+  anchorDateKey: string;
+  onAnchorDateChange: (dateKey: string) => void;
+}) {
+  const anchorDate = parseProjectCalendarDateKey(anchorDateKey);
+  const days = useMemo(() => buildProjectCalendarDays(anchorDateKey, events), [anchorDateKey, events]);
+  const todayKey = formatLocalDateInput();
+  const upcoming = useMemo(
+    () => sortProjectCalendarEvents(events.filter(event => String(projectCalendarEventDateKey(event) || '') >= todayKey)).slice(0, 4),
+    [events, todayKey],
+  );
+  const moveMonth = (offset: number) => onAnchorDateChange(formatLocalDateInput(addProjectCalendarMonths(anchorDate, offset)));
+
+  return (
+    <section className="rounded-xl border border-blue-900/40 bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 p-4 text-white shadow-[0_18px_42px_rgba(15,23,42,0.28)]">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-black text-white">Project Calendar</h3>
+          <p className="mt-0.5 text-xs font-semibold text-cyan-100">{events.length} {events.length === 1 ? 'project item' : 'project items'}</p>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => moveMonth(-1)}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/10 text-cyan-50 hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-cyan-300"
+            aria-label="Previous month"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onAnchorDateChange(formatLocalDateInput())}
+            className="inline-flex h-8 items-center justify-center rounded-lg border border-cyan-300/30 bg-cyan-400/10 px-2.5 text-xs font-black text-cyan-50 hover:bg-cyan-400/20 focus:outline-none focus:ring-2 focus:ring-cyan-300"
+          >
+            Today
+          </button>
+          <button
+            type="button"
+            onClick={() => moveMonth(1)}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/10 text-cyan-50 hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-cyan-300"
+            aria-label="Next month"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <p className="text-base font-black text-cyan-50">{format(anchorDate, 'MMMM yyyy')}</p>
+        {loading && <span className="text-xs font-bold text-cyan-200">Loading</span>}
+      </div>
+
+      <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-black uppercase text-cyan-200/90">
+        {PROJECT_CALENDAR_WEEKDAYS.map(day => <div key={day}>{day}</div>)}
+      </div>
+      <div className="mt-1 grid grid-cols-7 gap-1">
+        {days.map(day => (
+          <div
+            key={day.key}
+            className={`min-h-[58px] rounded-lg border p-1.5 ${day.isToday ? 'border-amber-300 bg-amber-400/20 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.25)]' : 'border-white/10 bg-white/[0.045]'} ${day.isCurrentMonth ? 'text-white' : 'text-slate-500'}`}
+          >
+            <div className="flex items-center justify-between">
+              <span className={`text-xs font-black ${day.isToday ? 'text-amber-100' : ''}`}>{day.dayNumber}</span>
+              {day.events.length > 0 && <span className="rounded-full bg-cyan-300 px-1.5 text-[9px] font-black text-slate-950">{day.events.length}</span>}
+            </div>
+            <div className="mt-1 space-y-1">
+              {day.events.slice(0, 2).map(event => (
+                <div key={`${day.key}-${event.id}`} className={`truncate rounded border px-1 py-0.5 text-[9px] font-black leading-tight ${projectCalendarEventTone(event)}`}>
+                  {event.title || 'Calendar item'}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <p className="text-xs font-black uppercase tracking-wide text-cyan-100">Upcoming</p>
+          <CalendarDays className="h-4 w-4 text-cyan-200" />
+        </div>
+        {upcoming.length > 0 ? (
+          <div className="space-y-2">
+            {upcoming.map(event => (
+              <div key={`upcoming-${event.id}`} className="flex items-start gap-2 rounded-lg border border-white/10 bg-white/[0.055] p-2">
+                <span className={`mt-1 h-2.5 w-2.5 flex-shrink-0 rounded-full ${event.status === 'completed' ? 'bg-emerald-300' : event.priority === 'critical' || event.priority === 'high' ? 'bg-rose-300' : 'bg-cyan-300'}`} />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-black text-white">{event.title || 'Calendar item'}</p>
+                  <p className="mt-0.5 text-[11px] font-semibold text-cyan-100">
+                    {format(parseProjectCalendarDateKey(projectCalendarEventDateKey(event)), 'MMM d')} · {formatProjectCalendarTime(event.due_time)}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="py-3 text-center text-xs font-bold text-slate-300">No upcoming project calendar items</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
 const defaultReminderTime = () => {
   const date = new Date(Date.now() + 30 * 60 * 1000);
   const roundedMinutes = Math.ceil(date.getMinutes() / 15) * 15;
@@ -404,6 +655,9 @@ export default function ProjectDetail() {
   const [calendarReminderDate, setCalendarReminderDate] = useState(formatLocalDateInput());
   const [calendarReminderTime, setCalendarReminderTime] = useState(defaultReminderTime());
   const [savingCalendarEvent, setSavingCalendarEvent] = useState(false);
+  const [projectCalendarAnchorDateKey, setProjectCalendarAnchorDateKey] = useState(formatLocalDateInput());
+  const [projectCalendarEvents, setProjectCalendarEvents] = useState<ProjectCalendarEvent[]>([]);
+  const [loadingProjectCalendar, setLoadingProjectCalendar] = useState(false);
   const [noteDictationStatus, setNoteDictationStatus] = useState<DictationStatus>('idle');
   const [notePhotoFiles, setNotePhotoFiles] = useState<File[]>([]);
   const [notePhotoSource, setNotePhotoSource] = useState<ProgressCaptureSource>('desktop');
@@ -484,6 +738,30 @@ export default function ProjectDetail() {
     const res = await api.get(`/projects/${id}/notes`);
     setNotes(res.data);
   };
+
+  const loadProjectCalendar = useCallback(async () => {
+    if (!id || !canViewProjectCalendar(user?.role)) {
+      setProjectCalendarEvents([]);
+      setLoadingProjectCalendar(false);
+      return;
+    }
+
+    const range = projectCalendarMonthRange(projectCalendarAnchorDateKey);
+    setLoadingProjectCalendar(true);
+    try {
+      const res = await api.get(`/calendar/events?start=${encodeURIComponent(range.start)}&end=${encodeURIComponent(range.end)}&project_id=${encodeURIComponent(id)}`);
+      setProjectCalendarEvents(Array.isArray(res.data?.events) ? res.data.events : []);
+    } catch (err) {
+      console.error(err);
+      setProjectCalendarEvents([]);
+    } finally {
+      setLoadingProjectCalendar(false);
+    }
+  }, [id, projectCalendarAnchorDateKey, user?.role]);
+
+  useEffect(() => {
+    if (tab === 'overview') loadProjectCalendar();
+  }, [tab, loadProjectCalendar]);
 
   const loadUsers = async () => {
     if (user && isAdminRole(user.role)) {
@@ -696,6 +974,7 @@ export default function ProjectDetail() {
       setCalendarReminderEnabled(false);
       setCalendarReminderRecipients('');
       setCalendarReminderMessage('');
+      await loadProjectCalendar();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to add calendar item');
     } finally {
@@ -795,6 +1074,7 @@ export default function ProjectDetail() {
   const punchlistStageActive = isPunchlistStageEnabled(project.punchlist_stage);
   const canAssign = user && isAdminRole(user.role);
   const canSeeBudget = Boolean(user && canViewProjectBudget(user.role));
+  const canSeeProjectCalendar = Boolean(user && canViewProjectCalendar(user.role));
   const fieldWork = project.field_work || { counts: {}, tasks: [], invoice_holds: [] };
 
   const tabs: { id: Tab; label: string; icon: any }[] = [
@@ -1305,6 +1585,7 @@ export default function ProjectDetail() {
               sourceType="project"
               sourceId={id || project.id}
               contextLabel={[project.address, project.job_name].filter(Boolean).join(' - ')}
+              onSaved={loadProjectCalendar}
               buttonClassName="bt-project-tab-button inline-flex min-h-10 min-w-0 items-center justify-center gap-1 rounded-lg border border-amber-400/65 bg-gradient-to-br from-slate-800 via-slate-950 to-amber-950 px-1.5 py-1.5 text-center text-[10px] font-black leading-tight text-amber-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.13),0_8px_16px_rgba(2,6,23,0.36)] transition-all duration-150 hover:border-amber-300 hover:from-amber-500 hover:via-amber-700 hover:to-slate-950 hover:text-white hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_10px_22px_rgba(245,158,11,0.26)] sm:px-2"
             />
           </div>
@@ -1369,6 +1650,15 @@ export default function ProjectDetail() {
                 <ProjectContractorAssignmentPanel projectId={id!} compact canAssign={Boolean(canAssign)} />
               </div>
             </div>
+
+              {canSeeProjectCalendar && (
+                <ProjectMiniCalendarCard
+                  events={projectCalendarEvents}
+                  loading={loadingProjectCalendar}
+                  anchorDateKey={projectCalendarAnchorDateKey}
+                  onAnchorDateChange={setProjectCalendarAnchorDateKey}
+                />
+              )}
 
               <RecentFieldPhotosCard
                 projectId={id!}

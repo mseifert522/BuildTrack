@@ -103,6 +103,11 @@ router.get('/events', (req, res) => {
   try {
     const db = getDb();
     const { start, end } = rangeFromQuery(req);
+    const projectId = req.query.project_id ? String(req.query.project_id) : null;
+    if (projectId) assertProjectAccess(db, req.user, projectId);
+
+    const explicitProjectFilterSql = projectId ? ' AND oce.project_id = ?' : '';
+    const explicitProjectFilterParams = projectId ? [projectId] : [];
     const explicitAccess = projectAccessClause(req.user, 'p');
     const explicitEvents = db.prepare(`
       SELECT
@@ -128,11 +133,14 @@ router.get('/events', (req, res) => {
         AND lower(COALESCE(oce.event_type, '')) NOT IN ('invoice','payment')
         AND lower(COALESCE(oce.source_type, '')) NOT IN ('invoice','payment','quickbooks','bill')
         AND (oce.project_id IS NULL OR p.id IS NOT NULL)
+        ${explicitProjectFilterSql}
         ${explicitAccess.sql}
       ORDER BY date(oce.scheduled_for), oce.due_time, datetime(oce.created_at) DESC
       LIMIT 160
-    `).all(start, end, ...explicitAccess.params).map(normalizeExplicitEvent);
+    `).all(start, end, ...explicitProjectFilterParams, ...explicitAccess.params).map(normalizeExplicitEvent);
 
+    const taskProjectFilterSql = projectId ? ' AND cpi.project_id = ?' : '';
+    const taskProjectFilterParams = projectId ? [projectId] : [];
     const projectAccess = projectAccessClause(req.user, 'p');
     const taskEvents = db.prepare(`
       SELECT
@@ -144,10 +152,11 @@ router.get('/events', (req, res) => {
       WHERE cpi.target_date IS NOT NULL
         AND cpi.target_date != ''
         AND date(cpi.target_date) BETWEEN date(?) AND date(?)
+        ${taskProjectFilterSql}
         ${projectAccess.sql}
       ORDER BY date(cpi.target_date)
       LIMIT 120
-    `).all(start, end, ...projectAccess.params).map(row => ({
+    `).all(start, end, ...taskProjectFilterParams, ...projectAccess.params).map(row => ({
       id: `task-${row.id}`,
       source: 'construction_task',
       source_id: row.id,
