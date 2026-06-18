@@ -518,7 +518,10 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
   const liveTodayKey = formatLocalDateInput(liveNow);
   const [lastCalendarTodayKey, setLastCalendarTodayKey] = useState(() => liveTodayKey);
   const calendarQueryRange = calendarRangeForView(calendarViewMode, calendarAnchorDateKey);
-  const canAccessOperationsCalendar = Boolean(calendarOnly && user && ['super_admin', 'operations_manager', 'project_manager'].includes(user.role));
+  const canReadOperationsCalendar = Boolean(user && ['super_admin', 'operations_manager', 'project_manager'].includes(user.role));
+  const canAccessOperationsCalendar = Boolean(calendarOnly && canReadOperationsCalendar);
+  const dashboardMiniCalendarRange = calendarRangeForView('month', calendarAnchorDateKey);
+  const calendarDataRange = calendarOnly ? calendarQueryRange : dashboardMiniCalendarRange;
   const canDeleteProjectNotes = Boolean(user && ['super_admin', 'operations_manager'].includes(user.role));
 
   useEffect(() => {
@@ -543,8 +546,8 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
           calendarOnly
             ? Promise.resolve({ data: { items: [] } })
             : api.get('/dashboard/activity-feed?limit=25').catch(() => ({ data: { items: [] } })),
-          canAccessOperationsCalendar
-            ? api.get(`/calendar/events?start=${encodeURIComponent(calendarQueryRange.start)}&end=${encodeURIComponent(calendarQueryRange.end)}`).catch(() => ({ data: { events: [] } }))
+          canReadOperationsCalendar
+            ? api.get(`/calendar/events?start=${encodeURIComponent(calendarDataRange.start)}&end=${encodeURIComponent(calendarDataRange.end)}`).catch(() => ({ data: { events: [] } }))
             : Promise.resolve({ data: { events: [] } }),
         ]);
         const feedItems = Array.isArray(feedRes.data?.items)
@@ -561,7 +564,7 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
       }
     };
     load();
-  }, [user?.id, user?.role, calendarOnly, canAccessOperationsCalendar, calendarQueryRange.start, calendarQueryRange.end]);
+  }, [user?.id, user?.role, calendarOnly, canReadOperationsCalendar, calendarDataRange.start, calendarDataRange.end]);
 
   if (loading) return <Loading />;
 
@@ -573,7 +576,7 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
     .replace(/\sPM$/, ' P.M.')} Eastern Time`;
 
   const refreshCalendarEvents = async (anchorDateKey = calendarAnchorDateKey, viewMode = calendarViewMode) => {
-    const range = calendarRangeForView(viewMode, anchorDateKey);
+    const range = calendarRangeForView(calendarOnly ? viewMode : 'month', anchorDateKey);
     const res = await api.get(`/calendar/events?start=${encodeURIComponent(range.start)}&end=${encodeURIComponent(range.end)}`);
     setCalendarEvents(Array.isArray(res.data?.events) ? res.data.events : []);
   };
@@ -753,6 +756,10 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
     });
     setExpandedCalendarNoteId(null);
   };
+  const moveDashboardMiniCalendarMonth = (offset: number) => {
+    setCalendarAnchorDateKey(current => formatLocalDateInput(addCalendarMonths(localDateInputToNoonDate(current), offset)));
+    setExpandedCalendarNoteId(null);
+  };
   const jumpToTodayCalendarView = () => {
     setCalendarAnchorDateKey(todayKey);
     setExpandedCalendarNoteId(null);
@@ -886,6 +893,14 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
     groups[dateKey].push(event);
     return groups;
   }, {});
+  const dashboardMiniCalendarEventsByDate = calendarEvents.reduce<Record<string, OperationsCalendarEvent[]>>((groups, event) => {
+    const dateKey = calendarDateKeyForEvent(event) || todayKey;
+    if (!groups[dateKey]) groups[dateKey] = [];
+    groups[dateKey].push(event);
+    return groups;
+  }, {});
+  const dashboardMiniSelectedDateEvents = sortCalendarEventsForDay(dashboardMiniCalendarEventsByDate[calendarAnchorDateKey] || []);
+  const dashboardMiniMonthEventCount = calendarEvents.filter(event => event.status !== 'cancelled').length;
   const renderCalendarDayTask = (event: OperationsCalendarEvent) => {
     const complete = event.status === 'completed';
     const noteDraft = calendarNoteDraft(event);
@@ -1441,6 +1456,97 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
     return renderCalendarMonthView();
   };
 
+  const renderDashboardMiniCalendar = () => (
+    <aside className="bt-dashboard-mini-calendar-module" aria-label="Company mini calendar">
+      <div className="bt-dashboard-mini-calendar-module__topline" />
+      <div className="bt-dashboard-mini-calendar-module__header">
+        <div className="min-w-0">
+          <p className="bt-dashboard-mini-calendar-module__kicker">Company Calendar</p>
+          <h3>{calendarMonthLabelFormatter.format(calendarMonthStartDate)}</h3>
+        </div>
+        <span>{dashboardMiniMonthEventCount}</span>
+      </div>
+      <div className="bt-dashboard-mini-calendar-module__controls">
+        <button type="button" onClick={() => moveDashboardMiniCalendarMonth(-1)} aria-label="Previous month">
+          <ChevronLeft className="h-3.5 w-3.5" />
+        </button>
+        <button type="button" onClick={jumpToTodayCalendarView}>
+          Today
+        </button>
+        <button type="button" onClick={() => moveDashboardMiniCalendarMonth(1)} aria-label="Next month">
+          <ChevronRight className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <div className="bt-dashboard-mini-calendar-module__weekdays">
+        {calendarWeekdayLabels.map(dayLabel => (
+          <span key={dayLabel}>{dayLabel.slice(0, 1)}</span>
+        ))}
+      </div>
+      <div className="bt-dashboard-mini-calendar-module__grid">
+        {calendarVisibleMonthDays.map(day => {
+          const dayEvents = dashboardMiniCalendarEventsByDate[day.key] || [];
+          const eventCount = dayEvents.filter(event => event.status !== 'cancelled').length;
+          const selected = day.key === calendarAnchorDateKey;
+          return (
+            <button
+              key={day.key}
+              type="button"
+              onClick={() => setCalendarAnchorDateKey(day.key)}
+              className={`${day.isToday ? 'is-today' : ''} ${selected ? 'is-selected' : ''} ${day.isCurrentMonth ? '' : 'is-muted'}`}
+              title={`${day.label}${eventCount ? ` - ${eventCount} item${eventCount === 1 ? '' : 's'}` : ''}`}
+              aria-label={`${day.label}${eventCount ? `, ${eventCount} calendar item${eventCount === 1 ? '' : 's'}` : ''}`}
+            >
+              <span>{day.dayNumber}</span>
+              {eventCount ? <strong>{eventCount}</strong> : null}
+            </button>
+          );
+        })}
+      </div>
+      <div className="bt-dashboard-mini-calendar-module__agenda">
+        <div className="bt-dashboard-mini-calendar-module__agenda-title">
+          <span>{formatCalendarBadgeDate(calendarAnchorDateKey).label}</span>
+          <strong>{dashboardMiniSelectedDateEvents.length}</strong>
+        </div>
+        {dashboardMiniSelectedDateEvents.length ? (
+          <div className="bt-dashboard-mini-calendar-module__agenda-list">
+            {dashboardMiniSelectedDateEvents.slice(0, 4).map(event => {
+              const tone = calendarEventTone(event);
+              return (
+                <button
+                  key={event.id}
+                  type="button"
+                  onClick={() => openCalendarEntryEditor(event)}
+                  className="bt-dashboard-mini-calendar-module__agenda-item"
+                  title={event.title || 'Untitled calendar item'}
+                >
+                  <span className={tone.rail} />
+                  <span>
+                    <strong>{event.title || 'Untitled calendar item'}</strong>
+                    <em>{formatCalendarDueTimeLabel(event.due_time)} - {getCalendarProjectLabel(event)}</em>
+                  </span>
+                </button>
+              );
+            })}
+            {dashboardMiniSelectedDateEvents.length > 4 ? (
+              <p className="bt-dashboard-mini-calendar-module__more">
+                +{dashboardMiniSelectedDateEvents.length - 4} more
+              </p>
+            ) : null}
+          </div>
+        ) : (
+          <p className="bt-dashboard-mini-calendar-module__empty">No calendar items for this day</p>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={() => navigate('/operations-calendar')}
+        className="bt-dashboard-mini-calendar-module__open"
+      >
+        Open Calendar
+      </button>
+    </aside>
+  );
+
   const renderActivityFeedPanel = () => (
     <div
       id="recent-activity"
@@ -1470,12 +1576,16 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
       </div>
 
       {activityFeed.length === 0 ? (
-        <div className="relative flex min-h-[96px] flex-col items-center justify-center px-4 py-6">
-          <p className="text-sm font-bold text-white">No notes yet</p>
-          <p className="mt-1 text-xs text-emerald-100">Recent field and office notes will appear here.</p>
+        <div className="bt-dashboard-notes-flow relative flow-root p-4">
+          {canReadOperationsCalendar ? renderDashboardMiniCalendar() : null}
+          <div className="relative flex min-h-[132px] flex-col items-center justify-center rounded-xl border border-white/10 bg-slate-950/20 px-4 py-6">
+            <p className="text-sm font-bold text-white">No notes yet</p>
+            <p className="mt-1 text-xs text-emerald-100">Recent field and office notes will appear here.</p>
+          </div>
         </div>
       ) : (
-        <div className="relative grid grid-cols-1 gap-3 p-4">
+        <div className="bt-dashboard-notes-flow relative flow-root p-4">
+          {canReadOperationsCalendar ? renderDashboardMiniCalendar() : null}
           {activityFeed.map((item) => {
             const activityStyle = getActivityTypeStyle(item);
             const summary = getActivitySummary(item);
@@ -1492,7 +1602,7 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
                 onKeyDown={event => {
                   if (projectTarget && event.key === 'Enter') navigate(projectTarget);
                 }}
-                className={`group relative flex min-h-[112px] items-start gap-4 rounded-xl border border-white/10 p-4 transition-all hover:border-cyan-300/55 sm:p-5 ${projectTarget ? 'cursor-pointer' : 'cursor-default'}`}
+                className={`bt-dashboard-note-row group relative mb-3 flex min-h-[92px] items-start gap-3 rounded-xl border border-white/10 p-3 transition-all hover:border-cyan-300/55 sm:p-4 ${projectTarget ? 'cursor-pointer' : 'cursor-default'}`}
                 style={{
                   background: 'linear-gradient(135deg, rgba(15,23,42,0.88) 0%, rgba(30,41,59,0.76) 58%, rgba(8,47,73,0.42) 100%)',
                   boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
@@ -1506,7 +1616,7 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
                   <Avatar
                     src={item.user_avatar_url}
                     name={item.user_name}
-                    size={60}
+                    size={48}
                     className="border-2"
                     style={{ borderColor: 'rgba(191,219,254,0.72)' }}
                   />
@@ -1528,7 +1638,7 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
                       </span>
                     )}
                   </div>
-                  <p className="mt-4 whitespace-pre-wrap break-words rounded-lg border border-cyan-300/10 bg-slate-950/25 px-3 py-3 text-sm font-black leading-7 text-white shadow-inner sm:text-[15px]">
+                  <p className="bt-dashboard-note-summary mt-2 whitespace-pre-wrap break-words rounded-lg border border-cyan-300/10 bg-slate-950/25 px-3 py-2 text-sm font-black leading-6 text-white shadow-inner sm:text-[15px]">
                     {summary}
                   </p>
                 </div>

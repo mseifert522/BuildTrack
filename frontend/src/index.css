@@ -23,6 +23,305 @@
   color-scheme: light dark;
 }
 
+/* Dashboard notes + company mini calendar */
+.bt-dashboard-notes-flow {
+  min-height: 0;
+}
+
+.bt-dashboard-note-row {
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.bt-dashboard-mini-calendar-module {
+  position: relative;
+  float: right;
+  width: min(392px, 42%);
+  margin: 0 0 14px 16px;
+  overflow: hidden;
+  border: 2px solid rgba(125, 211, 252, 0.58);
+  border-radius: 14px;
+  background:
+    radial-gradient(118% 110% at 0% 0%, rgba(45, 212, 191, 0.18), transparent 46%),
+    radial-gradient(100% 90% at 100% 0%, rgba(251, 191, 36, 0.13), transparent 42%),
+    linear-gradient(145deg, #122432 0%, #0B1722 54%, #07111B 100%);
+  box-shadow:
+    0 22px 46px rgba(2, 6, 23, 0.40),
+    0 5px 0 rgba(0, 0, 0, 0.30),
+    0 0 0 1px rgba(255, 255, 255, 0.15),
+    inset 0 2px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -4px 0 rgba(0, 0, 0, 0.26);
+}
+
+.bt-dashboard-mini-calendar-module__topline {
+  height: 3px;
+  background: linear-gradient(90deg, #34D399, #A3E635 48%, #FBBF24);
+  box-shadow: 0 0 18px rgba(163, 230, 53, 0.22);
+}
+
+.bt-dashboard-mini-calendar-module__header,
+.bt-dashboard-mini-calendar-module__controls,
+.bt-dashboard-mini-calendar-module__agenda-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.bt-dashboard-mini-calendar-module__header {
+  padding: 13px 14px 10px;
+}
+
+.bt-dashboard-mini-calendar-module__kicker {
+  margin: 0;
+  color: #A7F3D0;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.bt-dashboard-mini-calendar-module__header h3 {
+  margin: 4px 0 0;
+  color: #F8FAFC;
+  font-size: 17px;
+  font-weight: 950;
+  line-height: 1.15;
+}
+
+.bt-dashboard-mini-calendar-module__header > span,
+.bt-dashboard-mini-calendar-module__agenda-title strong {
+  display: inline-flex;
+  min-width: 30px;
+  min-height: 26px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(191, 219, 254, 0.26);
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.20);
+  color: #DBEAFE;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.bt-dashboard-mini-calendar-module__controls {
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  padding: 8px 12px;
+  background: rgba(2, 6, 23, 0.20);
+}
+
+.bt-dashboard-mini-calendar-module__controls button,
+.bt-dashboard-mini-calendar-module__open {
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: 9px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)),
+    rgba(15, 23, 42, 0.78);
+  color: #E0F2FE;
+  font-size: 11px;
+  font-weight: 950;
+  line-height: 1;
+  min-height: 30px;
+  padding: 0 10px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.10),
+    0 8px 16px rgba(2, 6, 23, 0.20);
+}
+
+.bt-dashboard-mini-calendar-module__controls button:first-child,
+.bt-dashboard-mini-calendar-module__controls button:last-child {
+  display: inline-flex;
+  width: 32px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.bt-dashboard-mini-calendar-module__controls button:hover,
+.bt-dashboard-mini-calendar-module__open:hover {
+  border-color: rgba(125, 211, 252, 0.70);
+  background-color: rgba(14, 116, 144, 0.34);
+}
+
+.bt-dashboard-mini-calendar-module__weekdays,
+.bt-dashboard-mini-calendar-module__grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.bt-dashboard-mini-calendar-module__weekdays {
+  padding: 10px 12px 5px;
+}
+
+.bt-dashboard-mini-calendar-module__weekdays span {
+  color: #93C5FD;
+  font-size: 10px;
+  font-weight: 950;
+  text-align: center;
+}
+
+.bt-dashboard-mini-calendar-module__grid {
+  gap: 4px;
+  padding: 0 12px 12px;
+}
+
+.bt-dashboard-mini-calendar-module__grid button {
+  position: relative;
+  display: grid;
+  min-height: 36px;
+  place-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 9px;
+  background: rgba(15, 23, 42, 0.46);
+  color: #E5F2FF;
+  font-size: 12px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.bt-dashboard-mini-calendar-module__grid button:hover {
+  border-color: rgba(125, 211, 252, 0.55);
+  background: rgba(8, 145, 178, 0.24);
+}
+
+.bt-dashboard-mini-calendar-module__grid button.is-muted {
+  color: #64748B;
+}
+
+.bt-dashboard-mini-calendar-module__grid button.is-today {
+  border-color: rgba(251, 191, 36, 0.88);
+  color: #FEF3C7;
+}
+
+.bt-dashboard-mini-calendar-module__grid button.is-selected {
+  border-color: rgba(52, 211, 153, 0.90);
+  background:
+    linear-gradient(180deg, rgba(52, 211, 153, 0.34), rgba(20, 184, 166, 0.18)),
+    rgba(5, 46, 22, 0.40);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 0 0 1px rgba(52, 211, 153, 0.16);
+}
+
+.bt-dashboard-mini-calendar-module__grid strong {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  min-width: 15px;
+  border-radius: 999px;
+  background: #2563EB;
+  color: #FFFFFF;
+  font-size: 9px;
+  font-weight: 950;
+  line-height: 15px;
+  text-align: center;
+}
+
+.bt-dashboard-mini-calendar-module__agenda {
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+  padding: 11px 12px 12px;
+  background: rgba(2, 6, 23, 0.18);
+}
+
+.bt-dashboard-mini-calendar-module__agenda-title span {
+  color: #F8FAFC;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.bt-dashboard-mini-calendar-module__agenda-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.bt-dashboard-mini-calendar-module__agenda-item {
+  display: grid;
+  grid-template-columns: 4px minmax(0, 1fr);
+  gap: 8px;
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.20);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.56);
+  padding: 8px;
+  text-align: left;
+}
+
+.bt-dashboard-mini-calendar-module__agenda-item > span:first-child {
+  width: 4px;
+  border-radius: 99px;
+}
+
+.bt-dashboard-mini-calendar-module__agenda-item strong,
+.bt-dashboard-mini-calendar-module__agenda-item em {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bt-dashboard-mini-calendar-module__agenda-item strong {
+  color: #F8FAFC;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 950;
+}
+
+.bt-dashboard-mini-calendar-module__agenda-item em,
+.bt-dashboard-mini-calendar-module__empty,
+.bt-dashboard-mini-calendar-module__more {
+  color: #BAE6FD;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.bt-dashboard-mini-calendar-module__empty {
+  margin: 9px 0 0;
+  border: 1px dashed rgba(125, 211, 252, 0.24);
+  border-radius: 10px;
+  padding: 10px;
+  text-align: center;
+}
+
+.bt-dashboard-mini-calendar-module__more {
+  margin: 0;
+  text-align: right;
+}
+
+.bt-dashboard-mini-calendar-module__open {
+  display: flex;
+  width: calc(100% - 24px);
+  align-items: center;
+  justify-content: center;
+  margin: 0 12px 12px;
+}
+
+@media (max-width: 1180px) {
+  .bt-dashboard-mini-calendar-module {
+    float: none;
+    width: 100%;
+    margin: 0 0 14px;
+  }
+}
+
+@media (max-width: 760px) {
+  .bt-dashboard-note-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .bt-dashboard-note-row > div:last-child {
+    grid-column: 1 / -1;
+    align-items: stretch;
+    flex-direction: row;
+    justify-content: space-between;
+    text-align: left;
+  }
+}
+
 @media (min-width: 480px) {
   :root { --bt-page-pad: 18px; }
 }
