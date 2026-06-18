@@ -287,21 +287,6 @@ export default function Layout({ children }: LayoutProps) {
   const isActive = (path: string, matchPaths: string[] = [path]) =>
     matchPaths.some(matchPath => location.pathname.startsWith(matchPath));
 
-  const pageTitles: Record<string, string> = {
-    '/dashboard': 'Dashboard',
-    '/operations-calendar': 'Calendar',
-    '/projects': 'Projects',
-    '/invoices': 'Invoices',
-    '/contractors': 'Vendors',
-    '/suppliers': 'Vendors',
-    '/security': 'Security',
-    '/users': 'Users',
-    '/settings': 'Settings',
-  };
-
-  const currentTitle = Object.entries(pageTitles).find(([path]) =>
-    location.pathname.startsWith(path)
-  )?.[1] || 'BuildTrack';
   const showBackToDashboard = !location.pathname.startsWith('/dashboard');
 
   useEffect(() => {
@@ -504,7 +489,7 @@ export default function Layout({ children }: LayoutProps) {
             boxShadow: '0 1px 0 #222831',
           }}
         >
-          {/* Left: hamburger + breadcrumb */}
+          {/* Left: hamburger + back control */}
           <div className="flex flex-1 items-center gap-3 min-w-0 sm:gap-4">
             <button
               onClick={() => setSidebarOpen(true)}
@@ -524,11 +509,6 @@ export default function Layout({ children }: LayoutProps) {
                 Back to Dashboard
               </Link>
             )}
-            <div className="flex min-w-0 items-center gap-2 text-sm">
-              <span className="flex-shrink-0 font-medium" style={{ color: 'var(--bt-text-muted)' }}>BuildTrack</span>
-              <ChevronRight className="w-3.5 h-3.5" style={{ color: '#D1D5DB' }} />
-              <span className="min-w-0 truncate font-bold" style={{ color: 'var(--bt-text)' }}>{currentTitle}</span>
-            </div>
           </div>
 
           {/* Global search */}
