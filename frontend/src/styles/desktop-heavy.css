@@ -973,6 +973,32 @@
   color: #475569;
 }
 
+.bt-calendar-detail-hero,
+.bt-calendar-detail-card {
+  border-color: #CBD5E1 !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(241, 245, 249, 0.96)) !important;
+  box-shadow:
+    0 14px 30px rgba(15, 23, 42, 0.10),
+    0 2px 0 rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92) !important;
+}
+
+.bt-calendar-detail-hero {
+  border-color: #93C5FD !important;
+  background:
+    radial-gradient(100% 120% at 0% 0%, rgba(59, 130, 246, 0.18), transparent 42%),
+    linear-gradient(135deg, #FFFFFF 0%, #EFF6FF 100%) !important;
+}
+
+.bt-calendar-detail-card textarea,
+.bt-calendar-detail-card input,
+.bt-calendar-detail-card select {
+  box-shadow:
+    inset 0 1px 2px rgba(15, 23, 42, 0.06),
+    0 1px 0 rgba(255, 255, 255, 0.86);
+}
+
 .bt-calendar-time-badge {
   border-color: #E2E8F0;
   background: #F1F5F9;

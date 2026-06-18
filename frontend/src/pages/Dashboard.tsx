@@ -137,6 +137,8 @@ interface OperationsCalendarEvent {
   next_email_reminder_at?: string | null;
   completion_note?: string | null;
   completed_at?: string | null;
+  created_by_name?: string | null;
+  created_at?: string | null;
 }
 
 type CalendarQueueFilter = 'upcoming' | 'completed';
@@ -499,6 +501,7 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
   const [calendarCompletionNotes, setCalendarCompletionNotes] = useState<Record<string, string>>({});
   const [savingCalendarEventId, setSavingCalendarEventId] = useState('');
   const [expandedCalendarNoteId, setExpandedCalendarNoteId] = useState<string | null>(null);
+  const [calendarDetailEventId, setCalendarDetailEventId] = useState<string | null>(null);
   const [calendarQueueFilter, setCalendarQueueFilter] = useState<CalendarQueueFilter>('upcoming');
   const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>(calendarOnly ? 'month' : 'week');
   const [calendarAnchorDateKey, setCalendarAnchorDateKey] = useState(() => formatLocalDateInput());
@@ -605,6 +608,16 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
 
   const updateCalendarEditField = (field: keyof CalendarEditForm, value: string) => {
     setCalendarEditForm(current => ({ ...current, [field]: value }));
+  };
+
+  const openCalendarEntryDetails = (event: OperationsCalendarEvent) => {
+    setCalendarDetailEventId(event.id);
+    setExpandedCalendarNoteId(null);
+  };
+
+  const closeCalendarEntryDetails = () => {
+    if (calendarDetailEventId && savingCalendarEventId === calendarDetailEventId) return;
+    setCalendarDetailEventId(null);
   };
 
   const openCalendarEntryEditor = (event: OperationsCalendarEvent) => {
@@ -922,9 +935,9 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
           <div className="flex min-w-0 items-start gap-2">
             <button
               type="button"
-              onClick={() => setExpandedCalendarNoteId(noteExpanded ? null : event.id)}
+              onClick={() => openCalendarEntryDetails(event)}
               className="min-w-0 flex-1 rounded-md text-left focus:outline-none focus:ring-2 focus:ring-blue-500"
-              aria-expanded={noteExpanded}
+              aria-haspopup="dialog"
             >
               <p className={`truncate text-sm font-black leading-5 ${complete ? 'text-slate-500 line-through decoration-slate-400' : 'text-slate-950'}`} title={event.title}>
                 {event.title || 'Untitled calendar item'}
@@ -963,11 +976,11 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
               </div>
               <button
                 type="button"
-                onClick={() => setExpandedCalendarNoteId(noteExpanded ? null : event.id)}
+                onClick={() => openCalendarEntryDetails(event)}
                 className="inline-flex min-h-8 items-center rounded-md border border-slate-300 bg-white px-3 text-xs font-medium text-slate-700 transition hover:bg-slate-50"
-                aria-expanded={noteExpanded}
+                aria-haspopup="dialog"
               >
-                {noteExpanded ? 'Close' : 'Details'}
+                Details
               </button>
             </div>
           ) : (
@@ -993,11 +1006,11 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
             ) : null}
             <button
               type="button"
-              onClick={() => setExpandedCalendarNoteId(noteExpanded ? null : event.id)}
+              onClick={() => openCalendarEntryDetails(event)}
               className="ml-auto inline-flex min-h-7 items-center rounded-lg border border-slate-300 bg-white px-2 text-[10px] font-black uppercase tracking-wide text-slate-700 transition hover:bg-slate-50"
-              aria-expanded={noteExpanded}
+              aria-haspopup="dialog"
             >
-              {noteExpanded ? 'Hide' : 'Details'}
+              Details
             </button>
           </div>
           )}
@@ -1088,9 +1101,10 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
         />
         <button
           type="button"
-          onClick={() => openCalendarEntryEditor(event)}
+          onClick={() => openCalendarEntryDetails(event)}
           className="min-w-0 flex-1 rounded text-left focus:outline-none focus:ring-2 focus:ring-blue-500"
           title={`${formatCalendarDueTimeLabel(event.due_time)} - ${event.title}`}
+          aria-haspopup="dialog"
         >
           <span className={`block text-[11px] font-black leading-4 ${complete ? 'text-slate-500 line-through decoration-slate-400' : 'text-slate-950'}`}>
             {event.title}
@@ -1120,6 +1134,176 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
       <p className="mt-1 text-xs font-semibold text-slate-500">{label}</p>
     </div>
   );
+
+  const renderCalendarDetailModal = () => {
+    const event = calendarDetailEventId
+      ? calendarEvents.find(calendarEvent => calendarEvent.id === calendarDetailEventId) || null
+      : null;
+    if (!event) return null;
+
+    const complete = event.status === 'completed';
+    const saving = savingCalendarEventId === event.id;
+    const projectLabel = getCalendarProjectLabel(event);
+    const noteDraft = calendarNoteDraft(event);
+    const dateKey = calendarDateKeyForEvent(event);
+    const dateLabel = dateKey ? formatCalendarBadgeDate(dateKey).label : 'Date unavailable';
+    const timeLabel = formatCalendarDueTimeLabel(event.due_time);
+    const typeLabel = calendarTypeLabel(event.event_type);
+    const statusLabel = formatCompactLabel(editableCalendarStatus(event.status));
+    const priorityLabel = formatCompactLabel(event.priority || 'normal');
+    const sourceLabel = event.source === 'construction_task' ? 'Project task' : 'Calendar event';
+    const createdLabel = event.created_at
+      ? formatEasternDateTime(event.created_at, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+      : '';
+    const completedLabel = event.completed_at
+      ? formatEasternDateTime(event.completed_at, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+      : '';
+
+    return (
+      <Modal
+        isOpen={Boolean(event)}
+        onClose={closeCalendarEntryDetails}
+        title="Calendar Item Details"
+        description="Review the full task or event record, notes, schedule, and project context."
+        size="xl"
+      >
+        <div className="bt-calendar-detail space-y-5">
+          <section className="bt-calendar-detail-hero overflow-hidden rounded-2xl border p-5">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="bt-calendar-badge bt-calendar-badge--task rounded-full px-2.5 py-1 text-[11px] font-black uppercase tracking-wide">
+                    {typeLabel}
+                  </span>
+                  <span className={`bt-calendar-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase tracking-wide ${complete ? 'bt-calendar-badge--completed' : 'bt-calendar-badge--neutral'}`}>
+                    {statusLabel}
+                  </span>
+                  <span className={`bt-calendar-badge rounded-full px-2.5 py-1 text-[11px] font-black uppercase tracking-wide ${(event.priority === 'critical' || event.priority === 'high') ? 'bt-calendar-badge--priority' : 'bt-calendar-badge--neutral'}`}>
+                    {priorityLabel} priority
+                  </span>
+                </div>
+                <h3 className="mt-3 break-words text-2xl font-black leading-tight text-slate-950">
+                  {event.title || 'Untitled calendar item'}
+                </h3>
+                <p className="mt-2 flex items-center gap-2 text-sm font-bold text-slate-600">
+                  <MapPin className="h-4 w-4 flex-shrink-0 text-blue-600" />
+                  <span className="break-words">{projectLabel}</span>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void saveCalendarEventUpdate(event, {
+                  status: complete ? 'scheduled' : 'completed',
+                  completion_note: noteDraft,
+                })}
+                disabled={saving}
+                className={`inline-flex min-h-11 items-center gap-2 rounded-xl border px-4 text-sm font-black shadow-sm transition disabled:opacity-60 ${complete ? 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50' : 'border-emerald-700 bg-emerald-600 text-white hover:bg-emerald-500'}`}
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                {saving ? 'Saving' : complete ? 'Reopen' : 'Mark Complete'}
+              </button>
+            </div>
+          </section>
+
+          <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="bt-calendar-detail-card rounded-2xl border p-4">
+              <span className="text-[11px] font-black uppercase tracking-wide text-slate-500">Schedule</span>
+              <strong className="mt-2 flex items-center gap-2 text-sm font-black text-slate-950">
+                <CalendarDays className="h-4 w-4 text-blue-600" />
+                {dateLabel}
+              </strong>
+              <p className="mt-1 flex items-center gap-2 text-sm font-bold text-slate-600">
+                <Clock className="h-4 w-4 text-slate-500" />
+                {timeLabel}
+              </p>
+            </div>
+            <div className="bt-calendar-detail-card rounded-2xl border p-4">
+              <span className="text-[11px] font-black uppercase tracking-wide text-slate-500">Source</span>
+              <strong className="mt-2 block text-sm font-black text-slate-950">{sourceLabel}</strong>
+              <p className="mt-1 text-sm font-bold text-slate-600">{event.created_by_name || 'BuildTrack'}</p>
+            </div>
+            <div className="bt-calendar-detail-card rounded-2xl border p-4">
+              <span className="text-[11px] font-black uppercase tracking-wide text-slate-500">Reminder</span>
+              <strong className="mt-2 flex items-center gap-2 text-sm font-black text-slate-950">
+                <Mail className="h-4 w-4 text-cyan-600" />
+                {Number(event.email_reminder_count || 0) > 0 ? `${event.email_reminder_count} active` : 'No email reminder'}
+              </strong>
+              <p className="mt-1 text-sm font-bold text-slate-600">
+                {event.next_email_reminder_at ? formatEasternDateTime(event.next_email_reminder_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'None scheduled'}
+              </p>
+            </div>
+            <div className="bt-calendar-detail-card rounded-2xl border p-4">
+              <span className="text-[11px] font-black uppercase tracking-wide text-slate-500">Timeline</span>
+              <strong className="mt-2 block text-sm font-black text-slate-950">{completedLabel || 'Not completed'}</strong>
+              <p className="mt-1 text-sm font-bold text-slate-600">{createdLabel ? `Created ${createdLabel}` : 'Created by system'}</p>
+            </div>
+          </section>
+
+          <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.82fr)]">
+            <div className="bt-calendar-detail-card rounded-2xl border p-4">
+              <div className="flex items-center justify-between gap-3">
+                <h4 className="text-sm font-black text-slate-950">Entered Details</h4>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCalendarDetailEventId(null);
+                    openCalendarEntryEditor(event);
+                  }}
+                  className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 text-xs font-black text-blue-700 transition hover:bg-blue-100"
+                >
+                  <Edit2 className="h-3.5 w-3.5" />
+                  Edit Details
+                </button>
+              </div>
+              <div className="mt-3 min-h-[168px] rounded-xl border border-slate-200 bg-white px-4 py-3">
+                {event.description ? (
+                  <p className="whitespace-pre-wrap text-sm font-semibold leading-6 text-slate-700">{event.description}</p>
+                ) : (
+                  <p className="text-sm font-semibold leading-6 text-slate-500">No additional details entered yet.</p>
+                )}
+              </div>
+              <div className="mt-3 grid gap-2 text-sm font-semibold text-slate-600">
+                {event.vendor_name ? <p><strong className="text-slate-950">Vendor:</strong> {event.vendor_name}</p> : null}
+                {event.project_address ? <p><strong className="text-slate-950">Project:</strong> {event.project_address}</p> : null}
+                {event.project_job_name ? <p><strong className="text-slate-950">Job:</strong> {event.project_job_name}</p> : null}
+              </div>
+            </div>
+
+            <div className="bt-calendar-detail-card rounded-2xl border p-4">
+              <h4 className="text-sm font-black text-slate-950">Notes</h4>
+              <p className="mt-1 text-xs font-semibold text-slate-500">Use this for updates, completion context, follow-up details, or multiple notes from the job.</p>
+              <VoiceTextarea
+                value={noteDraft}
+                onChange={inputEvent => updateCalendarCompletionNote(event.id, inputEvent.target.value)}
+                rows={8}
+                className="mt-3 w-full resize-y rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm font-semibold leading-6 text-slate-950 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Add notes, updates, completion details, or follow-up items..."
+              />
+              <div className="mt-3 flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={closeCalendarEntryDetails}
+                  disabled={saving}
+                  className="min-h-10 rounded-xl border border-slate-300 bg-white px-4 text-sm font-black text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void saveCalendarEventUpdate(event, { status: event.status, completion_note: noteDraft })}
+                  disabled={saving}
+                  className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-blue-700 bg-blue-600 px-4 text-sm font-black text-white transition hover:bg-blue-500 disabled:opacity-60"
+                >
+                  <Edit2 className="h-4 w-4" />
+                  {saving ? 'Saving' : 'Save Notes'}
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </Modal>
+    );
+  };
 
   const renderCalendarTodayView = () => {
     const todayEvents = sortCalendarEventsForDay(calendarEventsByDate[calendarAnchorDateKey] || []);
@@ -2105,6 +2289,8 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
         </div>
         )}
       </div>
+
+      {renderCalendarDetailModal()}
 
       <Modal
         isOpen={!!editingCalendarEvent}
