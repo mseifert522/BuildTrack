@@ -128,6 +128,22 @@ function isPdfLike({ mimeType, name, buffer } = {}) {
   return type.includes('pdf') || filename.endsWith('.pdf') || header === '%PDF-';
 }
 
+function isQboInvoiceDocumentLike({ mimeType, name, buffer } = {}) {
+  const type = String(mimeType || '').toLowerCase();
+  const filename = String(name || '').toLowerCase();
+  const hasBuffer = buffer && Buffer.isBuffer(buffer) && buffer.length > 0;
+  const pdfHeader = hasBuffer ? buffer.slice(0, 5).toString('utf8') === '%PDF-' : false;
+  if (pdfHeader) return true;
+  const imageType = type.includes('image/jpeg') || type.includes('image/jpg') || type.includes('image/png');
+  const imageName = filename.endsWith('.jpg') || filename.endsWith('.jpeg') || filename.endsWith('.png');
+  const imageHeader = hasBuffer
+    ? (buffer.slice(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff])) || buffer.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])))
+    : false;
+  if (hasBuffer) return imageHeader;
+  if (isPdfLike({ mimeType, name })) return true;
+  return imageType || imageName || imageHeader;
+}
+
 function formatBytesValue(value) {
   const size = Number(value || 0);
   if (!Number.isFinite(size) || size <= 0) return null;
@@ -138,10 +154,11 @@ function formatBytesValue(value) {
 
 function formatQuickBooksBillAttachment(row) {
   if (!row) return null;
+  const isPdf = isPdfLike({ mimeType: row.mime_type, name: row.original_name || row.filename });
   return {
     id: row.id,
     source: 'quickbooks_bill_attachment',
-    label: 'Vendor PDF',
+    label: isPdf ? 'Vendor PDF' : 'Vendor image',
     qbo_bill_id: row.qbo_bill_id,
     qbo_attachable_id: row.qbo_attachable_id || null,
     original_name: row.original_name,
@@ -179,7 +196,11 @@ function getLatestQuickBooksBillPdfAttachment(db, qboId) {
     WHERE qba.qbo_bill_id = ?
       AND (
         lower(COALESCE(qba.mime_type, '')) LIKE '%pdf%'
+        OR lower(COALESCE(qba.mime_type, '')) IN ('image/jpeg', 'image/jpg', 'image/png')
         OR lower(COALESCE(qba.original_name, qba.filename, '')) LIKE '%.pdf'
+        OR lower(COALESCE(qba.original_name, qba.filename, '')) LIKE '%.jpg'
+        OR lower(COALESCE(qba.original_name, qba.filename, '')) LIKE '%.jpeg'
+        OR lower(COALESCE(qba.original_name, qba.filename, '')) LIKE '%.png'
       )
     ORDER BY datetime(qba.created_at) DESC, qba.created_at DESC
     LIMIT 1
@@ -206,7 +227,16 @@ function quickBooksAttachableBillIds(attachable) {
 function quickBooksAttachableIsPdf(attachable) {
   const contentType = String(attachable?.ContentType || '').toLowerCase();
   const filename = String(attachable?.FileName || '').toLowerCase();
-  return contentType.includes('pdf') || filename.endsWith('.pdf');
+  return (
+    contentType.includes('pdf')
+    || contentType.includes('image/jpeg')
+    || contentType.includes('image/jpg')
+    || contentType.includes('image/png')
+    || filename.endsWith('.pdf')
+    || filename.endsWith('.jpg')
+    || filename.endsWith('.jpeg')
+    || filename.endsWith('.png')
+  );
 }
 
 function quickBooksAttachableDownloadUri(attachable) {
@@ -215,6 +245,15 @@ function quickBooksAttachableDownloadUri(attachable) {
 
 function quickBooksAttachableFilename(qboId, attachable) {
   return sanitizeFilename(attachable?.FileName || `quickbooks-bill-${qboId}-${attachable?.Id || 'attachment'}.pdf`);
+}
+
+function quickBooksAttachmentStoredExtension(originalName, mimeType) {
+  const filename = String(originalName || '').toLowerCase();
+  const type = String(mimeType || '').toLowerCase();
+  if (filename.endsWith('.png') || type.includes('image/png')) return '.png';
+  if (filename.endsWith('.jpg') || type.includes('image/jpg')) return '.jpg';
+  if (filename.endsWith('.jpeg') || type.includes('image/jpeg')) return '.jpeg';
+  return '.pdf';
 }
 
 function quickBooksAttachmentFilePath(qboId, filename) {
@@ -246,8 +285,23 @@ async function qboDownloadAttachment(db, connection, uri) {
     err.statusCode = response.status;
     throw err;
   }
-  const buffer = Buffer.from(await response.arrayBuffer());
-  const contentType = response.headers.get('content-type') || 'application/pdf';
+  let buffer = Buffer.from(await response.arrayBuffer());
+  let contentType = response.headers.get('content-type') || 'application/pdf';
+  const textBody = buffer.toString('utf8').trim();
+  if (contentType.toLowerCase().includes('text/plain') && /^https?:\/\//i.test(textBody)) {
+    const fileResponse = await fetch(textBody, {
+      headers: {
+        Accept: 'application/pdf,image/*,*/*',
+      },
+    });
+    if (!fileResponse.ok) {
+      const err = new Error(`QuickBooks attachment file download failed (${fileResponse.status})`);
+      err.statusCode = fileResponse.status;
+      throw err;
+    }
+    buffer = Buffer.from(await fileResponse.arrayBuffer());
+    contentType = fileResponse.headers.get('content-type') || contentType;
+  }
   return { buffer, contentType };
 }
 
@@ -268,7 +322,11 @@ function quickBooksBillPdfTargets(db, { scope = 'open_missing', qboIds = [] } = 
         WHERE qba.qbo_bill_id = qb.qbo_id
           AND (
             lower(COALESCE(qba.mime_type, '')) LIKE '%pdf%'
+            OR lower(COALESCE(qba.mime_type, '')) IN ('image/jpeg', 'image/jpg', 'image/png')
             OR lower(COALESCE(qba.original_name, qba.filename, '')) LIKE '%.pdf'
+            OR lower(COALESCE(qba.original_name, qba.filename, '')) LIKE '%.jpg'
+            OR lower(COALESCE(qba.original_name, qba.filename, '')) LIKE '%.jpeg'
+            OR lower(COALESCE(qba.original_name, qba.filename, '')) LIKE '%.png'
           )
       )
     `);
@@ -308,8 +366,8 @@ async function storeQuickBooksBillPdfAttachment(db, connection, bill, attachable
     LIMIT 1
   `).get(qboId, attachableId);
   const id = existing?.id || uuidv4();
-  const storedName = existing?.filename || `${id}.pdf`;
   const originalName = quickBooksAttachableFilename(qboId, attachable);
+  const storedName = existing?.filename || `${id}${quickBooksAttachmentStoredExtension(originalName, attachable?.ContentType)}`;
   const downloadUri = quickBooksAttachableDownloadUri(attachable);
   const { dir, filePath } = quickBooksAttachmentFilePath(qboId, storedName);
   const existingFileUsable = existing?.filename && fs.existsSync(filePath) && !force;
@@ -323,8 +381,8 @@ async function storeQuickBooksBillPdfAttachment(db, connection, bill, attachable
     if (downloadedFile.buffer.length > quickBooksBillPdfSyncMaxBytes()) {
       return { status: 'skipped', reason: 'file_too_large', attachable_id: attachableId };
     }
-    if (!isPdfLike({ mimeType: downloadedFile.contentType, name: originalName, buffer: downloadedFile.buffer })) {
-      return { status: 'skipped', reason: 'not_pdf_content', attachable_id: attachableId };
+    if (!isQboInvoiceDocumentLike({ mimeType: downloadedFile.contentType, name: originalName, buffer: downloadedFile.buffer })) {
+      return { status: 'skipped', reason: 'not_invoice_document_content', attachable_id: attachableId };
     }
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(filePath, downloadedFile.buffer);
