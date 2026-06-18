@@ -1152,10 +1152,15 @@ export default function Invoices() {
           : quickBooksInvoiceFilterNeedsExactDate && !quickBooksInvoiceFilter.exactDate
             ? 'Select bill date'
             : `${quickBooksMirrorRows.length} ${quickBooksInvoiceFilterScope} invoice${quickBooksMirrorRows.length === 1 ? '' : 's'}`;
-  const quickBooksTableTitle = quickBooksInvoiceFilterActive ? `Filtered ${quickBooksInvoiceFilterScope} invoices` : selectedQuickBooksBillFilter.title;
-  const quickBooksTableSubtitle = quickBooksInvoiceFilterActive
-    ? `Paid and unpaid QuickBooks bills matched to the selected ${quickBooksInvoiceFilterScope} filter.`
-    : selectedQuickBooksBillFilter.subtitle;
+  const quickBooksTableCountLabel = quickBooksInvoiceFilterActive
+    ? `${quickBooksMirrorRows.length} Filtered`
+    : deferredQuickBooksBillFilter === 'open'
+      ? `${quickBooksMirrorRows.length} Awaiting Approval`
+      : deferredQuickBooksBillFilter === 'friday_queue'
+        ? `${quickBooksMirrorRows.length} Approved`
+        : deferredQuickBooksBillFilter === 'paid'
+          ? `${quickBooksMirrorRows.length} Paid`
+          : `${quickBooksMirrorRows.length} Total`;
   const showFridayPaymentQueuePanel = deferredQuickBooksBillFilter === 'open' && !quickBooksInvoiceFilterInUse;
   const clearQuickBooksInvoiceFilter = () => setQuickBooksInvoiceFilter({ ...DEFAULT_QUICKBOOKS_INVOICE_FILTER });
   const updateQuickBooksInvoiceFilter = (patch: Partial<QuickBooksInvoiceFilterState>) => {
@@ -1801,10 +1806,8 @@ export default function Invoices() {
               <div className="bt-qbo-table-shell">
                 <div className="bt-qbo-table-title">
                   <div>
-                    <span>{quickBooksTableTitle}</span>
-                    <strong>{quickBooksMirrorRows.length} shown</strong>
+                    <strong>{quickBooksTableCountLabel}</strong>
                   </div>
-                  <p>{quickBooksTableSubtitle}</p>
                 </div>
                 <div className="bt-qbo-table-wrap">
                   <table className="bt-qbo-bill-table">
