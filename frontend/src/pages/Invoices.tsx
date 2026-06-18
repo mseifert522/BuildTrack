@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../lib/api';
 import { Loading } from '../components/ui';
@@ -733,6 +733,7 @@ export default function Invoices() {
   const [quickBooksBills, setQuickBooksBills] = useState<QuickBooksBill[]>([]);
   const [contractorSupplierDirectory, setContractorSupplierDirectory] = useState<ContractorSupplierDirectoryRow[]>([]);
   const [quickBooksBillFilter, setQuickBooksBillFilter] = useState<QuickBooksBillFilter>('open');
+  const deferredQuickBooksBillFilter = useDeferredValue(quickBooksBillFilter);
   const [quickBooksInvoiceFilter, setQuickBooksInvoiceFilter] = useState<QuickBooksInvoiceFilterState>({ ...DEFAULT_QUICKBOOKS_INVOICE_FILTER });
   const [quickBooksInvoiceSort, setQuickBooksInvoiceSort] = useState<QuickBooksInvoiceSortState | null>(null);
   const [approvingQboBillId, setApprovingQboBillId] = useState<string | null>(null);
@@ -1008,12 +1009,12 @@ export default function Invoices() {
   const allQuickBooksBills = useMemo(() => sortQuickBooksBillsByBillDate(quickBooksBills), [quickBooksBills]);
   const filteredQuickBooksBills = useMemo(
     () => {
-      if (quickBooksBillFilter === 'paid') return paidQuickBooksBills;
-      if (quickBooksBillFilter === 'friday_queue') return approvedPaymentQueue;
-      if (quickBooksBillFilter === 'all') return allQuickBooksBills;
+      if (deferredQuickBooksBillFilter === 'paid') return paidQuickBooksBills;
+      if (deferredQuickBooksBillFilter === 'friday_queue') return approvedPaymentQueue;
+      if (deferredQuickBooksBillFilter === 'all') return allQuickBooksBills;
       return sortQuickBooksBillsByBillDate(openQuickBooksBills);
     },
-    [allQuickBooksBills, approvedPaymentQueue, openQuickBooksBills, paidQuickBooksBills, quickBooksBillFilter]
+    [allQuickBooksBills, approvedPaymentQueue, deferredQuickBooksBillFilter, openQuickBooksBills, paidQuickBooksBills]
   );
   const quickBooksBillFilterMeta: Record<QuickBooksBillFilter, { label: string; title: string; subtitle: string; count: number }> = {
     open: {
@@ -1041,7 +1042,7 @@ export default function Invoices() {
       count: allQuickBooksBills.length,
     },
   };
-  const selectedQuickBooksBillFilter = quickBooksBillFilterMeta[quickBooksBillFilter];
+  const selectedQuickBooksBillFilter = quickBooksBillFilterMeta[deferredQuickBooksBillFilter];
   const quickBooksStatusMirrorRows = useMemo(() => filteredQuickBooksBills.map(bill => ({
     bill,
     invoice: bill.matched_invoice_id ? invoiceById.get(bill.matched_invoice_id) || null : null,
@@ -1120,7 +1121,7 @@ export default function Invoices() {
   const quickBooksInvoiceFilterInUse = quickBooksInvoiceFilter.mode !== 'all';
   const quickBooksInvoiceFilterActive = quickBooksInvoiceFilter.mode !== 'all' && quickBooksInvoiceFilterReady;
   const quickBooksEffectiveInvoiceSort = quickBooksInvoiceSort || (
-    quickBooksInvoiceFilterInUse || quickBooksBillFilter === 'all' || quickBooksBillFilter === 'open'
+    quickBooksInvoiceFilterInUse || deferredQuickBooksBillFilter === 'all' || deferredQuickBooksBillFilter === 'open'
       ? DEFAULT_QUICKBOOKS_INVOICE_SORT
       : null
   );
@@ -1155,10 +1156,13 @@ export default function Invoices() {
   const quickBooksTableSubtitle = quickBooksInvoiceFilterActive
     ? `Paid and unpaid QuickBooks bills matched to the selected ${quickBooksInvoiceFilterScope} filter.`
     : selectedQuickBooksBillFilter.subtitle;
-  const showFridayPaymentQueuePanel = quickBooksBillFilter === 'open' && !quickBooksInvoiceFilterInUse;
+  const showFridayPaymentQueuePanel = deferredQuickBooksBillFilter === 'open' && !quickBooksInvoiceFilterInUse;
   const clearQuickBooksInvoiceFilter = () => setQuickBooksInvoiceFilter({ ...DEFAULT_QUICKBOOKS_INVOICE_FILTER });
   const updateQuickBooksInvoiceFilter = (patch: Partial<QuickBooksInvoiceFilterState>) => {
     setQuickBooksInvoiceFilter(current => ({ ...current, ...patch }));
+  };
+  const updateQuickBooksBillFilter = (filter: QuickBooksBillFilter) => {
+    setQuickBooksBillFilter(current => current === filter ? current : filter);
   };
   const updateQuickBooksInvoiceSort = (key: QuickBooksInvoiceSortKey) => {
     setQuickBooksInvoiceSort(current => {
@@ -1640,7 +1644,7 @@ export default function Invoices() {
               </div>
               <button
                 type="button"
-                onClick={() => setQuickBooksBillFilter('friday_queue')}
+                onClick={() => updateQuickBooksBillFilter('friday_queue')}
                 className={quickBooksBillFilter === 'friday_queue' ? 'is-active' : ''}
               >
                 <span>Approved bills</span>
@@ -1649,7 +1653,7 @@ export default function Invoices() {
               </button>
               <button
                 type="button"
-                onClick={() => setQuickBooksBillFilter('paid')}
+                onClick={() => updateQuickBooksBillFilter('paid')}
                 className={quickBooksBillFilter === 'paid' ? 'is-active' : ''}
               >
                 <span>Paid bills</span>
@@ -1658,7 +1662,7 @@ export default function Invoices() {
               </button>
               <button
                 type="button"
-                onClick={() => setQuickBooksBillFilter('all')}
+                onClick={() => updateQuickBooksBillFilter('all')}
                 className={quickBooksBillFilter === 'all' ? 'is-active' : ''}
               >
                 <span>Total bills</span>
@@ -1681,7 +1685,7 @@ export default function Invoices() {
                     <button
                       key={option.key}
                       type="button"
-                      onClick={() => setQuickBooksBillFilter(option.key)}
+                      onClick={() => updateQuickBooksBillFilter(option.key)}
                       className={`bt-invoice-filter ${active ? 'is-active' : ''}`}
                       aria-pressed={active}
                       data-tone={option.tone}
