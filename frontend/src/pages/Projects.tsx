@@ -334,7 +334,8 @@ export default function Projects() {
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Search by address or job name..."
-              className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full rounded-xl border border-gray-300 bg-white py-2.5 pl-9 pr-4 text-sm font-semibold text-slate-950 placeholder:text-slate-500 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+              style={{ colorScheme: 'light' }}
             />
           </div>
           <button type="submit" className="w-full rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-800 sm:w-auto">Search</button>
@@ -342,35 +343,38 @@ export default function Projects() {
         <select
           value={statusFilter}
           onChange={e => setStatusFilter(e.target.value)}
-          className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-auto"
+          className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-950 focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-auto"
+          style={{ colorScheme: 'light' }}
           aria-label="Filter projects by status"
         >
           {PROJECT_FILTER_OPTIONS.map(option => (
-            <option key={option.value} value={option.value}>{option.label}</option>
+            <option key={option.value} value={option.value} className="bg-white text-slate-950">{option.label}</option>
           ))}
         </select>
         <select
           value={teamFilter}
           onChange={e => setTeamFilter(e.target.value)}
-          className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-auto"
+          className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-950 focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-auto"
+          style={{ colorScheme: 'light' }}
           aria-label="Filter projects by team assignment"
         >
-          <option value="">All teams</option>
-          <option value="assigned">Assigned contractors</option>
-          <option value="unassigned">Unassigned projects</option>
+          <option value="" className="bg-white text-slate-950">All teams</option>
+          <option value="assigned" className="bg-white text-slate-950">Assigned contractors</option>
+          <option value="unassigned" className="bg-white text-slate-950">Unassigned projects</option>
         </select>
         <select
           value={sortBy}
           onChange={e => setSortBy(e.target.value)}
-          className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-auto"
+          className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-950 focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-auto"
+          style={{ colorScheme: 'light' }}
           aria-label="Sort projects"
         >
-          <option value="priority">Sort: Priority order</option>
-          <option value="updated">Sort: Recently updated</option>
-          <option value="target">Sort: Target completion</option>
-          <option value="punch">Sort: Open punch items</option>
-          {canSeeBudget && <option value="budget">Sort: Budget high to low</option>}
-          <option value="address">Sort: Location A-Z</option>
+          <option value="priority" className="bg-white text-slate-950">Sort: Priority order</option>
+          <option value="updated" className="bg-white text-slate-950">Sort: Recently updated</option>
+          <option value="target" className="bg-white text-slate-950">Sort: Target completion</option>
+          <option value="punch" className="bg-white text-slate-950">Sort: Open punch items</option>
+          {canSeeBudget && <option value="budget" className="bg-white text-slate-950">Sort: Budget high to low</option>}
+          <option value="address" className="bg-white text-slate-950">Sort: Location A-Z</option>
         </select>
       </div>
 
