@@ -20,7 +20,6 @@ import {
   Search,
   Send,
   ShieldCheck,
-  SlidersHorizontal,
   Trash2,
   UserRound,
   Users,
@@ -345,8 +344,26 @@ const dedupeDirectoryRows = (rows: ContractorRow[]) => {
   return result;
 };
 
-const contractorFilterFieldClass =
-  'bt-directory-field bt-directory-filter-field h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-950 shadow-sm outline-none placeholder:text-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-200';
+const uniqueCategoryList = (values: Array<string | null | undefined>) => {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  values.forEach(value => {
+    const name = String(value || '').trim();
+    if (!name) return;
+    const key = name.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    result.push(name);
+  });
+  return result;
+};
+
+const contractorCategoryList = (contractor: ContractorRow) =>
+  uniqueCategoryList([
+    ...(Array.isArray(contractor.contractor_categories) ? contractor.contractor_categories : []),
+    contractor.contractor_category,
+    contractor.contractor_secondary_category,
+  ]).filter(item => item.toLowerCase() !== 'supplier');
 
 const isSetupComplete = (contractor: ContractorRow) =>
   contractor.onboarding_status === 'submitted' || Boolean(contractor.onboarding_submitted_at);
@@ -405,14 +422,6 @@ export default function Contractors() {
   const [categories, setCategories] = useState<string[]>(fallbackCategories);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [query, setQuery] = useState('');
-  const [nameSearch, setNameSearch] = useState('');
-  const [category, setCategory] = useState('');
-  const [paidFilter, setPaidFilter] = useState('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  const [minAmount, setMinAmount] = useState('');
-  const [maxAmount, setMaxAmount] = useState('');
-  const [sortBy, setSortBy] = useState('newest');
   const [expandedContractorId, setExpandedContractorId] = useState<string | null>(null);
   const [contractorNotes, setContractorNotes] = useState<Record<string, ContractorNote[]>>({});
   const [noteInputs, setNoteInputs] = useState<Record<string, string>>({});
@@ -457,27 +466,6 @@ export default function Contractors() {
     setCategories(Array.isArray(directoryRes.data?.categories) ? directoryRes.data.categories : fallbackCategories);
     setProjects(Array.isArray(projectsRes.data) ? projectsRes.data : []);
   };
-
-  const uniqueCategoryList = (values: Array<string | null | undefined>) => {
-    const seen = new Set<string>();
-    const result: string[] = [];
-    values.forEach(value => {
-      const name = String(value || '').trim();
-      if (!name) return;
-      const key = name.toLowerCase();
-      if (seen.has(key)) return;
-      seen.add(key);
-      result.push(name);
-    });
-    return result;
-  };
-
-  const contractorCategoryList = (contractor: ContractorRow) =>
-    uniqueCategoryList([
-      ...(Array.isArray(contractor.contractor_categories) ? contractor.contractor_categories : []),
-      contractor.contractor_category,
-      contractor.contractor_secondary_category,
-    ]).filter(item => item.toLowerCase() !== 'supplier');
 
   const combinedDirectoryRows = useMemo(() => dedupeDirectoryRows(contractors), [contractors]);
 
@@ -666,9 +654,6 @@ export default function Contractors() {
       toast.error(err.response?.data?.error || 'Failed to add category');
     }
   };
-
-  const categoryLabel = (contractor: ContractorRow) =>
-    contractorCategoryList(contractor).join(' / ');
 
   const renderCategorySelector = (form: typeof emptyContractorForm, target: 'add' | 'edit') => (
     <div className="sm:col-span-2">
@@ -891,67 +876,61 @@ export default function Contractors() {
 
   const filteredContractors = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const nameQ = nameSearch.trim().toLowerCase();
-    const min = minAmount ? Number(minAmount) : null;
-    const max = maxAmount ? Number(maxAmount) : null;
-    const from = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : null;
-    const to = dateTo ? new Date(`${dateTo}T23:59:59`).getTime() : null;
+    const normalizedQ = normalizeDirectoryValue(q);
 
     const rows = combinedDirectoryRows.filter((contractor) => {
       const contractorCategories = contractorCategoryList(contractor);
       const lastPaid = contractor.last_paid_invoice;
-      const lastPaidAmount = Number(lastPaid?.total || 0);
-      const lastPaidDate = dateValue(lastPaid?.updated_at);
-
-      if (nameQ) {
-        const nameHaystack = [
-          contractor.name,
-          contractor.vendor_name,
-          contractor.company,
-          contractor.contact_name,
-        ].filter(Boolean).join(' ').toLowerCase();
-        if (!nameHaystack.includes(nameQ)) return false;
-      }
+      const lastInvoice = contractor.last_invoice;
 
       if (q) {
         const haystack = [
           contractor.name,
+          contractor.vendor_name,
+          contractor.contact_name,
           contractor.email,
           contractor.phone,
           contractor.company,
           contractor.billing_address,
           contractor.account_number,
           contractor.contractor_status,
+          contractor.source,
           contractor.onboarding_status,
           contractor.bank_name,
+          contractor.tax_id_last4,
+          contractor.bank_account_last4,
+          contractor.routing_last4,
+          contractor.connected_project_count,
+          contractor.invoice_count,
+          contractor.total_paid,
+          directoryRecordLabel(contractor),
           ...contractorCategories,
-          ...(contractor.latest_notes || []).map(note => note.note),
+          ...(contractor.latest_notes || []).flatMap(note => [note.note, note.user_name, note.created_at]),
           ...(contractor.project_addresses || []),
+          ...(contractor.connected_projects || []).flatMap(project => [project.address, project.job_name, project.status]),
           lastPaid?.invoice_number,
           lastPaid?.address,
+          lastPaid?.job_name,
+          lastPaid?.status,
+          lastPaid?.total,
+          lastInvoice?.invoice_number,
+          lastInvoice?.address,
+          lastInvoice?.job_name,
+          lastInvoice?.status,
+          lastInvoice?.total,
         ].filter(Boolean).join(' ').toLowerCase();
-        if (!haystack.includes(q)) return false;
+        if (!haystack.includes(q) && (!normalizedQ || !normalizeDirectoryValue(haystack).includes(normalizedQ))) return false;
       }
 
-      if (category && !contractorCategories.includes(category)) return false;
-      if (paidFilter === 'paid' && !lastPaid) return false;
-      if (paidFilter === 'unpaid' && lastPaid) return false;
-      if (from !== null && (!lastPaidDate || lastPaidDate < from)) return false;
-      if (to !== null && (!lastPaidDate || lastPaidDate > to)) return false;
-      if (min !== null && lastPaidAmount < min) return false;
-      if (max !== null && lastPaidAmount > max) return false;
       return true;
     });
 
-    return rows.sort((a, b) => {
-      if (sortBy === 'newest') return (dateValue(b.created_at) - dateValue(a.created_at)) || a.name.localeCompare(b.name);
-      if (sortBy === 'last_paid_date') return dateValue(b.last_paid_invoice?.updated_at) - dateValue(a.last_paid_invoice?.updated_at);
-      if (sortBy === 'last_paid_amount') return Number(b.last_paid_invoice?.total || 0) - Number(a.last_paid_invoice?.total || 0);
-      if (sortBy === 'total_paid') return Number(b.total_paid || 0) - Number(a.total_paid || 0);
-      if (sortBy === 'category') return categoryLabel(a).localeCompare(categoryLabel(b));
-      return a.name.localeCompare(b.name);
-    });
-  }, [combinedDirectoryRows, query, nameSearch, category, paidFilter, dateFrom, dateTo, minAmount, maxAmount, sortBy]);
+    return rows.sort((a, b) =>
+      (dateValue(b.created_at) - dateValue(a.created_at))
+      || (dateValue(b.updated_at) - dateValue(a.updated_at))
+      || a.name.localeCompare(b.name)
+    );
+  }, [combinedDirectoryRows, query]);
 
   const filteredProjectOptions = projects.filter(project => {
     const q = projectFilter.trim().toLowerCase();
@@ -1087,48 +1066,6 @@ export default function Contractors() {
           </div>
         </div>
 
-        <div className="bt-toolbar bt-directory-filter-panel bt-directory-filter-panel-3d">
-          <div className="bt-directory-filter-title-row flex items-center gap-2 mb-3">
-            <SlidersHorizontal className="w-4 h-4 text-slate-500" />
-            <p className="text-sm font-black text-slate-900">Filters</p>
-          </div>
-          <div className="bt-directory-filter-grid grid sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-3">
-            <select value={category} onChange={(e) => setCategory(e.target.value)} className={contractorFilterFieldClass}>
-              <option value="">All categories</option>
-              {categories.map((item) => <option key={item} value={item}>{item}</option>)}
-            </select>
-            <select value={paidFilter} onChange={(e) => setPaidFilter(e.target.value)} className={contractorFilterFieldClass}>
-              <option value="">All payment history</option>
-              <option value="paid">Has paid job</option>
-              <option value="unpaid">No paid job</option>
-            </select>
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={contractorFilterFieldClass} style={{ colorScheme: 'dark' }} aria-label="Start date" />
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={contractorFilterFieldClass} style={{ colorScheme: 'dark' }} aria-label="End date" />
-            <input type="number" min="0" value={minAmount} onChange={(e) => setMinAmount(e.target.value)} placeholder="Min paid" className={contractorFilterFieldClass} />
-            <input type="number" min="0" value={maxAmount} onChange={(e) => setMaxAmount(e.target.value)} placeholder="Max paid" className={contractorFilterFieldClass} />
-            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className={contractorFilterFieldClass}>
-              <option value="newest">Sort: Newest records</option>
-              <option value="name">Sort: Name</option>
-              <option value="category">Sort: Category</option>
-              <option value="last_paid_date">Sort: Last paid date</option>
-              <option value="last_paid_amount">Sort: Last paid amount</option>
-              <option value="total_paid">Sort: Total paid</option>
-            </select>
-          </div>
-          <div className="bt-directory-filter-search-block bt-directory-name-search-block mt-4 border-t border-slate-200 pt-4">
-            <label htmlFor="contractor-name-search" className="bt-directory-filter-label bt-directory-name-search-label block text-xs font-black uppercase tracking-wide text-slate-500 mb-2">Find contractor or supplier by name</label>
-            <div className="bt-directory-search bt-directory-search-wide bt-directory-filter-search bt-directory-name-search-field flex items-center gap-2 px-3 py-2.5 rounded-xl border border-gray-300 bg-white">
-              <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
-              <input
-                id="contractor-name-search"
-                value={nameSearch}
-                onChange={(e) => setNameSearch(e.target.value)}
-                className="w-full bg-transparent text-sm outline-none text-gray-900 placeholder:text-gray-500"
-              />
-            </div>
-          </div>
-        </div>
-
         {error ? (
           <div className="rounded-2xl p-6 text-sm font-semibold text-red-700" style={{ background: '#FEF2F2', border: '1px solid #FECACA' }}>
             {error}
@@ -1136,7 +1073,7 @@ export default function Contractors() {
         ) : filteredContractors.length === 0 ? (
           <div className="rounded-2xl p-12 text-center" style={{ background: 'white', boxShadow: '0 2px 16px rgba(0,0,0,0.07)' }}>
             <Users className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-            <p className="text-sm font-bold text-gray-500">No contractor or supplier records match these filters</p>
+            <p className="text-sm font-bold text-gray-500">No contractor or supplier records match this search</p>
           </div>
         ) : (
           <div className="bt-table-wrap bt-directory-list p-2">
