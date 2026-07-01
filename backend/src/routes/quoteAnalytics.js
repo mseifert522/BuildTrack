@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 
 const { getDb } = require('../db/schema');
-const { authenticate, authorizeProjectAccess, PROJECT_MANAGE_ROLES } = require('../middleware/auth');
+const { authenticate, authorizeProjectAccess, PROJECT_MANAGE_ROLES, UPPER_MANAGEMENT_ROLES } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
 
 const QUOTE_STATUSES = ['draft', 'submitted', 'approved', 'rejected', 'paid', 'completed', 'historical'];
@@ -58,6 +58,14 @@ const upload = multer({
   }),
   limits: { fileSize: Math.max(Number.parseInt(process.env.MAX_FILE_SIZE_MB || '20', 10), 1) * 1024 * 1024 },
 });
+
+// In-memory upload for AI extraction — the buffer is base64'd and sent to Claude; nothing is persisted here.
+const extractUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: Math.max(Number.parseInt(process.env.MAX_FILE_SIZE_MB || '20', 10), 1) * 1024 * 1024 },
+});
+
+const QUOTE_EXTRACT_MODEL = process.env.QUOTE_EXTRACT_MODEL || 'claude-opus-4-8';
 
 function requireManagement(req, res, next) {
   if (!PROJECT_MANAGE_ROLES.includes(req.user.role)) {
@@ -466,6 +474,84 @@ function createQuote(req, res, projectIdFromRoute = null) {
   }
 }
 
+// Modify an existing quote (header fields + line items). The quote number, project,
+// source document, cost breakdown, and final approved amount are preserved; the editable
+// fields and the line items are replaced. Writes a historical 'updated' snapshot + activity.
+function updateQuote(req, res, forcedProjectId = null) {
+  const db = getDb();
+  const existing = db.prepare('SELECT * FROM contractor_quotes WHERE id = ?').get(req.params.id);
+  if (!existing || (forcedProjectId && existing.project_id !== forcedProjectId)) {
+    return res.status(404).json({ error: 'Quote not found' });
+  }
+  // The project cannot change on edit — validate against the quote's existing project.
+  const validation = validateQuoteInput(db, req.body || {}, existing.project_id, null);
+  if (validation.errors.length > 0) {
+    return res.status(400).json({ errors: validation.errors });
+  }
+  const { quoteDate, quoteYear, status, contractor, financial, lineItems } = validation;
+
+  try {
+    const updated = db.transaction(() => {
+      db.prepare(`
+        UPDATE contractor_quotes SET
+          contractor_id = ?, contractor_profile_id = ?, contractor_name = ?, contractor_company = ?,
+          contractor_email = ?, contractor_phone = ?, contractor_address = ?,
+          quote_date = ?, quote_year = ?, status = ?, scope_description = ?, notes = ?,
+          total_quote_amount = ?, updated_at = datetime('now')
+        WHERE id = ?
+      `).run(
+        contractor.contractor_id,
+        contractor.contractor_profile_id,
+        contractor.contractor_name || contractor.contractor_company,
+        contractor.contractor_company || contractor.contractor_name,
+        contractor.contractor_email || null,
+        contractor.contractor_phone || null,
+        contractor.contractor_address || null,
+        quoteDate,
+        quoteYear,
+        status,
+        String(req.body.scope_description || '').trim(),
+        String(req.body.notes || '').trim() || null,
+        financial.total_quote_amount,
+        existing.id
+      );
+
+      db.prepare('DELETE FROM quote_line_items WHERE quote_id = ?').run(existing.id);
+      const insertLine = db.prepare(`
+        INSERT INTO quote_line_items (
+          id, quote_id, category_id, category_group, category, subcategory, description,
+          quantity, unit, unit_price, total_line_item_price, labor_amount, material_amount, sort_order
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const item of lineItems) {
+        insertLine.run(
+          uuidv4(), existing.id, item.category_id, item.category_group, item.category,
+          item.subcategory || null, item.description, item.quantity, item.unit || null,
+          item.unit_price, item.total_line_item_price, item.labor_amount, item.material_amount, item.sort_order
+        );
+      }
+
+      insertHistoricalRecord(db, existing.id, existing.project_id, quoteYear, req.user.id, 'updated');
+      return quoteSnapshot(db, existing.id);
+    })();
+
+    clearSummaryCache();
+    logActivity({
+      userId: req.user.id,
+      projectId: existing.project_id,
+      action: 'quote_updated',
+      entityType: 'contractor_quote',
+      entityId: existing.id,
+      details: { quote_number: existing.quote_number, total: updated.quote.total_quote_amount },
+    });
+
+    return res.json(updated);
+  } catch (err) {
+    console.error('[QUOTE_ANALYTICS] update failed:', err);
+    return res.status(500).json({ error: 'Failed to update quote' });
+  }
+}
+
 function updateQuoteReviewStatus(req, res, forcedProjectId = null, nextStatus) {
   if (!['approved', 'rejected'].includes(nextStatus)) {
     return res.status(400).json({ error: 'Unsupported quote review action' });
@@ -518,6 +604,123 @@ function updateQuoteReviewStatus(req, res, forcedProjectId = null, nextStatus) {
     console.error('[QUOTE_ANALYTICS] review status update failed:', err);
     return res.status(500).json({ error: 'Failed to update quote review status' });
   }
+}
+
+// Permanently delete a quote. Restricted to super_admin + operations_manager
+// (the router already requires management; this narrows to upper management).
+// Line items + historical records cascade via FK; the source document + file are
+// cleaned up best-effort. A quote_deleted entry is written to the activity log.
+function deleteQuote(req, res, forcedProjectId = null) {
+  if (!UPPER_MANAGEMENT_ROLES.includes(req.user.role)) {
+    return res.status(403).json({ error: 'Only super admins and operations managers can delete quotes' });
+  }
+  const db = getDb();
+  const quote = db.prepare('SELECT * FROM contractor_quotes WHERE id = ?').get(req.params.id);
+  if (!quote || (forcedProjectId && quote.project_id !== forcedProjectId)) {
+    return res.status(404).json({ error: 'Quote not found' });
+  }
+
+  try {
+    db.transaction(() => {
+      const doc = quote.source_document_id
+        ? db.prepare('SELECT * FROM project_documents WHERE id = ?').get(quote.source_document_id)
+        : null;
+      db.prepare('DELETE FROM contractor_quotes WHERE id = ?').run(quote.id);
+      if (doc) {
+        db.prepare('DELETE FROM project_documents WHERE id = ?').run(doc.id);
+        try {
+          const root = path.resolve(documentRoot(quote.project_id));
+          const filePath = path.resolve(root, doc.filename);
+          if (filePath.startsWith(root) && fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        } catch (_) { /* best-effort file cleanup */ }
+      }
+    })();
+
+    clearSummaryCache();
+    logActivity({
+      userId: req.user.id,
+      projectId: quote.project_id,
+      action: 'quote_deleted',
+      entityType: 'contractor_quote',
+      entityId: quote.id,
+      details: { quote_number: quote.quote_number, total: quote.total_quote_amount, contractor: quote.contractor_company || quote.contractor_name },
+    });
+
+    return res.json({ message: 'Quote deleted', id: quote.id });
+  } catch (err) {
+    console.error('[QUOTE_ANALYTICS] delete failed:', err);
+    return res.status(500).json({ error: 'Failed to delete quote' });
+  }
+}
+
+// ── Quote-only notes ─────────────────────────────────────────────────────────
+// Lightweight notes scoped to a single quote. Intentionally NOT linked to project
+// notes, the activity feed, or anything else — purely for quoting context. The
+// table is created idempotently so no shared schema migration is required.
+let quoteNotesReady = false;
+function ensureQuoteNotes(db) {
+  if (quoteNotesReady) return;
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS quote_notes (
+      id TEXT PRIMARY KEY,
+      quote_id TEXT NOT NULL,
+      project_id TEXT,
+      user_id TEXT NOT NULL,
+      note TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (quote_id) REFERENCES contractor_quotes(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_quote_notes_quote ON quote_notes(quote_id, created_at);
+  `);
+  quoteNotesReady = true;
+}
+
+function listQuoteNotes(req, res, forcedProjectId = null) {
+  const db = getDb();
+  ensureQuoteNotes(db);
+  const quote = db.prepare('SELECT id FROM contractor_quotes WHERE id = ?' + (forcedProjectId ? ' AND project_id = ?' : ''))
+    .get(...(forcedProjectId ? [req.params.id, forcedProjectId] : [req.params.id]));
+  if (!quote) return res.status(404).json({ error: 'Quote not found' });
+  const notes = db.prepare(`
+    SELECT n.id, n.note, n.user_id, n.created_at,
+           u.name as user_name, u.role as user_role, u.avatar_url as user_avatar_url
+    FROM quote_notes n
+    JOIN users u ON u.id = n.user_id
+    WHERE n.quote_id = ?
+    ORDER BY datetime(n.created_at) ASC, n.created_at ASC
+  `).all(req.params.id);
+  return res.json(notes);
+}
+
+function addQuoteNote(req, res, forcedProjectId = null) {
+  const note = String(req.body?.note || '').trim();
+  if (!note) return res.status(400).json({ error: 'Note text is required' });
+  const db = getDb();
+  ensureQuoteNotes(db);
+  const quote = db.prepare('SELECT id, project_id FROM contractor_quotes WHERE id = ?').get(req.params.id);
+  if (!quote || (forcedProjectId && quote.project_id !== forcedProjectId)) {
+    return res.status(404).json({ error: 'Quote not found' });
+  }
+  const id = uuidv4();
+  const createdAt = new Date().toISOString();
+  db.prepare('INSERT INTO quote_notes (id, quote_id, project_id, user_id, note, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(id, req.params.id, quote.project_id, req.user.id, note, createdAt);
+  return res.status(201).json({
+    id, note, user_id: req.user.id, user_name: req.user.name,
+    user_role: req.user.role, user_avatar_url: req.user.avatar_url || null, created_at: createdAt,
+  });
+}
+
+function deleteQuoteNote(req, res) {
+  const db = getDb();
+  ensureQuoteNotes(db);
+  const row = db.prepare('SELECT * FROM quote_notes WHERE id = ? AND quote_id = ?').get(req.params.noteId, req.params.id);
+  if (!row) return res.status(404).json({ error: 'Note not found' });
+  const canDelete = row.user_id === req.user.id || UPPER_MANAGEMENT_ROLES.includes(req.user.role);
+  if (!canDelete) return res.status(403).json({ error: 'Cannot delete this note' });
+  db.prepare('DELETE FROM quote_notes WHERE id = ?').run(req.params.noteId);
+  return res.json({ message: 'Note deleted', id: req.params.noteId });
 }
 
 function filterWhere(query, forcedProjectId = null) {
@@ -849,26 +1052,294 @@ function downloadQuoteDocument(req, res, forcedProjectId = null) {
   return res.download(filePath, doc.original_name);
 }
 
+// AI quote reader: send the uploaded PDF/image to Claude and return structured quote data
+// (contractor, line items mapped to real categories, totals) for the front-end to pre-fill.
+async function extractQuoteFromPdf(req, res, _projectIdFromRoute = null) {
+  try {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return res.status(503).json({ error: 'AI extraction is not configured on the server (missing ANTHROPIC_API_KEY).' });
+    }
+    if (!req.file || !req.file.buffer || !req.file.buffer.length) {
+      return res.status(400).json({ error: 'Attach a quote PDF or image to auto-read.' });
+    }
+    const mime = String(req.file.mimetype || '').toLowerCase();
+    const isPdf = mime.includes('pdf') || /\.pdf$/i.test(req.file.originalname || '');
+    const isImage = mime.startsWith('image/');
+    if (!isPdf && !isImage) {
+      return res.status(400).json({ error: 'Only a PDF or an image of a quote can be auto-read.' });
+    }
+
+    let Anthropic;
+    try {
+      Anthropic = require('@anthropic-ai/sdk');
+    } catch (_e) {
+      return res.status(503).json({ error: 'AI SDK is not installed on the server.' });
+    }
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+    const categoryNames = loadCategoryMap(getDb()).categories.map((c) => c.name).filter(Boolean);
+    const b64 = req.file.buffer.toString('base64');
+    const docBlock = isPdf
+      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } }
+      : { type: 'image', source: { type: 'base64', media_type: mime || 'image/jpeg', data: b64 } };
+
+    const schema = {
+      type: 'object',
+      additionalProperties: false,
+      required: ['contractor_name', 'line_items', 'total_quote_amount'],
+      properties: {
+        contractor_name: { type: 'string' },
+        contractor_company: { type: 'string' },
+        contractor_email: { type: 'string' },
+        contractor_phone: { type: 'string' },
+        scope_description: { type: 'string' },
+        quote_date: { type: 'string' },
+        labor_cost: { type: 'number' },
+        material_cost: { type: 'number' },
+        total_quote_amount: { type: 'number' },
+        line_items: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['category', 'description', 'total_line_item_price'],
+            properties: {
+              category: categoryNames.length ? { type: 'string', enum: categoryNames } : { type: 'string' },
+              description: { type: 'string' },
+              total_line_item_price: { type: 'number' },
+            },
+          },
+        },
+      },
+    };
+
+    const prompt =
+      "You are reading a contractor's quote/estimate for a residential rehab project. Extract the structured data exactly as it appears.\n" +
+      '- Money fields are plain numbers (no $, no commas).\n' +
+      '- For each line item pick the single closest "category" from the allowed list; if nothing fits well use "General labor".\n' +
+      '- If the quote is one lump sum with no itemization, return a single line item using the best overall category with the total as its price.\n' +
+      '- Use an empty string or 0 for anything not present in the document. Do not invent values.\n' +
+      '- total_quote_amount is the grand total the contractor is charging.';
+
+    const message = await client.messages.create({
+      model: QUOTE_EXTRACT_MODEL,
+      max_tokens: 4096,
+      output_config: { format: { type: 'json_schema', schema } },
+      messages: [{ role: 'user', content: [docBlock, { type: 'text', text: prompt }] }],
+    });
+
+    const textBlock = (message.content || []).find((b) => b.type === 'text');
+    if (!textBlock || !textBlock.text) {
+      return res.status(502).json({ error: 'The AI did not return readable data from this file.' });
+    }
+    let quote;
+    try {
+      quote = JSON.parse(textBlock.text);
+    } catch (_e) {
+      return res.status(502).json({ error: 'The AI returned data that could not be parsed.' });
+    }
+
+    return res.json({
+      ok: true,
+      model: QUOTE_EXTRACT_MODEL,
+      tokens: message.usage ? { input: message.usage.input_tokens, output: message.usage.output_tokens } : null,
+      quote,
+    });
+  } catch (err) {
+    const status = err && Number.isInteger(err.status) ? err.status : 500;
+    console.error('[quote-extract] failed:', err && err.message ? err.message : err);
+    return res
+      .status(status >= 400 && status < 600 ? status : 500)
+      .json({ error: err && err.message ? `AI extraction failed: ${err.message}` : 'AI extraction failed.' });
+  }
+}
+
+// Bid leveling / side-by-side comparison for one project. Read-only aggregation over
+// existing contractor_quotes + quote_line_items. Original contractor amounts are returned
+// verbatim and never mutated here; any leveling "adjustments" live only in the client.
+function compareQuotes(req, res, forcedProjectId = null) {
+  const db = getDb();
+  const projectId = forcedProjectId || String(req.query.project_id || '').trim();
+  if (!projectId) {
+    return res.status(400).json({ error: 'project_id is required for bid comparison' });
+  }
+  const project = getProjectOrThrow(db, projectId);
+  if (!project) {
+    return res.status(404).json({ error: 'Project not found' });
+  }
+
+  const categoryFilter = String(req.query.category || '').trim();
+  const includeHistorical = String(req.query.include_historical || '') === '1';
+
+  const quoteRows = db.prepare(`
+    SELECT id, quote_number, contractor_name, contractor_company, contractor_email,
+           status, quote_date, total_quote_amount, final_approved_amount, data_quality_flags, created_at,
+           source_document_id, source_file_name, source_file_mime_type
+    FROM contractor_quotes
+    WHERE project_id = ?
+    ${includeHistorical ? '' : "AND status != 'historical'"}
+    ORDER BY date(quote_date) DESC, datetime(created_at) DESC
+  `).all(projectId);
+
+  const quoteIds = quoteRows.map(row => row.id);
+  const lineItemsByQuote = new Map();
+  if (quoteIds.length > 0) {
+    const placeholders = quoteIds.map(() => '?').join(',');
+    const lineItems = db.prepare(`
+      SELECT quote_id, category, category_group, subcategory, description,
+             quantity, unit, unit_price, total_line_item_price
+      FROM quote_line_items
+      WHERE quote_id IN (${placeholders})
+      ORDER BY sort_order ASC
+    `).all(...quoteIds);
+    for (const item of lineItems) {
+      const list = lineItemsByQuote.get(item.quote_id) || [];
+      list.push(item);
+      lineItemsByQuote.set(item.quote_id, list);
+    }
+  }
+
+  const contractors = quoteRows.map(row => ({
+    quote_id: row.id,
+    quote_number: row.quote_number,
+    contractor_name: row.contractor_name,
+    contractor_company: row.contractor_company,
+    contractor_email: row.contractor_email,
+    status: row.status,
+    quote_date: row.quote_date,
+    total_quote_amount: numberValue(row.total_quote_amount),
+    final_approved_amount: row.final_approved_amount === null || row.final_approved_amount === undefined
+      ? null
+      : numberValue(row.final_approved_amount),
+    data_quality_flags: parseJson(row.data_quality_flags, []),
+    line_item_count: (lineItemsByQuote.get(row.id) || []).length,
+    has_document: !!row.source_document_id,
+    source_file_name: row.source_file_name || null,
+    source_file_mime_type: row.source_file_mime_type || null,
+  }));
+
+  // category -> quote_id -> { amount, line_items }
+  const categoryOrder = [];
+  const categorySeen = new Set();
+  const cellMap = new Map();
+  for (const row of quoteRows) {
+    for (const item of (lineItemsByQuote.get(row.id) || [])) {
+      const category = item.category || 'Uncategorized';
+      if (categoryFilter && category !== categoryFilter) continue;
+      if (!categorySeen.has(category)) {
+        categorySeen.add(category);
+        categoryOrder.push({ category, category_group: item.category_group || '' });
+      }
+      if (!cellMap.has(category)) cellMap.set(category, new Map());
+      const byQuote = cellMap.get(category);
+      const current = byQuote.get(row.id) || { amount: 0, line_items: [] };
+      current.amount += numberValue(item.total_line_item_price);
+      current.line_items.push(item);
+      byQuote.set(row.id, current);
+    }
+  }
+
+  const rows = categoryOrder
+    .sort((a, b) => a.category.localeCompare(b.category))
+    .map(({ category, category_group }) => {
+      const byQuote = cellMap.get(category) || new Map();
+      const cells = {};
+      const presentValues = [];
+      const missingQuoteIds = [];
+      for (const row of quoteRows) {
+        const cell = byQuote.get(row.id);
+        if (cell) {
+          cells[row.id] = { amount: cell.amount, present: true, line_items: cell.line_items };
+          presentValues.push(cell.amount);
+        } else {
+          cells[row.id] = { amount: null, present: false, line_items: [] };
+          missingQuoteIds.push(row.id);
+        }
+      }
+      const low = presentValues.length ? Math.min(...presentValues) : 0;
+      const high = presentValues.length ? Math.max(...presentValues) : 0;
+      const average = presentValues.length
+        ? presentValues.reduce((sum, value) => sum + value, 0) / presentValues.length
+        : 0;
+      return {
+        category,
+        category_group,
+        cells,
+        present_count: presentValues.length,
+        missing_quote_ids: missingQuoteIds,
+        has_missing: missingQuoteIds.length > 0 && quoteRows.length > 1,
+        low,
+        high,
+        average,
+        spread: high - low,
+      };
+    });
+
+  const totals = quoteRows.map(row => numberValue(row.total_quote_amount));
+  const squareFootage = project.square_footage === undefined || project.square_footage === null
+    ? null
+    : numberValue(project.square_footage);
+
+  return res.json({
+    project: {
+      id: project.id,
+      address: project.address,
+      job_name: project.job_name,
+      budget: project.budget === null || project.budget === undefined ? null : numberValue(project.budget),
+      square_footage: squareFootage,
+    },
+    category_filter: categoryFilter || null,
+    contractors,
+    rows,
+    totals: {
+      by_quote: Object.fromEntries(quoteRows.map(row => [row.id, numberValue(row.total_quote_amount)])),
+      low: totals.length ? Math.min(...totals) : 0,
+      high: totals.length ? Math.max(...totals) : 0,
+      average: totals.length ? totals.reduce((sum, value) => sum + value, 0) / totals.length : 0,
+      price_per_sqft_by_quote: squareFootage
+        ? Object.fromEntries(quoteRows.map(row => [row.id, numberValue(row.total_quote_amount) / squareFootage]))
+        : null,
+    },
+  });
+}
+
 const analyticsRouter = express.Router();
 analyticsRouter.use(authenticate, requireManagement);
 analyticsRouter.get('/options', options);
 analyticsRouter.get('/categories', (req, res) => res.json(loadCategoryMap(getDb()).categories));
 analyticsRouter.get('/summary', (req, res) => quoteSummary(req, res));
+analyticsRouter.get('/compare', (req, res) => compareQuotes(req, res));
 analyticsRouter.get('/quotes', (req, res) => listQuotes(req, res));
 analyticsRouter.post('/quotes', (req, res) => createQuote(req, res));
 analyticsRouter.post('/quotes/upload', upload.single('quote_file'), (req, res) => createQuote(req, res));
+analyticsRouter.put('/quotes/:id', (req, res) => updateQuote(req, res));
 analyticsRouter.post('/quotes/:id/approve', (req, res) => updateQuoteReviewStatus(req, res, null, 'approved'));
 analyticsRouter.post('/quotes/:id/deny', (req, res) => updateQuoteReviewStatus(req, res, null, 'rejected'));
+analyticsRouter.delete('/quotes/:id', (req, res) => deleteQuote(req, res));
+analyticsRouter.get('/quotes/:id/notes', (req, res) => listQuoteNotes(req, res));
+analyticsRouter.post('/quotes/:id/notes', (req, res) => addQuoteNote(req, res));
+analyticsRouter.delete('/quotes/:id/notes/:noteId', (req, res) => deleteQuoteNote(req, res));
 analyticsRouter.get('/quotes/:id/download', (req, res) => downloadQuoteDocument(req, res));
+// Project-agnostic AI read so the global Quote Center can auto-extract on upload
+// before a project is chosen. extractQuoteFromPdf does not use the project; it only
+// reads the uploaded file and returns structured fields (nothing is persisted).
+analyticsRouter.post('/extract', extractUpload.single('quote_file'), (req, res) => extractQuoteFromPdf(req, res));
 
 const projectQuotesRouter = express.Router({ mergeParams: true });
 projectQuotesRouter.use(authenticate, requireManagement, authorizeProjectAccess);
 projectQuotesRouter.get('/', (req, res) => listQuotes(req, res, req.params.projectId));
 projectQuotesRouter.get('/summary', (req, res) => quoteSummary(req, res, req.params.projectId));
+projectQuotesRouter.get('/compare', (req, res) => compareQuotes(req, res, req.params.projectId));
 projectQuotesRouter.post('/', (req, res) => createQuote(req, res, req.params.projectId));
 projectQuotesRouter.post('/upload', upload.single('quote_file'), (req, res) => createQuote(req, res, req.params.projectId));
+projectQuotesRouter.put('/:id', (req, res) => updateQuote(req, res, req.params.projectId));
+projectQuotesRouter.post('/extract', extractUpload.single('quote_file'), (req, res) => extractQuoteFromPdf(req, res, req.params.projectId));
 projectQuotesRouter.post('/:id/approve', (req, res) => updateQuoteReviewStatus(req, res, req.params.projectId, 'approved'));
 projectQuotesRouter.post('/:id/deny', (req, res) => updateQuoteReviewStatus(req, res, req.params.projectId, 'rejected'));
+projectQuotesRouter.delete('/:id', (req, res) => deleteQuote(req, res, req.params.projectId));
+projectQuotesRouter.get('/:id/notes', (req, res) => listQuoteNotes(req, res, req.params.projectId));
+projectQuotesRouter.post('/:id/notes', (req, res) => addQuoteNote(req, res, req.params.projectId));
+projectQuotesRouter.delete('/:id/notes/:noteId', (req, res) => deleteQuoteNote(req, res));
 projectQuotesRouter.get('/:id/download', (req, res) => downloadQuoteDocument(req, res, req.params.projectId));
 
 module.exports = {

@@ -21,6 +21,7 @@ const DEFAULT_EXCLUDED_BILL_VENDORS = ['great lakes mortgage fund'];
 const PAYMENT_APPROVAL_STATUS = 'approved_for_payment';
 const PAYMENT_APPROVAL_DEFAULT_STATUS = 'not_approved';
 const PAYMENT_APPROVAL_DELETED_STATUS = 'deleted_from_buildtrack';
+const PAYMENT_APPROVAL_PAID_STATUS = 'paid_from_buildtrack';
 const PAYDAY_ANCHOR_UTC_MS = Date.UTC(2026, 5, 12, 12, 0, 0);
 const PAYMENT_QUEUE_NOTIFY_DEFAULT_HOUR_ET = 8;
 const PAYMENT_QUEUE_NOTIFY_DEFAULT_POLL_MS = 5 * 60 * 1000;
@@ -735,18 +736,32 @@ async function qboQuery(db, connection, query) {
   return qboRequest(db, connection, `/v3/company/${encodeURIComponent(connection.realm_id)}/query?query=${encodeURIComponent(query)}`);
 }
 
-async function fetchAllQboEntities(db, connection, entityName) {
+async function fetchAllQboEntitiesWhere(db, connection, entityName, whereClause = '') {
   const rows = [];
   let start = 1;
   const pageSize = 1000;
   while (start <= 10000) {
-    const payload = await qboQuery(db, connection, `SELECT * FROM ${entityName} STARTPOSITION ${start} MAXRESULTS ${pageSize}`);
+    const where = whereClause ? ` WHERE ${whereClause}` : '';
+    const payload = await qboQuery(db, connection, `SELECT * FROM ${entityName}${where} STARTPOSITION ${start} MAXRESULTS ${pageSize}`);
     const page = payload?.QueryResponse?.[entityName] || [];
     rows.push(...page);
     if (page.length < pageSize) break;
     start += page.length;
   }
   return rows;
+}
+
+async function fetchAllQboEntities(db, connection, entityName) {
+  return fetchAllQboEntitiesWhere(db, connection, entityName);
+}
+
+async function fetchAllQboVendors(db, connection) {
+  try {
+    return await fetchAllQboEntitiesWhere(db, connection, 'Vendor', 'Active IN (true, false)');
+  } catch (err) {
+    console.warn('[QBO] Vendor all-active-state query failed, retrying active Vendor query:', err.message);
+    return fetchAllQboEntities(db, connection, 'Vendor');
+  }
 }
 
 async function fetchCompanyName(db, connection) {
@@ -756,6 +771,163 @@ async function fetchCompanyName(db, connection) {
   } catch (err) {
     return null;
   }
+}
+
+function qboText(value) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  return text || null;
+}
+
+function qboEmail(value) {
+  return qboText(value?.Address || value?.address || value);
+}
+
+function qboPhone(value) {
+  return qboText(value?.FreeFormNumber || value?.freeFormNumber || value);
+}
+
+function qboWeb(value) {
+  return qboText(value?.URI || value?.uri || value?.Address || value);
+}
+
+function qboBoolean(value) {
+  return value === true || String(value || '').toLowerCase() === 'true' ? 1 : 0;
+}
+
+function qboTaxIdentifierLast4(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  return digits.length >= 4 ? digits.slice(-4) : null;
+}
+
+function qboAddressParts(address = {}) {
+  return {
+    line1: qboText(address.Line1),
+    line2: qboText(address.Line2),
+    line3: qboText(address.Line3),
+    city: qboText(address.City),
+    state: qboText(address.CountrySubDivisionCode),
+    postalCode: qboText(address.PostalCode),
+    country: qboText(address.Country),
+  };
+}
+
+function qboAddressText(address = {}) {
+  const parts = qboAddressParts(address);
+  const cityStateZip = [
+    parts.city,
+    [parts.state, parts.postalCode].filter(Boolean).join(' '),
+  ].filter(Boolean).join(', ');
+  return [parts.line1, parts.line2, parts.line3, cityStateZip, parts.country].filter(Boolean).join('\n') || null;
+}
+
+function qboPersonName(vendor = {}) {
+  return [vendor.Title, vendor.GivenName, vendor.MiddleName, vendor.FamilyName, vendor.Suffix]
+    .map(qboText)
+    .filter(Boolean)
+    .join(' ') || null;
+}
+
+function qboVendorDisplayName(vendor = {}) {
+  return qboText(vendor.DisplayName)
+    || qboText(vendor.CompanyName)
+    || qboText(vendor.PrintOnCheckName)
+    || qboPersonName(vendor)
+    || (vendor.Id ? `QuickBooks Vendor ${vendor.Id}` : null);
+}
+
+function redactQuickBooksVendorForStorage(value) {
+  if (Array.isArray(value)) return value.map(redactQuickBooksVendorForStorage);
+  if (!value || typeof value !== 'object') return value;
+  const redacted = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (/^(taxidentifier|taxid|ssn|tin)$/i.test(key)) {
+      redacted[key] = '[redacted]';
+      continue;
+    }
+    redacted[key] = redactQuickBooksVendorForStorage(child);
+  }
+  return redacted;
+}
+
+function normalizeQuickBooksVendor(vendor, connection) {
+  const billingParts = qboAddressParts(vendor?.BillAddr || {});
+  const displayName = qboVendorDisplayName(vendor);
+  const companyName = qboText(vendor?.CompanyName);
+  const printOnCheckName = qboText(vendor?.PrintOnCheckName);
+  const contactName = qboPersonName(vendor);
+  const primaryPhone = qboPhone(vendor?.PrimaryPhone);
+  const primaryEmail = qboEmail(vendor?.PrimaryEmailAddr);
+  return {
+    qbo_id: vendor?.Id ? String(vendor.Id) : null,
+    realm_id: connection.realm_id,
+    environment: connection.environment,
+    sync_token: vendor?.SyncToken || null,
+    display_name: displayName,
+    company_name: companyName,
+    print_on_check_name: printOnCheckName,
+    given_name: qboText(vendor?.GivenName),
+    middle_name: qboText(vendor?.MiddleName),
+    family_name: qboText(vendor?.FamilyName),
+    suffix: qboText(vendor?.Suffix),
+    contact_name: contactName,
+    primary_email: primaryEmail,
+    primary_phone: primaryPhone,
+    mobile_phone: qboPhone(vendor?.Mobile),
+    alternate_phone: qboPhone(vendor?.AlternatePhone),
+    fax: qboPhone(vendor?.Fax),
+    website: qboWeb(vendor?.WebAddr),
+    bill_addr_text: qboAddressText(vendor?.BillAddr || {}),
+    bill_addr_line1: billingParts.line1,
+    bill_addr_line2: billingParts.line2,
+    bill_addr_line3: billingParts.line3,
+    bill_addr_city: billingParts.city,
+    bill_addr_state: billingParts.state,
+    bill_addr_postal_code: billingParts.postalCode,
+    bill_addr_country: billingParts.country,
+    acct_num: qboText(vendor?.AcctNum),
+    vendor_1099: qboBoolean(vendor?.Vendor1099),
+    tax_identifier_last4: qboTaxIdentifierLast4(vendor?.TaxIdentifier || vendor?.TaxId),
+    balance: normalizeMoney(vendor?.Balance),
+    active: vendor?.Active === false ? 0 : 1,
+    raw_json: JSON.stringify(redactQuickBooksVendorForStorage(vendor || {})),
+    qbo_created_at: metadataTime(vendor, 'CreateTime'),
+    qbo_updated_at: metadataTime(vendor, 'LastUpdatedTime'),
+  };
+}
+
+function quickBooksVendorNameCandidates(info) {
+  const names = [
+    info.display_name,
+    info.company_name,
+    info.print_on_check_name,
+    info.contact_name,
+  ].map(qboText).filter(Boolean);
+  return Array.from(new Map(names.map(name => [normalizeMatchText(name), name])).values());
+}
+
+function findContractorProfileForQuickBooksVendor(db, info) {
+  const byQboId = db.prepare(`
+    SELECT *
+    FROM contractor_profiles
+    WHERE quickbooks_vendor_id = ?
+    LIMIT 1
+  `).get(info.qbo_id);
+  if (byQboId) return byQboId;
+
+  const names = quickBooksVendorNameCandidates(info).map(name => name.toLowerCase()).filter(Boolean);
+  if (!names.length) return null;
+  const placeholders = names.map(() => '?').join(',');
+  return db.prepare(`
+    SELECT *
+    FROM contractor_profiles
+    WHERE lower(trim(COALESCE(vendor_name, ''))) IN (${placeholders})
+       OR lower(trim(COALESCE(quickbooks_display_name, ''))) IN (${placeholders})
+    ORDER BY
+      CASE WHEN source = 'quickbooks_vendor' THEN 0 ELSE 1 END,
+      datetime(updated_at) DESC,
+      vendor_name
+    LIMIT 1
+  `).get(...names, ...names);
 }
 
 function normalizeDoc(value) {
@@ -1007,6 +1179,205 @@ function linkedBillIdsFromPayment(payment) {
   return Array.from(ids);
 }
 
+function upsertQuickBooksVendors(db, connection, vendors) {
+  const upsertVendor = db.prepare(`
+    INSERT INTO quickbooks_vendors (
+      qbo_id, realm_id, environment, sync_token, display_name, company_name, print_on_check_name,
+      given_name, middle_name, family_name, suffix, primary_email, primary_phone, mobile_phone,
+      alternate_phone, fax, website, bill_addr_text, bill_addr_line1, bill_addr_line2, bill_addr_line3,
+      bill_addr_city, bill_addr_state, bill_addr_postal_code, bill_addr_country, acct_num,
+      vendor_1099, tax_identifier_last4, balance, active, raw_json, qbo_created_at, qbo_updated_at,
+      last_seen_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    ON CONFLICT(qbo_id) DO UPDATE SET
+      realm_id = excluded.realm_id,
+      environment = excluded.environment,
+      sync_token = excluded.sync_token,
+      display_name = excluded.display_name,
+      company_name = excluded.company_name,
+      print_on_check_name = excluded.print_on_check_name,
+      given_name = excluded.given_name,
+      middle_name = excluded.middle_name,
+      family_name = excluded.family_name,
+      suffix = excluded.suffix,
+      primary_email = excluded.primary_email,
+      primary_phone = excluded.primary_phone,
+      mobile_phone = excluded.mobile_phone,
+      alternate_phone = excluded.alternate_phone,
+      fax = excluded.fax,
+      website = excluded.website,
+      bill_addr_text = excluded.bill_addr_text,
+      bill_addr_line1 = excluded.bill_addr_line1,
+      bill_addr_line2 = excluded.bill_addr_line2,
+      bill_addr_line3 = excluded.bill_addr_line3,
+      bill_addr_city = excluded.bill_addr_city,
+      bill_addr_state = excluded.bill_addr_state,
+      bill_addr_postal_code = excluded.bill_addr_postal_code,
+      bill_addr_country = excluded.bill_addr_country,
+      acct_num = excluded.acct_num,
+      vendor_1099 = excluded.vendor_1099,
+      tax_identifier_last4 = excluded.tax_identifier_last4,
+      balance = excluded.balance,
+      active = excluded.active,
+      raw_json = excluded.raw_json,
+      qbo_created_at = excluded.qbo_created_at,
+      qbo_updated_at = excluded.qbo_updated_at,
+      last_seen_at = datetime('now'),
+      updated_at = datetime('now')
+  `);
+  const insertProfile = db.prepare(`
+    INSERT INTO contractor_profiles (
+      id, vendor_name, contact_name, email, phone, billing_address, account_number, contractor_status,
+      quickbooks_vendor_id, quickbooks_display_name, quickbooks_company_name, quickbooks_print_on_check_name,
+      quickbooks_primary_email, quickbooks_primary_phone, quickbooks_bill_addr, quickbooks_account_number,
+      quickbooks_vendor_1099, quickbooks_tax_identifier_last4, quickbooks_balance, quickbooks_active,
+      quickbooks_synced_at, source, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), 'quickbooks_vendor', datetime('now'), datetime('now'))
+  `);
+  const updateProfile = db.prepare(`
+    UPDATE contractor_profiles
+    SET vendor_name = CASE
+          WHEN COALESCE(source, '') = 'quickbooks_vendor' OR trim(COALESCE(vendor_name, '')) = '' THEN ?
+          ELSE vendor_name
+        END,
+        contact_name = COALESCE(NULLIF(contact_name, ''), ?),
+        email = COALESCE(NULLIF(email, ''), ?),
+        phone = COALESCE(NULLIF(phone, ''), ?),
+        billing_address = COALESCE(NULLIF(billing_address, ''), ?),
+        account_number = COALESCE(NULLIF(account_number, ''), ?),
+        quickbooks_vendor_id = ?,
+        quickbooks_display_name = ?,
+        quickbooks_company_name = ?,
+        quickbooks_print_on_check_name = ?,
+        quickbooks_primary_email = ?,
+        quickbooks_primary_phone = ?,
+        quickbooks_bill_addr = ?,
+        quickbooks_account_number = ?,
+        quickbooks_vendor_1099 = ?,
+        quickbooks_tax_identifier_last4 = ?,
+        quickbooks_balance = ?,
+        quickbooks_active = ?,
+        quickbooks_synced_at = datetime('now'),
+        updated_at = datetime('now')
+    WHERE id = ?
+  `);
+
+  const suppressionStmt = db.prepare('SELECT 1 FROM quickbooks_vendor_suppressions WHERE qbo_id = ?');
+  let mirrored = 0;
+  let createdProfiles = 0;
+  let updatedProfiles = 0;
+  let suppressedProfiles = 0;
+  let skipped = 0;
+  const write = db.transaction(() => {
+    for (const vendor of vendors || []) {
+      const info = normalizeQuickBooksVendor(vendor, connection);
+      if (!info.qbo_id || !info.display_name) {
+        skipped += 1;
+        continue;
+      }
+
+      upsertVendor.run(
+        info.qbo_id,
+        info.realm_id,
+        info.environment,
+        info.sync_token,
+        info.display_name,
+        info.company_name,
+        info.print_on_check_name,
+        info.given_name,
+        info.middle_name,
+        info.family_name,
+        info.suffix,
+        info.primary_email,
+        info.primary_phone,
+        info.mobile_phone,
+        info.alternate_phone,
+        info.fax,
+        info.website,
+        info.bill_addr_text,
+        info.bill_addr_line1,
+        info.bill_addr_line2,
+        info.bill_addr_line3,
+        info.bill_addr_city,
+        info.bill_addr_state,
+        info.bill_addr_postal_code,
+        info.bill_addr_country,
+        info.acct_num,
+        info.vendor_1099,
+        info.tax_identifier_last4,
+        info.balance,
+        info.active,
+        info.raw_json,
+        info.qbo_created_at,
+        info.qbo_updated_at
+      );
+      mirrored += 1;
+
+      if (suppressionStmt.get(String(info.qbo_id))) {
+        // A manager deleted this vendor from the directory. Keep the raw QBO
+        // mirror row (used for bill matching) but do NOT recreate or refresh a
+        // contractor profile for it - this is what makes the delete permanent.
+        suppressedProfiles += 1;
+        continue;
+      }
+
+      const profile = findContractorProfileForQuickBooksVendor(db, info);
+      if (profile) {
+        updateProfile.run(
+          info.display_name,
+          info.contact_name,
+          info.primary_email,
+          info.primary_phone,
+          info.bill_addr_text,
+          info.acct_num,
+          info.qbo_id,
+          info.display_name,
+          info.company_name,
+          info.print_on_check_name,
+          info.primary_email,
+          info.primary_phone,
+          info.bill_addr_text,
+          info.acct_num,
+          info.vendor_1099,
+          info.tax_identifier_last4,
+          info.balance,
+          info.active,
+          profile.id
+        );
+        updatedProfiles += 1;
+      } else {
+        insertProfile.run(
+          uuidv4(),
+          info.display_name,
+          info.contact_name,
+          info.primary_email,
+          info.primary_phone,
+          info.bill_addr_text,
+          info.acct_num,
+          info.qbo_id,
+          info.display_name,
+          info.company_name,
+          info.print_on_check_name,
+          info.primary_email,
+          info.primary_phone,
+          info.bill_addr_text,
+          info.acct_num,
+          info.vendor_1099,
+          info.tax_identifier_last4,
+          info.balance,
+          info.active
+        );
+        createdProfiles += 1;
+      }
+    }
+  });
+
+  write();
+  return { mirrored, profiles_created: createdProfiles, profiles_updated: updatedProfiles, profiles_suppressed: suppressedProfiles, skipped };
+}
+
 function upsertBillsAndPayments(db, connection, bills, payments) {
   const excludedVendors = excludedQuickBooksBillVendors();
   const excludedVendorPlaceholders = excludedVendors.map(() => '?').join(', ');
@@ -1097,7 +1468,7 @@ function upsertBillsAndPayments(db, connection, bills, payments) {
         vendor_name = COALESCE(NULLIF(vendor_name, ''), ?),
         status = CASE
           WHEN ? = 'paid' AND ? = '${PAYMENT_APPROVAL_STATUS}' THEN 'paid'
-          WHEN status = 'paid' AND ? != 'paid' THEN 'approved'
+          WHEN status = 'paid' AND ? != 'paid' AND ? != '${PAYMENT_APPROVAL_PAID_STATUS}' THEN 'approved'
           ELSE status
         END,
         updated_at = datetime('now')
@@ -1187,6 +1558,7 @@ function upsertBillsAndPayments(db, connection, bills, payments) {
           paymentStatus,
           paymentApprovalStatusAtSync,
           paymentStatus,
+          paymentApprovalStatusAtSync,
           invoice.id
         );
       }
@@ -1256,17 +1628,17 @@ function statusSummary(db) {
       SUM(CASE WHEN payment_status = 'paid' THEN 1 ELSE 0 END) as paid_count,
       SUM(CASE
         WHEN payment_status != 'paid'
-          AND COALESCE(payment_approval_status, '${PAYMENT_APPROVAL_DEFAULT_STATUS}') != '${PAYMENT_APPROVAL_STATUS}'
+          AND COALESCE(payment_approval_status, '${PAYMENT_APPROVAL_DEFAULT_STATUS}') NOT IN ('${PAYMENT_APPROVAL_STATUS}', '${PAYMENT_APPROVAL_PAID_STATUS}')
         THEN 1 ELSE 0 END) as open_count,
       ROUND(COALESCE(SUM(CASE
         WHEN payment_status != 'paid'
-          AND COALESCE(payment_approval_status, '${PAYMENT_APPROVAL_DEFAULT_STATUS}') != '${PAYMENT_APPROVAL_STATUS}'
+          AND COALESCE(payment_approval_status, '${PAYMENT_APPROVAL_DEFAULT_STATUS}') NOT IN ('${PAYMENT_APPROVAL_STATUS}', '${PAYMENT_APPROVAL_PAID_STATUS}')
         THEN balance ELSE 0 END), 0), 2) as open_balance,
       SUM(CASE
         WHEN project_id IS NULL
           AND NOT ${splitLinesFullyMatchedSql('qb')}
           AND payment_status != 'paid'
-          AND COALESCE(payment_approval_status, '${PAYMENT_APPROVAL_DEFAULT_STATUS}') != '${PAYMENT_APPROVAL_STATUS}'
+          AND COALESCE(payment_approval_status, '${PAYMENT_APPROVAL_DEFAULT_STATUS}') NOT IN ('${PAYMENT_APPROVAL_STATUS}', '${PAYMENT_APPROVAL_PAID_STATUS}')
         THEN 1 ELSE 0 END) as unmatched_count,
       SUM(CASE
         WHEN payment_status != 'paid'
@@ -1717,18 +2089,23 @@ async function syncQuickBooksBills({ source = 'manual', userId = null } = {}) {
     if (!connection) return { skipped: true, reason: 'not_connected' };
 
     try {
-      const [bills, payments] = await Promise.all([
+      const [bills, payments, vendors] = await Promise.all([
         fetchAllQboEntities(db, connection, 'Bill'),
         fetchAllQboEntities(db, connection, 'BillPayment').catch(err => {
           console.warn('[QBO] BillPayment sync skipped:', err.message);
           return [];
         }),
+        fetchAllQboVendors(db, connection).catch(err => {
+          console.warn('[QBO] Vendor sync skipped:', err.message);
+          return [];
+        }),
       ]);
       const companyName = connection.company_name || await fetchCompanyName(db, connection);
+      const vendorResult = upsertQuickBooksVendors(db, connection, vendors);
       const result = upsertBillsAndPayments(db, connection, bills, payments);
       let billPdfSync = null;
       if (process.env.QBO_BILL_PDF_SYNC_ON_BILL_SYNC !== 'false') {
-        billPdfSync = await syncQuickBooksBillPdfs({ scope: 'open_missing', source, userId }).catch(err => {
+        billPdfSync = await syncQuickBooksBillPdfs({ scope: process.env.QBO_BILL_PDF_SYNC_SCOPE || 'missing', source, userId }).catch(err => {
           console.warn('[QBO] Bill PDF sync skipped after bill sync:', err.message);
           return { skipped: true, reason: err.message || 'pdf_sync_failed' };
         });
@@ -1752,6 +2129,9 @@ async function syncQuickBooksBills({ source = 'manual', userId = null } = {}) {
             source,
             bills: bills.length,
             bill_payments: payments.length,
+            vendors: vendors.length,
+            vendor_profiles_created: vendorResult.profiles_created,
+            vendor_profiles_updated: vendorResult.profiles_updated,
             matched: result.matched,
             ignored_bills: result.ignored,
             marked_paid_from_friday_queue: result.markedPaidFromQueue,
@@ -1764,6 +2144,10 @@ async function syncQuickBooksBills({ source = 'manual', userId = null } = {}) {
         source,
         bills: bills.length,
         bill_payments: payments.length,
+        vendors: vendors.length,
+        vendor_profiles_created: vendorResult.profiles_created,
+        vendor_profiles_updated: vendorResult.profiles_updated,
+        vendor_mirror: vendorResult,
         matched_invoices: result.matched,
         marked_paid_from_friday_queue: result.markedPaidFromQueue,
         ignored_bills: result.ignored,
@@ -2187,11 +2571,11 @@ router.get('/bills', authorize(...QUICKBOOKS_ADMIN_ROLES), (req, res) => {
     params.push(status);
   }
   if (status === 'unpaid') {
-    where.push(`COALESCE(qb.payment_approval_status, '${PAYMENT_APPROVAL_DEFAULT_STATUS}') != '${PAYMENT_APPROVAL_STATUS}'`);
+    where.push(`COALESCE(qb.payment_approval_status, '${PAYMENT_APPROVAL_DEFAULT_STATUS}') NOT IN ('${PAYMENT_APPROVAL_STATUS}', '${PAYMENT_APPROVAL_PAID_STATUS}')`);
   }
   if (unmatchedOnly) {
     where.push(`qb.project_id IS NULL AND NOT ${splitLinesFullyMatchedSql('qb')}`);
-    where.push(`COALESCE(qb.payment_approval_status, '${PAYMENT_APPROVAL_DEFAULT_STATUS}') != '${PAYMENT_APPROVAL_STATUS}'`);
+    where.push(`COALESCE(qb.payment_approval_status, '${PAYMENT_APPROVAL_DEFAULT_STATUS}') NOT IN ('${PAYMENT_APPROVAL_STATUS}', '${PAYMENT_APPROVAL_PAID_STATUS}')`);
   }
   if (excludedVendors.length) {
     where.push(`lower(trim(COALESCE(qb.vendor_name, ''))) NOT IN (${excludedVendors.map(() => '?').join(', ')})`);
@@ -2230,6 +2614,9 @@ router.delete('/bills/:qboId', authorize(...QUICKBOOKS_ADMIN_ROLES), (req, res) 
     }
     if (bill.payment_approval_status === PAYMENT_APPROVAL_STATUS) {
       return res.status(409).json({ error: 'Remove this bill from the Friday payment queue before deleting it.' });
+    }
+    if (bill.payment_approval_status === PAYMENT_APPROVAL_PAID_STATUS) {
+      return res.status(409).json({ error: 'This bill was marked paid in BuildTrack and must stay linked to QuickBooks.' });
     }
 
     const retainedAttachmentCount = db.prepare('SELECT COUNT(*) AS count FROM quickbooks_bill_attachments WHERE qbo_bill_id = ?').get(qboId)?.count || 0;
@@ -2280,6 +2667,9 @@ router.put('/bills/:qboId/approve-for-pay', authorize(...QUICKBOOKS_ADMIN_ROLES)
   if (bill.payment_status === 'paid') {
     return res.status(409).json({ error: 'This bill is already paid in QuickBooks.' });
   }
+  if (bill.payment_approval_status === PAYMENT_APPROVAL_PAID_STATUS) {
+    return res.status(409).json({ error: 'This bill is already marked paid in BuildTrack and remains linked to QuickBooks.' });
+  }
   if (!quickBooksBillHasApprovalMatch(db, bill)) {
     return res.status(409).json({ error: 'Match this bill or every QuickBooks class split to a BuildTrack project before approving for pay.' });
   }
@@ -2318,6 +2708,9 @@ router.put('/bills/:qboId/remove-from-pay', authorize(...QUICKBOOKS_ADMIN_ROLES)
   if (bill.payment_status === 'paid') {
     return res.status(409).json({ error: 'This bill is already paid in QuickBooks.' });
   }
+  if (bill.payment_approval_status === PAYMENT_APPROVAL_PAID_STATUS) {
+    return res.status(409).json({ error: 'This bill is marked paid in BuildTrack and must stay linked to QuickBooks.' });
+  }
 
   db.prepare(`
     UPDATE quickbooks_bills
@@ -2339,6 +2732,62 @@ router.put('/bills/:qboId/remove-from-pay', authorize(...QUICKBOOKS_ADMIN_ROLES)
     entityType: 'quickbooks_bill',
     entityId: updated.qbo_id,
     details: { vendor_name: updated.vendor_name, balance: updated.balance },
+  });
+  res.json(updated);
+});
+
+router.put('/bills/:qboId/mark-paid-from-queue', authorize(...QUICKBOOKS_ADMIN_ROLES), (req, res) => {
+  const db = getDb();
+  const bill = getQuickBooksBillRow(db, req.params.qboId);
+  if (!bill) return res.status(404).json({ error: 'QuickBooks bill not found.' });
+  if (bill.payment_status === 'paid') {
+    return res.status(409).json({ error: 'This bill is already paid in QuickBooks.' });
+  }
+  if (bill.payment_approval_status !== PAYMENT_APPROVAL_STATUS) {
+    return res.status(409).json({ error: 'Only bills in the Friday payment queue can be marked paid from BuildTrack.' });
+  }
+
+  const markPaid = db.transaction(() => {
+    db.prepare(`
+      UPDATE quickbooks_bills
+      SET payment_approval_status = ?,
+          payment_approved_at = COALESCE(payment_approved_at, datetime('now')),
+          payment_approved_by = COALESCE(payment_approved_by, ?),
+          payment_run_date = NULL,
+          payment_approval_notified_at = NULL,
+          payment_approval_notified_by = NULL,
+          updated_at = datetime('now')
+      WHERE qbo_id = ?
+    `).run(PAYMENT_APPROVAL_PAID_STATUS, req.user.id, bill.qbo_id);
+
+    if (bill.matched_invoice_id) {
+      db.prepare(`
+        UPDATE invoices
+        SET status = 'paid',
+            quickbooks_status = COALESCE(NULLIF(quickbooks_status, ''), 'synced'),
+            quickbooks_bill_id = COALESCE(NULLIF(quickbooks_bill_id, ''), ?),
+            quickbooks_last_seen_at = datetime('now'),
+            updated_at = datetime('now')
+        WHERE id = ?
+      `).run(bill.qbo_id, bill.matched_invoice_id);
+    }
+  });
+
+  markPaid();
+
+  const updated = getQuickBooksBillRow(db, bill.qbo_id);
+  logActivity({
+    userId: req.user.id,
+    projectId: updated.project_id || undefined,
+    action: 'quickbooks_bill_marked_paid_from_queue',
+    entityType: 'quickbooks_bill',
+    entityId: updated.qbo_id,
+    details: {
+      vendor_name: updated.vendor_name,
+      balance: updated.balance,
+      matched_invoice_id: updated.matched_invoice_id,
+      qbo_payment_status: updated.payment_status,
+    },
   });
   res.json(updated);
 });
@@ -2412,7 +2861,7 @@ function startQuickBooksAutoSync() {
         }
         return;
       }
-      console.log(`[QBO] Automatic sync completed: ${result.bills} bills, ${result.matched_invoices} matched invoices, ${result.ignored_bills || 0} ignored bills`);
+      console.log(`[QBO] Automatic sync completed: ${result.bills} bills, ${result.vendors || 0} vendors, ${result.matched_invoices} matched invoices, ${result.ignored_bills || 0} ignored bills`);
     } catch (err) {
       console.error('[QBO] Automatic sync failed:', err.message);
     }

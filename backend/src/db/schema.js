@@ -680,6 +680,60 @@ function initializeSchema() {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS quickbooks_vendors (
+      qbo_id TEXT PRIMARY KEY,
+      realm_id TEXT NOT NULL,
+      environment TEXT NOT NULL DEFAULT 'production',
+      sync_token TEXT,
+      display_name TEXT,
+      company_name TEXT,
+      print_on_check_name TEXT,
+      given_name TEXT,
+      middle_name TEXT,
+      family_name TEXT,
+      suffix TEXT,
+      primary_email TEXT,
+      primary_phone TEXT,
+      mobile_phone TEXT,
+      alternate_phone TEXT,
+      fax TEXT,
+      website TEXT,
+      bill_addr_text TEXT,
+      bill_addr_line1 TEXT,
+      bill_addr_line2 TEXT,
+      bill_addr_line3 TEXT,
+      bill_addr_city TEXT,
+      bill_addr_state TEXT,
+      bill_addr_postal_code TEXT,
+      bill_addr_country TEXT,
+      acct_num TEXT,
+      vendor_1099 INTEGER NOT NULL DEFAULT 0,
+      tax_identifier_last4 TEXT,
+      balance REAL NOT NULL DEFAULT 0,
+      active INTEGER NOT NULL DEFAULT 1,
+      raw_json TEXT NOT NULL DEFAULT '{}',
+      qbo_created_at TEXT,
+      qbo_updated_at TEXT,
+      first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_quickbooks_vendors_display_name
+      ON quickbooks_vendors(display_name, company_name);
+
+    -- Tombstones for QuickBooks vendors a manager deleted from the directory.
+    -- The QBO auto-sync consults this list and will NOT re-create a contractor
+    -- profile for any qbo_id recorded here, so a delete actually sticks.
+    CREATE TABLE IF NOT EXISTS quickbooks_vendor_suppressions (
+      qbo_id TEXT PRIMARY KEY,
+      realm_id TEXT,
+      environment TEXT,
+      vendor_name TEXT,
+      suppressed_by TEXT,
+      suppressed_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS quickbooks_bills (
       qbo_id TEXT PRIMARY KEY,
       realm_id TEXT NOT NULL,
@@ -1231,6 +1285,19 @@ function initializeSchema() {
       phone TEXT,
       billing_address TEXT,
       account_number TEXT,
+      quickbooks_vendor_id TEXT,
+      quickbooks_display_name TEXT,
+      quickbooks_company_name TEXT,
+      quickbooks_print_on_check_name TEXT,
+      quickbooks_primary_email TEXT,
+      quickbooks_primary_phone TEXT,
+      quickbooks_bill_addr TEXT,
+      quickbooks_account_number TEXT,
+      quickbooks_vendor_1099 INTEGER NOT NULL DEFAULT 0,
+      quickbooks_tax_identifier_last4 TEXT,
+      quickbooks_balance REAL NOT NULL DEFAULT 0,
+      quickbooks_active INTEGER NOT NULL DEFAULT 1,
+      quickbooks_synced_at TEXT,
       contractor_status TEXT NOT NULL DEFAULT 'active' CHECK(contractor_status IN ('active','terminated','will_use_again')),
       contractor_category TEXT,
       contractor_secondary_category TEXT,
@@ -1251,6 +1318,9 @@ function initializeSchema() {
 
     CREATE INDEX IF NOT EXISTS idx_contractor_profiles_linked_user
       ON contractor_profiles(linked_user_id);
+
+    CREATE INDEX IF NOT EXISTS idx_contractor_profiles_qbo_vendor
+      ON contractor_profiles(quickbooks_vendor_id);
 
     CREATE TABLE IF NOT EXISTS contractor_onboarding_requests (
       id TEXT PRIMARY KEY,
@@ -1936,6 +2006,14 @@ function initializeSchema() {
   try { db.exec(`ALTER TABLE photos ADD COLUMN correction_deleted_by TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE photos ADD COLUMN correction_delete_reason TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE photos ADD COLUMN updated_at TEXT`); } catch (_) { /* already exists */ }
+  // Photo markup/annotation overlay (FUNCTION 1 punch-list + FUNCTION 2 field-update).
+  // Additive + nullable: the ORIGINAL image (filename/storage_path) is never modified.
+  // markup_path = relative path (under uploads/{projectId}/) of the flattened annotated image;
+  // markup_json = vector annotation data so markup stays re-editable.
+  try { db.exec(`ALTER TABLE photos ADD COLUMN markup_path TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN markup_json TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN markup_drawn_at TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN markup_drawn_by TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`UPDATE photos SET updated_at = COALESCE(updated_at, created_at, datetime('now')) WHERE updated_at IS NULL`); } catch (_) { /* best-effort */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_photos_project_type_taken ON photos(project_id, photo_type, taken_at, created_at)`); } catch (_) { /* best-effort */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_photos_note_taken ON photos(note_id, taken_at, created_at)`); } catch (_) { /* best-effort */ }
@@ -2023,6 +2101,7 @@ function initializeSchema() {
 	  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_invoices_source_attachment ON invoices(source_intake_id, source_attachment_id)`); } catch (_) { /* best-effort */ }
 	  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_invoices_quickbooks_bill ON invoices(quickbooks_bill_id)`); } catch (_) { /* best-effort */ }
 	  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_invoices_quickbooks_doc ON invoices(quickbooks_doc_number, quickbooks_payment_status)`); } catch (_) { /* best-effort */ }
+	  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_quickbooks_vendors_display_name ON quickbooks_vendors(display_name, company_name)`); } catch (_) { /* best-effort */ }
 	  try { db.exec(`ALTER TABLE quickbooks_bills ADD COLUMN qbo_class_id TEXT`); } catch (_) { /* already exists */ }
 	  try { db.exec(`ALTER TABLE quickbooks_bills ADD COLUMN qbo_class_name TEXT`); } catch (_) { /* already exists */ }
 	  try { db.exec(`ALTER TABLE quickbooks_bills ADD COLUMN payment_approval_status TEXT NOT NULL DEFAULT 'not_approved'`); } catch (_) { /* already exists */ }
@@ -2132,6 +2211,48 @@ function initializeSchema() {
 	        used_at TEXT,
 	        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 	      );
+
+	      CREATE TABLE IF NOT EXISTS quickbooks_vendors (
+	        qbo_id TEXT PRIMARY KEY,
+	        realm_id TEXT NOT NULL,
+	        environment TEXT NOT NULL DEFAULT 'production',
+	        sync_token TEXT,
+	        display_name TEXT,
+	        company_name TEXT,
+	        print_on_check_name TEXT,
+	        given_name TEXT,
+	        middle_name TEXT,
+	        family_name TEXT,
+	        suffix TEXT,
+	        primary_email TEXT,
+	        primary_phone TEXT,
+	        mobile_phone TEXT,
+	        alternate_phone TEXT,
+	        fax TEXT,
+	        website TEXT,
+	        bill_addr_text TEXT,
+	        bill_addr_line1 TEXT,
+	        bill_addr_line2 TEXT,
+	        bill_addr_line3 TEXT,
+	        bill_addr_city TEXT,
+	        bill_addr_state TEXT,
+	        bill_addr_postal_code TEXT,
+	        bill_addr_country TEXT,
+	        acct_num TEXT,
+	        vendor_1099 INTEGER NOT NULL DEFAULT 0,
+	        tax_identifier_last4 TEXT,
+	        balance REAL NOT NULL DEFAULT 0,
+	        active INTEGER NOT NULL DEFAULT 1,
+	        raw_json TEXT NOT NULL DEFAULT '{}',
+	        qbo_created_at TEXT,
+	        qbo_updated_at TEXT,
+	        first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+	        last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+	        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+	      );
+
+	      CREATE INDEX IF NOT EXISTS idx_quickbooks_vendors_display_name
+	        ON quickbooks_vendors(display_name, company_name);
 
 	      CREATE TABLE IF NOT EXISTS quickbooks_bills (
 	        qbo_id TEXT PRIMARY KEY,
@@ -2331,7 +2452,21 @@ function initializeSchema() {
   try { db.exec(`ALTER TABLE contractor_profiles ADD COLUMN is_supplier INTEGER NOT NULL DEFAULT 0`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE contractor_profiles ADD COLUMN supplier_marked_at TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE contractor_profiles ADD COLUMN supplier_marked_by TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE contractor_profiles ADD COLUMN quickbooks_vendor_id TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE contractor_profiles ADD COLUMN quickbooks_display_name TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE contractor_profiles ADD COLUMN quickbooks_company_name TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE contractor_profiles ADD COLUMN quickbooks_print_on_check_name TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE contractor_profiles ADD COLUMN quickbooks_primary_email TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE contractor_profiles ADD COLUMN quickbooks_primary_phone TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE contractor_profiles ADD COLUMN quickbooks_bill_addr TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE contractor_profiles ADD COLUMN quickbooks_account_number TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE contractor_profiles ADD COLUMN quickbooks_vendor_1099 INTEGER NOT NULL DEFAULT 0`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE contractor_profiles ADD COLUMN quickbooks_tax_identifier_last4 TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE contractor_profiles ADD COLUMN quickbooks_balance REAL NOT NULL DEFAULT 0`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE contractor_profiles ADD COLUMN quickbooks_active INTEGER NOT NULL DEFAULT 1`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE contractor_profiles ADD COLUMN quickbooks_synced_at TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_contractor_profiles_supplier ON contractor_profiles(is_supplier, supplier_marked_at)`); } catch (_) { /* best-effort */ }
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_contractor_profiles_qbo_vendor ON contractor_profiles(quickbooks_vendor_id)`); } catch (_) { /* best-effort */ }
   try { db.exec(`UPDATE contractor_profiles SET contractor_status = 'active' WHERE contractor_status IS NULL OR contractor_status NOT IN ('active','terminated','will_use_again')`); } catch (_) { /* best-effort */ }
   try {
     const rows = db.prepare(`

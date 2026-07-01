@@ -18,6 +18,9 @@ import { useAuthStore, canChangeProjectStatus } from '../store/authStore';
 import { mobilePath } from '../lib/appUrls';
 import { fileDropHandlers } from '../lib/fileDrop';
 import { notifyMobileDataChanged } from '../lib/mobileEvents';
+import PhotoMarkupModal from '../components/PhotoMarkupModal';
+import { photoDisplaySrc } from '../lib/photoMarkup';
+import { getProgressMediaKind } from '../lib/progressMedia';
 
 interface PunchItem {
   id: string;
@@ -117,6 +120,7 @@ export default function MobilePunchList() {
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
 
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [markupPhoto, setMarkupPhoto] = useState<any | null>(null);
 
   const stats = useMemo(() => {
     const open = items.filter(isOpenItem).length;
@@ -657,11 +661,27 @@ export default function MobilePunchList() {
                   </div>
                 ) : itemPhotos.length ? (
                   <div className="bt-mobile-photo-grid">
-                    {itemPhotos.map(photo => (
-                      <button type="button" key={photo.id} onClick={() => setLightboxUrl(`/uploads/${id}/${photo.filename}`)}>
-                        <img src={`/uploads/${id}/${photo.filename}`} alt={photo.caption || photo.original_name} />
-                      </button>
-                    ))}
+                    {itemPhotos.map(photo => {
+                      const src = photoDisplaySrc(String(id), photo);
+                      const isImage = getProgressMediaKind(photo) === 'image';
+                      return (
+                        <div key={photo.id} style={{ position: 'relative', aspectRatio: '1', borderRadius: 14, overflow: 'hidden', background: '#E2E8F0' }}>
+                          <button type="button" onClick={() => setLightboxUrl(src)} style={{ display: 'block', width: '100%', height: '100%', border: 0, padding: 0 }}>
+                            <img src={src} alt={photo.caption || photo.original_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          </button>
+                          {isImage && (
+                            <button
+                              type="button"
+                              onClick={() => setMarkupPhoto(photo)}
+                              aria-label="Mark up photo"
+                              style={{ position: 'absolute', left: 6, bottom: 6, minHeight: 32, padding: '4px 10px', borderRadius: 10, border: '1px solid #FCD34D', background: '#F59E0B', color: '#0f172a', fontSize: 11, fontWeight: 800 }}
+                            >
+                              Mark up
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="bt-mobile-no-photos">
@@ -683,6 +703,23 @@ export default function MobilePunchList() {
           </button>
         </div>
       )}
+
+      <PhotoMarkupModal
+        open={Boolean(markupPhoto)}
+        projectId={String(id)}
+        photo={markupPhoto}
+        onClose={() => setMarkupPhoto(null)}
+        onSaved={async () => {
+          setMarkupPhoto(null);
+          if (id && photoItemId) {
+            try {
+              const res = await api.get(`/projects/${id}/photos?punch_list_item_id=${photoItemId}`);
+              setItemPhotos(Array.isArray(res.data) ? res.data : []);
+            } catch { /* ignore refresh errors */ }
+          }
+          notifyMobileDataChanged({ entity: 'punch_list_photo', action: 'markup', projectId: id });
+        }}
+      />
 
       <div className="bt-mobile-floating-status" aria-live="polite">
         <CheckCircle2 size={18} />

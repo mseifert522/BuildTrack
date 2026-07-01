@@ -51,6 +51,22 @@ interface ConnectedProject {
   status?: string | null;
 }
 
+interface QuickBooksVendorInfo {
+  id?: string | null;
+  display_name?: string | null;
+  company_name?: string | null;
+  print_on_check_name?: string | null;
+  primary_email?: string | null;
+  primary_phone?: string | null;
+  billing_address?: string | null;
+  account_number?: string | null;
+  vendor_1099?: boolean | number | null;
+  tax_identifier_last4?: string | null;
+  balance?: number | null;
+  active?: boolean | number | null;
+  synced_at?: string | null;
+}
+
 interface ContractorRow {
   id: string;
   name: string;
@@ -61,6 +77,20 @@ interface ContractorRow {
   company?: string | null;
   billing_address?: string | null;
   account_number?: string | null;
+  quickbooks_vendor_id?: string | null;
+  quickbooks_display_name?: string | null;
+  quickbooks_company_name?: string | null;
+  quickbooks_print_on_check_name?: string | null;
+  quickbooks_primary_email?: string | null;
+  quickbooks_primary_phone?: string | null;
+  quickbooks_bill_addr?: string | null;
+  quickbooks_account_number?: string | null;
+  quickbooks_vendor_1099?: boolean | number | null;
+  quickbooks_tax_identifier_last4?: string | null;
+  quickbooks_balance?: number | null;
+  quickbooks_active?: boolean | number | null;
+  quickbooks_synced_at?: string | null;
+  quickbooks_vendor?: QuickBooksVendorInfo | null;
   contractor_status?: 'active' | 'terminated' | 'will_use_again' | string | null;
   contractor_category?: string | null;
   contractor_secondary_category?: string | null;
@@ -199,16 +229,49 @@ const contractorAddressLine = (value?: string | null) => {
   return address || 'No address on file';
 };
 
-const directoryAddressLine = (value?: string | null) => {
+const quickBooksVendorInfo = (contractor: ContractorRow): QuickBooksVendorInfo | null =>
+  contractor.quickbooks_vendor || (contractor.quickbooks_vendor_id ? {
+    id: contractor.quickbooks_vendor_id,
+    display_name: contractor.quickbooks_display_name,
+    company_name: contractor.quickbooks_company_name,
+    print_on_check_name: contractor.quickbooks_print_on_check_name,
+    primary_email: contractor.quickbooks_primary_email,
+    primary_phone: contractor.quickbooks_primary_phone,
+    billing_address: contractor.quickbooks_bill_addr,
+    account_number: contractor.quickbooks_account_number,
+    vendor_1099: contractor.quickbooks_vendor_1099,
+    tax_identifier_last4: contractor.quickbooks_tax_identifier_last4,
+    balance: contractor.quickbooks_balance,
+    active: contractor.quickbooks_active,
+    synced_at: contractor.quickbooks_synced_at,
+  } : null);
+
+const contractorVendorAddress = (contractor: ContractorRow) =>
+  contractor.billing_address || quickBooksVendorInfo(contractor)?.billing_address || contractor.quickbooks_bill_addr || null;
+
+const contractorVendorPhone = (contractor: ContractorRow) =>
+  contractor.phone || quickBooksVendorInfo(contractor)?.primary_phone || contractor.quickbooks_primary_phone || null;
+
+const contractorVendorEmail = (contractor: ContractorRow) =>
+  contractor.email || quickBooksVendorInfo(contractor)?.primary_email || contractor.quickbooks_primary_email || null;
+
+const contractorVendorAccountNumber = (contractor: ContractorRow) =>
+  contractor.account_number || quickBooksVendorInfo(contractor)?.account_number || contractor.quickbooks_account_number || null;
+
+const quickBooksBoolean = (value?: boolean | number | null) =>
+  value === true || Number(value || 0) === 1;
+
+const directoryAddressLine = (contractor: ContractorRow) => {
+  const value = contractorVendorAddress(contractor);
   const address = (value || '').replace(/\s+/g, ' ').trim();
   return address || 'No address listed';
 };
 
 const directoryContactLine = (contractor: ContractorRow) =>
-  (contractor.contact_name || contractor.company || '').trim() || 'No contact person';
+  (contractor.contact_name || contractor.company || quickBooksVendorInfo(contractor)?.company_name || '').trim() || 'No contact person';
 
 const directoryPhoneLine = (contractor: ContractorRow) =>
-  (contractor.phone || '').trim() || 'No phone listed';
+  (contractorVendorPhone(contractor) || '').trim() || 'No phone listed';
 
 const uniqueTextList = (values: Array<string | null | undefined>) => {
   const seen = new Set<string>();
@@ -443,6 +506,8 @@ export default function Contractors() {
   const [savingSupplier, setSavingSupplier] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
   const [deletingContractorId, setDeletingContractorId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [deletingContractorNoteId, setDeletingContractorNoteId] = useState<string | null>(null);
   const [requestingSetupId, setRequestingSetupId] = useState<string | null>(null);
   const [setupLinks, setSetupLinks] = useState<Record<string, { url: string; expires_at?: string }>>({});
@@ -453,9 +518,11 @@ export default function Contractors() {
   const [sensitive1099Details, setSensitive1099Details] = useState<Record<string, Sensitive1099Details>>({});
   const [visible1099Details, setVisible1099Details] = useState<Record<string, boolean>>({});
   const [loading1099DetailsId, setLoading1099DetailsId] = useState<string | null>(null);
-  const canAddCategories = currentUser ? ['super_admin', 'operations_manager'].includes(currentUser.role) : false;
-  const canReveal1099Details = currentUser ? ['super_admin', 'operations_manager'].includes(currentUser.role) : false;
-  const canDeleteNotes = currentUser ? ['super_admin', 'operations_manager'].includes(currentUser.role) : false;
+  const canManageVendors = currentUser ? ['super_admin', 'operations_manager'].includes(currentUser.role) : false;
+  const canAddCategories = canManageVendors;
+  const canReveal1099Details = canManageVendors;
+  const canDeleteNotes = canManageVendors;
+  const canDeleteContractors = canManageVendors;
 
   const loadDirectory = async () => {
     const [directoryRes, projectsRes] = await Promise.all([
@@ -822,6 +889,7 @@ export default function Contractors() {
   };
 
   const deleteContractor = async (contractor: ContractorRow) => {
+    if (!canDeleteContractors || deletingContractorId) return;
     const confirmed = window.confirm(`Delete ${contractor.name} from the combined directory? Notes and project links for this record will also be removed.`);
     if (!confirmed) return;
 
@@ -931,6 +999,64 @@ export default function Contractors() {
       || a.name.localeCompare(b.name)
     );
   }, [combinedDirectoryRows, query]);
+
+  // Keep the multi-select selection scoped to what is currently visible, so a
+  // search/filter change can never leave hidden rows silently selected for deletion.
+  useEffect(() => {
+    setSelectedIds(prev => {
+      if (prev.size === 0) return prev;
+      const visible = new Set(filteredContractors.map(c => c.id));
+      let changed = false;
+      const next = new Set<string>();
+      prev.forEach(id => { if (visible.has(id)) next.add(id); else changed = true; });
+      return changed ? next : prev;
+    });
+  }, [filteredContractors]);
+
+  const allVisibleSelected = filteredContractors.length > 0 && filteredContractors.every(c => selectedIds.has(c.id));
+
+  const toggleSelectContractor = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllVisible = () => {
+    setSelectedIds(prev => {
+      if (filteredContractors.length > 0 && filteredContractors.every(c => prev.has(c.id))) return new Set();
+      return new Set(filteredContractors.map(c => c.id));
+    });
+  };
+
+  const bulkDeleteContractors = async () => {
+    if (!canDeleteContractors || bulkDeleting) return;
+    const ids = filteredContractors.filter(c => selectedIds.has(c.id)).map(c => c.id);
+    if (ids.length === 0) return;
+    const confirmed = window.confirm(
+      `Delete ${ids.length} selected record${ids.length === 1 ? '' : 's'} from the directory? ` +
+      `Notes and project links for these records will also be removed. ` +
+      `QuickBooks-linked vendors will be blocked from re-importing so they stay deleted.`
+    );
+    if (!confirmed) return;
+
+    setBulkDeleting(true);
+    try {
+      const res = await api.post('/users/contractors/bulk-delete', { ids });
+      const deletedIds: string[] = res.data?.deleted_ids || ids;
+      const deletedSet = new Set(deletedIds);
+      setContractors(prev => prev.filter(item => !deletedSet.has(item.id)));
+      setSelectedIds(new Set());
+      if (expandedContractorId && deletedSet.has(expandedContractorId)) setExpandedContractorId(null);
+      if (selectedContractorId && deletedSet.has(selectedContractorId)) setSelectedContractorId(null);
+      toast.success(res.data?.message || `Deleted ${deletedIds.length} record${deletedIds.length === 1 ? '' : 's'}`);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to delete selected records');
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
 
   const filteredProjectOptions = projects.filter(project => {
     const q = projectFilter.trim().toLowerCase();
@@ -1077,13 +1203,53 @@ export default function Contractors() {
           </div>
         ) : (
           <div className="bt-table-wrap bt-directory-list p-2">
-            <div className="bt-directory-list-header hidden rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-black uppercase tracking-wide text-slate-500 xl:grid xl:grid-cols-[minmax(210px,1.1fr)_minmax(220px,1fr)_minmax(260px,1.25fr)_minmax(190px,0.9fr)_minmax(160px,0.75fr)_80px] xl:gap-4">
+            {canDeleteContractors && (
+              <div className="bt-directory-bulkbar mb-2 flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5">
+                <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-black uppercase tracking-wide text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    onChange={toggleSelectAllVisible}
+                    disabled={bulkDeleting || filteredContractors.length === 0}
+                    style={{ accentColor: '#2563eb' }}
+                    className="h-4 w-4 cursor-pointer rounded border-slate-400"
+                    aria-label="Select all vendors"
+                  />
+                  Select all ({filteredContractors.length})
+                </label>
+                {selectedIds.size > 0 ? (
+                  <>
+                    <span className="text-xs font-black text-blue-700">{selectedIds.size} selected</span>
+                    <button
+                      type="button"
+                      onClick={bulkDeleteContractors}
+                      disabled={bulkDeleting}
+                      className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-red-500 bg-red-600 px-3 py-2 text-xs font-black text-white shadow-sm transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      {bulkDeleting ? 'Deleting...' : `Delete selected (${selectedIds.size})`}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedIds(new Set())}
+                      disabled={bulkDeleting}
+                      className="inline-flex min-h-9 items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-600 shadow-sm transition hover:bg-slate-100 disabled:opacity-60"
+                    >
+                      Clear
+                    </button>
+                  </>
+                ) : (
+                  <span className="text-xs font-semibold text-slate-400">Check vendors to delete several at once</span>
+                )}
+              </div>
+            )}
+            <div className={`bt-directory-list-header hidden rounded-lg border border-slate-200 bg-slate-50 py-3 text-xs font-black uppercase tracking-wide text-slate-500 xl:grid xl:grid-cols-[minmax(210px,1.1fr)_minmax(220px,1fr)_minmax(260px,1.25fr)_minmax(190px,0.9fr)_minmax(160px,0.75fr)_80px] xl:gap-4 ${canDeleteContractors ? 'pl-12 pr-4' : 'px-4'}`}>
               <span>Name</span>
               <span>Category</span>
               <span>Address</span>
               <span>Contact Person</span>
               <span>Phone Number</span>
-              <span className="text-right">Open</span>
+              <span className="text-right">{canDeleteContractors ? 'Actions' : 'Open'}</span>
             </div>
             <div className="mt-2 space-y-2">
               {filteredContractors.map((contractor) => {
@@ -1097,33 +1263,40 @@ export default function Contractors() {
               const statusMeta = contractorStatusMeta(contractor.contractor_status);
               const contractorCategories = contractorCategoryList(contractor);
               const isExpanded = expandedContractorId === contractor.id;
-              const addressLine = directoryAddressLine(contractor.billing_address);
+              const qboVendor = quickBooksVendorInfo(contractor);
+              const addressLine = directoryAddressLine(contractor);
               const contactLine = directoryContactLine(contractor);
               const phoneLine = directoryPhoneLine(contractor);
               const recordLabel = directoryRecordLabel(contractor);
               return (
                 <div
                   key={contractor.id}
-                  onClick={(event) => {
-                    const target = event.target as HTMLElement;
-                    if (target.closest('button,a,input,textarea,select,label')) return;
-                    setExpandedContractorId(current => current === contractor.id ? null : contractor.id);
-                  }}
-                  className={`bt-directory-card overflow-hidden rounded-lg border border-l-4 transition-colors cursor-pointer ${isExpanded ? 'is-expanded border-blue-300 border-l-blue-600 bg-blue-50 ring-1 ring-blue-100' : 'border-slate-200 border-l-slate-400 bg-white hover:border-blue-200 hover:bg-slate-50'}`}
-                  title={isExpanded ? 'Click to collapse directory details' : 'Click to expand directory details'}
+                  className={`bt-directory-card relative overflow-hidden rounded-lg border border-l-4 transition-colors ${isExpanded ? 'is-expanded border-blue-300 border-l-blue-600 bg-blue-50 ring-1 ring-blue-100' : 'border-slate-200 border-l-slate-400 bg-white hover:border-blue-200 hover:bg-slate-50'}`}
                 >
                   <div>
-                    <div
-                      role="button"
-                      tabIndex={0}
+                    {canDeleteContractors && (
+                      <div
+                        className="absolute left-3 top-4 z-20 flex items-center xl:top-1/2 xl:-translate-y-1/2"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(contractor.id)}
+                          onChange={() => toggleSelectContractor(contractor.id)}
+                          disabled={bulkDeleting}
+                          style={{ accentColor: '#2563eb' }}
+                          className="h-4 w-4 cursor-pointer rounded border-slate-400"
+                          aria-label={`Select ${contractor.name}`}
+                          title={`Select ${contractor.name}`}
+                        />
+                      </div>
+                    )}
+                    <button
+                      type="button"
                       onClick={() => setExpandedContractorId(current => current === contractor.id ? null : contractor.id)}
-                      onKeyDown={(event) => {
-                        if (event.key !== 'Enter' && event.key !== ' ') return;
-                        event.preventDefault();
-                        setExpandedContractorId(current => current === contractor.id ? null : contractor.id);
-                      }}
                       aria-expanded={isExpanded}
-                      className="bt-directory-row grid w-full grid-cols-1 gap-3 px-4 py-4 text-left xl:grid-cols-[minmax(210px,1.1fr)_minmax(220px,1fr)_minmax(260px,1.25fr)_minmax(190px,0.9fr)_minmax(160px,0.75fr)_80px] xl:items-center xl:gap-4"
+                      aria-controls={`contractor-directory-details-${contractor.id}`}
+                      className={`bt-directory-row grid w-full cursor-pointer grid-cols-1 gap-3 py-4 text-left xl:grid-cols-[minmax(210px,1.1fr)_minmax(220px,1fr)_minmax(260px,1.25fr)_minmax(190px,0.9fr)_minmax(160px,0.75fr)_80px] xl:items-center xl:gap-4 ${canDeleteContractors ? 'pl-12 pr-32 sm:pr-36 xl:pr-40' : 'px-4'}`}
                     >
                       <div className="flex min-w-0 items-center gap-3">
                         <div className="bt-directory-avatar flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-slate-100 text-xs font-black text-slate-700 ring-1 ring-slate-200">
@@ -1132,6 +1305,9 @@ export default function Contractors() {
                         <div className="min-w-0">
                           <h2 className="truncate text-sm font-black text-gray-950">{contractor.name}</h2>
                           <p className="mt-1 text-xs font-semibold text-gray-500">{recordLabel}</p>
+                          {qboVendor?.id ? (
+                            <p className="mt-1 truncate text-[11px] font-black text-emerald-700">QuickBooks vendor linked</p>
+                          ) : null}
                         </div>
                       </div>
                       <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -1169,10 +1345,23 @@ export default function Contractors() {
                         <span className="truncate">{phoneLine}</span>
                       </div>
                       <div className="bt-directory-row-action flex items-center justify-end gap-2 text-xs font-black text-blue-700">
-                        <span>{isExpanded ? 'Hide details' : 'Expand'}</span>
+                        <span>{isExpanded ? 'Hide details' : 'View details'}</span>
                         <ChevronDown className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                       </div>
-                    </div>
+                    </button>
+                    {canDeleteContractors && (
+                      <button
+                        type="button"
+                        onClick={() => deleteContractor(contractor)}
+                        disabled={Boolean(deletingContractorId)}
+                        className="absolute right-3 top-3 z-10 inline-flex min-h-9 items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-black text-red-700 shadow-sm transition hover:bg-red-100 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-60 xl:top-1/2 xl:-translate-y-1/2"
+                        title={`Delete ${contractor.name}`}
+                        aria-label={`Delete ${contractor.name}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        {deletingContractorId === contractor.id ? 'Deleting...' : 'Delete'}
+                      </button>
+                    )}
 
                     {noteEntryOpen[contractor.id] && (
                       <div
@@ -1217,7 +1406,7 @@ export default function Contractors() {
                     )}
 
                     {isExpanded && (
-                      <div className="bt-directory-expanded border-t border-slate-200 bg-slate-50 px-4 py-4 md:px-5">
+                      <div id={`contractor-directory-details-${contractor.id}`} className="bt-directory-expanded border-t border-slate-200 bg-slate-50 px-4 py-4 md:px-5">
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                           <div className="flex flex-wrap items-center gap-2">
                             <span
@@ -1301,16 +1490,18 @@ export default function Contractors() {
                               <MessageSquare className="w-3.5 h-3.5" />
                               {contractor.note_count || 0} notes
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => deleteContractor(contractor)}
-                              disabled={deletingContractorId === contractor.id}
-                              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black transition-colors disabled:opacity-50"
-                              style={{ background: '#FEF2F2', color: '#B91C1C', border: '1px solid #FECACA' }}
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                              {deletingContractorId === contractor.id ? 'Deleting...' : 'Delete'}
-                            </button>
+                            {canDeleteContractors && (
+                              <button
+                                type="button"
+                                onClick={() => deleteContractor(contractor)}
+                                disabled={Boolean(deletingContractorId)}
+                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black transition-colors disabled:opacity-50"
+                                style={{ background: '#FEF2F2', color: '#B91C1C', border: '1px solid #FECACA' }}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                {deletingContractorId === contractor.id ? 'Deleting...' : 'Delete'}
+                              </button>
+                            )}
                           </div>
                         </div>
                         {setupLinks[contractor.id]?.url && (
@@ -1358,13 +1549,55 @@ export default function Contractors() {
                           </div>
                         )}
 
+                    <div className="mt-5 grid gap-4 lg:grid-cols-3">
+                      <div className="rounded-xl border border-slate-300 bg-white p-4 shadow-sm lg:col-span-2">
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <FileText className="h-4 w-4 text-emerald-600" />
+                            <p className="text-xs font-black uppercase tracking-wide text-gray-500">QuickBooks Vendor Record</p>
+                          </div>
+                          {qboVendor?.id ? (
+                            <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-black text-emerald-700 ring-1 ring-emerald-100">
+                              Synced
+                            </span>
+                          ) : (
+                            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-500">
+                              Not linked
+                            </span>
+                          )}
+                        </div>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          {detailLine('QuickBooks vendor name', qboVendor?.display_name || contractor.quickbooks_display_name)}
+                          {detailLine('Company name', qboVendor?.company_name || contractor.quickbooks_company_name)}
+                          {detailLine('Print on check as', qboVendor?.print_on_check_name || contractor.quickbooks_print_on_check_name)}
+                          {detailLine('QuickBooks vendor ID', qboVendor?.id || contractor.quickbooks_vendor_id)}
+                          {detailLine('QuickBooks phone', qboVendor?.primary_phone || contractor.quickbooks_primary_phone)}
+                          {detailLine('QuickBooks email', qboVendor?.primary_email || contractor.quickbooks_primary_email)}
+                          {detailLine('QuickBooks account number', qboVendor?.account_number || contractor.quickbooks_account_number)}
+                          {detailLine('QuickBooks balance', qboVendor?.balance !== null && qboVendor?.balance !== undefined ? money(Number(qboVendor.balance)) : contractor.quickbooks_balance !== null && contractor.quickbooks_balance !== undefined ? money(Number(contractor.quickbooks_balance)) : null)}
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-slate-300 bg-white p-4 shadow-sm">
+                        <div className="mb-3 flex items-center gap-2">
+                          <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                          <p className="text-xs font-black uppercase tracking-wide text-gray-500">1099 Status</p>
+                        </div>
+                        <div className="space-y-3">
+                          {detailLine('QuickBooks 1099 vendor', quickBooksBoolean(qboVendor?.vendor_1099 ?? contractor.quickbooks_vendor_1099) ? 'Yes' : 'No')}
+                          {detailLine('QuickBooks Tax ID', (qboVendor?.tax_identifier_last4 || contractor.quickbooks_tax_identifier_last4) ? `Ending ${qboVendor?.tax_identifier_last4 || contractor.quickbooks_tax_identifier_last4}` : null)}
+                          {detailLine('Contractor setup tax ID', contractor.tax_id_last4 ? `Ending ${contractor.tax_id_last4}` : null)}
+                          {detailLine('Vendor active in QuickBooks', quickBooksBoolean(qboVendor?.active ?? contractor.quickbooks_active ?? 1) ? 'Yes' : 'No')}
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="grid lg:grid-cols-12 gap-4 mt-5">
                       <div className="lg:col-span-3 rounded-xl border border-slate-300 p-4 bg-slate-100 shadow-sm">
                         <div className="flex items-center gap-2 mb-2">
                           <Building2 className="w-4 h-4 text-gray-400" />
                           <p className="text-xs font-black uppercase tracking-wide text-gray-500">Billing Address</p>
                         </div>
-                        <p className="text-sm text-gray-800 whitespace-pre-wrap">{contractor.billing_address || 'No billing address on file'}</p>
+                        <p className="text-sm text-gray-800 whitespace-pre-wrap">{contractorVendorAddress(contractor) || 'No billing address on file'}</p>
                       </div>
 
                       <div className="lg:col-span-3 rounded-xl border border-slate-300 bg-slate-50 p-4 shadow-sm">
@@ -1687,6 +1920,7 @@ export default function Contractors() {
         const contractor = selectedContractor;
         const connectedProjects = contractor.connected_projects || [];
         const contractorCategories = contractorCategoryList(contractor);
+        const qboVendor = quickBooksVendorInfo(contractor);
         const statusMeta = contractorStatusMeta(contractor.contractor_status);
         const setupComplete = isSetupComplete(contractor);
         const setupPending = isSetupPending(contractor);
@@ -1706,7 +1940,7 @@ export default function Contractors() {
           <Modal
             isOpen={!!selectedContractor}
             onClose={() => setSelectedContractorId(null)}
-            title="Directory Record Details"
+            title="Vendor / Contractor Details"
             size="xl"
           >
             <div className="space-y-5">
@@ -1717,9 +1951,10 @@ export default function Contractors() {
                       {initials(contractor.name)}
                     </div>
                     <div className="min-w-0">
-                      <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Contractor profile</p>
+                      <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Vendor profile</p>
                       <h2 className="mt-1 break-words text-2xl font-black leading-tight text-slate-950">{contractor.name}</h2>
                       {contractor.contact_name ? <p className="mt-1 text-sm font-semibold text-slate-500">Contact: {contractor.contact_name}</p> : null}
+                      {qboVendor?.display_name ? <p className="mt-1 text-sm font-semibold text-emerald-700">QuickBooks: {qboVendor.display_name}</p> : null}
                       <div className="mt-3 flex flex-wrap gap-2">
                         <span
                           className="inline-flex rounded-full px-2.5 py-1 text-xs font-black"
@@ -1858,9 +2093,9 @@ export default function Contractors() {
                   <div className="space-y-3">
                     {detailLine('Contractor name', contractor.name)}
                     {detailLine('Contact person', contractor.contact_name)}
-                    {detailLine('Phone', contractor.phone)}
-                    {detailLine('Email', contractor.email)}
-                    {detailLine('Account number', contractor.account_number)}
+                    {detailLine('Phone', contractorVendorPhone(contractor))}
+                    {detailLine('Email', contractorVendorEmail(contractor))}
+                    {detailLine('Account number', contractorVendorAccountNumber(contractor))}
                   </div>
                 </div>
 
@@ -1874,6 +2109,7 @@ export default function Contractors() {
                     {detailLine('Categories', contractorCategories.length ? contractorCategories.join(', ') : null)}
                     {detailLine('Status', statusMeta.label)}
                     {detailLine('Source', contractor.source)}
+                    {detailLine('QuickBooks linked', qboVendor?.id ? 'Yes' : 'No')}
                     {detailLine('Created', formatDate(contractor.created_at))}
                     {detailLine('Updated', formatDate(contractor.updated_at))}
                   </div>
@@ -1885,8 +2121,35 @@ export default function Contractors() {
                     <h3 className="text-sm font-black text-gray-900">Address</h3>
                   </div>
                   <div className="space-y-3">
-                    {detailLine('Billing address', contractor.billing_address, 'min-h-[9rem]')}
+                    {detailLine('Billing address', contractorVendorAddress(contractor), 'min-h-[9rem]')}
                   </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
+                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-emerald-700" />
+                    <h3 className="text-sm font-black text-gray-900">QuickBooks Vendor Information</h3>
+                  </div>
+                  <span className="inline-flex w-fit rounded-full bg-white px-2.5 py-1 text-xs font-black text-emerald-800 ring-1 ring-emerald-200">
+                    {qboVendor?.id ? 'Synced from QuickBooks' : 'No QuickBooks vendor linked'}
+                  </span>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {detailLine('Vendor ID', qboVendor?.id || contractor.quickbooks_vendor_id)}
+                  {detailLine('Display name', qboVendor?.display_name || contractor.quickbooks_display_name)}
+                  {detailLine('Company name', qboVendor?.company_name || contractor.quickbooks_company_name)}
+                  {detailLine('Print on check', qboVendor?.print_on_check_name || contractor.quickbooks_print_on_check_name)}
+                  {detailLine('Phone', qboVendor?.primary_phone || contractor.quickbooks_primary_phone)}
+                  {detailLine('Email', qboVendor?.primary_email || contractor.quickbooks_primary_email)}
+                  {detailLine('Account number', qboVendor?.account_number || contractor.quickbooks_account_number)}
+                  {detailLine('Current balance', qboVendor?.balance !== null && qboVendor?.balance !== undefined ? money(Number(qboVendor.balance)) : contractor.quickbooks_balance !== null && contractor.quickbooks_balance !== undefined ? money(Number(contractor.quickbooks_balance)) : null)}
+                  {detailLine('1099 vendor', quickBooksBoolean(qboVendor?.vendor_1099 ?? contractor.quickbooks_vendor_1099) ? 'Yes' : 'No')}
+                  {detailLine('Tax ID', (qboVendor?.tax_identifier_last4 || contractor.quickbooks_tax_identifier_last4) ? `Ending ${qboVendor?.tax_identifier_last4 || contractor.quickbooks_tax_identifier_last4}` : null)}
+                  {detailLine('Active', quickBooksBoolean(qboVendor?.active ?? contractor.quickbooks_active ?? 1) ? 'Yes' : 'No')}
+                  {detailLine('Last synced', formatDate(qboVendor?.synced_at || contractor.quickbooks_synced_at))}
+                  {detailLine('QuickBooks billing address', qboVendor?.billing_address || contractor.quickbooks_bill_addr, 'sm:col-span-2 lg:col-span-4')}
                 </div>
               </div>
 
@@ -2148,11 +2411,11 @@ export default function Contractors() {
         );
       })()}
 
-      <Modal isOpen={addingContractor} onClose={() => setAddingContractor(false)} title="Add Contractor" size="lg">
+      <Modal isOpen={addingContractor} onClose={() => setAddingContractor(false)} title="Add Vendor / Contractor" size="lg">
         <div className="space-y-5">
           <div className="grid sm:grid-cols-2 gap-4">
             <div className="sm:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Contractor Name *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Vendor / Contractor Name *</label>
               <input value={addForm.vendor_name} onChange={e => setAddForm(prev => ({ ...prev, vendor_name: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
             <div>
@@ -2243,17 +2506,17 @@ export default function Contractors() {
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={() => setAddingContractor(false)} className="flex-1 py-2.5 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50">Cancel</button>
             <button type="button" onClick={saveAdd} disabled={savingAdd} className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
-              {savingAdd ? 'Adding...' : 'Add Contractor'}
+              {savingAdd ? 'Adding...' : 'Add Vendor'}
             </button>
           </div>
         </div>
       </Modal>
 
-      <Modal isOpen={!!editingContractor} onClose={() => setEditingContractor(null)} title="Edit Contractor" size="lg">
+      <Modal isOpen={!!editingContractor} onClose={() => setEditingContractor(null)} title="Vendor Details" size="lg">
         <div className="space-y-5">
           <div className="grid sm:grid-cols-2 gap-4">
             <div className="sm:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Contractor Name *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Vendor / Contractor Name *</label>
               <input value={editForm.vendor_name} onChange={e => setEditForm(prev => ({ ...prev, vendor_name: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
             <div>
@@ -2290,6 +2553,34 @@ export default function Contractors() {
               <textarea value={editForm.billing_address} onChange={e => setEditForm(prev => ({ ...prev, billing_address: e.target.value }))} rows={2} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
             </div>
           </div>
+
+          {editingContractor ? (() => {
+            const qboVendor = quickBooksVendorInfo(editingContractor);
+            return (
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
+                <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-black text-gray-900">QuickBooks Vendor Record</p>
+                    <p className="text-xs text-emerald-800">Read-only accounting fields synced through the QuickBooks API.</p>
+                  </div>
+                  <span className="inline-flex w-fit rounded-full bg-white px-2.5 py-1 text-xs font-black text-emerald-800 ring-1 ring-emerald-200">
+                    {qboVendor?.id ? 'Linked' : 'Not linked'}
+                  </span>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {detailLine('QuickBooks vendor ID', qboVendor?.id || editingContractor.quickbooks_vendor_id)}
+                  {detailLine('Display name', qboVendor?.display_name || editingContractor.quickbooks_display_name)}
+                  {detailLine('Company name', qboVendor?.company_name || editingContractor.quickbooks_company_name)}
+                  {detailLine('Print on check', qboVendor?.print_on_check_name || editingContractor.quickbooks_print_on_check_name)}
+                  {detailLine('QuickBooks phone', qboVendor?.primary_phone || editingContractor.quickbooks_primary_phone)}
+                  {detailLine('QuickBooks email', qboVendor?.primary_email || editingContractor.quickbooks_primary_email)}
+                  {detailLine('1099 vendor', quickBooksBoolean(qboVendor?.vendor_1099 ?? editingContractor.quickbooks_vendor_1099) ? 'Yes' : 'No')}
+                  {detailLine('Tax ID', (qboVendor?.tax_identifier_last4 || editingContractor.quickbooks_tax_identifier_last4) ? `Ending ${qboVendor?.tax_identifier_last4 || editingContractor.quickbooks_tax_identifier_last4}` : null)}
+                  {detailLine('QuickBooks billing address', qboVendor?.billing_address || editingContractor.quickbooks_bill_addr, 'sm:col-span-2')}
+                </div>
+              </div>
+            );
+          })() : null}
 
           <div className="rounded-2xl border border-gray-200 p-4">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
@@ -2346,7 +2637,7 @@ export default function Contractors() {
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={() => setEditingContractor(null)} className="flex-1 py-2.5 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50">Cancel</button>
             <button type="button" onClick={saveEdit} disabled={savingEdit} className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
-              {savingEdit ? 'Saving...' : 'Save Contractor'}
+              {savingEdit ? 'Saving...' : 'Save Vendor Details'}
             </button>
           </div>
         </div>

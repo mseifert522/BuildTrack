@@ -1,0 +1,92 @@
+/*
+ * Self-contained dark-navy theme for the global Quote Center (/quotes).
+ * Scoped to .bt-quotes-dark so it never affects other pages. This deliberately
+ * does NOT use the shared bt-invoices-light remap (which left gaps like
+ * bg-gray-50/60 and uses a warm near-black, not navy). Goal: dark navy
+ * surfaces + bright white text, fully readable, no gray.
+ */
+
+.bt-quotes-dark {
+  min-height: 100%;
+  background: linear-gradient(180deg, #0A1226 0%, #0B1430 100%);
+  color: #F4F7FC; /* bright base text */
+}
+
+/* ── Surfaces ─────────────────────────────────────────────────────────────── */
+.bt-quotes-dark .bg-white {
+  background: #121C38 !important;        /* navy card/table/panel */
+}
+.bt-quotes-dark .bg-gray-50 {
+  background: #0E1730 !important;        /* table header + chips (deep navy) */
+}
+.bt-quotes-dark .bg-gray-50\/60,
+.bt-quotes-dark .bg-gray-50\/70,
+.bt-quotes-dark .bg-gray-50\/55 {
+  background: #18254A !important;        /* expanded / nested panel (lighter navy) */
+}
+.bt-quotes-dark .bg-gray-100 {
+  background: #1B2848 !important;
+}
+
+/* ── Text hierarchy (bright white) ────────────────────────────────────────── */
+.bt-quotes-dark .text-gray-900,
+.bt-quotes-dark .text-gray-800,
+.bt-quotes-dark h1,
+.bt-quotes-dark h2,
+.bt-quotes-dark h3 {
+  color: #FFFFFF !important;
+}
+.bt-quotes-dark .text-gray-700 { color: #E7EEF9 !important; }
+.bt-quotes-dark .text-gray-600 { color: #CBD6E8 !important; }
+.bt-quotes-dark .text-gray-500 { color: #AEBBD2 !important; }
+.bt-quotes-dark .text-gray-400,
+.bt-quotes-dark .text-gray-300 { color: #93A1BC !important; }
+
+/* ── Borders ──────────────────────────────────────────────────────────────── */
+.bt-quotes-dark .border-gray-200,
+.bt-quotes-dark .border-gray-100,
+.bt-quotes-dark .border-gray-300 {
+  border-color: #29395C !important;
+}
+
+/* ── Accents (blue info / links) ──────────────────────────────────────────── */
+.bt-quotes-dark .text-blue-600,
+.bt-quotes-dark .text-blue-700 { color: #93C5FD !important; }
+.bt-quotes-dark .border-blue-100,
+.bt-quotes-dark .border-blue-200 { border-color: rgba(96, 165, 250, 0.45) !important; }
+.bt-quotes-dark .bg-blue-50,
+.bt-quotes-dark .bg-blue-50\/60 { background: rgba(59, 130, 246, 0.16) !important; }
+
+/* ── Semantic action chips (approve / deny) ───────────────────────────────── */
+.bt-quotes-dark .bg-green-50 { background: rgba(34, 197, 94, 0.18) !important; }
+.bt-quotes-dark .text-green-700 { color: #5EE08A !important; }
+.bt-quotes-dark .border-green-200 { border-color: rgba(34, 197, 94, 0.45) !important; }
+.bt-quotes-dark .bg-red-50 { background: rgba(239, 68, 68, 0.18) !important; }
+.bt-quotes-dark .text-red-700 { color: #FCA5A5 !important; }
+.bt-quotes-dark .border-red-200 { border-color: rgba(239, 68, 68, 0.45) !important; }
+.bt-quotes-dark .bg-amber-50 { background: rgba(217, 157, 38, 0.18) !important; }
+.bt-quotes-dark .text-amber-700 { color: #FBBF24 !important; }
+.bt-quotes-dark .border-amber-200 { border-color: rgba(217, 157, 38, 0.45) !important; }
+.bt-quotes-dark .hover\:bg-amber-100:hover { background: rgba(217, 157, 38, 0.30) !important; }
+
+/* ── Hover states ─────────────────────────────────────────────────────────── */
+.bt-quotes-dark .hover\:bg-amber-50\/40:hover { background: rgba(217, 157, 38, 0.12) !important; }
+.bt-quotes-dark .hover\:bg-gray-50:hover { background: #1B2848 !important; }
+.bt-quotes-dark .hover\:bg-green-100:hover { background: rgba(34, 197, 94, 0.30) !important; }
+.bt-quotes-dark .hover\:bg-red-100:hover { background: rgba(239, 68, 68, 0.30) !important; }
+.bt-quotes-dark .hover\:bg-blue-100:hover { background: rgba(59, 130, 246, 0.30) !important; }
+
+/* ── Form controls ────────────────────────────────────────────────────────── */
+.bt-quotes-dark input,
+.bt-quotes-dark select,
+.bt-quotes-dark textarea {
+  background: #0E1730 !important;
+  color: #F4F7FC !important;
+  border-color: #29395C !important;
+}
+.bt-quotes-dark input::placeholder,
+.bt-quotes-dark textarea::placeholder { color: #6E7C97 !important; }
+.bt-quotes-dark option { background: #0E1730; color: #F4F7FC; }
+
+/* Sticky table header/first-column cells inherit the navy header surface */
+.bt-quotes-dark thead th { background: #0E1730 !important; }

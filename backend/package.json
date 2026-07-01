@@ -6,13 +6,16 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test:agent-bridge": "node tests/agentBridge.test.js"
+    "test": "node tests/agentBridge.test.js && node tests/quoteAnalytics.test.js",
+    "test:agent-bridge": "node tests/agentBridge.test.js",
+    "test:quotes": "node tests/quoteAnalytics.test.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.107.0",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.8.0",
     "cors": "^2.8.6",

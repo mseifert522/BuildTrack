@@ -14,7 +14,14 @@
 }
 
 .ops-calendar {
-  min-height: calc(100vh - 118px);
+  /* Pin the whole calendar card to the viewport so the entire month
+     grid fits on one screen with no page scroll. The 124px offset
+     reserves the app header + page padding (calibrated from the original
+     100vh - 118px), with a small safety margin. */
+  height: calc(100vh - 124px);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   border: 1px solid #e4e0d8;
   border-radius: 8px;
@@ -29,7 +36,7 @@
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 14px;
-  padding: 16px 18px;
+  padding: 9px 16px;
   border-bottom: 1px solid #e4e0d8;
   background: #ffffff;
 }
@@ -56,9 +63,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: clamp(1.15rem, 1.8vw, 1.55rem);
+  font-size: clamp(1.05rem, 1.5vw, 1.35rem);
   font-weight: 800;
-  line-height: 1.2;
+  line-height: 1.15;
 }
 
 .ops-icon-button,
@@ -215,7 +222,7 @@
   grid-template-columns: minmax(180px, 1fr) auto minmax(170px, 240px);
   align-items: end;
   gap: 12px;
-  padding: 14px 18px;
+  padding: 9px 16px;
   border-bottom: 1px solid #e4e0d8;
   background: #fbfaf7;
 }
@@ -288,7 +295,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 12px 18px;
+  padding: 8px 16px;
   border-bottom: 1px solid #e4e0d8;
   background: #ffffff;
 }
@@ -329,7 +336,10 @@
 }
 
 .ops-calendar__body {
-  min-height: 560px;
+  flex: 1 1 auto;
+  min-height: 0;
+  /* Month view fits exactly (no scroll); week/day time grids scroll here. */
+  overflow: auto;
   background: #ffffff;
 }
 
@@ -355,6 +365,9 @@
 }
 
 .ops-month {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
 }
 
@@ -370,7 +383,7 @@
 }
 
 .ops-month__weekdays div {
-  padding: 10px 12px;
+  padding: 5px 10px;
   color: #5d625f;
   font-size: 0.76rem;
   font-weight: 900;
@@ -378,15 +391,23 @@
 }
 
 .ops-month__grid {
+  flex: 1 1 auto;
   min-width: 760px;
+  min-height: 0;
+  /* Six week-rows share the available height equally so the whole
+     month is visible without scrolling. */
+  grid-auto-rows: 1fr;
 }
 
 .ops-month-day {
-  min-height: 132px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
   border-right: 1px solid #e4e0d8;
   border-bottom: 1px solid #e4e0d8;
   background: #ffffff;
-  padding: 9px;
+  padding: 6px 7px;
 }
 
 .ops-month-day:nth-child(7n) {
@@ -406,7 +427,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
+  flex: 0 0 auto;
 }
 
 .ops-month-day__number,
@@ -420,12 +442,12 @@
 
 .ops-month-day__number {
   display: inline-flex;
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   font-weight: 900;
 }
 
@@ -436,27 +458,30 @@
 
 .ops-month-day__add {
   display: inline-flex;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   align-items: center;
   justify-content: center;
   border: 1px solid #d8d3c9;
   border-radius: 999px;
   color: #6f767d;
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 900;
 }
 
 .ops-month-day__events {
   display: grid;
-  gap: 5px;
+  gap: 3px;
+  min-height: 0;
+  overflow: hidden;
+  align-content: start;
 }
 
 .ops-event-chip {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   min-width: 0;
-  min-height: 32px;
+  min-height: 26px;
   align-items: center;
   gap: 8px;
   overflow: hidden;
@@ -489,13 +514,13 @@
 
 .ops-event-chip--compact {
   grid-template-columns: minmax(38px, auto) minmax(0, 1fr);
-  min-height: 28px;
+  min-height: 22px;
   padding: 0 7px;
 }
 
 .ops-more-button,
 .ops-empty-day {
-  min-height: 28px;
+  min-height: 20px;
   border: 0;
   border-radius: 7px;
   background: #f6f4ef;

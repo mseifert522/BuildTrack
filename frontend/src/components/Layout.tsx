@@ -279,6 +279,7 @@ export default function Layout({ children }: LayoutProps) {
     { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/operations-calendar', icon: CalendarDays, label: 'Calendar' },
     { to: '/projects', icon: FolderOpen, label: 'Projects' },
+    { to: '/quotes', icon: ClipboardList, label: 'Quotes' },
     { to: '/invoices', icon: FileText, label: 'Invoices' },
     { to: '/contractors', icon: Users, label: 'Vendors', match: ['/contractors', '/suppliers'] },
     ...(user && canAccessSecurity(user.role) ? [{ to: '/security', icon: ShieldCheck, label: 'Security' }] : []),
@@ -316,13 +317,13 @@ export default function Layout({ children }: LayoutProps) {
           </div>
           <div className="min-w-0">
             <p className="text-white font-bold text-sm leading-tight truncate">BuildTrack</p>
-            <p className="text-xs font-medium truncate" style={{ color: '#F4A261' }}>Construction Ops</p>
+            <p className="text-xs font-medium truncate" style={{ color: '#60a5fa' }}>Construction Ops</p>
           </div>
         </div>
         )}
           <button
             onClick={() => setSidebarCollapsed(current => !current)}
-            className="hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border transition-colors hover:border-orange-400/70 hover:text-orange-300 lg:flex"
+            className="hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border transition-colors hover:border-blue-400/70 hover:text-blue-300 lg:flex"
             style={{ color: 'rgba(255,255,255,0.48)', background: '#0E1012', borderColor: '#242A31' }}
             aria-label={collapsed ? 'Expand navigation menu' : 'Collapse navigation menu'}
             aria-expanded={!collapsed}
@@ -465,7 +466,7 @@ export default function Layout({ children }: LayoutProps) {
                 </div>
                 <div>
                   <p className="text-white font-bold text-sm">New Urban Dev</p>
-                  <p className="text-xs" style={{ color: '#D99D26' }}>Field Operations</p>
+                  <p className="text-xs" style={{ color: '#60a5fa' }}>Field Operations</p>
                 </div>
               </div>
               <button onClick={() => setSidebarOpen(false)} className="p-2 rounded-lg" style={{ color: 'rgba(255,255,255,0.4)' }} aria-label="Close navigation menu">
@@ -523,7 +524,7 @@ export default function Layout({ children }: LayoutProps) {
                 }}
                 onFocus={() => setSearchOpen(true)}
                 aria-label="Search BuildTrack"
-                className="w-full rounded-md py-2 pl-10 pr-10 text-sm font-medium placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                className="w-full rounded-md py-2 pl-10 pr-10 text-sm font-medium placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 style={{
                   background: '#111315',
                   color: 'var(--bt-text)',
@@ -567,7 +568,7 @@ export default function Layout({ children }: LayoutProps) {
                               {result.subtitle && <p className="text-xs text-gray-500 truncate mt-0.5">{result.subtitle}</p>}
                             </div>
                             <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                              <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">
+                              <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-amber-50 text-amber-300">
                                 {result.type}
                               </span>
                               {result.meta && <span className="text-[10px] text-gray-400 truncate max-w-[120px]">{result.meta}</span>}
@@ -594,7 +595,7 @@ export default function Layout({ children }: LayoutProps) {
                 style={{
                   background: location.pathname.startsWith('/users') ? '#1E1610' : '#111315',
                   border: `1px solid ${location.pathname.startsWith('/users') ? '#E78B4A' : '#343A42'}`,
-                  color: location.pathname.startsWith('/users') ? '#F4A261' : '#B8BEC6',
+                  color: location.pathname.startsWith('/users') ? '#60a5fa' : '#B8BEC6',
                 }}
               >
                 <Users className="w-[18px] h-[18px]" />
@@ -611,7 +612,7 @@ export default function Layout({ children }: LayoutProps) {
                 style={{
                   background: location.pathname.startsWith('/settings') ? '#1E1610' : '#111315',
                   border: `1px solid ${location.pathname.startsWith('/settings') ? '#E78B4A' : '#343A42'}`,
-                  color: location.pathname.startsWith('/settings') ? '#F4A261' : '#B8BEC6',
+                  color: location.pathname.startsWith('/settings') ? '#60a5fa' : '#B8BEC6',
                 }}
               >
                 <Settings className="w-[18px] h-[18px]" />
@@ -627,7 +628,7 @@ export default function Layout({ children }: LayoutProps) {
                 style={{
                   background: notificationsOpen ? '#1E1610' : '#111315',
                   border: `1px solid ${notificationsOpen ? '#E78B4A' : '#343A42'}`,
-                  color: notificationsOpen ? '#F4A261' : '#B8BEC6',
+                  color: notificationsOpen ? '#60a5fa' : '#B8BEC6',
                 }}
                 aria-label="Open notifications"
                 aria-haspopup="menu"
@@ -729,7 +730,7 @@ export default function Layout({ children }: LayoutProps) {
                 <div className="hidden min-w-0 text-left sm:block">
                   <p className="truncate text-[13px] font-bold leading-4" style={{ color: '#F8FAFC' }}>{user?.name}</p>
                   <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
-                    <p className="truncate text-[11px] font-semibold leading-3" style={{ color: '#F4A261' }}>
+                    <p className="truncate text-[11px] font-semibold leading-3" style={{ color: '#60a5fa' }}>
                       {user ? roleLabels[user.role] : ''}
                     </p>
                     <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full" style={{ background: '#059669' }} aria-label="Online now" />

@@ -8,6 +8,8 @@ import { fileDropHandlers } from '../lib/fileDrop';
 import { appendProgressUploadAudit, PROGRESS_MEDIA_ACCEPT } from '../lib/progressUpload';
 import { notifyMobileDataChanged } from '../lib/mobileEvents';
 import VoiceTextarea from '../components/VoiceTextarea';
+import PhotoMarkupModal from '../components/PhotoMarkupModal';
+import { getProgressMediaKind } from '../lib/progressMedia';
 
 const workStatuses = [
   ['not_started', 'Not Started'],
@@ -48,6 +50,7 @@ export default function MobileFieldWork() {
     target_date: '',
   });
   const [noteText, setNoteText] = useState('');
+  const [markupPhoto, setMarkupPhoto] = useState<any | null>(null);
 
   const load = async () => {
     if (!projectId) return;
@@ -184,11 +187,15 @@ export default function MobileFieldWork() {
         individualNotes: selected.map(() => evidenceNote),
         projectId,
       });
-      await api.post(`/projects/${projectId}/photos`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const uploadRes = await api.post(`/projects/${projectId}/photos`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       toast.success(evidenceNote ? 'Photo and note uploaded for review' : 'Evidence uploaded for review');
       clearTaskEvidenceDraft(task.id);
       await load();
       notifyMobileDataChanged({ entity: 'field_evidence', action: 'uploaded', projectId });
+      // Offer markup on the freshly uploaded evidence (it is already saved if skipped).
+      const uploaded = Array.isArray(uploadRes.data?.photos) ? uploadRes.data.photos : [];
+      const firstImage = uploaded.find((p: any) => getProgressMediaKind(p) === 'image') || uploaded[0];
+      if (firstImage) setMarkupPhoto(firstImage);
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to upload evidence');
     } finally {
@@ -427,6 +434,17 @@ export default function MobileFieldWork() {
           })}
         </section>
       </main>
+      <PhotoMarkupModal
+        open={Boolean(markupPhoto)}
+        projectId={String(projectId)}
+        photo={markupPhoto}
+        onClose={() => setMarkupPhoto(null)}
+        onSaved={async () => {
+          setMarkupPhoto(null);
+          await load();
+          notifyMobileDataChanged({ entity: 'field_evidence', action: 'markup', projectId });
+        }}
+      />
     </div>
   );
 }

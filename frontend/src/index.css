@@ -33,30 +33,126 @@
   isolation: isolate;
 }
 
+.bt-dashboard-calendar-stack {
+  position: relative;
+  float: right;
+  display: grid;
+  width: min(392px, 42%);
+  gap: 10px;
+  margin: 0 0 14px 16px;
+}
+
+.bt-dashboard-calendar-stack .bt-dashboard-mini-calendar-module {
+  float: none;
+  width: 100%;
+  margin: 0;
+}
+
+.bt-dashboard-payment-queue-reminder {
+  display: block;
+  overflow: hidden;
+  border: 2px solid #333a47;
+  border-radius: 14px;
+  background:
+    radial-gradient(90% 120% at 0% 0%, rgba(59, 130, 246, 0.10), transparent 48%),
+    linear-gradient(145deg, #1a1e27 0%, #1c1f29 58%, #14171e 100%);
+  color: #ededed;
+  text-decoration: none;
+  box-shadow:
+    0 16px 34px rgba(0, 0, 0, 0.45),
+    0 4px 0 rgba(0, 0, 0, 0.30),
+    0 0 0 1px rgba(255, 255, 255, 0.05),
+    inset 0 2px 0 rgba(255, 255, 255, 0.06);
+}
+
+.bt-dashboard-payment-queue-reminder__topline {
+  display: block;
+  height: 3px;
+  background: linear-gradient(90deg, #3b82f6, #6366f1 52%, #3ecf6a);
+  box-shadow: 0 0 18px rgba(59, 130, 246, 0.20);
+}
+
+.bt-dashboard-payment-queue-reminder__body {
+  display: flex;
+  min-height: 76px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.bt-dashboard-payment-queue-reminder__copy,
+.bt-dashboard-payment-queue-reminder__amount {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.bt-dashboard-payment-queue-reminder__kicker,
+.bt-dashboard-payment-queue-reminder__amount span {
+  color: #a1a1a1;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.bt-dashboard-payment-queue-reminder__copy strong {
+  overflow-wrap: anywhere;
+  color: #ededed;
+  font-size: 22px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.bt-dashboard-payment-queue-reminder__amount {
+  min-width: 118px;
+  border: 1px solid #333a47;
+  border-radius: 12px;
+  background: #242834;
+  padding: 9px 10px;
+  text-align: right;
+}
+
+.bt-dashboard-payment-queue-reminder__amount strong {
+  color: #3ecf6a;
+  font-size: 18px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.bt-dashboard-payment-queue-reminder:hover {
+  border-color: rgba(59, 130, 246, 0.55);
+  background:
+    radial-gradient(90% 120% at 0% 0%, rgba(59, 130, 246, 0.16), transparent 48%),
+    linear-gradient(145deg, #1b1b1b 0%, #1a1e27 58%, #15181f 100%);
+}
+
 .bt-dashboard-mini-calendar-module {
   position: relative;
   float: right;
   width: min(392px, 42%);
   margin: 0 0 14px 16px;
   overflow: hidden;
-  border: 2px solid rgba(125, 211, 252, 0.58);
+  border: 2px solid #333a47;
   border-radius: 14px;
   background:
-    radial-gradient(118% 110% at 0% 0%, rgba(45, 212, 191, 0.18), transparent 46%),
-    radial-gradient(100% 90% at 100% 0%, rgba(251, 191, 36, 0.13), transparent 42%),
-    linear-gradient(145deg, #122432 0%, #0B1722 54%, #07111B 100%);
+    radial-gradient(118% 110% at 0% 0%, rgba(59, 130, 246, 0.08), transparent 46%),
+    radial-gradient(100% 90% at 100% 0%, rgba(99, 102, 241, 0.06), transparent 42%),
+    linear-gradient(145deg, #1a1e27 0%, #171a22 54%, #14171e 100%);
   box-shadow:
-    0 22px 46px rgba(2, 6, 23, 0.40),
-    0 5px 0 rgba(0, 0, 0, 0.30),
-    0 0 0 1px rgba(255, 255, 255, 0.15),
-    inset 0 2px 0 rgba(255, 255, 255, 0.18),
-    inset 0 -4px 0 rgba(0, 0, 0, 0.26);
+    0 22px 46px rgba(0, 0, 0, 0.45),
+    0 5px 0 rgba(0, 0, 0, 0.32),
+    0 0 0 1px rgba(255, 255, 255, 0.05),
+    inset 0 2px 0 rgba(255, 255, 255, 0.06),
+    inset 0 -4px 0 rgba(0, 0, 0, 0.28);
 }
 
 .bt-dashboard-mini-calendar-module__topline {
   height: 3px;
-  background: linear-gradient(90deg, #34D399, #A3E635 48%, #FBBF24);
-  box-shadow: 0 0 18px rgba(163, 230, 53, 0.22);
+  background: linear-gradient(90deg, #3b82f6, #6366f1 48%, #3ecf6a);
+  box-shadow: 0 0 18px rgba(59, 130, 246, 0.20);
 }
 
 .bt-dashboard-mini-calendar-module__header,
@@ -74,7 +170,7 @@
 
 .bt-dashboard-mini-calendar-module__kicker {
   margin: 0;
-  color: #A7F3D0;
+  color: #a1a1a1;
   font-size: 10px;
   font-weight: 950;
   letter-spacing: 0.06em;
@@ -84,7 +180,7 @@
 
 .bt-dashboard-mini-calendar-module__header h3 {
   margin: 4px 0 0;
-  color: #F8FAFC;
+  color: #ededed;
   font-size: 17px;
   font-weight: 950;
   line-height: 1.15;
@@ -97,29 +193,29 @@
   min-height: 26px;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(191, 219, 254, 0.26);
+  border: 1px solid rgba(59, 130, 246, 0.30);
   border-radius: 999px;
-  background: rgba(37, 99, 235, 0.20);
-  color: #DBEAFE;
+  background: rgba(59, 130, 246, 0.16);
+  color: #93c5fd;
   font-size: 12px;
   font-weight: 950;
 }
 
 .bt-dashboard-mini-calendar-module__controls {
-  border-top: 1px solid rgba(148, 163, 184, 0.18);
-  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   padding: 8px 12px;
-  background: rgba(2, 6, 23, 0.20);
+  background: rgba(0, 0, 0, 0.25);
 }
 
 .bt-dashboard-mini-calendar-module__controls button,
 .bt-dashboard-mini-calendar-module__open {
-  border: 1px solid rgba(148, 163, 184, 0.32);
+  border: 1px solid #333a47;
   border-radius: 9px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)),
-    rgba(15, 23, 42, 0.78);
-  color: #E0F2FE;
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
+    #242834;
+  color: #ededed;
   font-size: 11px;
   font-weight: 950;
   line-height: 1;
@@ -141,8 +237,8 @@
 
 .bt-dashboard-mini-calendar-module__controls button:hover,
 .bt-dashboard-mini-calendar-module__open:hover {
-  border-color: rgba(125, 211, 252, 0.70);
-  background-color: rgba(14, 116, 144, 0.34);
+  border-color: rgba(59, 130, 246, 0.60);
+  background-color: rgba(59, 130, 246, 0.18);
 }
 
 .bt-dashboard-mini-calendar-module__weekdays,
@@ -156,7 +252,7 @@
 }
 
 .bt-dashboard-mini-calendar-module__weekdays span {
-  color: #93C5FD;
+  color: #a1a1a1;
   font-size: 10px;
   font-weight: 950;
   text-align: center;
@@ -172,37 +268,37 @@
   display: grid;
   min-height: 36px;
   place-items: center;
-  border: 1px solid rgba(148, 163, 184, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 9px;
-  background: rgba(15, 23, 42, 0.46);
-  color: #E5F2FF;
+  background: #1a1e27;
+  color: #ededed;
   font-size: 12px;
   font-weight: 950;
   line-height: 1;
 }
 
 .bt-dashboard-mini-calendar-module__grid button:hover {
-  border-color: rgba(125, 211, 252, 0.55);
-  background: rgba(8, 145, 178, 0.24);
+  border-color: rgba(59, 130, 246, 0.55);
+  background: rgba(59, 130, 246, 0.16);
 }
 
 .bt-dashboard-mini-calendar-module__grid button.is-muted {
-  color: #64748B;
+  color: #6b6b6b;
 }
 
 .bt-dashboard-mini-calendar-module__grid button.is-today {
-  border-color: rgba(251, 191, 36, 0.88);
-  color: #FEF3C7;
+  border-color: rgba(59, 130, 246, 0.85);
+  color: #bfdbfe;
 }
 
 .bt-dashboard-mini-calendar-module__grid button.is-selected {
-  border-color: rgba(52, 211, 153, 0.90);
+  border-color: rgba(59, 130, 246, 0.90);
   background:
-    linear-gradient(180deg, rgba(52, 211, 153, 0.34), rgba(20, 184, 166, 0.18)),
-    rgba(5, 46, 22, 0.40);
+    linear-gradient(180deg, rgba(59, 130, 246, 0.32), rgba(59, 130, 246, 0.14)),
+    rgba(15, 23, 42, 0.40);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.16),
-    0 0 0 1px rgba(52, 211, 153, 0.16);
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 0 0 1px rgba(59, 130, 246, 0.18);
 }
 
 .bt-dashboard-mini-calendar-module__grid strong {
@@ -211,7 +307,7 @@
   top: 4px;
   min-width: 15px;
   border-radius: 999px;
-  background: #2563EB;
+  background: #3b82f6;
   color: #FFFFFF;
   font-size: 9px;
   font-weight: 950;
@@ -220,13 +316,13 @@
 }
 
 .bt-dashboard-mini-calendar-module__agenda {
-  border-top: 1px solid rgba(148, 163, 184, 0.18);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
   padding: 11px 12px 12px;
-  background: rgba(2, 6, 23, 0.18);
+  background: rgba(0, 0, 0, 0.22);
 }
 
 .bt-dashboard-mini-calendar-module__agenda-title span {
-  color: #F8FAFC;
+  color: #ededed;
   font-size: 12px;
   font-weight: 950;
 }
@@ -242,9 +338,9 @@
   grid-template-columns: 4px minmax(0, 1fr);
   gap: 8px;
   width: 100%;
-  border: 1px solid rgba(148, 163, 184, 0.20);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 10px;
-  background: rgba(15, 23, 42, 0.56);
+  background: #242834;
   padding: 8px;
   text-align: left;
 }
@@ -263,7 +359,7 @@
 }
 
 .bt-dashboard-mini-calendar-module__agenda-item strong {
-  color: #F8FAFC;
+  color: #ededed;
   font-size: 11px;
   font-style: normal;
   font-weight: 950;
@@ -272,7 +368,7 @@
 .bt-dashboard-mini-calendar-module__agenda-item em,
 .bt-dashboard-mini-calendar-module__empty,
 .bt-dashboard-mini-calendar-module__more {
-  color: #BAE6FD;
+  color: #a1a1a1;
   font-size: 10px;
   font-style: normal;
   font-weight: 800;
@@ -280,7 +376,7 @@
 
 .bt-dashboard-mini-calendar-module__empty {
   margin: 9px 0 0;
-  border: 1px dashed rgba(125, 211, 252, 0.24);
+  border: 1px dashed rgba(255, 255, 255, 0.10);
   border-radius: 10px;
   padding: 10px;
   text-align: center;
@@ -300,6 +396,12 @@
 }
 
 @media (max-width: 1180px) {
+  .bt-dashboard-calendar-stack {
+    float: none;
+    width: 100%;
+    margin: 0 0 14px;
+  }
+
   .bt-dashboard-mini-calendar-module {
     float: none;
     width: 100%;
@@ -308,6 +410,16 @@
 }
 
 @media (max-width: 760px) {
+  .bt-dashboard-payment-queue-reminder__body {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .bt-dashboard-payment-queue-reminder__amount {
+    width: 100%;
+    text-align: left;
+  }
+
   .bt-dashboard-note-row {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
@@ -514,6 +626,7 @@ textarea,
   max-width: none;
   margin-inline: 0;
   padding: 0 !important;
+  background: #14171e;
 }
 
 /* Invoices stays full-bleed in WIDTH (immersive background) but keeps the
@@ -1637,45 +1750,77 @@ textarea,
 }
 
 .bt-sidebar-nav-item {
-  --bt-nav-accent: #D99D26;
+  --bt-nav-accent: #8A5A24;
+  --bt-nav-top: #344150;
+  --bt-nav-mid: #253241;
+  --bt-nav-bottom: #172331;
   min-height: 48px;
   isolation: isolate;
   overflow: hidden;
-  border: 1px solid rgba(226, 232, 240, 0.22);
+  border: 2px solid rgba(118, 136, 151, 0.72);
   border-radius: 14px !important;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.18) 0%, rgba(255, 255, 255, 0.08) 44%, rgba(0, 0, 0, 0.08) 100%),
-    linear-gradient(135deg, #3F4A54 0%, #2C3540 52%, #20272F 100%);
-  color: #FFFFFF !important;
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.02) 38%, rgba(0, 0, 0, 0.18) 100%),
+    linear-gradient(180deg, var(--bt-nav-top) 0%, var(--bt-nav-mid) 48%, var(--bt-nav-bottom) 100%);
+  color: #F7FAFC !important;
   padding: 8px 11px !important;
   font-size: 13.5px !important;
   font-weight: 820 !important;
   line-height: 1 !important;
   text-shadow:
-    0 1px 0 rgba(0, 0, 0, 0.54),
-    0 0 8px rgba(255, 255, 255, 0.10);
+    0 1px 0 rgba(0, 0, 0, 0.72);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.30),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.34),
-    0 3px 0 rgba(0, 0, 0, 0.28),
-    0 12px 22px rgba(0, 0, 0, 0.18);
+    inset 0 1px 0 rgba(255, 255, 255, 0.13),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.48),
+    inset 2px 0 0 color-mix(in srgb, var(--bt-nav-accent) 74%, transparent),
+    0 3px 0 rgba(0, 0, 0, 0.64),
+    0 10px 16px rgba(0, 0, 0, 0.26);
   transition: none !important;
 }
 
-.bt-sidebar-nav-item:nth-child(2) { --bt-nav-accent: #C2773F; }
-.bt-sidebar-nav-item:nth-child(3) { --bt-nav-accent: #7E8C72; }
-.bt-sidebar-nav-item:nth-child(4) { --bt-nav-accent: #8FA8B8; }
-.bt-sidebar-nav-item:nth-child(5) { --bt-nav-accent: #7DA69A; }
-.bt-sidebar-nav-item:nth-child(6) { --bt-nav-accent: #C96A4B; }
+.bt-sidebar-nav-item:nth-child(2) {
+  --bt-nav-accent: #3F6680;
+  --bt-nav-top: #334555;
+  --bt-nav-mid: #243646;
+  --bt-nav-bottom: #172838;
+}
+
+.bt-sidebar-nav-item:nth-child(3) {
+  --bt-nav-accent: #3F6E4E;
+  --bt-nav-top: #34463D;
+  --bt-nav-mid: #273A31;
+  --bt-nav-bottom: #1B2B24;
+}
+
+.bt-sidebar-nav-item:nth-child(4) {
+  --bt-nav-accent: #4E668A;
+  --bt-nav-top: #344153;
+  --bt-nav-mid: #263447;
+  --bt-nav-bottom: #1A2636;
+}
+
+.bt-sidebar-nav-item:nth-child(5) {
+  --bt-nav-accent: #3A705D;
+  --bt-nav-top: #314842;
+  --bt-nav-mid: #243A35;
+  --bt-nav-bottom: #182A27;
+}
+
+.bt-sidebar-nav-item:nth-child(6) {
+  --bt-nav-accent: #7A5030;
+  --bt-nav-top: #4A3B33;
+  --bt-nav-mid: #372D28;
+  --bt-nav-bottom: #261F1C;
+}
 
 .bt-sidebar-nav-item::before {
   content: "";
   position: absolute;
-  inset: 2px 8px auto;
-  height: 42%;
+  inset: 4px 10px auto;
+  height: 22%;
   border-radius: 999px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.30), rgba(255, 255, 255, 0.06));
-  opacity: 0.84;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.02));
+  opacity: 0.54;
   pointer-events: none;
   z-index: -1;
   transition: none !important;
@@ -1688,22 +1833,23 @@ textarea,
   width: 3px;
   border-radius: 0 999px 999px 0;
   background: var(--bt-nav-accent);
-  opacity: 0.80;
-  box-shadow: 0 0 16px color-mix(in srgb, var(--bt-nav-accent) 62%, transparent);
+  opacity: 0.92;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.42);
   transition: none !important;
 }
 
 .bt-sidebar-nav-item:hover {
-  border-color: color-mix(in srgb, var(--bt-nav-accent) 54%, rgba(255, 255, 255, 0.36));
+  border-color: color-mix(in srgb, var(--bt-nav-accent) 58%, #9CA3AF);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.24) 0%, rgba(255, 255, 255, 0.11) 42%, rgba(0, 0, 0, 0.08) 100%),
-    linear-gradient(135deg, #4B5965 0%, #343F49 52%, #252E36 100%);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.03) 38%, rgba(0, 0, 0, 0.16) 100%),
+    linear-gradient(180deg, color-mix(in srgb, var(--bt-nav-top) 86%, var(--bt-nav-accent)) 0%, var(--bt-nav-mid) 52%, var(--bt-nav-bottom) 100%);
   color: #FFFFFF !important;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.36),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.34),
-    0 4px 0 rgba(0, 0, 0, 0.30),
-    0 16px 28px rgba(0, 0, 0, 0.22);
+    inset 0 1px 0 rgba(255, 255, 255, 0.15),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.50),
+    inset 2px 0 0 color-mix(in srgb, var(--bt-nav-accent) 82%, transparent),
+    0 4px 0 rgba(0, 0, 0, 0.68),
+    0 12px 18px rgba(0, 0, 0, 0.30);
 }
 
 .bt-sidebar-nav-item:active {
@@ -1714,16 +1860,22 @@ textarea,
 }
 
 .bt-sidebar-nav-item.is-active {
-  border-color: rgba(255, 220, 158, 0.96);
+  --bt-nav-accent: #9A6122;
+  --bt-nav-top: #8A5A24;
+  --bt-nav-mid: #6B431C;
+  --bt-nav-bottom: #3F2813;
+  border-color: #A6722F;
   background:
-    linear-gradient(180deg, #FFD27A 0%, #E9A72A 46%, #BE741E 100%);
-  color: #07111B !important;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.52);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0.03) 34%, rgba(0, 0, 0, 0.22) 100%),
+    linear-gradient(180deg, var(--bt-nav-top) 0%, var(--bt-nav-mid) 50%, var(--bt-nav-bottom) 100%);
+  color: #FFF2D8 !important;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.78);
   box-shadow:
-    inset 0 1px 0 rgba(255, 246, 224, 0.90),
-    inset 0 -2px 0 rgba(100, 52, 13, 0.34),
-    0 4px 0 rgba(89, 52, 16, 0.52),
-    0 16px 30px rgba(217, 157, 38, 0.36);
+    inset 0 1px 0 rgba(255, 236, 192, 0.24),
+    inset 0 -4px 0 rgba(38, 22, 9, 0.60),
+    inset 2px 0 0 #C48631,
+    0 4px 0 rgba(31, 18, 7, 0.86),
+    0 13px 20px rgba(63, 40, 19, 0.40);
 }
 
 .bt-sidebar-nav-item.is-collapsed {
@@ -1736,27 +1888,30 @@ textarea,
   height: 30px !important;
   box-sizing: border-box;
   padding: 6px;
-  border: 1px solid rgba(226, 232, 240, 0.26);
+  border: 2px solid rgba(203, 213, 225, 0.25);
   border-radius: 10px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.07)),
-    rgba(255, 255, 255, 0.07);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.10)),
+    color-mix(in srgb, var(--bt-nav-top) 78%, #111827);
   color: #FFFFFF;
   stroke-width: 2.2;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.28),
-    0 6px 12px rgba(0, 0, 0, 0.20);
+    inset 0 1px 0 rgba(255, 255, 255, 0.11),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.34),
+    0 2px 0 rgba(0, 0, 0, 0.48);
   transition: none !important;
 }
 
 .bt-sidebar-nav-item.is-active .bt-sidebar-nav-icon {
-  border-color: rgba(75, 46, 15, 0.24);
+  border-color: rgba(255, 226, 169, 0.34);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.52), rgba(255, 255, 255, 0.18));
-  color: #101418;
+    linear-gradient(180deg, rgba(255, 236, 192, 0.16), rgba(64, 40, 19, 0.20)),
+    #5C3918;
+  color: #FFF2D8;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.66),
-    0 5px 10px rgba(100, 52, 13, 0.20);
+    inset 0 1px 0 rgba(255, 236, 192, 0.20),
+    inset 0 -2px 0 rgba(31, 18, 7, 0.48),
+    0 2px 0 rgba(31, 18, 7, 0.58);
 }
 
 .bt-sidebar-nav-label {
@@ -1766,9 +1921,456 @@ textarea,
 }
 
 .bt-sidebar-nav-dot {
-  width: 7px !important;
-  height: 7px !important;
-  background: #111827 !important;
-  box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.14);
+  width: 8px !important;
+  height: 8px !important;
+  background: #FFD21F !important;
+  border: 1px solid rgba(255, 245, 157, 0.82);
+  box-shadow:
+    0 0 0 2px rgba(30, 18, 5, 0.86),
+    0 0 9px rgba(255, 210, 31, 0.78),
+    inset 0 1px 0 rgba(255, 255, 255, 0.62);
   transition: none !important;
 }
+
+.bt-invoices-light .bt-approved-pay-card-bottom .bt-approved-pay-paid-button {
+  display: inline-flex;
+  width: auto;
+  min-width: 118px;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 2px solid #14532D;
+  border-radius: 10px !important;
+  background: linear-gradient(180deg, #166534 0%, #14532D 100%);
+  color: #F0FDF4;
+  padding: 0 18px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 950;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-transform: uppercase;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -3px 0 rgba(5, 46, 22, 0.62),
+    0 3px 0 rgba(5, 46, 22, 0.46);
+}
+
+.bt-invoices-light .bt-approved-pay-card-bottom .bt-approved-pay-paid-button svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  stroke-width: 2.8;
+}
+
+.bt-invoices-light .bt-approved-pay-card-bottom .bt-approved-pay-paid-button:hover:not(:disabled) {
+  border-color: #22C55E;
+  background: linear-gradient(180deg, #15803D 0%, #14532D 100%);
+  color: #FFFFFF;
+}
+
+.bt-invoices-light .bt-approved-pay-card-bottom .bt-approved-pay-paid-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.68;
+  transform: none;
+}
+
+.bt-contractors-page .bt-directory-card.is-expanded,
+.bt-contractors-page .bt-directory-expanded,
+.bt-contractors-page .bt-directory-expanded .bg-white,
+.bt-contractors-page .bt-directory-expanded .bg-gray-50,
+.bt-contractors-page .bt-directory-expanded .bg-slate-50,
+.bt-contractors-page .bt-directory-expanded .bg-emerald-50,
+.bt-contractors-page .bt-directory-expanded .bg-emerald-50\/70,
+.bt-contractors-page .bt-directory-expanded .bg-amber-50,
+.bt-contractors-page .bt-directory-expanded .bg-amber-50\/40 {
+  color: #111827 !important;
+}
+
+.bt-contractors-page .bt-directory-expanded .bg-white,
+.bt-contractors-page .bt-directory-expanded input.bg-white,
+.bt-contractors-page .bt-directory-expanded textarea.bg-white {
+  background-color: #FFFFFF !important;
+}
+
+.bt-contractors-page .bt-directory-expanded .bg-gray-50,
+.bt-contractors-page .bt-directory-expanded .bg-slate-50 {
+  background-color: #F8FAFC !important;
+}
+
+.bt-contractors-page .bt-directory-expanded .bg-emerald-50,
+.bt-contractors-page .bt-directory-expanded .bg-emerald-50\/70 {
+  background-color: #ECFDF5 !important;
+}
+
+.bt-contractors-page .bt-directory-expanded .bg-amber-50,
+.bt-contractors-page .bt-directory-expanded .bg-amber-50\/40 {
+  background-color: #FFFBEB !important;
+}
+
+.bt-contractors-page .bt-directory-expanded h2,
+.bt-contractors-page .bt-directory-expanded h3,
+.bt-contractors-page .bt-directory-expanded strong,
+.bt-contractors-page .bt-directory-expanded .text-gray-950,
+.bt-contractors-page .bt-directory-expanded .text-gray-900,
+.bt-contractors-page .bt-directory-expanded .text-slate-950,
+.bt-contractors-page .bt-directory-expanded .text-slate-900 {
+  color: #111827 !important;
+}
+
+.bt-contractors-page .bt-directory-expanded .text-gray-700,
+.bt-contractors-page .bt-directory-expanded .text-slate-700,
+.bt-contractors-page .bt-directory-expanded .text-emerald-900,
+.bt-contractors-page .bt-directory-expanded .text-amber-900 {
+  color: #334155 !important;
+}
+
+.bt-contractors-page .bt-directory-expanded .text-gray-600,
+.bt-contractors-page .bt-directory-expanded .text-gray-500,
+.bt-contractors-page .bt-directory-expanded .text-slate-600,
+.bt-contractors-page .bt-directory-expanded .text-slate-500 {
+  color: #475569 !important;
+}
+
+.bt-contractors-page .bt-directory-expanded .text-gray-400,
+.bt-contractors-page .bt-directory-expanded .text-slate-400 {
+  color: #64748B !important;
+}
+
+.bt-contractors-page .bt-directory-expanded input,
+.bt-contractors-page .bt-directory-expanded textarea {
+  color: #111827 !important;
+}
+
+.bt-contractors-page .bt-directory-expanded input::placeholder,
+.bt-contractors-page .bt-directory-expanded textarea::placeholder {
+  color: #64748B !important;
+  opacity: 1 !important;
+}
+
+.bt-contractors-page .bt-directory-expanded .text-blue-700 {
+  color: #1D4ED8 !important;
+}
+
+.bt-contractors-page .bt-directory-expanded .text-emerald-700,
+.bt-contractors-page .bt-directory-expanded .text-emerald-800 {
+  color: #047857 !important;
+}
+
+.bt-contractors-page .bt-directory-expanded .text-amber-700,
+.bt-contractors-page .bt-directory-expanded .text-amber-800 {
+  color: #92400E !important;
+}
+
+.bt-contractors-page .bt-directory-expanded .text-red-500,
+.bt-contractors-page .bt-directory-expanded .text-red-700 {
+  color: #B91C1C !important;
+}
+
+.bt-contractors-page .bt-directory-card.is-expanded .bt-directory-row .bt-directory-chip {
+  background: #EFF6FF !important;
+  color: #1E3A8A !important;
+  border: 1px solid #BFDBFE !important;
+  box-shadow: none !important;
+}
+
+.bt-contractors-page .bt-directory-card.is-expanded .bt-directory-row .bt-directory-chip svg {
+  color: #2563EB !important;
+}
+
+.bt-contractors-page .bt-directory-card.is-expanded .bg-white,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-gray-50,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-slate-50,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-slate-100,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-emerald-50,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-emerald-50\/70,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-amber-50,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-amber-50\/40 {
+  color: #111827 !important;
+}
+
+.bt-contractors-page .bt-directory-card.is-expanded .bg-white .text-gray-950,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-white .text-gray-900,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-white .text-gray-800,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-gray-50 .text-gray-950,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-gray-50 .text-gray-900,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-gray-50 .text-gray-800,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-slate-50 .text-gray-950,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-slate-50 .text-gray-900,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-slate-50 .text-gray-800,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-slate-100 .text-gray-950,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-slate-100 .text-gray-900,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-slate-100 .text-gray-800 {
+  color: #111827 !important;
+}
+
+.bt-contractors-page .bt-directory-card.is-expanded .bg-white .text-gray-700,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-white .text-gray-600,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-white .text-gray-500,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-gray-50 .text-gray-700,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-gray-50 .text-gray-600,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-gray-50 .text-gray-500,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-slate-50 .text-gray-700,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-slate-50 .text-gray-600,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-slate-50 .text-gray-500,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-slate-100 .text-gray-700,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-slate-100 .text-gray-600,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-slate-100 .text-gray-500 {
+  color: #334155 !important;
+}
+
+.bt-contractors-page .bt-directory-card.is-expanded .bg-white .text-gray-400,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-gray-50 .text-gray-400,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-slate-50 .text-gray-400,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-slate-100 .text-gray-400 {
+  color: #64748B !important;
+}
+
+.bt-contractors-page .bt-directory-card.is-expanded .bg-white input,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-white textarea,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-slate-50 input,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-slate-50 textarea,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-slate-100 input,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-slate-100 textarea {
+  color: #111827 !important;
+}
+
+.bt-contractors-page .bt-directory-card.is-expanded .bg-white input::placeholder,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-white textarea::placeholder,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-slate-50 input::placeholder,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-slate-50 textarea::placeholder,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-slate-100 input::placeholder,
+.bt-contractors-page .bt-directory-card.is-expanded .bg-slate-100 textarea::placeholder {
+  color: #64748B !important;
+  opacity: 1 !important;
+}
+
+/* ===================================================================
+   QUIET CARBON — GLOBAL SITE THEME  (appended 2026-06-30)
+   Unifies every DESKTOP screen on the Quiet Carbon palette. Reversible:
+   delete this whole block to revert. Scoped to .bt-desktop-shell so the
+   intentionally-light mobile field views and the login screen are untouched.
+   Doubled .bt-desktop-shell.bt-desktop-shell bumps specificity so these win
+   over the existing per-scope light overrides via source order.
+   Semantic accent colors (blue/green/amber/red text + solid buttons) are kept.
+   =================================================================== */
+
+/* 1) Quiet Carbon tokens on the desktop shell (not :root — login stays as-is) */
+.bt-desktop-shell {
+  --bt-bg: #14171e;
+  --bt-surface: #1c1f29;
+  --bt-surface-raised: #242834;
+  --bt-border: #333a47;
+  --bt-text: #ededed;
+  --bt-text-muted: #a1a1a1;
+  --bt-text-soft: #707070;
+  --bt-ring: #3b82f6;
+  --surface-3: #14171e;
+  --border: #333a47;
+  --text-primary: #ededed;
+  --text-secondary: #a1a1a1;
+  background: #14171e !important;
+}
+
+/* 2) Neutral surfaces */
+.bt-desktop-shell.bt-desktop-shell .bg-white,
+.bt-desktop-shell.bt-desktop-shell input.bg-white,
+.bt-desktop-shell.bt-desktop-shell select.bg-white,
+.bt-desktop-shell.bt-desktop-shell textarea.bg-white,
+.bt-desktop-shell.bt-desktop-shell .bg-slate-50,
+.bt-desktop-shell.bt-desktop-shell .bg-gray-50,
+.bt-desktop-shell.bt-desktop-shell .bg-neutral-50,
+.bt-desktop-shell.bt-desktop-shell .bg-zinc-50 {
+  background-color: #1c1f29 !important;
+}
+.bt-desktop-shell.bt-desktop-shell .bg-slate-100,
+.bt-desktop-shell.bt-desktop-shell .bg-slate-200,
+.bt-desktop-shell.bt-desktop-shell .bg-gray-100,
+.bt-desktop-shell.bt-desktop-shell .bg-gray-200,
+.bt-desktop-shell.bt-desktop-shell .bg-neutral-100 {
+  background-color: #242834 !important;
+}
+.bt-desktop-shell.bt-desktop-shell .bg-slate-900,
+.bt-desktop-shell.bt-desktop-shell .bg-slate-950 {
+  background-color: #14171e !important;
+}
+
+/* 3) Text */
+.bt-desktop-shell.bt-desktop-shell .text-slate-950,
+.bt-desktop-shell.bt-desktop-shell .text-slate-900,
+.bt-desktop-shell.bt-desktop-shell .text-slate-800,
+.bt-desktop-shell.bt-desktop-shell .text-gray-900,
+.bt-desktop-shell.bt-desktop-shell .text-gray-800,
+.bt-desktop-shell.bt-desktop-shell .text-zinc-900,
+.bt-desktop-shell.bt-desktop-shell .text-black {
+  color: #ededed !important;
+}
+.bt-desktop-shell.bt-desktop-shell .text-slate-700,
+.bt-desktop-shell.bt-desktop-shell .text-slate-600,
+.bt-desktop-shell.bt-desktop-shell .text-gray-700,
+.bt-desktop-shell.bt-desktop-shell .text-gray-600 {
+  color: #c7cbd4 !important;
+}
+.bt-desktop-shell.bt-desktop-shell .text-slate-500,
+.bt-desktop-shell.bt-desktop-shell .text-slate-400,
+.bt-desktop-shell.bt-desktop-shell .text-gray-500,
+.bt-desktop-shell.bt-desktop-shell .text-gray-400 {
+  color: #a1a1a1 !important;
+}
+
+/* 4) Borders */
+.bt-desktop-shell.bt-desktop-shell .border-slate-100,
+.bt-desktop-shell.bt-desktop-shell .border-slate-200,
+.bt-desktop-shell.bt-desktop-shell .border-slate-300,
+.bt-desktop-shell.bt-desktop-shell .border-gray-100,
+.bt-desktop-shell.bt-desktop-shell .border-gray-200,
+.bt-desktop-shell.bt-desktop-shell .border-gray-300,
+.bt-desktop-shell.bt-desktop-shell .border-neutral-200 {
+  border-color: #333a47 !important;
+}
+
+/* 5) Soft colored status tints -> dark tints (keep meaning, kill glare) */
+.bt-desktop-shell.bt-desktop-shell .bg-blue-50,
+.bt-desktop-shell.bt-desktop-shell .bg-sky-50,
+.bt-desktop-shell.bt-desktop-shell .bg-indigo-50 { background-color: rgba(59,130,246,0.12) !important; }
+.bt-desktop-shell.bt-desktop-shell .bg-emerald-50,
+.bt-desktop-shell.bt-desktop-shell .bg-green-50,
+.bt-desktop-shell.bt-desktop-shell .bg-teal-50 { background-color: rgba(62,207,106,0.12) !important; }
+.bt-desktop-shell.bt-desktop-shell .bg-amber-50,
+.bt-desktop-shell.bt-desktop-shell .bg-yellow-50,
+.bt-desktop-shell.bt-desktop-shell .bg-orange-50 { background-color: rgba(245,166,35,0.12) !important; }
+.bt-desktop-shell.bt-desktop-shell .bg-red-50,
+.bt-desktop-shell.bt-desktop-shell .bg-rose-50 { background-color: rgba(240,80,110,0.12) !important; }
+
+/* 6) Keep the embedded Operations Calendar text light on its dark surface */
+.bt-desktop-shell.bt-desktop-shell .bt-dashboard-ops-panel .bt-calendar-day-card .text-slate-950,
+.bt-desktop-shell.bt-desktop-shell .bt-dashboard-ops-panel .bt-calendar-day-card .text-slate-900,
+.bt-desktop-shell.bt-desktop-shell .bt-dashboard-ops-panel .bt-calendar-day-card .text-slate-800,
+.bt-desktop-shell.bt-desktop-shell .bt-dashboard-ops-panel .bt-calendar-day-card .text-slate-700 {
+  color: #eaf1ff !important;
+}
+
+/* 7) Project cards -> uniform Quiet Carbon (drop the pastel rainbow) */
+.bt-desktop-shell .bt-projects-page .bt-project-card,
+.bt-desktop-shell .bt-projects-page .bt-project-card:nth-of-type(6n + 1),
+.bt-desktop-shell .bt-projects-page .bt-project-card:nth-of-type(6n + 2),
+.bt-desktop-shell .bt-projects-page .bt-project-card:nth-of-type(6n + 3),
+.bt-desktop-shell .bt-projects-page .bt-project-card:nth-of-type(6n + 4),
+.bt-desktop-shell .bt-projects-page .bt-project-card:nth-of-type(6n + 5),
+.bt-desktop-shell .bt-projects-page .bt-project-card:nth-of-type(6n) {
+  background: linear-gradient(145deg, #1a1e27 0%, #15181f 100%) !important;
+  border-color: #333a47 !important;
+  box-shadow: 0 14px 30px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.05) !important;
+}
+
+/* 8) Sidebar -> neutral graphite + blue active accent (was gold/brown) */
+.bt-sidebar-frame { background: #101319 !important; }
+.bt-sidebar-nav-item {
+  --bt-nav-top: #242834 !important;
+  --bt-nav-mid: #1a1e27 !important;
+  --bt-nav-bottom: #14171e !important;
+  border-color: #333a47 !important;
+}
+.bt-sidebar-nav-item.is-active {
+  --bt-nav-top: #1e2740 !important;
+  --bt-nav-mid: #182036 !important;
+  --bt-nav-bottom: #121829 !important;
+  border-color: rgba(59,130,246,0.55) !important;
+  color: #eaf1ff !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.10),
+    inset 2px 0 0 #3b82f6,
+    0 4px 0 rgba(0,0,0,0.70),
+    0 13px 20px rgba(0,0,0,0.45) !important;
+}
+.bt-sidebar-nav-item.is-active .bt-sidebar-nav-icon {
+  border-color: rgba(59,130,246,0.34) !important;
+  background: linear-gradient(180deg, rgba(59,130,246,0.18), rgba(15,23,42,0.40)), #1a2236 !important;
+  color: #bfdbfe !important;
+}
+.bt-sidebar-nav-dot {
+  background: #3b82f6 !important;
+  border-color: rgba(147,197,253,0.70) !important;
+  box-shadow: 0 0 0 2px rgba(0,0,0,0.70), 0 0 9px rgba(59,130,246,0.70) !important;
+}
+
+/* ---- QUIET CARBON READABILITY PATCH (2026-06-30) ---- */
+/* near-black text utilities missed in the first pass (the project-card address is text-gray-950) */
+.bt-desktop-shell.bt-desktop-shell .text-gray-950,
+.bt-desktop-shell.bt-desktop-shell .text-zinc-950,
+.bt-desktop-shell.bt-desktop-shell .text-neutral-950,
+.bt-desktop-shell.bt-desktop-shell .text-neutral-900 {
+  color: #ededed !important;
+}
+/* dark-tone colored text -> lighter variants so it reads on black */
+.bt-desktop-shell.bt-desktop-shell .text-blue-900,
+.bt-desktop-shell.bt-desktop-shell .text-blue-800,
+.bt-desktop-shell.bt-desktop-shell .text-blue-700,
+.bt-desktop-shell.bt-desktop-shell .text-sky-700,
+.bt-desktop-shell.bt-desktop-shell .text-cyan-700,
+.bt-desktop-shell.bt-desktop-shell .text-indigo-700 { color: #93c5fd !important; }
+.bt-desktop-shell.bt-desktop-shell .text-emerald-900,
+.bt-desktop-shell.bt-desktop-shell .text-emerald-800,
+.bt-desktop-shell.bt-desktop-shell .text-emerald-700,
+.bt-desktop-shell.bt-desktop-shell .text-green-800,
+.bt-desktop-shell.bt-desktop-shell .text-green-700,
+.bt-desktop-shell.bt-desktop-shell .text-teal-700 { color: #4ade80 !important; }
+.bt-desktop-shell.bt-desktop-shell .text-amber-900,
+.bt-desktop-shell.bt-desktop-shell .text-amber-800,
+.bt-desktop-shell.bt-desktop-shell .text-amber-700,
+.bt-desktop-shell.bt-desktop-shell .text-yellow-700,
+.bt-desktop-shell.bt-desktop-shell .text-orange-700 { color: #fbbf24 !important; }
+.bt-desktop-shell.bt-desktop-shell .text-red-900,
+.bt-desktop-shell.bt-desktop-shell .text-red-800,
+.bt-desktop-shell.bt-desktop-shell .text-red-700,
+.bt-desktop-shell.bt-desktop-shell .text-rose-700 { color: #fca5a5 !important; }
+.bt-desktop-shell.bt-desktop-shell .text-purple-700,
+.bt-desktop-shell.bt-desktop-shell .text-violet-700,
+.bt-desktop-shell.bt-desktop-shell .text-indigo-800 { color: #c4b5fd !important; }
+
+/* project-card title (gradient-clip on the old light card) -> solid light */
+.bt-desktop-shell .bt-projects-page .bt-project-card .bt-project-title {
+  color: #ededed !important;
+  -webkit-text-fill-color: #ededed !important;
+  background: none !important;
+}
+
+/* inline white surfaces inside the app (CSS utilities can't reach inline styles) */
+.bt-desktop-shell .bt-project-filterbar { background: #1c1f29 !important; }
+.bt-desktop-shell [style*="background: white"],
+.bt-desktop-shell [style*="background:#fff"],
+.bt-desktop-shell [style*="background: #fff"],
+.bt-desktop-shell [style*="background:#FFF"],
+.bt-desktop-shell [style*="background: #FFF"],
+.bt-desktop-shell [style*="background: rgb(255, 255, 255)"] {
+  background-color: #1c1f29 !important;
+}
+/* light hardcoded inline borders inside the app -> QC border */
+.bt-desktop-shell [style*="#E5E7EB"],
+.bt-desktop-shell [style*="#D1D5DB"],
+.bt-desktop-shell [style*="#E2E8F0"] { border-color: #333a47 !important; }
+
+/* ---- QUIET CARBON BACKGROUND FIX (2026-06-30) ---- */
+/* Page wrappers use an inline light bg (#F0F2F5 etc.) that hides the now-light
+   title text. !important beats inline styles; they all share .bt-desktop-page. */
+.bt-desktop-shell .bt-desktop-page { background: var(--bt-bg) !important; }
+/* inline light card backgrounds (browser serializes hex -> rgb, so match rgb) */
+.bt-desktop-shell [style*="rgb(240, 242, 245)"] { background-color: var(--bt-bg) !important; }
+.bt-desktop-shell [style*="rgb(249, 250, 251)"],
+.bt-desktop-shell [style*="rgb(248, 250, 252)"],
+.bt-desktop-shell [style*="rgb(250, 250, 250)"],
+.bt-desktop-shell [style*="rgb(239, 246, 255)"],
+.bt-desktop-shell [style*="rgb(236, 253, 245)"],
+.bt-desktop-shell [style*="rgb(241, 245, 249)"] { background-color: var(--bt-surface) !important; }
+
+/* ---- QUIET CARBON BUTTON/TINT READABILITY (2026-06-30) ---- */
+.bt-desktop-shell.bt-desktop-shell .bg-cyan-50,
+.bt-desktop-shell.bt-desktop-shell .bg-cyan-100 { background-color: rgba(34,211,238,0.14) !important; }
+.bt-desktop-shell.bt-desktop-shell .bg-violet-50,
+.bt-desktop-shell.bt-desktop-shell .bg-purple-50,
+.bt-desktop-shell.bt-desktop-shell .bg-fuchsia-50,
+.bt-desktop-shell.bt-desktop-shell .bg-pink-50 { background-color: rgba(160,107,255,0.14) !important; }
+.bt-desktop-shell.bt-desktop-shell .bg-lime-50 { background-color: rgba(132,204,22,0.14) !important; }
+.bt-desktop-shell.bt-desktop-shell .text-cyan-900,
+.bt-desktop-shell.bt-desktop-shell .text-cyan-800 { color: #a5e8ff !important; }

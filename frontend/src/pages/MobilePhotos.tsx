@@ -35,6 +35,7 @@ import {
 } from '../lib/progressUpload';
 import { MOBILE_DATA_CHANGED_EVENT, notifyMobileDataChanged } from '../lib/mobileEvents';
 import VoiceTextarea from '../components/VoiceTextarea';
+import PhotoMarkupModal from '../components/PhotoMarkupModal';
 
 interface Project {
   id: string;
@@ -380,6 +381,7 @@ export default function MobilePhotos() {
   const [batchNoteSaving, setBatchNoteSaving] = useState(false);
   const [batchNoteSyncMessage, setBatchNoteSyncMessage] = useState('');
   const [lightbox, setLightbox] = useState<LightboxMedia | null>(null);
+  const [markupPhoto, setMarkupPhoto] = useState<any | null>(null);
   const [deletingPhotoId, setDeletingPhotoId] = useState('');
 
   const selectedProject = useMemo(
@@ -1802,7 +1804,7 @@ export default function MobilePhotos() {
                   {group.photos.map(photo => {
                     const src = photo.filename.startsWith('http')
                       ? photo.filename
-                      : `${photoBaseUrl}/uploads/${selectedProjectId}/${photo.filename}`;
+                      : `${photoBaseUrl}/uploads/${selectedProjectId}/${(photo as any).markup_path || photo.filename}`;
                     const isVideo = isVideoMedia(photo);
                     const progressContext = isPhotoContextEnabled(photo.show_in_progress, photo.photo_type === 'progress' || photo.photo_type === 'note');
                     const scopeContext = isPhotoContextEnabled(photo.show_in_scope, photo.photo_type === 'scope' || photo.photo_type === 'construction_plan');
@@ -1878,6 +1880,37 @@ export default function MobilePhotos() {
                             >
                               <Trash2 size={14} color="#B91C1C" />
                               {deletingPhotoId === photo.id ? 'Deleting' : 'Delete once'}
+                            </button>
+                          )}
+                          {!isVideo && (
+                            <button
+                              type="button"
+                              onClick={event => {
+                                event.stopPropagation();
+                                setMarkupPhoto(photo);
+                              }}
+                              aria-label="Mark up this picture and add a note"
+                              style={{
+                                position: 'absolute',
+                                right: 6,
+                                bottom: 84,
+                                minHeight: 44,
+                                border: '1px solid #FCD34D',
+                                borderRadius: 12,
+                                background: 'rgba(245,158,11,0.96)',
+                                color: '#0f172a',
+                                padding: '0 12px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: 5,
+                                fontSize: 11,
+                                fontWeight: 900,
+                                boxShadow: '0 4px 12px rgba(0,0,0,0.16)',
+                              }}
+                            >
+                              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth={2.5}><ellipse cx="12" cy="12" rx="8" ry="6" /></svg>
+                              Mark up
                             </button>
                           )}
                           <div
@@ -2159,6 +2192,18 @@ export default function MobilePhotos() {
           </button>
         </div>
       )}
+
+      <PhotoMarkupModal
+        open={Boolean(markupPhoto)}
+        projectId={String(selectedProjectId || '')}
+        photo={markupPhoto}
+        onClose={() => setMarkupPhoto(null)}
+        onSaved={async () => {
+          setMarkupPhoto(null);
+          if (selectedProjectId) await loadPhotos(selectedProjectId);
+          notifyMobileDataChanged({ entity: 'progress_photo', action: 'markup', projectId: selectedProjectId });
+        }}
+      />
 
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }

@@ -70,12 +70,12 @@ const PROJECT_STATUS_OPTIONS = [
 ];
 
 const PROJECT_STATUS_BADGES: Record<string, { label: string; className: string }> = {
-  not_started: { label: 'Not Started', className: 'border-slate-300 bg-slate-100 text-slate-700' },
-  active_rehab: { label: 'Being Worked On', className: 'border-blue-300 bg-blue-100 text-blue-800' },
-  rehab_completed: { label: 'Completed', className: 'border-emerald-300 bg-emerald-100 text-emerald-800' },
-  long_term_holding: { label: 'Holding', className: 'border-amber-300 bg-amber-100 text-amber-800' },
-  commercial: { label: 'Commercial', className: 'border-cyan-300 bg-cyan-100 text-cyan-800' },
-  wholesale: { label: 'Wholesale', className: 'border-teal-300 bg-teal-100 text-teal-800' },
+  not_started: { label: 'Not Started', className: 'border-slate-400 bg-slate-600 text-white' },
+  active_rehab: { label: 'Being Worked On', className: 'border-blue-400 bg-blue-600 text-white' },
+  rehab_completed: { label: 'Completed', className: 'border-emerald-400 bg-emerald-600 text-white' },
+  long_term_holding: { label: 'Holding', className: 'border-amber-400 bg-amber-500 text-slate-950' },
+  commercial: { label: 'Commercial', className: 'border-cyan-400 bg-cyan-600 text-white' },
+  wholesale: { label: 'Wholesale', className: 'border-teal-400 bg-teal-600 text-white' },
 };
 
 const MARKET_STATUS_OPTIONS = [
@@ -129,7 +129,7 @@ export default function Projects() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [searchParams] = useSearchParams();
-  const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '');
+  const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || 'active_rehab');
   const [showCreate, setShowCreate] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState<string | null>(null);
@@ -474,8 +474,8 @@ export default function Projects() {
                           <span
                             className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-black uppercase tracking-wide shadow-sm ${
                               priority <= 5
-                                ? 'border-amber-300 bg-amber-400 text-amber-950'
-                                : 'border-blue-300 bg-blue-100 text-blue-800'
+                                ? 'border-amber-400 bg-amber-500 text-slate-950'
+                                : 'border-blue-400 bg-blue-600 text-white'
                             }`}
                             title={`Work priority ${priority} of 20`}
                           >
@@ -488,8 +488,8 @@ export default function Projects() {
                         <span
                           className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-black uppercase tracking-wide ${
                             isOnMarket
-                              ? 'border-emerald-300 bg-emerald-500 text-emerald-950 shadow-sm'
-                              : 'border-slate-300 bg-slate-100 text-slate-600'
+                              ? 'border-emerald-400 bg-emerald-600 text-white shadow-sm'
+                              : 'border-slate-400 bg-slate-600 text-white'
                           }`}
                         >
                           {getMarketStatusLabel(p.market_status)}
@@ -508,10 +508,10 @@ export default function Projects() {
                             <KeyRound className="h-3.5 w-3.5" />
                             <span>Lock Box</span>
                             <span
-                              className="rounded-full px-2 py-0.5 font-mono text-xs tracking-normal"
+                              className="rounded-full px-2 py-0.5 font-mono text-xs font-bold tracking-normal"
                               style={{
-                                background: '#F8FAFC',
-                                color: '#0F172A',
+                                background: '#FBBF24',
+                                color: '#1E293B',
                               }}
                             >
                               {lockboxCode}
@@ -551,7 +551,7 @@ export default function Projects() {
                           sourceType="project"
                           sourceId={p.id}
                           contextLabel={[p.address, p.job_name].filter(Boolean).join(' - ')}
-                          buttonClassName="inline-flex min-h-10 min-w-max items-center justify-center gap-1.5 rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs font-black text-cyan-800 shadow-sm transition-colors hover:bg-cyan-100"
+                          buttonClassName="inline-flex min-h-10 min-w-max items-center justify-center gap-1.5 rounded-xl border border-cyan-400/60 bg-cyan-600 px-3 py-2 text-xs font-black text-white shadow-sm transition-colors hover:bg-cyan-500"
                         />
                       </div>
                       <div
@@ -562,7 +562,7 @@ export default function Projects() {
                         <button
                           type="button"
                           onClick={() => setActiveActionsProjectId(isActionsOpen ? null : p.id)}
-                          className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
+                          className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-500 bg-slate-800 px-3 py-2 text-xs font-black text-slate-100 shadow-sm transition-colors hover:bg-slate-700"
                           aria-haspopup="menu"
                           aria-expanded={isActionsOpen}
                           aria-label={`Open actions for ${p.address}`}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { X } from 'lucide-react';
 
 type LightboxImage = {
@@ -20,6 +21,13 @@ function shouldOpenImage(img: HTMLImageElement) {
 
 export default function GlobalImageLightbox() {
   const [image, setImage] = useState<LightboxImage | null>(null);
+  const location = useLocation();
+
+  // Close the enlarged-photo overlay whenever the route changes, so navigating
+  // away (e.g. "Back to Dashboard") is never hidden behind a stale lightbox.
+  useEffect(() => {
+    setImage(null);
+  }, [location.pathname]);
 
   useEffect(() => {
     const onClick = (event: MouseEvent) => {

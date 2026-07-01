@@ -422,6 +422,8 @@ const emailStatusClass: Record<string, string> = {
 
 const QUICKBOOKS_PANEL_ROLES = ['super_admin', 'operations_manager'];
 const QUICKBOOKS_BILLS_PATH = '/quickbooks/bills?limit=1000';
+const QUICKBOOKS_APPROVED_FOR_PAYMENT_STATUS = 'approved_for_payment';
+const QUICKBOOKS_BUILDTRACK_PAID_STATUS = 'paid_from_buildtrack';
 const DEFAULT_QUICKBOOKS_INVOICE_FILTER: QuickBooksInvoiceFilterState = {
   mode: 'all',
   projectId: '',
@@ -481,6 +483,10 @@ const qboStatusLabel = (status?: string | null) => {
 const isQuickBooksBillPaid = (bill?: QuickBooksBill | null) => (
   String(bill?.payment_status || '').toLowerCase() === 'paid'
   || Number(bill?.balance || 0) <= 0
+);
+
+const isQuickBooksBillBuildTrackPaid = (bill?: QuickBooksBill | null) => (
+  bill?.payment_approval_status === QUICKBOOKS_BUILDTRACK_PAID_STATUS
 );
 
 const quickBooksBillDateKey = (bill?: QuickBooksBill | null) => (
@@ -705,9 +711,10 @@ const quickBooksBillMatchesExactDate = (bill: QuickBooksBill, exactDate: string)
 
 const quickBooksBillMatchesStatusFilter = (bill: QuickBooksBill, filter: QuickBooksBillFilter) => {
   const paid = isQuickBooksBillPaid(bill);
-  if (filter === 'paid') return paid;
-  if (filter === 'friday_queue') return !paid && bill.payment_approval_status === 'approved_for_payment';
-  if (filter === 'open') return !paid && bill.payment_approval_status !== 'approved_for_payment';
+  const buildTrackPaid = isQuickBooksBillBuildTrackPaid(bill);
+  if (filter === 'paid') return paid || buildTrackPaid;
+  if (filter === 'friday_queue') return !paid && !buildTrackPaid && bill.payment_approval_status === QUICKBOOKS_APPROVED_FOR_PAYMENT_STATUS;
+  if (filter === 'open') return !paid && !buildTrackPaid && bill.payment_approval_status !== QUICKBOOKS_APPROVED_FOR_PAYMENT_STATUS;
   return true;
 };
 
@@ -821,6 +828,7 @@ export default function Invoices() {
   const [quickBooksInvoiceSort, setQuickBooksInvoiceSort] = useState<QuickBooksInvoiceSortState | null>(null);
   const [approvingQboBillId, setApprovingQboBillId] = useState<string | null>(null);
   const [removingQboBillId, setRemovingQboBillId] = useState<string | null>(null);
+  const [markingQboPaidId, setMarkingQboPaidId] = useState<string | null>(null);
   const [deletingQboBillId, setDeletingQboBillId] = useState<string | null>(null);
   const [uploadingQboBillPdfId, setUploadingQboBillPdfId] = useState<string | null>(null);
   const [draggingQboBillPdfId, setDraggingQboBillPdfId] = useState<string | null>(null);
@@ -1069,7 +1077,11 @@ export default function Invoices() {
 
   const approvedPaymentQueue = useMemo(
     () => quickBooksBills
-      .filter(bill => !isQuickBooksBillPaid(bill) && bill.payment_approval_status === 'approved_for_payment')
+      .filter(bill => (
+        !isQuickBooksBillPaid(bill)
+        && !isQuickBooksBillBuildTrackPaid(bill)
+        && bill.payment_approval_status === QUICKBOOKS_APPROVED_FOR_PAYMENT_STATUS
+      ))
       .sort((a, b) => {
         const dateCompare = String(a.payment_run_date || '').localeCompare(String(b.payment_run_date || ''));
         if (dateCompare !== 0) return dateCompare;
@@ -1478,13 +1490,15 @@ export default function Invoices() {
   const canApproveQuickBooksBill = (bill: QuickBooksBill, invoice?: Invoice | null) => {
     if (!isAdminRole(user?.role || '')) return false;
     if (isQuickBooksBillPaid(bill)) return false;
-    if (bill.payment_approval_status === 'approved_for_payment') return false;
+    if (isQuickBooksBillBuildTrackPaid(bill)) return false;
+    if (bill.payment_approval_status === QUICKBOOKS_APPROVED_FOR_PAYMENT_STATUS) return false;
     return quickBooksBillHasApprovalMatch(bill, invoice);
   };
 
   const quickBooksApprovalBlockedReason = (bill: QuickBooksBill, invoice?: Invoice | null) => {
     if (isQuickBooksBillPaid(bill)) return 'Already paid in QuickBooks';
-    if (bill.payment_approval_status === 'approved_for_payment') return 'Already in the Friday payment queue';
+    if (isQuickBooksBillBuildTrackPaid(bill)) return 'Already marked paid in BuildTrack; QuickBooks match stays linked';
+    if (bill.payment_approval_status === QUICKBOOKS_APPROVED_FOR_PAYMENT_STATUS) return 'Already in the Friday payment queue';
     if (quickBooksSplitLineCount(bill) > 0 && quickBooksUnmatchedSplitLineCount(bill) > 0) return 'Assign every class split before approval';
     if (!quickBooksBillHasApprovalMatch(bill, invoice)) return 'Assign before approval';
     return 'Ready for Friday payment approval';
@@ -1493,7 +1507,8 @@ export default function Invoices() {
   const canDeleteQuickBooksOpenBill = (bill: QuickBooksBill) => (
     canManageQuickBooks
     && !isQuickBooksBillPaid(bill)
-    && bill.payment_approval_status !== 'approved_for_payment'
+    && !isQuickBooksBillBuildTrackPaid(bill)
+    && bill.payment_approval_status !== QUICKBOOKS_APPROVED_FOR_PAYMENT_STATUS
   );
 
   const approveQuickBooksBillForPay = async (bill: QuickBooksBill, invoice?: Invoice | null) => {
@@ -1525,6 +1540,29 @@ export default function Invoices() {
       toast.error(err.response?.data?.error || 'Failed to remove this bill from the payment queue');
     } finally {
       setRemovingQboBillId(null);
+    }
+  };
+
+  const markQuickBooksBillPaidFromQueue = async (bill: QuickBooksBill) => {
+    if (isQuickBooksBillPaid(bill)) {
+      toast.error('This invoice is already paid in QuickBooks.');
+      return;
+    }
+    if (bill.payment_approval_status !== QUICKBOOKS_APPROVED_FOR_PAYMENT_STATUS) {
+      toast.error('Only Friday queue invoices can be marked paid.');
+      return;
+    }
+
+    setMarkingQboPaidId(bill.qbo_id);
+    try {
+      const res = await api.put(`/quickbooks/bills/${encodeURIComponent(bill.qbo_id)}/mark-paid-from-queue`);
+      updateQuickBooksBill(res.data);
+      await refreshQuickBooksStatus();
+      toast.success('Invoice marked paid and removed from the Friday payment queue');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to mark this invoice paid');
+    } finally {
+      setMarkingQboPaidId(null);
     }
   };
 
@@ -2051,8 +2089,9 @@ export default function Invoices() {
                     <tbody>
                       {quickBooksMirrorRows.map(({ bill, invoice }) => {
                         const isPaid = isQuickBooksBillPaid(bill);
-                        const isApprovedForPay = bill.payment_approval_status === 'approved_for_payment' && !isPaid;
-                        const localInvoiceMarkedPaid = Boolean(!isPaid && invoice && (invoice.status === 'paid' || invoice.quickbooks_payment_status === 'paid'));
+                        const isBuildTrackPaid = isQuickBooksBillBuildTrackPaid(bill);
+                        const isApprovedForPay = bill.payment_approval_status === QUICKBOOKS_APPROVED_FOR_PAYMENT_STATUS && !isPaid && !isBuildTrackPaid;
+                        const localInvoiceMarkedPaid = Boolean(!isPaid && !isBuildTrackPaid && invoice && (invoice.status === 'paid' || invoice.quickbooks_payment_status === 'paid'));
                         const splitLines = quickBooksVisibleSplitLines(bill);
                         const visibleSplitLineCount = splitLines.length;
                         const splitLineCount = quickBooksSplitLineCount(bill);
@@ -2060,7 +2099,7 @@ export default function Invoices() {
                         const splitMatched = quickBooksBillSplitMatched(bill);
                         const isSplitScoped = Boolean(bill.split_scope_line_id);
                         const projectMatched = quickBooksBillHasApprovalMatch(bill, invoice);
-                        const needsReview = !projectMatched && !isPaid;
+                        const needsReview = !projectMatched && !isPaid && !isBuildTrackPaid;
                         const canDeleteOpenBill = canDeleteQuickBooksOpenBill(bill);
                         const matchAddress = isSplitScoped ? bill.project_address || invoice?.address || '' : invoice?.address || bill.project_address || '';
                         const matchName = isSplitScoped ? bill.project_job_name || invoice?.job_name || '' : invoice?.job_name || bill.project_job_name || '';
@@ -2068,15 +2107,16 @@ export default function Invoices() {
                         const deiDateLabel = formatQuickBooksDeiDate(bill, invoice);
                         const rowKey = isSplitScoped ? `${bill.qbo_id}:${bill.split_scope_line_id}` : bill.qbo_id;
                         return (
-                          <tr key={rowKey} className={`${isPaid ? 'is-paid' : isApprovedForPay ? 'is-approved-for-pay' : 'is-unpaid'} ${needsReview ? 'needs-review' : ''}`}>
+                          <tr key={rowKey} className={`${isPaid || isBuildTrackPaid ? 'is-paid' : isApprovedForPay ? 'is-approved-for-pay' : 'is-unpaid'} ${needsReview ? 'needs-review' : ''}`}>
                             <td>
-                              <span className={`bt-qbo-status-chip ${isPaid ? 'is-paid' : isApprovedForPay ? 'is-approved-for-pay' : 'is-unpaid'}`}>
-                                {isApprovedForPay ? 'Queued' : qboStatusLabel(bill.payment_status)}
+                              <span className={`bt-qbo-status-chip ${isPaid || isBuildTrackPaid ? 'is-paid' : isApprovedForPay ? 'is-approved-for-pay' : 'is-unpaid'}`}>
+                                {isBuildTrackPaid ? 'Paid' : isApprovedForPay ? 'Queued' : qboStatusLabel(bill.payment_status)}
                               </span>
                               <small>QBO #{bill.doc_number || bill.qbo_id}</small>
                               <small>DEI: {deiDateLabel}</small>
                               {paidDateLabel ? <small>Paid: {paidDateLabel}</small> : null}
                               {isApprovedForPay ? <small>Pay run: Friday {qboPaymentRunLabel(bill)}</small> : null}
+                              {isBuildTrackPaid ? <small>BuildTrack marked paid; QuickBooks still open</small> : null}
                               {localInvoiceMarkedPaid ? <small>BuildTrack marked paid; QBO still open</small> : null}
                               {renderQuickBooksBillPdfControl(bill)}
                             </td>
@@ -2141,6 +2181,12 @@ export default function Invoices() {
                                   <small>Paid in QBO; no payment approval needed</small>
                                   {bill.qbo_class_name ? <small>QBO class: {bill.qbo_class_name}</small> : null}
                                 </>
+                              ) : isBuildTrackPaid ? (
+                                <>
+                                  <strong>BuildTrack paid bill</strong>
+                                  <small>QuickBooks bill match is still linked for sync</small>
+                                  {bill.qbo_class_name ? <small>QBO class: {bill.qbo_class_name}</small> : null}
+                                </>
                               ) : (
                                 <>
                                   <span className="bt-qbo-match-needed">Match needed</span>
@@ -2149,12 +2195,17 @@ export default function Invoices() {
                               )}
                             </td>
                             <td>
-                              {projectMatched || isPaid ? (
+                              {projectMatched || isPaid || isBuildTrackPaid ? (
                                 <div className="bt-qbo-row-actions">
                                   {isPaid ? (
                                     <span className="bt-payment-run-chip is-paid">
                                       <CheckCircle2 className="h-3.5 w-3.5" />
                                       Paid in QBO
+                                    </span>
+                                  ) : isBuildTrackPaid ? (
+                                    <span className="bt-payment-run-chip is-paid">
+                                      <CheckCircle2 className="h-3.5 w-3.5" />
+                                      Paid in BuildTrack
                                     </span>
                                   ) : isApprovedForPay ? (
                                     <span className="bt-payment-run-chip">
@@ -2257,11 +2308,6 @@ export default function Invoices() {
                 <div className="bt-approved-pay-grid">
                   {approvedPaymentQueue.map(bill => {
                     const invoice = bill.matched_invoice_id ? invoiceById.get(bill.matched_invoice_id) || null : null;
-                    const projectHref = invoice?.project_id
-                      ? `/projects/${invoice.project_id}/invoices/${invoice.id}`
-                      : bill.project_id
-                        ? `/projects/${bill.project_id}`
-                        : '/invoices';
                     return (
                     <article key={bill.qbo_id} className="bt-approved-pay-card">
                       <div className="bt-approved-pay-card-top">
@@ -2282,12 +2328,20 @@ export default function Invoices() {
                       <div className="bt-approved-pay-card-bottom">
                         <button
                           type="button"
+                          className="bt-approved-pay-paid-button"
+                          onClick={() => markQuickBooksBillPaidFromQueue(bill)}
+                          disabled={markingQboPaidId === bill.qbo_id}
+                        >
+                          <CheckCircle2 className="h-4 w-4" />
+                          {markingQboPaidId === bill.qbo_id ? 'Marking paid...' : 'PAID'}
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => removeQuickBooksBillFromPay(bill)}
                           disabled={removingQboBillId === bill.qbo_id}
                         >
                           {removingQboBillId === bill.qbo_id ? 'Removing...' : 'Remove from queue'}
                         </button>
-                        <Link to={projectHref}>Review</Link>
                       </div>
                     </article>
                     );

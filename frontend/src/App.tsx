@@ -27,6 +27,7 @@ const PunchList = lazy(() => import('./pages/PunchList'));
 const Photos = lazy(() => import('./pages/Photos'));
 const Invoices = lazy(() => import('./pages/Invoices'));
 const InvoiceBuilder = lazy(() => import('./pages/InvoiceBuilder'));
+const Quotes = lazy(() => import('./pages/Quotes'));
 const Contractors = lazy(() => import('./pages/Contractors'));
 const Users = lazy(() => import('./pages/Users'));
 const Settings = lazy(() => import('./pages/Settings'));
@@ -533,6 +534,7 @@ function MobileHostRoutes() {
       <Route path="/operations-calendar" element={<ManagementMobileRoute><Layout><OperationsCalendar /></Layout></ManagementMobileRoute>} />
       <Route path="/projects" element={<ManagementMobileRoute><Layout><Projects /></Layout></ManagementMobileRoute>} />
       <Route path="/projects/:id" element={<ManagementMobileRoute><Layout><ProjectDetail /></Layout></ManagementMobileRoute>} />
+      <Route path="/quotes" element={<ManagementMobileRoute><Layout><Quotes /></Layout></ManagementMobileRoute>} />
       <Route path="/projects/:projectId/invoices/new" element={<ManagementMobileRoute><Layout><InvoiceBuilder /></Layout></ManagementMobileRoute>} />
       <Route path="/projects/:projectId/invoices/:invoiceId" element={<ManagementMobileRoute><Layout><InvoiceBuilder /></Layout></ManagementMobileRoute>} />
       <Route path="/punch-list" element={<ManagementMobileRoute><Layout><PunchList /></Layout></ManagementMobileRoute>} />
@@ -655,6 +657,11 @@ export default function App() {
         <Route path="/projects/:id" element={
           <DesktopRoute>
             <Layout><ProjectDetail /></Layout>
+          </DesktopRoute>
+        } />
+        <Route path="/quotes" element={
+          <DesktopRoute>
+            <Layout><Quotes /></Layout>
           </DesktopRoute>
         } />
         <Route path="/projects/:projectId/invoices/new" element={

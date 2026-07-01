@@ -113,7 +113,15 @@ function getPhotoWithNote(db, projectId, photoId, user) {
       AND ph.project_id = ?
       AND ${activePhotoSql('ph')}
   `).get(photoId, projectId);
-  return photo ? withCorrectionDeletePermission(photo, user) : null;
+  if (!photo) return null;
+  // Derive served URLs for the original and (if present) the markup overlay.
+  // Mirrors how the frontend builds `/uploads/{projectId}/{relativePath}`.
+  const withUrls = {
+    ...photo,
+    original_url: photo.filename ? `/uploads/${projectId}/${photo.filename}` : null,
+    markup_url: photo.markup_path ? `/uploads/${projectId}/${photo.markup_path}` : null,
+  };
+  return withCorrectionDeletePermission(withUrls, user);
 }
 
 function removeStoredPhotoFiles(photo, projectId) {
@@ -477,6 +485,52 @@ async function normalizeUploadedMediaFiles(files = []) {
       console.warn(`Failed to convert HEIC upload ${file?.originalname || file?.filename || ''}:`, err.message || err);
     }
   }
+}
+
+// --- Photo markup (annotation overlay) upload ---------------------------------
+// A single flattened image (photo + drawn annotations) saved alongside the
+// ORIGINAL under uploads/{projectId}/markup/. The original photo file is never
+// touched. Used by both punch-list (FUNCTION 1) and field-update (FUNCTION 2) UI.
+const MARKUP_FILE_SIZE_LIMIT = 25 * 1024 * 1024;
+const markupStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = path.join(uploadRoot(), req.params.projectId, 'markup');
+    try {
+      if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+      cb(null, uploadDir);
+    } catch (err) {
+      cb(err, uploadDir);
+    }
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase() === '.png' ? '.png' : '.jpg';
+    const photoId = sanitizePathSegment(req.params.id, 'photo');
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    cb(null, `markup_${photoId}_${stamp}${ext}`);
+  },
+});
+const markupUpload = multer({
+  storage: markupStorage,
+  limits: { fileSize: MARKUP_FILE_SIZE_LIMIT, files: 1 },
+  fileFilter: (req, file, cb) => {
+    const mime = String(file.mimetype || '').toLowerCase();
+    if (mime === 'image/png' || mime === 'image/jpeg' || mime === 'image/jpg' || mime === 'image/webp') {
+      cb(null, true);
+    } else {
+      cb(new Error('Markup image must be PNG, JPEG, or WEBP'));
+    }
+  },
+});
+function uploadMarkupImage(req, res, next) {
+  markupUpload.single('markup')(req, res, err => {
+    if (!err) return next();
+    if (req.file?.path) {
+      try { fs.unlinkSync(req.file.path); } catch (_) { /* best-effort */ }
+    }
+    const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+    const message = err.code === 'LIMIT_FILE_SIZE' ? 'Markup image is too large' : (err.message || 'Markup upload rejected');
+    return res.status(status).json({ error: message });
+  });
 }
 
 // GET /api/projects/:projectId/photos
@@ -1088,6 +1142,130 @@ router.put('/:id/note', (req, res) => {
   } catch (err) {
     console.error('Failed to save photo description:', err);
     res.status(500).json({ error: 'Failed to save photo description' });
+  }
+});
+
+// PUT /api/projects/:projectId/photos/:id/markup
+// Save (or replace) the flattened annotation overlay + optional note for a photo.
+// The ORIGINAL image is never modified; markup lands in a separate file and the
+// new nullable columns. Re-editable via markup_json (vector annotation data).
+router.put('/:id/markup', uploadMarkupImage, (req, res) => {
+  const db = getDb();
+  const photo = db.prepare(`
+    SELECT *
+    FROM photos
+    WHERE id = ? AND project_id = ? AND ${activePhotoSql('photos')}
+  `).get(req.params.id, req.params.projectId);
+  if (!photo) {
+    if (req.file?.path) {
+      try { fs.unlinkSync(req.file.path); } catch (_) { /* best-effort */ }
+    }
+    return res.status(404).json({ error: 'Photo not found' });
+  }
+  if (!req.file) {
+    return res.status(400).json({ error: 'Markup image is required' });
+  }
+
+  const projectRoot = path.resolve(uploadRoot(), req.params.projectId);
+  const markupRelPath = path.relative(projectRoot, req.file.path).replace(/\\/g, '/');
+  if (markupRelPath.startsWith('..') || path.isAbsolute(markupRelPath)) {
+    try { fs.unlinkSync(req.file.path); } catch (_) { /* best-effort */ }
+    return res.status(400).json({ error: 'Invalid markup path' });
+  }
+
+  let markupJson = null;
+  if (req.body?.annotations) {
+    const raw = String(req.body.annotations);
+    if (raw.length <= 200000) markupJson = raw;
+  }
+
+  const hasNote = Object.prototype.hasOwnProperty.call(req.body || {}, 'note');
+  const noteText = hasNote ? String(req.body.note || '').trim().slice(0, 2000) : null;
+  const now = new Date().toISOString();
+  const previousMarkup = photo.markup_path;
+
+  try {
+    if (hasNote) {
+      db.prepare(`
+        UPDATE photos
+        SET markup_path = ?, markup_json = ?, markup_drawn_at = ?, markup_drawn_by = ?,
+            caption = ?, individual_note = ?, updated_at = ?
+        WHERE id = ? AND project_id = ?
+      `).run(markupRelPath, markupJson, now, req.user.id, noteText || null, noteText || null, now, req.params.id, req.params.projectId);
+    } else {
+      db.prepare(`
+        UPDATE photos
+        SET markup_path = ?, markup_json = ?, markup_drawn_at = ?, markup_drawn_by = ?, updated_at = ?
+        WHERE id = ? AND project_id = ?
+      `).run(markupRelPath, markupJson, now, req.user.id, now, req.params.id, req.params.projectId);
+    }
+
+    // Best-effort cleanup of the superseded markup file (original photo untouched).
+    if (previousMarkup && previousMarkup !== markupRelPath) {
+      const prevPath = path.resolve(projectRoot, String(previousMarkup));
+      if (prevPath.startsWith(`${projectRoot}${path.sep}`)) {
+        try { if (fs.existsSync(prevPath)) fs.unlinkSync(prevPath); } catch (_) { /* best-effort */ }
+      }
+    }
+
+    logActivity({
+      userId: req.user.id,
+      projectId: req.params.projectId,
+      action: 'photo_markup_saved',
+      entityType: 'photo',
+      entityId: req.params.id,
+      details: { has_note: Boolean(noteText), has_annotations: Boolean(markupJson) },
+    });
+
+    const updatedPhoto = getPhotoWithNote(db, req.params.projectId, req.params.id, req.user);
+    res.json({ photo: updatedPhoto });
+  } catch (err) {
+    if (req.file?.path) {
+      try { fs.unlinkSync(req.file.path); } catch (_) { /* best-effort */ }
+    }
+    console.error('Failed to save photo markup:', err);
+    res.status(500).json({ error: 'Failed to save photo markup' });
+  }
+});
+
+// DELETE /api/projects/:projectId/photos/:id/markup - remove the overlay (keeps the original).
+router.delete('/:id/markup', (req, res) => {
+  const db = getDb();
+  const photo = db.prepare(`
+    SELECT *
+    FROM photos
+    WHERE id = ? AND project_id = ? AND ${activePhotoSql('photos')}
+  `).get(req.params.id, req.params.projectId);
+  if (!photo) return res.status(404).json({ error: 'Photo not found' });
+
+  try {
+    if (photo.markup_path) {
+      const projectRoot = path.resolve(uploadRoot(), req.params.projectId);
+      const prevPath = path.resolve(projectRoot, String(photo.markup_path));
+      if (prevPath.startsWith(`${projectRoot}${path.sep}`)) {
+        try { if (fs.existsSync(prevPath)) fs.unlinkSync(prevPath); } catch (_) { /* best-effort */ }
+      }
+    }
+    db.prepare(`
+      UPDATE photos
+      SET markup_path = NULL, markup_json = NULL, markup_drawn_at = NULL, markup_drawn_by = NULL, updated_at = ?
+      WHERE id = ? AND project_id = ?
+    `).run(new Date().toISOString(), req.params.id, req.params.projectId);
+
+    logActivity({
+      userId: req.user.id,
+      projectId: req.params.projectId,
+      action: 'photo_markup_cleared',
+      entityType: 'photo',
+      entityId: req.params.id,
+      details: {},
+    });
+
+    const updatedPhoto = getPhotoWithNote(db, req.params.projectId, req.params.id, req.user);
+    res.json({ photo: updatedPhoto });
+  } catch (err) {
+    console.error('Failed to clear photo markup:', err);
+    res.status(500).json({ error: 'Failed to clear photo markup' });
   }
 });
 

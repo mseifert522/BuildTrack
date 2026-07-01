@@ -9,6 +9,7 @@ import { fileDropHandlers } from '../lib/fileDrop';
 import { appendProgressUploadAudit, PROGRESS_MEDIA_ACCEPT } from '../lib/progressUpload';
 import { getProgressMediaKind } from '../lib/progressMedia';
 import VoiceTextarea from '../components/VoiceTextarea';
+import PhotoMarkupModal from '../components/PhotoMarkupModal';
 
 type PhotoView = 'general' | 'progress' | 'scope';
 
@@ -247,7 +248,7 @@ export default function Photos() {
 
   const openMedia = (photo: Photo) => {
     const kind = getProgressMediaKind(photo);
-    const src = `/uploads/${photo.project_id}/${photo.filename}`;
+    const src = `/uploads/${photo.project_id}/${(photo as any).markup_path || photo.filename}`;
     if (kind === 'file') {
       window.open(src, '_blank', 'noopener,noreferrer');
       return;
@@ -395,7 +396,7 @@ export default function Photos() {
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
                   {group.photos.map(photo => {
-                    const src = `/uploads/${photo.project_id}/${photo.filename}`;
+                    const src = `/uploads/${photo.project_id}/${(photo as any).markup_path || photo.filename}`;
                     const mediaKind = getProgressMediaKind(photo);
                     const isVideo = mediaKind === 'video';
                     const progressContext = isPhotoContextEnabled(photo.show_in_progress, photo.photo_type === 'progress' || photo.photo_type === 'note');
@@ -495,7 +496,7 @@ export default function Photos() {
                 <h2 className="mb-2 text-xs font-black uppercase tracking-wide text-gray-500">{group.date}</h2>
                 <div className="space-y-2">
                   {group.photos.map(photo => {
-                    const src = `/uploads/${photo.project_id}/${photo.filename}`;
+                    const src = `/uploads/${photo.project_id}/${(photo as any).markup_path || photo.filename}`;
                     const mediaKind = getProgressMediaKind(photo);
                     const isVideo = mediaKind === 'video';
                     const progressContext = isPhotoContextEnabled(photo.show_in_progress, photo.photo_type === 'progress' || photo.photo_type === 'note');
@@ -613,6 +614,7 @@ function PhotoDescriptionModal({
   const [descriptionText, setDescriptionText] = useState('');
   const [saving, setSaving] = useState(false);
   const [voiceStopSignal, setVoiceStopSignal] = useState(0);
+  const [markupOpen, setMarkupOpen] = useState(false);
   const existingDescription = getPhotoDescriptionText(photo);
   const mediaKind = photo ? getProgressMediaKind(photo) : 'image';
   const src = photo ? `/uploads/${photo.project_id}/${photo.filename}` : '';
@@ -641,6 +643,7 @@ function PhotoDescriptionModal({
   };
 
   return (
+    <>
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
       <div className="w-full max-w-3xl overflow-hidden rounded-xl border border-amber-400/40 bg-slate-950 shadow-2xl" onClick={event => event.stopPropagation()}>
         <div
@@ -689,6 +692,17 @@ function PhotoDescriptionModal({
               />
             </label>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+              {mediaKind === 'image' && (
+                <button
+                  type="button"
+                  onClick={() => setMarkupOpen(true)}
+                  disabled={saving}
+                  className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-amber-300/60 bg-slate-900 px-4 text-sm font-black text-amber-200 transition hover:border-amber-300 hover:text-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2}><ellipse cx="12" cy="12" rx="8" ry="6" /></svg>
+                  Mark up
+                </button>
+              )}
               <button
                 type="button"
                 onClick={onClose}
@@ -721,5 +735,17 @@ function PhotoDescriptionModal({
         </div>
       </div>
     </div>
+      <PhotoMarkupModal
+        open={markupOpen}
+        projectId={String(photo.project_id)}
+        photo={photo}
+        onClose={() => setMarkupOpen(false)}
+        onSaved={async (updated) => {
+          setMarkupOpen(false);
+          await onSaved(updated as unknown as Photo);
+          onClose();
+        }}
+      />
+    </>
   );
 }

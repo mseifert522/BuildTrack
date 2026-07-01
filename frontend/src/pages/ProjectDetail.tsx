@@ -22,8 +22,9 @@ import {
   type ProgressCaptureSource,
 } from '../lib/progressUpload';
 import { getProgressMediaKind, isVideoMedia } from '../lib/progressMedia';
+import PhotoMarkupModal from '../components/PhotoMarkupModal';
 
-type Tab = 'overview' | 'progress-history' | 'construction-plan' | 'project-timeline' | 'quotes' | 'punch-list' | 'photos' | 'invoices' | 'notes' | 'team' | 'texts';
+type Tab = 'overview' | 'details' | 'progress-history' | 'construction-plan' | 'project-timeline' | 'quotes' | 'punch-list' | 'photos' | 'invoices' | 'notes' | 'team' | 'texts';
 
 type ProjectCalendarEvent = {
   id: string;
@@ -234,7 +235,13 @@ const getProgressTimestamp = (item: any) =>
 
 const progressPhotoKey = (photo: any) => String(photo?.id || photo?.filename || '');
 
-const progressPhotoSrc = (projectId: string, photo: any) => `/uploads/${projectId}/${photo.filename}`;
+const progressPhotoSrc = (projectId: string, photo: any) => {
+  // Prefer the marked-up overlay when present; the original is preserved and
+  // un-marked photos display exactly as before.
+  if (photo?.markup_url) return photo.markup_url;
+  if (photo?.markup_path) return `/uploads/${projectId}/${photo.markup_path}`;
+  return `/uploads/${projectId}/${photo.filename}`;
+};
 
 const getProgressPhotoNoteText = (photo: any) =>
   String(photo?.individual_note || photo?.caption || photo?.note_text || '').trim();
@@ -745,7 +752,15 @@ export default function ProjectDetail() {
   const location = useLocation();
   const [project, setProject] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<Tab>('overview');
+  const [tab, setTab] = useState<Tab>(() => {
+    try {
+      const h = window.location.hash.replace('#', '') as Tab;
+      const valid: Tab[] = ['overview', 'details', 'progress-history', 'construction-plan', 'project-timeline', 'quotes', 'punch-list', 'photos', 'invoices', 'notes', 'team', 'texts'];
+      return valid.includes(h) ? h : 'notes';
+    } catch {
+      return 'notes';
+    }
+  });
   const [showEdit, setShowEdit] = useState(false);
   const [showAssign, setShowAssign] = useState(false);
   const [allUsers, setAllUsers] = useState<any[]>([]);
@@ -758,6 +773,7 @@ export default function ProjectDetail() {
   const [calendarDate, setCalendarDate] = useState(new Date().toISOString().slice(0, 10));
   const [calendarEventType, setCalendarEventType] = useState('task');
   const [calendarPriority, setCalendarPriority] = useState('normal');
+  const [calendarDetails, setCalendarDetails] = useState('');
   const [calendarReminderEnabled, setCalendarReminderEnabled] = useState(false);
   const [calendarReminderRecipients, setCalendarReminderRecipients] = useState('');
   const [calendarReminderMessage, setCalendarReminderMessage] = useState('');
@@ -837,6 +853,17 @@ export default function ProjectDetail() {
     if (tab === 'overview' || tab === 'notes') loadNotes();
   }, [tab, id]);
 
+  // Keep the URL hash in sync with the active tab so a refresh stays on the same tab.
+  useEffect(() => {
+    try {
+      if (window.location.hash.replace('#', '') !== tab) {
+        window.history.replaceState(null, '', `#${tab}`);
+      }
+    } catch {
+      /* no-op */
+    }
+  }, [tab]);
+
   useEffect(() => {
     return () => {
       noteRecognitionRef.current?.stop?.();
@@ -870,7 +897,7 @@ export default function ProjectDetail() {
   }, [id, projectCalendarAnchorDateKey, user?.role]);
 
   useEffect(() => {
-    if (tab === 'overview') loadProjectCalendar();
+    if (tab === 'overview' || tab === 'notes') loadProjectCalendar();
   }, [tab, loadProjectCalendar]);
 
   const loadUsers = async () => {
@@ -1055,7 +1082,7 @@ export default function ProjectDetail() {
       const payload: any = {
         project_id: id,
         title: calendarTitle.trim(),
-        description: newNote.trim() || null,
+        description: calendarDetails.trim() || newNote.trim() || null,
         event_type: calendarEventType,
         scheduled_for: calendarDate,
         priority: calendarPriority,
@@ -1079,6 +1106,7 @@ export default function ProjectDetail() {
       }
       setShowCalendarComposer(false);
       setCalendarTitle('');
+      setCalendarDetails('');
       setCalendarPriority('normal');
       setCalendarEventType('task');
       setCalendarReminderEnabled(false);
@@ -1189,6 +1217,7 @@ export default function ProjectDetail() {
 
   const tabs: { id: Tab; label: string; icon: any }[] = [
     { id: 'notes', label: 'Notes', icon: MessageSquare },
+    { id: 'details', label: 'Details', icon: ListFilter },
     { id: 'construction-plan', label: 'Scope of Work', icon: FileText },
     { id: 'project-timeline', label: 'Project Timeline', icon: CalendarDays },
     { id: 'quotes', label: 'Quotes', icon: FileText },
@@ -1237,7 +1266,7 @@ export default function ProjectDetail() {
     }
   };
 
-  const notesPanel = (compact = false) => (
+  const notesPanel = (compact = false, section: 'full' | 'list' | 'composer' = 'full') => (
     <div className="bt-project-notes-panel h-full rounded-xl border border-blue-400/45 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 p-3 shadow-[0_18px_44px_rgba(15,23,42,0.34)] ring-1 ring-cyan-300/10 sm:p-4">
       <input
         ref={attachExistingNoteInputRef}
@@ -1247,6 +1276,7 @@ export default function ProjectDetail() {
         className="hidden"
         onChange={event => attachProgressPicturesToExistingNote(event.target.files)}
       />
+      {section !== 'list' && (<>
       <div className="bt-project-notes-header mb-3 flex items-center justify-between gap-3 rounded-xl border border-cyan-300/25 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 px-3 py-2.5 shadow-[0_8px_22px_rgba(37,99,235,0.18)]">
         <div className="min-w-0">
           <h3 className="text-base font-black text-white sm:text-lg">Project Notes</h3>
@@ -1409,6 +1439,13 @@ export default function ProjectDetail() {
               {savingCalendarEvent ? 'Saving' : 'Save'}
             </button>
           </div>
+          <textarea
+            value={calendarDetails}
+            onChange={e => setCalendarDetails(e.target.value)}
+            rows={2}
+            className="mt-2 w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500"
+            placeholder="Details of the task or event (optional) — what needs to be done, where, who, etc."
+          />
           {isAdminRole(user?.role || '') && (
             <div className="mt-3 rounded-xl border border-amber-300 bg-white p-3 shadow-sm">
               <label className="flex items-start gap-2 text-sm font-black text-amber-900">
@@ -1485,12 +1522,14 @@ export default function ProjectDetail() {
         </div>
       )}
       </div>
-      <div className="bt-project-notes-list space-y-2 rounded-xl border border-blue-300/30 bg-gradient-to-br from-slate-950/85 via-slate-900/90 to-cyan-950/70 p-2.5 shadow-inner">
+      </>)}
+      {section !== 'composer' && (
+      <div className="bt-project-notes-list space-y-2">
         {notes.map(note => (
-          <div key={note.id} className={`bt-project-note-card bt-project-note-card-${note.note_type || 'general'} flex items-start gap-3 rounded-xl border border-blue-300/35 bg-gradient-to-br from-slate-900 via-slate-950 to-blue-950 p-3 shadow-[0_14px_36px_rgba(15,23,42,0.32)] ring-1 ring-cyan-300/10`}>
+          <div key={note.id} className={`bt-project-note-card bt-project-note-card-${note.note_type || 'general'} flex items-start gap-3 rounded-xl border border-white/12 bg-gradient-to-br from-slate-900 via-slate-950 to-blue-950 p-4 shadow-[0_14px_36px_rgba(15,23,42,0.32)]`}>
             <Avatar src={note.user_avatar_url} name={note.user_name} size={36} />
             <div className="flex-1 min-w-0">
-              <div className="bt-project-note-meta-bar mb-2 flex items-start justify-between gap-3 border-b border-blue-300/20 pb-1.5">
+              <div className="bt-project-note-meta-bar mb-2 flex items-start justify-between gap-3 pb-1.5">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="text-base font-black text-white truncate">{note.user_name}</span>
@@ -1544,7 +1583,7 @@ export default function ProjectDetail() {
                 </div>
               ) : (
                 <>
-                  <p className="bt-project-note-body rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-base font-semibold leading-7 text-slate-50 whitespace-pre-wrap sm:text-[17px]">{note.note}</p>
+                  <p className="bt-project-note-body rounded-lg bg-black/20 px-3 py-2.5 text-base font-semibold leading-7 text-slate-50 whitespace-pre-wrap sm:text-[17px]">{note.note}</p>
                   <span className={`inline-flex mt-2 rounded-full border px-2.5 py-0.5 text-sm font-bold ${note.visibility === 'public' ? 'border-emerald-300/40 bg-emerald-500/15 text-emerald-100' : 'border-slate-500 bg-slate-800 text-slate-200'}`}>
                     {note.visibility === 'public' ? 'Public to contractors' : 'Private management note'}
                   </span>
@@ -1630,6 +1669,7 @@ export default function ProjectDetail() {
         ))}
         {notes.length === 0 && <p className="text-center text-slate-400 text-sm py-8">No notes yet</p>}
       </div>
+      )}
     </div>
   );
 
@@ -1649,23 +1689,23 @@ export default function ProjectDetail() {
       {/* Header */}
       <div className="sticky top-0 z-50 isolate bg-white border-b border-gray-200 shadow-sm">
         <div className="px-4 md:px-6 py-3">
-          <div className="flex items-center gap-3 mb-3">
-            <button onClick={() => navigate('/projects')} className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors">
+          <div className="flex items-center gap-4 mb-3">
+            <button onClick={() => navigate('/projects')} className="flex-shrink-0 p-2 rounded-lg text-slate-300 hover:bg-white/5 hover:text-white transition-colors" aria-label="Back to projects">
               <ArrowLeft className="w-5 h-5" />
             </button>
-            <div className="w-14 h-12 rounded-xl overflow-hidden flex items-center justify-center flex-shrink-0" style={{ background: '#EFF6FF' }}>
+            <div className="h-16 w-20 overflow-hidden rounded-xl border border-white/10 flex items-center justify-center flex-shrink-0 shadow-[0_6px_18px_rgba(0,0,0,0.45)]" style={{ background: '#1c1f29' }}>
               {project.main_photo_url ? (
-                <img src={project.main_photo_url} alt={project.address} className="w-full h-full object-cover" />
+                <img src={project.main_photo_url} alt={project.address} className="h-full w-full object-cover" />
               ) : (
-                <MapPin className="w-5 h-5 text-blue-600" />
+                <MapPin className="w-6 h-6 text-blue-400" />
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="font-bold text-gray-900 text-lg truncate">{formatProjectAddressLabel(project.address)}</h1>
+              <h1 className="font-black text-white text-xl sm:text-2xl leading-tight truncate">{formatProjectAddressLabel(project.address)}</h1>
+              <div className="mt-1.5 flex items-center gap-2 flex-wrap">
                 <StatusBadge status={project.status} />
                 {punchlistStageActive && (
-                  <span className="inline-flex items-center rounded-full border border-yellow-300 bg-yellow-400 px-3 py-1 text-sm font-black uppercase tracking-wide text-yellow-950 shadow-sm">
+                  <span className="inline-flex items-center rounded-full border border-yellow-300 bg-yellow-400 px-3 py-1 text-xs font-black uppercase tracking-wide text-yellow-950 shadow-sm">
                     Punch List Active
                   </span>
                 )}
@@ -1704,62 +1744,15 @@ export default function ProjectDetail() {
 
       {/* Tab Content */}
       <div className={`p-4 md:p-6 mx-auto ${tab === 'project-timeline' ? 'max-w-[1480px]' : 'max-w-6xl'}`}>
-        {/* Overview */}
-        {tab === 'overview' && (
+        {/* Notes / Overview (unified) */}
+        {(tab === 'overview' || tab === 'notes') && (
           <div className="space-y-4">
-            {/* Stats row */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {[
-                { label: 'Open Punch Items', value: project.punch_stats?.filter((s: any) => s.status !== 'completed').reduce((a: number, b: any) => a + b.cnt, 0) || 0, color: 'text-orange-600', bg: 'bg-orange-50' },
-                { label: 'Completed Items', value: project.punch_stats?.find((s: any) => s.status === 'completed')?.cnt || 0, color: 'text-green-600', bg: 'bg-green-50' },
-                { label: 'Assigned Users', value: project.assignments?.length || 0, color: 'text-blue-600', bg: 'bg-blue-50' },
-                { label: 'Recent Field Photos', value: project.recent_photos?.length || 0, color: 'text-amber-600', bg: 'bg-amber-50' },
-              ].map(({ label, value, color, bg }) => (
-                <div key={label} className="bg-white rounded-xl border border-gray-200 p-4">
-                  <p className={`text-2xl font-bold ${color}`}>{value}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">{label}</p>
-                </div>
-              ))}
-            </div>
-
             <div className="grid lg:grid-cols-5 gap-4">
               <div className="lg:col-span-3">
-                {notesPanel(true)}
+                {notesPanel(true, 'list')}
               </div>
               <div className="lg:col-span-2 space-y-4">
-            {/* Project details */}
-            <div className="bg-white rounded-xl border border-gray-200 p-4">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <h3 className="font-semibold text-gray-900 text-sm">Project Details</h3>
-                {canEdit && (
-                  <button
-                    type="button"
-                    onClick={openEditProject}
-                    className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-blue-400 bg-blue-600 px-3 text-xs font-black text-white shadow-sm transition hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-300"
-                  >
-                    <Edit2 className="h-3.5 w-3.5" />
-                    Edit Details
-                  </button>
-                )}
-              </div>
-              <div className="grid sm:grid-cols-2 gap-4 text-sm">
-                {[
-                  { label: 'Status', value: <StatusBadge status={project.status} /> },
-                  ...(punchlistStageActive ? [{ label: 'Punch List', value: <span className="inline-flex items-center rounded-full border border-yellow-300 bg-yellow-400 px-2.5 py-1 text-xs font-black uppercase tracking-wide text-yellow-950">Active</span> }] : []),
-                  { label: 'Start Date', value: project.start_date ? format(new Date(project.start_date), 'MMM d, yyyy') : '—' },
-                  { label: 'Target Completion', value: project.target_completion ? format(new Date(project.target_completion), 'MMM d, yyyy') : '—' },
-                  { label: 'Budget', value: project.budget ? `$${Number(project.budget).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—' },
-                  { label: 'Lockbox Code', value: project.lockbox_code || 'Not entered' },
-                  { label: 'Created By', value: project.created_by_name || '—' },
-                ].filter(item => canSeeBudget || item.label !== 'Budget').map(({ label, value }) => (
-                  <div key={label}>
-                    <p className="text-xs text-gray-500 mb-0.5">{label}</p>
-                    <div className="font-medium text-gray-900">{value}</div>
-                  </div>
-                ))}
-                <ProjectContractorAssignmentPanel projectId={id!} compact canAssign={Boolean(canAssign)} />
-              </div>
-            </div>
+              {notesPanel(true, 'composer')}
 
               {canSeeProjectCalendar && (
                 <ProjectMiniCalendarCard
@@ -1792,6 +1785,43 @@ export default function ProjectDetail() {
               </div>
             </div>
 
+          </div>
+        )}
+
+        {tab === 'details' && (
+          <div className="max-w-4xl space-y-4">
+            <div className="bg-white rounded-xl border border-gray-200 p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3 className="font-semibold text-gray-900 text-base">Project Details</h3>
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={openEditProject}
+                    className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-blue-400 bg-blue-600 px-3 text-xs font-black text-white shadow-sm transition hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                  >
+                    <Edit2 className="h-3.5 w-3.5" />
+                    Edit Details
+                  </button>
+                )}
+              </div>
+              <div className="grid sm:grid-cols-2 gap-4 text-sm">
+                {[
+                  { label: 'Status', value: <StatusBadge status={project.status} /> },
+                  ...(punchlistStageActive ? [{ label: 'Punch List', value: <span className="inline-flex items-center rounded-full border border-yellow-300 bg-yellow-400 px-2.5 py-1 text-xs font-black uppercase tracking-wide text-yellow-950">Active</span> }] : []),
+                  { label: 'Start Date', value: project.start_date ? format(new Date(project.start_date), 'MMM d, yyyy') : '—' },
+                  { label: 'Target Completion', value: project.target_completion ? format(new Date(project.target_completion), 'MMM d, yyyy') : '—' },
+                  { label: 'Budget', value: project.budget ? `$${Number(project.budget).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—' },
+                  { label: 'Lockbox Code', value: project.lockbox_code || 'Not entered' },
+                  { label: 'Created By', value: project.created_by_name || '—' },
+                ].filter(item => canSeeBudget || item.label !== 'Budget').map(({ label, value }) => (
+                  <div key={label}>
+                    <p className="text-xs text-gray-500 mb-0.5">{label}</p>
+                    <div className="font-medium text-gray-900">{value}</div>
+                  </div>
+                ))}
+                <ProjectContractorAssignmentPanel projectId={id!} compact canAssign={Boolean(canAssign)} />
+              </div>
+            </div>
           </div>
         )}
 
@@ -1831,11 +1861,6 @@ export default function ProjectDetail() {
         {/* Invoices Tab */}
         {tab === 'invoices' && (
           <InvoicesTab projectId={id!} user={user} project={project} />
-        )}
-
-        {/* Notes Tab */}
-        {tab === 'notes' && (
-          notesPanel(false)
         )}
 
         {/* Team Tab */}
@@ -3417,32 +3442,11 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
   };
   const scopeCardStyles = [
     {
-      card: 'border-blue-400/40 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 shadow-[0_18px_42px_rgba(37,99,235,0.20)]',
-      accent: 'bg-blue-400',
-      number: 'bg-blue-500 text-white ring-blue-200/40',
-      section: 'border-blue-300/25 bg-blue-400/15 text-blue-100',
-      hoverTitle: 'group-hover:text-blue-100',
-    },
-    {
-      card: 'border-emerald-400/40 bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 shadow-[0_18px_42px_rgba(16,185,129,0.18)]',
-      accent: 'bg-emerald-400',
-      number: 'bg-emerald-500 text-white ring-emerald-200/40',
-      section: 'border-emerald-300/25 bg-emerald-400/15 text-emerald-100',
-      hoverTitle: 'group-hover:text-emerald-100',
-    },
-    {
-      card: 'border-amber-300/40 bg-gradient-to-br from-slate-950 via-slate-900 to-amber-950 shadow-[0_18px_42px_rgba(245,158,11,0.16)]',
-      accent: 'bg-amber-300',
-      number: 'bg-amber-400 text-slate-950 ring-amber-100/50',
-      section: 'border-amber-200/25 bg-amber-300/15 text-amber-100',
-      hoverTitle: 'group-hover:text-amber-100',
-    },
-    {
-      card: 'border-cyan-300/40 bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950 shadow-[0_18px_42px_rgba(34,211,238,0.16)]',
-      accent: 'bg-cyan-300',
-      number: 'bg-cyan-400 text-slate-950 ring-cyan-100/50',
-      section: 'border-cyan-200/25 bg-cyan-300/15 text-cyan-100',
-      hoverTitle: 'group-hover:text-cyan-100',
+      card: 'border-white/10 bg-slate-900/55 shadow-[0_10px_26px_rgba(0,0,0,0.35)]',
+      accent: 'bg-white/15',
+      number: 'bg-slate-700 text-white ring-white/15',
+      section: 'border-white/15 bg-white/10 text-slate-200',
+      hoverTitle: 'group-hover:text-white',
     },
   ];
 
@@ -4296,6 +4300,7 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
         <Loading />
       ) : (
         <div className="space-y-3">
+          {aiAgentScopes.length > 0 && (
           <section className="overflow-hidden rounded-2xl border border-violet-300/45 bg-gradient-to-br from-slate-950 via-violet-950 to-blue-950 text-white shadow-[0_18px_44px_rgba(49,46,129,0.32)]">
             <div className="flex flex-col gap-3 border-b border-white/10 p-4 lg:flex-row lg:items-start lg:justify-between">
               <div className="flex min-w-0 items-start gap-3">
@@ -4407,6 +4412,7 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
               </div>
             )}
           </section>
+          )}
 
           {legacyScope && scopes.length === 0 && (
             <div className="bg-white rounded-2xl border border-amber-200 p-4">
@@ -4474,7 +4480,7 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                       <span className={`inline-flex h-8 min-w-8 items-center justify-center rounded-lg px-2 text-sm font-black shadow-sm ring-1 ${scopeCardStyle.number}`}>{scopeNumber}</span>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
-                          <h4 className={`min-w-0 truncate text-sm font-black leading-5 text-white transition-colors ${scopeCardStyle.hoverTitle}`}>{scope.scope_title}</h4>
+                          <h4 className={`min-w-0 truncate text-sm font-black leading-5 text-white transition-colors ${scopeCardStyle.hoverTitle}`}>{scope.scope_of_work || scope.scope_title || 'Scope of work'}</h4>
                           <ChevronRight className={`h-4 w-4 flex-shrink-0 text-slate-300 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
                         </div>
                         <div className="mt-0.5 flex flex-wrap items-center gap-1">
@@ -4499,9 +4505,7 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                             Updated {formatEasternDateTime(scope.updated_at || scope.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                           </span>
                         </div>
-                        {scope.scope_of_work ? (
-                          <p className="mt-0.5 line-clamp-1 whitespace-pre-wrap text-xs font-semibold leading-4 text-slate-300">{scope.scope_of_work}</p>
-                        ) : null}
+                        {/* task is shown as the title above */}
                         {executionItems.length > 0 && (
                           <div className="mt-1 space-y-1">
                             {executionItems.map((item, lineIndex) => (
@@ -4521,7 +4525,7 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                         <button
                           type="button"
                           onClick={() => toggleScopeCompleted(scope)}
-                          className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-red-300/70 bg-gradient-to-br from-red-600 via-red-700 to-red-950 px-2.5 py-1.5 text-xs font-black text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_8px_18px_rgba(185,28,28,0.28)] transition-all hover:border-red-200 hover:from-red-500 hover:via-red-600 hover:to-red-900"
+                          className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-400/40 bg-emerald-500/15 px-2.5 py-1.5 text-xs font-black text-emerald-100 transition-colors hover:bg-emerald-500/25 hover:text-white"
                           title="Mark this scope 100% complete on the project timeline"
                         >
                           <CheckCircle2 className="h-3.5 w-3.5" />
@@ -4529,7 +4533,7 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                         </button>
                       )}
                       {String(scope.status || 'active') === 'completed' && (
-                        <span className="inline-flex items-center justify-center gap-1.5 rounded-full border border-emerald-200/80 bg-gradient-to-br from-emerald-300 via-lime-300 to-emerald-500 px-3 py-1.5 text-xs font-black uppercase tracking-wide text-slate-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_8px_18px_rgba(16,185,129,0.26)]">
+                        <span className="inline-flex items-center justify-center gap-1.5 rounded-full border border-emerald-400/45 bg-emerald-500/20 px-3 py-1.5 text-xs font-black uppercase tracking-wide text-emerald-100">
                           <CheckCircle2 className="h-3.5 w-3.5" />
                           Completed
                         </span>
@@ -4538,7 +4542,7 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                         {isExpanded ? 'Hide' : 'Details'}
                       </button>
                       {canManage && (
-                        <button type="button" onClick={() => openVendorQuoteModal(scope)} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-300/45 bg-emerald-500/15 px-2.5 py-1.5 text-xs font-black text-emerald-100 transition-colors hover:bg-emerald-500/25" aria-label="Request quote for this scope">
+                        <button type="button" onClick={() => openVendorQuoteModal(scope)} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-600 bg-slate-950/45 px-2.5 py-1.5 text-xs font-black text-slate-100 transition-colors hover:bg-slate-800" aria-label="Request quote for this scope">
                           <Send className="h-3.5 w-3.5" />
                           Request Quote
                         </button>
@@ -4552,9 +4556,9 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                         sourceType="scope"
                         sourceId={scope.id}
                         contextLabel={[project?.address, scope.scope_title].filter(Boolean).join(' - ')}
-                        buttonClassName="inline-flex items-center justify-center gap-1.5 rounded-lg border border-cyan-300/40 bg-cyan-500/15 px-2 py-1.5 text-xs font-black text-cyan-100 transition-colors hover:bg-cyan-500/25"
+                        buttonClassName="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-600 bg-slate-950/45 px-2 py-1.5 text-xs font-black text-slate-100 transition-colors hover:bg-slate-800"
                       />
-                      <button type="button" onClick={() => openScopeAssignmentPhotoPicker(scope)} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-amber-300/40 bg-amber-500/15 px-2 py-1.5 text-xs font-black text-amber-100 transition-colors hover:bg-amber-500/25" aria-label="Attach photos to scope">
+                      <button type="button" onClick={() => openScopeAssignmentPhotoPicker(scope)} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-600 bg-slate-950/45 px-2 py-1.5 text-xs font-black text-slate-100 transition-colors hover:bg-slate-800" aria-label="Attach photos to scope">
                         <Camera className="h-3.5 w-3.5" />
                         Photos
                       </button>
@@ -4646,60 +4650,26 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                     </div>
                   )}
                   {isExpanded && (
-                    <div className="mt-5 border-t border-white/10 pt-4">
-                      <div className="rounded-xl border border-white/10 bg-slate-950/45 p-3">
-                        <p className="text-xs font-black uppercase tracking-wide text-slate-300">Scope details</p>
-                        {scope.scope_of_work ? (
-                          <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-100/90">{scope.scope_of_work}</p>
-                        ) : (
-                          <p className="mt-2 text-sm font-semibold italic text-slate-300">No scope details entered yet.</p>
-                        )}
-                        <p className="mt-3 text-[11px] font-bold uppercase tracking-wide text-slate-500">
-                          Updated {formatEasternDateTime(scope.updated_at || scope.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time
-                        </p>
-                        {scopeAiMeta && (
-                          <div className="mt-3 rounded-lg border border-violet-300/25 bg-violet-500/10 p-3">
-                            <p className="text-xs font-black uppercase tracking-wide text-violet-100">Created by AI Agent: {scopeAiMeta.agentName}</p>
-                            <p className="mt-1 text-xs font-semibold text-violet-100/85">Source: {scopeAiMeta.source}{scopeAiMeta.requestId ? ` | Request: ${scopeAiMeta.requestId}` : ''}</p>
-                            {scopeAiMeta.rawTranscript && <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-violet-50/90">{scopeAiMeta.rawTranscript}</p>}
-                          </div>
-                        )}
-                      </div>
-                      <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                        <div className="rounded-xl border border-blue-300/30 bg-blue-400/10 p-3">
-                          <p className="text-xl font-black text-blue-100">{executionItems.length}</p>
-                          <p className="text-xs font-black uppercase tracking-wide text-blue-200">Execution lines</p>
-                        </div>
-                        <div className="rounded-xl border border-amber-300/30 bg-amber-400/10 p-3">
-                          <p className="text-xl font-black text-amber-100">{waitingMaterials}</p>
-                          <p className="text-xs font-black uppercase tracking-wide text-amber-200">Materials waiting</p>
-                        </div>
-                        <div className="rounded-xl border border-emerald-300/30 bg-emerald-400/10 p-3">
-                          <p className="text-xl font-black text-emerald-100">${scopeMaterialCost.toLocaleString('en-US', { maximumFractionDigits: 0 })}</p>
-                          <p className="text-xs font-black uppercase tracking-wide text-emerald-200">Material cost</p>
-                        </div>
-                      </div>
+                    <div className="mt-4 border-t border-white/10 pt-4">
+                      {scope.scope_of_work ? (
+                        <p className="whitespace-pre-wrap text-sm leading-6 text-slate-200/90">{scope.scope_of_work}</p>
+                      ) : (
+                        <p className="text-sm font-semibold italic text-slate-400">No scope notes entered yet.</p>
+                      )}
+                      <p className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        {executionItems.length} execution line{executionItems.length === 1 ? '' : 's'} · {waitingMaterials} material{waitingMaterials === 1 ? '' : 's'} waiting · ${scopeMaterialCost.toLocaleString('en-US', { maximumFractionDigits: 0 })} material cost · Updated {formatEasternDateTime(scope.updated_at || scope.created_at, { month: 'short', day: 'numeric' })}
+                      </p>
+                      {scopeAiMeta && (
+                        <p className="mt-2 text-[11px] font-semibold text-violet-200/80">AI Agent: {scopeAiMeta.agentName}{scopeAiMeta.requestId ? ` · Request ${scopeAiMeta.requestId}` : ''}</p>
+                      )}
 
                       {canManage && (
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          <button type="button" onClick={() => openScopeAssignmentPhotoPicker(scope)} className="inline-flex items-center gap-2 rounded-xl border border-amber-300/40 bg-amber-500/20 px-3 py-2 text-xs font-black text-amber-50 hover:bg-amber-500/30">
-                            <Camera className="h-4 w-4" /> Attach Photos
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button type="button" onClick={() => openScopeAssignmentPhotoPicker(scope)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-950/45 px-3 py-1.5 text-xs font-black text-slate-100 hover:bg-slate-800">
+                            <Camera className="h-3.5 w-3.5" /> Photos
                           </button>
-                          <button type="button" onClick={() => openAddStep(scope.id)} className="inline-flex items-center gap-2 rounded-xl border border-blue-300/40 bg-blue-500/20 px-3 py-2 text-xs font-black text-blue-50 hover:bg-blue-500/30">
-                            <Plus className="h-4 w-4" /> Line Item
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!executionItems.length) {
-                                toast.error('Add an execution line before adding materials');
-                                return;
-                              }
-                              openAddMaterial(executionItems[0].id, scope.id);
-                            }}
-                            className="inline-flex items-center gap-2 rounded-xl border border-amber-300/40 bg-amber-500/20 px-3 py-2 text-xs font-black text-amber-50 hover:bg-amber-500/30"
-                          >
-                            <Package className="h-4 w-4" /> Material
+                          <button type="button" onClick={() => openAddStep(scope.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-950/45 px-3 py-1.5 text-xs font-black text-slate-100 hover:bg-slate-800">
+                            <Plus className="h-3.5 w-3.5" /> Line Item
                           </button>
                         </div>
                       )}
@@ -6211,6 +6181,7 @@ function PunchListTab({
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
   const [uploadingItemPhoto, setUploadingItemPhoto] = useState<string | null>(null);
   const [punchPhotoPickerItem, setPunchPhotoPickerItem] = useState<any | null>(null);
+  const [markupPhoto, setMarkupPhoto] = useState<any | null>(null);
   const { register, handleSubmit, reset, formState: { isSubmitting } } = useForm();
 
   const load = async () => {
@@ -6444,6 +6415,16 @@ function PunchListTab({
                               ) : (
                                 <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
                               )}
+                              {mediaKind === 'image' && (
+                                <button
+                                  type="button"
+                                  onClick={() => setMarkupPhoto(photo)}
+                                  className="absolute left-1 top-1 hidden rounded-md border border-amber-300 bg-amber-500 px-1.5 py-1 text-[10px] font-black text-slate-950 shadow-sm group-hover:inline-flex"
+                                  aria-label="Mark up photo"
+                                >
+                                  Mark
+                                </button>
+                              )}
                               {photo.assignment_id && (
                                 <button
                                   type="button"
@@ -6515,6 +6496,13 @@ function PunchListTab({
         initialSelectedIds={[]}
         onClose={() => setPunchPhotoPickerItem(null)}
         onSave={savePunchPhotoPickerSelection}
+      />
+      <PhotoMarkupModal
+        open={Boolean(markupPhoto)}
+        projectId={projectId}
+        photo={markupPhoto}
+        onClose={() => setMarkupPhoto(null)}
+        onSaved={async () => { await load(); setMarkupPhoto(null); }}
       />
     </div>
   );
@@ -7167,6 +7155,7 @@ function PhotoNoteModal({
   const [noteText, setNoteText] = useState('');
   const [saving, setSaving] = useState(false);
   const [voiceStopSignal, setVoiceStopSignal] = useState(0);
+  const [markupOpen, setMarkupOpen] = useState(false);
   const mediaKind = photo ? getProgressMediaKind(photo) : 'image';
   const src = photo ? progressPhotoSrc(projectId, photo) : '';
   const existingNote = getProgressPhotoNoteText(photo);
@@ -7195,6 +7184,7 @@ function PhotoNoteModal({
   };
 
   return (
+    <>
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
       <div className="w-full max-w-3xl overflow-hidden rounded-xl border border-amber-400/40 bg-slate-950 shadow-2xl" onClick={event => event.stopPropagation()}>
         <div
@@ -7243,6 +7233,17 @@ function PhotoNoteModal({
               />
             </label>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+              {mediaKind === 'image' && (
+                <button
+                  type="button"
+                  onClick={() => setMarkupOpen(true)}
+                  disabled={saving}
+                  className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-amber-300/60 bg-slate-900 px-4 text-sm font-black text-amber-200 transition hover:border-amber-300 hover:text-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2}><ellipse cx="12" cy="12" rx="8" ry="6" /></svg>
+                  Mark up
+                </button>
+              )}
               <button
                 type="button"
                 onClick={onClose}
@@ -7275,6 +7276,18 @@ function PhotoNoteModal({
         </div>
       </div>
     </div>
+      <PhotoMarkupModal
+        open={markupOpen}
+        projectId={projectId}
+        photo={photo}
+        onClose={() => setMarkupOpen(false)}
+        onSaved={async (updated) => {
+          setMarkupOpen(false);
+          await onSaved(updated);
+          onClose();
+        }}
+      />
+    </>
   );
 }
 
@@ -8253,7 +8266,7 @@ type ProjectQuoteForm = {
   total_quote_amount: string;
 };
 
-type QuoteFilterKey = 'review' | 'approved' | 'database';
+type QuoteFilterKey = 'review' | 'approved' | 'database' | 'compare';
 
 const projectQuoteStatuses = ['draft', 'submitted', 'approved', 'rejected', 'paid', 'completed', 'historical'];
 const approvedQuoteStatuses = ['approved', 'paid', 'completed'];
@@ -8350,6 +8363,7 @@ function QuotesTab({ projectId, project }: { projectId: string; project: any }) 
   });
   const [showAddQuote, setShowAddQuote] = useState(false);
   const [savingQuote, setSavingQuote] = useState(false);
+  const [aiExtracting, setAiExtracting] = useState(false);
   const [quoteFile, setQuoteFile] = useState<File | null>(null);
   const [quoteForm, setQuoteForm] = useState<ProjectQuoteForm>(() => blankProjectQuoteForm());
   const [quoteLineItems, setQuoteLineItems] = useState<ProjectQuoteLineForm[]>(() => [blankProjectQuoteLineItem()]);
@@ -8413,8 +8427,9 @@ function QuotesTab({ projectId, project }: { projectId: string; project: any }) 
   const visibleQuotes = useMemo(() => {
     if (quoteFilter === 'review') return reviewQuotes;
     if (quoteFilter === 'approved') return approvedQuotes;
+    if (quoteFilter === 'compare') return [...quotes].sort((a, b) => quoteNumberValue(a.total_quote_amount) - quoteNumberValue(b.total_quote_amount));
     return databaseQuotes;
-  }, [approvedQuotes, databaseQuotes, quoteFilter, reviewQuotes]);
+  }, [approvedQuotes, databaseQuotes, quoteFilter, reviewQuotes, quotes]);
   const totalQuoted = quotes.reduce((sum, quote) => sum + quoteNumberValue(quote.total_quote_amount), 0);
   const visibleQuoted = visibleQuotes.reduce((sum, quote) => sum + quoteNumberValue(quote.total_quote_amount), 0);
   const contractors = new Set(visibleQuotes.map(quote => quote.contractor_company || quote.contractor_name).filter(Boolean));
@@ -8462,6 +8477,14 @@ function QuotesTab({ projectId, project }: { projectId: string; project: any }) 
       description: 'Complete project quote history, including denied quotes',
       Icon: Database,
     },
+    {
+      key: 'compare',
+      label: 'Compare & Pick',
+      count: quotes.length,
+      value: quoteMoney(totalQuoted),
+      description: 'All quotes side by side — choose the winner',
+      Icon: ListFilter,
+    },
   ];
   const currentFilter = quoteFilters.find(filter => filter.key === quoteFilter) || quoteFilters[0];
 
@@ -8480,6 +8503,38 @@ function QuotesTab({ projectId, project }: { projectId: string; project: any }) 
       }
       return next;
     }));
+  };
+
+  const autoFillQuoteFromPdf = async () => {
+    if (!quoteFile) { toast.error('Attach a PDF or image of the quote first'); return; }
+    setAiExtracting(true);
+    try {
+      const body = new FormData();
+      body.append('quote_file', quoteFile);
+      const res = await api.post(`/projects/${projectId}/quotes/extract`, body, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const q = res.data?.quote || {};
+      setQuoteForm(f => ({
+        ...f,
+        contractor_name: q.contractor_name || f.contractor_name,
+        contractor_email: q.contractor_email || q.contractor_phone || f.contractor_email,
+        scope_description: q.scope_description || f.scope_description,
+        total_quote_amount: q.total_quote_amount ? String(q.total_quote_amount) : f.total_quote_amount,
+      }));
+      const lines = Array.isArray(q.line_items) ? q.line_items : [];
+      if (lines.length) {
+        setQuoteLineItems(lines.map((li: any) => ({
+          ...blankProjectQuoteLineItem(li.category || defaultCategory),
+          category: li.category || defaultCategory,
+          description: li.description || '',
+          total_line_item_price: li.total_line_item_price != null ? String(li.total_line_item_price) : '',
+        })));
+      }
+      toast.success('Quote read by AI — review the fields, then Save quote');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Could not read the quote from this file');
+    } finally {
+      setAiExtracting(false);
+    }
   };
 
   const submitProjectQuote = async () => {
@@ -8552,7 +8607,73 @@ function QuotesTab({ projectId, project }: { projectId: string; project: any }) 
 
   return (
     <div className="space-y-4 text-slate-100">
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-lg font-black text-white">Project Quotes</h3>
+          <p className="text-xs font-semibold text-slate-400">Upload a PDF or enter a quote manually, then use Compare &amp; Pick to choose the winner.</p>
+        </div>
+        <button type="button" onClick={() => { resetQuoteForm(); setShowAddQuote(value => !value); }} className="inline-flex items-center gap-1.5 rounded-lg border border-blue-400/60 bg-blue-600 px-3 py-2 text-xs font-black text-white transition-colors hover:bg-blue-500">
+          <Plus className="h-3.5 w-3.5" /> {showAddQuote ? 'Close' : 'Add Quote'}
+        </button>
+      </div>
+
+      {showAddQuote && (
+        <div className="space-y-3 rounded-xl border border-white/10 bg-slate-950/55 p-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block">
+              <span className="text-[11px] font-black uppercase tracking-wide text-slate-400">Contractor name *</span>
+              <input value={quoteForm.contractor_name} onChange={e => setQuoteForm(f => ({ ...f, contractor_name: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Who gave the quote" />
+            </label>
+            <label className="block">
+              <span className="text-[11px] font-black uppercase tracking-wide text-slate-400">Email / phone (optional)</span>
+              <input value={quoteForm.contractor_email} onChange={e => setQuoteForm(f => ({ ...f, contractor_email: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="contractor@email.com" />
+            </label>
+          </div>
+
+          <label className="block">
+            <span className="text-[11px] font-black uppercase tracking-wide text-slate-400">What is this quote for? (optional)</span>
+            <textarea value={quoteForm.scope_description} onChange={e => setQuoteForm(f => ({ ...f, scope_description: e.target.value }))} rows={2} className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="e.g. Paint entire interior, 2 coats" />
+          </label>
+
+          <label className="block">
+            <span className="text-[11px] font-black uppercase tracking-wide text-slate-400">Attach the quote PDF (optional)</span>
+            <input type="file" accept="application/pdf,image/*" onChange={e => setQuoteFile(e.target.files?.[0] || null)} className="mt-1 block w-full text-xs text-slate-300 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-600 file:px-3 file:py-2 file:text-xs file:font-black file:text-white hover:file:bg-blue-500" />
+            {quoteFile && <span className="mt-1 block text-[11px] font-semibold text-emerald-300">Attached: {quoteFile.name}</span>}
+          </label>
+
+          {quoteFile && (
+            <button type="button" onClick={autoFillQuoteFromPdf} disabled={aiExtracting} className="inline-flex items-center gap-1.5 rounded-lg border border-violet-400/50 bg-violet-600 px-3 py-2 text-xs font-black text-white transition-colors hover:bg-violet-500 disabled:opacity-50">
+              <Bot className="h-3.5 w-3.5" /> {aiExtracting ? 'Reading the quote…' : 'Auto-fill from PDF with AI'}
+            </button>
+          )}
+
+          <div className="space-y-2">
+            <span className="text-[11px] font-black uppercase tracking-wide text-slate-400">Line items — each needs a category &amp; price</span>
+            {quoteLineItems.map((line, idx) => (
+              <div key={idx} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_120px_auto]">
+                <select value={line.category} onChange={e => updateQuoteLineItem(idx, { category: e.target.value })} className="rounded-lg border border-slate-600 bg-slate-900 px-2 py-2 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="">Category…</option>
+                  {quoteOptions.categories.map(cat => <option key={cat.id} value={cat.name}>{cat.name}</option>)}
+                </select>
+                <input value={line.description} onChange={e => updateQuoteLineItem(idx, { description: e.target.value })} className="rounded-lg border border-slate-600 bg-slate-900 px-2 py-2 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Description (optional)" />
+                <input value={line.total_line_item_price} onChange={e => updateQuoteLineItem(idx, { total_line_item_price: e.target.value })} inputMode="decimal" className="rounded-lg border border-slate-600 bg-slate-900 px-2 py-2 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="$ price" />
+                <button type="button" onClick={() => setQuoteLineItems(cur => cur.length > 1 ? cur.filter((_, i) => i !== idx) : cur)} className="inline-flex items-center justify-center rounded-lg border border-slate-600 bg-slate-900 px-2 text-slate-300 hover:bg-slate-800" aria-label="Remove line"><Trash2 className="h-4 w-4" /></button>
+              </div>
+            ))}
+            <button type="button" onClick={() => setQuoteLineItems(cur => [...cur, blankProjectQuoteLineItem(defaultCategory)])} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-900 px-3 py-1.5 text-xs font-black text-slate-100 hover:bg-slate-800"><Plus className="h-3.5 w-3.5" /> Add line</button>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-3">
+            <span className="text-sm font-black text-white">Total: {quoteMoney(quoteForm.total_quote_amount || calculatedLineTotal)}</span>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => { resetQuoteForm(); setShowAddQuote(false); }} className="rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-xs font-black text-slate-200 hover:bg-slate-800">Cancel</button>
+              <button type="button" onClick={submitProjectQuote} disabled={savingQuote} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-400/50 bg-emerald-600 px-3 py-2 text-xs font-black text-white hover:bg-emerald-500 disabled:opacity-50"><Send className="h-3.5 w-3.5" /> {savingQuote ? 'Saving…' : 'Save quote'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
         {quoteFilters.map(filter => {
           const Icon = filter.Icon;
           const active = quoteFilter === filter.key;
@@ -8561,22 +8682,20 @@ function QuotesTab({ projectId, project }: { projectId: string; project: any }) 
               key={filter.key}
               type="button"
               onClick={() => setQuoteFilter(filter.key)}
-              className={`rounded-lg p-4 text-left transition hover:-translate-y-0.5 ${active ? 'ring-2 ring-cyan-300/60' : 'opacity-90 hover:opacity-100'}`}
+              title={filter.description}
+              className={`rounded-lg px-3 py-2 text-left transition hover:-translate-y-0.5 ${active ? 'ring-2 ring-cyan-300/60' : 'opacity-90 hover:opacity-100'}`}
               style={active ? quotePanelStyle : quoteInsetStyle}
             >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className={`flex h-10 w-10 items-center justify-center rounded-lg border ${active ? 'border-cyan-200/60 bg-cyan-400/20 text-cyan-100' : 'border-slate-500/60 bg-slate-900/60 text-slate-200'}`}>
-                    <Icon className="h-5 w-5" />
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border ${active ? 'border-cyan-200/60 bg-cyan-400/20 text-cyan-100' : 'border-slate-500/60 bg-slate-900/60 text-slate-200'}`}>
+                    <Icon className="h-4 w-4" />
                   </span>
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-black text-white">{filter.label}</p>
-                    <p className="mt-0.5 text-xs font-semibold text-cyan-100/80">{filter.description}</p>
-                  </div>
+                  <p className="truncate text-[13px] font-black text-white">{filter.label}</p>
                 </div>
-                <span className="rounded-lg border border-white/20 bg-white/10 px-2.5 py-1 text-sm font-black text-white">{filter.count}</span>
+                <span className="shrink-0 rounded-md border border-white/20 bg-white/10 px-1.5 py-0.5 text-xs font-black text-white">{filter.count}</span>
               </div>
-              <p className="mt-3 text-xl font-black text-white">{filter.value}</p>
+              <p className="mt-1.5 text-base font-black text-white">{filter.value}</p>
             </button>
           );
         })}
@@ -8596,7 +8715,65 @@ function QuotesTab({ projectId, project }: { projectId: string; project: any }) 
         ))}
       </div>
 
-      {loading ? <Loading /> : (
+      {loading ? <Loading /> : quoteFilter === 'compare' ? (
+        <div className="overflow-x-auto rounded-xl border border-white/10">
+          <table className="w-full min-w-[760px] text-left text-sm">
+            <thead>
+              <tr className="border-b border-white/10 text-[11px] font-black uppercase tracking-wide text-slate-400">
+                <th className="px-3 py-2.5">Contractor</th>
+                <th className="px-3 py-2.5">Quote #</th>
+                <th className="px-3 py-2.5">Categories</th>
+                <th className="px-3 py-2.5 text-right">Labor</th>
+                <th className="px-3 py-2.5 text-right">Material</th>
+                <th className="px-3 py-2.5 text-right">Total</th>
+                <th className="px-3 py-2.5">Status</th>
+                <th className="px-3 py-2.5 text-right">Pick</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleQuotes.map((quote, qi) => {
+                const cats = Array.from(new Set((Array.isArray(quote.line_items) ? quote.line_items : []).map((li: any) => li.category).filter(Boolean)));
+                const isBest = qi === 0 && visibleQuotes.length > 1 && quoteNumberValue(quote.total_quote_amount) > 0;
+                return (
+                  <tr key={quote.id} className={`border-b border-white/5 ${isBest ? 'bg-emerald-500/10' : ''}`}>
+                    <td className="px-3 py-3 align-top">
+                      <div className="font-black text-white">{quote.contractor_company || quote.contractor_name || 'Unknown contractor'}</div>
+                      {quote.contractor_company && quote.contractor_name && <div className="text-xs text-slate-400">{quote.contractor_name}</div>}
+                    </td>
+                    <td className="px-3 py-3 align-top font-mono text-xs text-slate-300">{quote.quote_number}</td>
+                    <td className="px-3 py-3 align-top">
+                      <div className="flex flex-wrap gap-1">
+                        {cats.slice(0, 4).map((c: any) => <span key={c} className="rounded-full border border-white/15 bg-white/5 px-2 py-0.5 text-[10px] font-bold text-slate-200">{c}</span>)}
+                        {cats.length > 4 && <span className="text-[10px] text-slate-400">+{cats.length - 4}</span>}
+                        {cats.length === 0 && <span className="text-[10px] text-slate-500">—</span>}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 align-top text-right font-mono text-slate-300">{quoteMoney(quote.labor_cost)}</td>
+                    <td className="px-3 py-3 align-top text-right font-mono text-slate-300">{quoteMoney(quote.material_cost)}</td>
+                    <td className="px-3 py-3 align-top text-right">
+                      <span className={`font-mono font-black ${isBest ? 'text-emerald-300' : 'text-white'}`}>{quoteMoney(quote.total_quote_amount)}</span>
+                      {isBest && <div className="text-[9px] font-black uppercase tracking-wide text-emerald-400">Best price</div>}
+                    </td>
+                    <td className="px-3 py-3 align-top"><span className="rounded-full border border-white/15 bg-white/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-slate-200">{String(quote.status || '').replace(/_/g, ' ')}</span></td>
+                    <td className="px-3 py-3 align-top text-right">
+                      {quote.status === 'approved' ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-black text-emerald-300"><CheckCircle2 className="h-3.5 w-3.5" />Chosen</span>
+                      ) : (
+                        <button type="button" disabled={updatingQuoteId === quote.id} onClick={() => reviewQuote(quote, 'approve')} className="inline-flex items-center gap-1 rounded-lg border border-emerald-400/50 bg-emerald-600 px-2.5 py-1.5 text-xs font-black text-white transition-colors hover:bg-emerald-500 disabled:opacity-50">
+                          <CheckCircle2 className="h-3.5 w-3.5" />Pick
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {visibleQuotes.length === 0 && (
+                <tr><td colSpan={8} className="px-3 py-10 text-center text-sm font-semibold text-slate-300">No quotes yet — add quotes (PDF or manual) and they'll line up here to compare.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      ) : (
         <div className="space-y-2">
           {visibleQuotes.map(quote => {
             const lineItems = Array.isArray(quote.line_items) ? quote.line_items : [];
@@ -8615,72 +8792,58 @@ function QuotesTab({ projectId, project }: { projectId: string; project: any }) 
               : compactQuoteDateTime(quote.created_at);
             const hasImageAttachment = quoteAttachmentIsImage(quote);
             return (
-              <div key={quote.id} className="rounded-lg p-2.5" style={quotePanelStyle}>
-                <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-sm font-black text-white">{quote.quote_number || 'Quote # pending'}</p>
-                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-black ${statusColors[quote.status] || 'bg-slate-700/80 text-slate-100 border border-slate-400/40'}`}>
-                        {quoteStatusLabel(quote.status)}
-                      </span>
-                      <span className="text-xs font-semibold text-cyan-100/75">Sent: {sentLabel}</span>
-                      <span className="text-xs font-semibold text-cyan-100/75">Returned: {returnedLabel}</span>
-                      <span className="text-xs font-semibold text-slate-300">{lineItems.length} lines</span>
-                    </div>
-                    <div className="mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
-                      <div className="min-w-0">
-                        <p className="text-xs font-black uppercase tracking-wide text-cyan-100/70">Contractor</p>
-                        <p className="truncate text-base font-black text-white">{contractorLabel}</p>
-                        {quote.contractor_name && quote.contractor_company && quote.contractor_name !== quote.contractor_company && (
-                          <p className="truncate text-xs font-semibold text-slate-300">{quote.contractor_name}</p>
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-xs font-black uppercase tracking-wide text-cyan-100/70">Scope Title</p>
-                        <p className="truncate text-sm font-semibold text-slate-100">{scopeTitle}</p>
-                      </div>
-                    </div>
+              <div key={quote.id} className="rounded-lg px-3 py-2" style={quotePanelStyle}>
+                <div className="flex items-center gap-3">
+                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                    <p className="shrink-0 text-sm font-black text-white">{quote.quote_number || 'Quote # pending'}</p>
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black ${statusColors[quote.status] || 'bg-slate-700/80 text-slate-100 border border-slate-400/40'}`}>
+                      {quoteStatusLabel(quote.status)}
+                    </span>
+                    <span className="shrink-0 max-w-[34%] truncate text-sm font-black text-white">{contractorLabel}</span>
+                    <span className="shrink-0 text-slate-500">·</span>
+                    <span className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-300">{scopeTitle}</span>
                   </div>
-
-                  <div className="flex flex-col gap-2 xl:items-end">
-                    <div className="xl:text-right">
-                      <p className="text-lg font-black text-white">{quoteMoney(quote.total_quote_amount)}</p>
-                      <p className="text-xs font-bold uppercase tracking-wide text-cyan-100/75">Total quote price</p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {isExpanded && canReview && (
-                        <>
-                          <button
-                            type="button"
-                            disabled={updatingQuoteId === quote.id}
-                            onClick={() => reviewQuote(quote, 'approve')}
-                            className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-emerald-200/60 bg-emerald-500/25 px-2.5 py-1.5 text-xs font-black text-emerald-50 shadow-lg shadow-emerald-950/30 transition hover:bg-emerald-500/30 disabled:opacity-50"
-                          >
-                            <CheckCircle2 className="h-4 w-4" />
-                            Approve Quote
-                          </button>
-                          <button
-                            type="button"
-                            disabled={updatingQuoteId === quote.id}
-                            onClick={() => reviewQuote(quote, 'deny')}
-                            className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-rose-200/60 bg-rose-500/25 px-2.5 py-1.5 text-xs font-black text-rose-50 shadow-lg shadow-rose-950/30 transition hover:bg-rose-500/30 disabled:opacity-50"
-                          >
-                            <XCircle className="h-4 w-4" />
-                            Deny Quote
-                          </button>
-                        </>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => toggleQuoteExpanded(quote.id)}
-                        aria-expanded={isExpanded}
-                        className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-cyan-200/40 bg-cyan-400/10 px-2.5 py-1.5 text-xs font-black text-cyan-50 transition hover:bg-cyan-400/20"
-                      >
-                        {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                        {isExpanded ? 'Hide Details' : 'Details'}
-                      </button>
-                    </div>
+                  <div className="flex shrink-0 items-center gap-2.5">
+                    <p className="text-base font-black text-white">{quoteMoney(quote.total_quote_amount)}</p>
+                    {isExpanded && canReview && (
+                      <>
+                        <button
+                          type="button"
+                          disabled={updatingQuoteId === quote.id}
+                          onClick={() => reviewQuote(quote, 'approve')}
+                          className="inline-flex items-center gap-1 rounded-md border border-emerald-200/60 bg-emerald-500/25 px-2 py-1 text-[11px] font-black text-emerald-50 transition hover:bg-emerald-500/30 disabled:opacity-50"
+                        >
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          disabled={updatingQuoteId === quote.id}
+                          onClick={() => reviewQuote(quote, 'deny')}
+                          className="inline-flex items-center gap-1 rounded-md border border-rose-200/60 bg-rose-500/25 px-2 py-1 text-[11px] font-black text-rose-50 transition hover:bg-rose-500/30 disabled:opacity-50"
+                        >
+                          <XCircle className="h-3.5 w-3.5" />
+                          Deny
+                        </button>
+                      </>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => toggleQuoteExpanded(quote.id)}
+                      aria-expanded={isExpanded}
+                      className="inline-flex items-center gap-1 rounded-md border border-cyan-200/40 bg-cyan-400/10 px-2 py-1 text-[11px] font-black text-cyan-50 transition hover:bg-cyan-400/20"
+                    >
+                      {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                      {isExpanded ? 'Hide' : 'Details'}
+                    </button>
                   </div>
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] font-semibold text-cyan-100/55">
+                  <span>Sent: {sentLabel}</span>
+                  <span className="text-slate-600">·</span>
+                  <span>Returned: {returnedLabel}</span>
+                  <span className="text-slate-600">·</span>
+                  <span>{lineItems.length} {lineItems.length === 1 ? 'line' : 'lines'}</span>
                 </div>
 
                 {isExpanded && (

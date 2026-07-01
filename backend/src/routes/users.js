@@ -688,11 +688,35 @@ router.get('/contractors/directory', authorize('super_admin', 'operations_manage
     SELECT
       cp.id,
       cp.vendor_name,
-      cp.contact_name,
-      cp.email,
-      cp.phone,
-      cp.billing_address,
+      COALESCE(NULLIF(cp.contact_name, ''), ccp.legal_name) as contact_name,
+      COALESCE(NULLIF(cp.email, ''), ccp.email) as email,
+      COALESCE(NULLIF(cp.phone, ''), ccp.phone) as phone,
+      COALESCE(
+        NULLIF(cp.billing_address, ''),
+        NULLIF(trim(
+          COALESCE(ccp.address_line1, '') ||
+          CASE WHEN trim(COALESCE(ccp.address_line2, '')) <> '' THEN char(10) || ccp.address_line2 ELSE '' END ||
+          CASE WHEN trim(COALESCE(ccp.city, '') || COALESCE(ccp.state, '') || COALESCE(ccp.postal_code, '')) <> ''
+            THEN char(10) || trim(COALESCE(ccp.city, '') || CASE WHEN trim(COALESCE(ccp.state, '')) <> '' THEN ', ' || ccp.state ELSE '' END || CASE WHEN trim(COALESCE(ccp.postal_code, '')) <> '' THEN ' ' || ccp.postal_code ELSE '' END)
+            ELSE ''
+          END ||
+          CASE WHEN trim(COALESCE(ccp.country, '')) <> '' THEN char(10) || ccp.country ELSE '' END
+        ), '')
+      ) as billing_address,
       cp.account_number,
+      cp.quickbooks_vendor_id,
+      cp.quickbooks_display_name,
+      cp.quickbooks_company_name,
+      cp.quickbooks_print_on_check_name,
+      cp.quickbooks_primary_email,
+      cp.quickbooks_primary_phone,
+      cp.quickbooks_bill_addr,
+      cp.quickbooks_account_number,
+      cp.quickbooks_vendor_1099,
+      cp.quickbooks_tax_identifier_last4,
+      cp.quickbooks_balance,
+      cp.quickbooks_active,
+      cp.quickbooks_synced_at,
       cp.contractor_status,
       cp.contractor_category,
       cp.contractor_secondary_category,
@@ -773,6 +797,7 @@ router.get('/contractors/directory', authorize('super_admin', 'operations_manage
        LIMIT 1) as bank_name
     FROM contractor_profiles cp
     LEFT JOIN users u ON u.id = cp.linked_user_id
+    LEFT JOIN contractor_compliance_profiles ccp ON ccp.contractor_id = cp.id
     WHERE COALESCE(u.is_active, 1) = 1
     ORDER BY datetime(cp.created_at) DESC, cp.vendor_name
   `).all();
@@ -869,11 +894,29 @@ router.get('/contractors/directory', authorize('super_admin', 'operations_manage
     const connectedProjects = Array.from(connectedProjectMap.values());
     const projectAddresses = connectedProjects.map(project => project.address).filter(Boolean);
     const contractorCategories = parseStoredContractorCategories(contractor);
+    const quickBooksVendor = contractor.quickbooks_vendor_id ? {
+      id: contractor.quickbooks_vendor_id,
+      display_name: contractor.quickbooks_display_name,
+      company_name: contractor.quickbooks_company_name,
+      print_on_check_name: contractor.quickbooks_print_on_check_name,
+      primary_email: contractor.quickbooks_primary_email,
+      primary_phone: contractor.quickbooks_primary_phone,
+      billing_address: contractor.quickbooks_bill_addr,
+      account_number: contractor.quickbooks_account_number,
+      vendor_1099: Boolean(Number(contractor.quickbooks_vendor_1099 || 0)),
+      tax_identifier_last4: contractor.quickbooks_tax_identifier_last4,
+      balance: Number(contractor.quickbooks_balance || 0),
+      active: contractor.quickbooks_active === null || contractor.quickbooks_active === undefined
+        ? true
+        : Boolean(Number(contractor.quickbooks_active)),
+      synced_at: contractor.quickbooks_synced_at,
+    } : null;
 
     return {
       ...contractor,
       name: contractor.vendor_name,
-      company: contractor.vendor_name,
+      company: contractor.quickbooks_company_name || contractor.vendor_name,
+      quickbooks_vendor: quickBooksVendor,
       contractor_categories: contractorCategories,
       connected_projects: connectedProjects,
       project_addresses: projectAddresses,
@@ -1261,6 +1304,37 @@ router.put('/contractors/:id/projects', authorize('super_admin', 'operations_man
   }
 });
 
+// Cascade-delete one contractor_profiles row and tombstone its QuickBooks vendor
+// (if any) so the periodic QBO auto-sync will NOT re-create the profile - this is
+// what makes a delete actually stick for QuickBooks-linked vendors. When bulk
+// deleting, the caller wraps repeated invocations in a single db.transaction().
+function deleteContractorProfileCascade(db, contractor, userId) {
+  db.prepare('DELETE FROM contractor_onboarding_requests WHERE contractor_id = ?').run(contractor.id);
+  db.prepare('DELETE FROM contractor_compliance_profiles WHERE contractor_id = ?').run(contractor.id);
+  db.prepare('DELETE FROM contractor_project_links WHERE contractor_id = ?').run(contractor.id);
+  db.prepare('DELETE FROM contractor_profile_notes WHERE contractor_id = ?').run(contractor.id);
+  db.prepare('DELETE FROM contractor_profiles WHERE id = ?').run(contractor.id);
+
+  if (contractor.quickbooks_vendor_id) {
+    db.prepare(`
+      INSERT INTO quickbooks_vendor_suppressions (qbo_id, vendor_name, suppressed_by)
+      VALUES (?, ?, ?)
+      ON CONFLICT(qbo_id) DO UPDATE SET
+        vendor_name = excluded.vendor_name,
+        suppressed_by = excluded.suppressed_by,
+        suppressed_at = datetime('now')
+    `).run(String(contractor.quickbooks_vendor_id), contractor.vendor_name || null, userId || null);
+  }
+
+  if (contractor.linked_user_id) {
+    db.prepare(`
+      UPDATE users
+      SET is_active = 0, updated_at = datetime('now')
+      WHERE id = ? AND role = 'contractor'
+    `).run(contractor.linked_user_id);
+  }
+}
+
 // DELETE /api/users/contractors/:id/profile - remove a contractor directory record
 router.delete('/contractors/:id/profile', authorize('super_admin', 'operations_manager'), (req, res) => {
   try {
@@ -1269,19 +1343,7 @@ router.delete('/contractors/:id/profile', authorize('super_admin', 'operations_m
     if (!contractor) return res.status(404).json({ error: 'Contractor not found' });
 
     const removeContractor = db.transaction(() => {
-      db.prepare('DELETE FROM contractor_onboarding_requests WHERE contractor_id = ?').run(req.params.id);
-      db.prepare('DELETE FROM contractor_compliance_profiles WHERE contractor_id = ?').run(req.params.id);
-      db.prepare('DELETE FROM contractor_project_links WHERE contractor_id = ?').run(req.params.id);
-      db.prepare('DELETE FROM contractor_profile_notes WHERE contractor_id = ?').run(req.params.id);
-      db.prepare('DELETE FROM contractor_profiles WHERE id = ?').run(req.params.id);
-
-      if (contractor.linked_user_id) {
-        db.prepare(`
-          UPDATE users
-          SET is_active = 0, updated_at = datetime('now')
-          WHERE id = ? AND role = 'contractor'
-        `).run(contractor.linked_user_id);
-      }
+      deleteContractorProfileCascade(db, contractor, req.user.id);
     });
     removeContractor();
 
@@ -1300,6 +1362,56 @@ router.delete('/contractors/:id/profile', authorize('super_admin', 'operations_m
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to delete contractor' });
+  }
+});
+
+// POST /api/users/contractors/bulk-delete - remove many directory records at once
+// Accepts { ids: [...] }. Runs the same cascade + QuickBooks suppression per row
+// inside a single transaction, so partial failures roll back cleanly.
+router.post('/contractors/bulk-delete', authorize('super_admin', 'operations_manager'), (req, res) => {
+  try {
+    const rawIds = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    const ids = [...new Set(rawIds.map((id) => String(id || '').trim()).filter(Boolean))];
+    if (ids.length === 0) return res.status(400).json({ error: 'No records selected' });
+    if (ids.length > 1000) return res.status(400).json({ error: 'Too many records selected (max 1000 at a time)' });
+
+    const db = getDb();
+    const selectStmt = db.prepare('SELECT * FROM contractor_profiles WHERE id = ?');
+    const deleted = [];
+    const missing = [];
+
+    const removeMany = db.transaction(() => {
+      for (const id of ids) {
+        const contractor = selectStmt.get(id);
+        if (!contractor) { missing.push(id); continue; }
+        deleteContractorProfileCascade(db, contractor, req.user.id);
+        deleted.push({ id, name: contractor.vendor_name || null });
+      }
+    });
+    removeMany();
+
+    logActivity({
+      userId: req.user.id,
+      action: 'contractors_bulk_deleted',
+      entityType: 'contractor_profile',
+      details: {
+        requested: ids.length,
+        deleted_count: deleted.length,
+        missing_count: missing.length,
+        deleted_ids: deleted.map((d) => d.id),
+        deleted_names: deleted.map((d) => d.name),
+      },
+    });
+
+    res.json({
+      message: `Deleted ${deleted.length} record${deleted.length === 1 ? '' : 's'}`,
+      deleted_ids: deleted.map((d) => d.id),
+      deleted_count: deleted.length,
+      missing_ids: missing,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete records' });
   }
 });
 

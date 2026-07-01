@@ -46,6 +46,7 @@ router.get('/', (req, res) => {
         ph.taken_at,
         ph.captured_at,
         ph.created_at,
+        ph.markup_path,
         ph.individual_note,
         ph.batch_note,
         u.name as uploader_name
@@ -67,6 +68,7 @@ router.get('/', (req, res) => {
         ph.taken_at,
         ph.captured_at,
         ph.created_at,
+        ph.markup_path,
         ph.individual_note,
         ph.batch_note,
         u.name as uploader_name

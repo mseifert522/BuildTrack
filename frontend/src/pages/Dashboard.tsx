@@ -141,6 +141,19 @@ interface OperationsCalendarEvent {
   created_at?: string | null;
 }
 
+interface FridayPaymentQueueBill {
+  qbo_id?: string;
+  balance?: number | null;
+  total_amt?: number | null;
+  payment_status?: string | null;
+  payment_approval_status?: string | null;
+}
+
+type FridayPaymentQueueSummary = {
+  count: number;
+  total: number;
+};
+
 type CalendarQueueFilter = 'upcoming' | 'completed';
 type CalendarViewMode = 'today' | 'week' | 'month' | 'list';
 
@@ -475,6 +488,38 @@ const sortCalendarEventsForRange = (events: OperationsCalendarEvent[]) =>
 const getCalendarProjectLabel = (event: OperationsCalendarEvent) =>
   event.project_address || event.project_job_name || event.project_id || 'BuildTrack';
 
+const FRIDAY_PAYMENT_QUEUE_ROLES = new Set(['super_admin', 'operations_manager']);
+const emptyFridayPaymentQueueSummary: FridayPaymentQueueSummary = { count: 0, total: 0 };
+
+const paymentQueueCurrencyFormatter = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+const paymentQueueAmount = (value: unknown) => {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount : 0;
+};
+
+const isFridayPaymentQueueBillPaid = (bill: FridayPaymentQueueBill) => (
+  String(bill.payment_status || '').toLowerCase() === 'paid'
+  || paymentQueueAmount(bill.balance) <= 0
+);
+
+const summarizeFridayPaymentQueue = (bills: FridayPaymentQueueBill[]): FridayPaymentQueueSummary =>
+  bills.reduce<FridayPaymentQueueSummary>((summary, bill) => {
+    if (isFridayPaymentQueueBillPaid(bill) || bill.payment_approval_status !== 'approved_for_payment') {
+      return summary;
+    }
+
+    return {
+      count: summary.count + 1,
+      total: summary.total + paymentQueueAmount(bill.balance ?? bill.total_amt),
+    };
+  }, emptyFridayPaymentQueueSummary);
+
 const calendarPreference = {
   get(key: string, fallback: boolean) {
     if (typeof window === 'undefined') return fallback;
@@ -526,6 +571,8 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
   const dashboardMiniCalendarRange = calendarRangeForView('month', calendarAnchorDateKey);
   const calendarDataRange = calendarOnly ? calendarQueryRange : dashboardMiniCalendarRange;
   const canDeleteProjectNotes = Boolean(user && ['super_admin', 'operations_manager'].includes(user.role));
+  const canReadFridayPaymentQueue = Boolean(user?.role && FRIDAY_PAYMENT_QUEUE_ROLES.has(user.role));
+  const [fridayPaymentQueueSummary, setFridayPaymentQueueSummary] = useState<FridayPaymentQueueSummary>(emptyFridayPaymentQueueSummary);
 
   useEffect(() => {
     const timer = window.setInterval(() => setLiveNow(new Date()), 1000);
@@ -545,13 +592,16 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
   useEffect(() => {
     const load = async () => {
       try {
-        const [feedRes, calendarRes] = await Promise.all([
+        const [feedRes, calendarRes, paymentQueueRes] = await Promise.all([
           calendarOnly
             ? Promise.resolve({ data: { items: [] } })
             : api.get('/dashboard/activity-feed?limit=25').catch(() => ({ data: { items: [] } })),
           canReadOperationsCalendar
             ? api.get(`/calendar/events?start=${encodeURIComponent(calendarDataRange.start)}&end=${encodeURIComponent(calendarDataRange.end)}`).catch(() => ({ data: { events: [] } }))
             : Promise.resolve({ data: { events: [] } }),
+          !calendarOnly && canReadFridayPaymentQueue
+            ? api.get('/quickbooks/bills?limit=1000').catch(() => ({ data: [] }))
+            : Promise.resolve({ data: [] }),
         ]);
         const feedItems = Array.isArray(feedRes.data?.items)
           ? feedRes.data.items
@@ -560,6 +610,11 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
             : [];
         setActivityFeed(dedupeActivityFeedItems(feedItems).slice(0, 25));
         setCalendarEvents(Array.isArray(calendarRes.data?.events) ? calendarRes.data.events : []);
+        setFridayPaymentQueueSummary(
+          Array.isArray(paymentQueueRes.data)
+            ? summarizeFridayPaymentQueue(paymentQueueRes.data)
+            : emptyFridayPaymentQueueSummary
+        );
       } catch (err) {
         console.error(err);
       } finally {
@@ -567,7 +622,7 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
       }
     };
     load();
-  }, [user?.id, user?.role, calendarOnly, canReadOperationsCalendar, calendarDataRange.start, calendarDataRange.end]);
+  }, [user?.id, user?.role, calendarOnly, canReadOperationsCalendar, canReadFridayPaymentQueue, calendarDataRange.start, calendarDataRange.end]);
 
   if (loading) return <Loading />;
 
@@ -1653,6 +1708,40 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
     return renderCalendarMonthView();
   };
 
+  const renderFridayPaymentQueueReminder = () => {
+    if (!canReadFridayPaymentQueue) return null;
+
+    const invoiceLabel = fridayPaymentQueueSummary.count === 1 ? 'invoice' : 'invoices';
+    const totalLabel = paymentQueueCurrencyFormatter.format(fridayPaymentQueueSummary.total);
+
+    return (
+      <Link
+        to="/invoices"
+        className="bt-dashboard-payment-queue-reminder"
+        aria-label={`Friday payment queue reminder: ${fridayPaymentQueueSummary.count} ${invoiceLabel}, ${totalLabel} total to pay`}
+      >
+        <span className="bt-dashboard-payment-queue-reminder__topline" />
+        <span className="bt-dashboard-payment-queue-reminder__body">
+          <span className="bt-dashboard-payment-queue-reminder__copy">
+            <span className="bt-dashboard-payment-queue-reminder__kicker">Friday Payment Queue</span>
+            <strong>{fridayPaymentQueueSummary.count} {invoiceLabel}</strong>
+          </span>
+          <span className="bt-dashboard-payment-queue-reminder__amount">
+            <span>To Pay</span>
+            <strong>{totalLabel}</strong>
+          </span>
+        </span>
+      </Link>
+    );
+  };
+
+  const renderDashboardCalendarStack = () => (
+    <div className="bt-dashboard-calendar-stack">
+      {renderFridayPaymentQueueReminder()}
+      {renderDashboardMiniCalendar()}
+    </div>
+  );
+
   const renderDashboardMiniCalendar = () => (
     <aside className="bt-dashboard-mini-calendar-module" aria-label="Company mini calendar">
       <div className="bt-dashboard-mini-calendar-module__topline" />
@@ -1750,22 +1839,22 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
       id="recent-activity"
       className="bt-dashboard-notes-panel bt-dashboard-activity-panel relative overflow-hidden rounded-2xl border border-slate-700/70 shadow-[0_16px_40px_rgba(2,6,23,0.24)]"
       style={{
-        background: 'linear-gradient(180deg, rgba(20,35,31,0.92), rgba(13,22,23,0.92))',
+        background: 'linear-gradient(180deg, #141414, #111111)',
       }}
     >
-      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-400 via-lime-300 to-amber-300" />
+      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-400" />
       <div
         className="bt-dashboard-notes-panel-header relative flex items-center justify-between gap-4 border-b border-white/10 px-5 py-4"
         style={{
-          background: 'linear-gradient(90deg, rgba(22,101,52,0.22) 0%, rgba(132,204,22,0.10) 52%, rgba(245,158,11,0.08) 100%)',
+          background: 'linear-gradient(90deg, rgba(59,130,246,0.12) 0%, rgba(99,102,241,0.06) 52%, rgba(255,255,255,0.02) 100%)',
         }}
       >
         <div className="flex items-center gap-3.5">
           <div
-            className="flex h-11 w-11 items-center justify-center rounded-xl border shadow-[0_0_16px_rgba(34,197,94,0.14)]"
-            style={{ background: 'rgba(34,197,94,0.16)', borderColor: 'rgba(134,239,172,0.46)' }}
+            className="flex h-11 w-11 items-center justify-center rounded-xl border shadow-[0_0_16px_rgba(59,130,246,0.16)]"
+            style={{ background: 'rgba(59,130,246,0.16)', borderColor: 'rgba(59,130,246,0.40)' }}
           >
-            <Activity className="h-5 w-5" style={{ color: '#BBF7D0' }} />
+            <Activity className="h-5 w-5" style={{ color: '#93c5fd' }} />
           </div>
           <div>
             <h2 className="text-xl font-black text-white">Latest Field & Office Notes</h2>
@@ -1775,15 +1864,15 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
 
       {activityFeed.length === 0 ? (
         <div className="bt-dashboard-notes-flow relative flow-root p-4">
-          {canReadOperationsCalendar ? renderDashboardMiniCalendar() : null}
+          {canReadOperationsCalendar ? renderDashboardCalendarStack() : null}
           <div className="relative flex min-h-[132px] flex-col items-center justify-center rounded-xl border border-white/10 bg-slate-950/20 px-4 py-6">
             <p className="text-sm font-bold text-white">No notes yet</p>
-            <p className="mt-1 text-xs text-emerald-100">Recent field and office notes will appear here.</p>
+            <p className="mt-1 text-xs text-slate-300">Recent field and office notes will appear here.</p>
           </div>
         </div>
       ) : (
         <div className="bt-dashboard-notes-flow relative flow-root p-4">
-          {canReadOperationsCalendar ? renderDashboardMiniCalendar() : null}
+          {canReadOperationsCalendar ? renderDashboardCalendarStack() : null}
           {activityFeed.map((item) => {
             const activityStyle = getActivityTypeStyle(item);
             const summary = getActivitySummary(item);
@@ -1800,10 +1889,10 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
                 onKeyDown={event => {
                   if (projectTarget && event.key === 'Enter') navigate(projectTarget);
                 }}
-                className={`bt-dashboard-note-row group relative mb-3 flex min-h-[92px] items-start gap-3 rounded-xl border border-white/10 p-3 transition-all hover:border-cyan-300/55 sm:p-4 ${projectTarget ? 'cursor-pointer' : 'cursor-default'}`}
+                className={`bt-dashboard-note-row group relative mb-3 flex min-h-[92px] items-start gap-3 rounded-xl border border-white/10 p-3 transition-all hover:border-blue-400/55 sm:p-4 ${projectTarget ? 'cursor-pointer' : 'cursor-default'}`}
                 style={{
-                  background: 'linear-gradient(135deg, rgba(15,23,42,0.88) 0%, rgba(30,41,59,0.76) 58%, rgba(8,47,73,0.42) 100%)',
-                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
+                  background: 'linear-gradient(135deg, #161616 0%, #141414 58%, #121212 100%)',
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)',
                 }}
               >
                 <span
@@ -1816,7 +1905,7 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
                     name={item.user_name}
                     size={48}
                     className="border-2"
-                    style={{ borderColor: 'rgba(191,219,254,0.72)' }}
+                    style={{ borderColor: 'rgba(255,255,255,0.14)' }}
                   />
                 </div>
                 <div className="min-w-0 flex-1">
@@ -1827,11 +1916,11 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
                     </span>
                     {projectLabel && (
                       <span
-                        className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black text-cyan-50 sm:max-w-[360px]"
-                        style={{ background: 'rgba(8, 145, 178, 0.14)', borderColor: 'rgba(103, 232, 249, 0.32)' }}
+                        className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black text-blue-50 sm:max-w-[360px]"
+                        style={{ background: 'rgba(59, 130, 246, 0.14)', borderColor: 'rgba(59, 130, 246, 0.32)' }}
                         title={projectLabel}
                       >
-                        <MapPin className="h-3.5 w-3.5 flex-shrink-0 text-cyan-200" />
+                        <MapPin className="h-3.5 w-3.5 flex-shrink-0 text-blue-200" />
                         <span className="truncate">{projectLabel}</span>
                       </span>
                     )}
@@ -1844,11 +1933,6 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
                   <span className="rounded-full bg-blue-500/15 px-2.5 py-1 text-[11px] font-black text-blue-100 ring-1 ring-blue-300/25">
                     {formatEasternRelative(item.created_at)}
                   </span>
-                  {projectTarget ? (
-                    <span className="hidden rounded-md border border-slate-600/70 bg-slate-900/80 px-3 py-1.5 text-[11px] font-black uppercase tracking-wide text-slate-200 transition group-hover:border-cyan-300/60 group-hover:text-cyan-100 sm:inline">
-                      Open
-                    </span>
-                  ) : null}
                   {canDeleteProjectNotes && item.feed_type === 'note' && item.project_id ? (
                     <button
                       type="button"
