@@ -624,6 +624,24 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
     load();
   }, [user?.id, user?.role, calendarOnly, canReadOperationsCalendar, canReadFridayPaymentQueue, calendarDataRange.start, calendarDataRange.end]);
 
+  // Re-sync the consolidated calendar whenever the user returns to this view, so
+  // events entered elsewhere (e.g. from a project) appear without a manual reload.
+  useEffect(() => {
+    if (!canReadOperationsCalendar) return;
+    const resync = () => {
+      if (document.visibilityState !== 'visible') return;
+      api.get(`/calendar/events?start=${encodeURIComponent(calendarDataRange.start)}&end=${encodeURIComponent(calendarDataRange.end)}`)
+        .then(res => setCalendarEvents(Array.isArray(res.data?.events) ? res.data.events : []))
+        .catch(() => {});
+    };
+    window.addEventListener('focus', resync);
+    document.addEventListener('visibilitychange', resync);
+    return () => {
+      window.removeEventListener('focus', resync);
+      document.removeEventListener('visibilitychange', resync);
+    };
+  }, [canReadOperationsCalendar, calendarDataRange.start, calendarDataRange.end]);
+
   if (loading) return <Loading />;
 
   const firstName = user?.name?.split(' ')[0] || 'there';
