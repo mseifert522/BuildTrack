@@ -516,8 +516,8 @@ export default function Quotes() {
             </button>
             <button
               onClick={() => setShowAdd(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold text-white"
-              style={{ background: 'linear-gradient(135deg,#D99D26,#C4891F)' }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 px-3 py-2 text-sm font-semibold text-slate-100 transition-colors hover:border-cyan-300 hover:text-white"
+              style={{ background: 'linear-gradient(135deg, #334155, #0f172a)' }}
             >
               <Plus className="h-4 w-4" /> Add Quote
             </button>

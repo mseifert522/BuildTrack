@@ -1401,10 +1401,11 @@ export default function Contractors() {
 
                     {noteEntryOpen[contractor.id] && (
                       <div
-                        className="border-t border-amber-200 bg-amber-50/80 px-4 py-4 md:px-5"
+                        className="border-t border-white/10 px-4 py-4 md:px-5"
+                        style={{ background: 'rgba(13, 18, 24, 0.6)' }}
                         onClick={(event) => event.stopPropagation()}
                       >
-                        <div className="rounded-2xl border border-amber-200 bg-white p-4 shadow-sm">
+                        <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-4 shadow-sm">
                           <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                             <div>
                               <p className="text-xs font-black uppercase tracking-wide text-amber-700">New Directory Note</p>
@@ -1425,13 +1426,13 @@ export default function Contractors() {
                               rows={3}
                               placeholder={`Enter a note about ${contractor.name}`}
                               wrapperClassName="flex-1"
-                              className="min-h-24 w-full resize-none rounded-xl border border-amber-200 bg-amber-50/40 px-3.5 py-3 text-sm font-semibold text-gray-950 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
+                              className="min-h-24 w-full resize-none rounded-xl border border-white/15 bg-slate-900/55 px-3.5 py-3 text-sm font-semibold text-slate-100 placeholder:text-slate-400 outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/30"
                             />
                             <button
                               type="button"
                               onClick={() => addContractorNote(contractor.id)}
                               disabled={savingNotes[contractor.id] || !(noteInputs[contractor.id] || '').trim()}
-                              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-600 bg-gradient-to-br from-slate-800 via-slate-950 to-blue-950 px-4 py-2.5 text-sm font-black text-slate-100 shadow-sm transition-all duration-150 hover:border-cyan-300 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               <Send className="h-4 w-4" />
                               Save Note
@@ -1652,7 +1653,7 @@ export default function Contractors() {
                                 type="button"
                                 onClick={() => project.id ? navigate(`/projects/${project.id}`) : undefined}
                                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-left"
-                                style={{ background: '#EFF6FF', color: '#1D4ED8', border: '1px solid #BFDBFE' }}
+                                style={{ background: 'rgba(30, 58, 95, 0.5)', color: '#BFDBFE', border: '1px solid rgba(96, 165, 250, 0.35)' }}
                               >
                                 <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
                                 <span className="max-w-[220px] truncate">{project.address}</span>
@@ -1736,7 +1737,7 @@ export default function Contractors() {
                             onClick={() => addContractorNote(contractor.id)}
                             disabled={savingNotes[contractor.id] || !(noteInputs[contractor.id] || '').trim()}
                             className="h-10 w-10 rounded-xl flex items-center justify-center text-white disabled:opacity-50 flex-shrink-0"
-                            style={{ background: '#2563EB' }}
+                            style={{ background: 'linear-gradient(135deg, #334155, #0f172a)', border: '1px solid #475569' }}
                             title="Add note"
                             aria-label="Add contractor note"
                           >
@@ -1786,7 +1787,7 @@ export default function Contractors() {
                     )}
 
                   {expandedContractorId === contractor.id && (
-                    <div className="border-t border-slate-300 p-5" style={{ background: '#E4EAF2' }}>
+                    <div className="border-t border-white/10 p-5" style={{ background: 'rgba(13, 18, 24, 0.6)' }}>
                       <div className="rounded-2xl border border-slate-300 bg-white p-4">
                         <div className="flex items-center justify-between gap-3 mb-3">
                           <div>
@@ -1801,14 +1802,14 @@ export default function Contractors() {
                             rows={2}
                             placeholder={`Add a note about ${contractor.name}`}
                             wrapperClassName="flex-1"
-                            className="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                            className="w-full px-3.5 py-2.5 rounded-xl border border-white/15 bg-slate-900/55 text-sm text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-500/30 resize-none"
                           />
                           <button
                             type="button"
                             onClick={() => addContractorNote(contractor.id)}
                             disabled={savingNotes[contractor.id] || !(noteInputs[contractor.id] || '').trim()}
                             className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-black text-white disabled:opacity-50"
-                            style={{ background: '#2563EB' }}
+                            style={{ background: 'linear-gradient(135deg, #334155, #0f172a)', border: '1px solid #475569' }}
                           >
                             <Send className="w-4 h-4" />
                             Add Note
