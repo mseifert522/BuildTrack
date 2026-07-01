@@ -485,7 +485,7 @@ export default function Contractors() {
   const [categories, setCategories] = useState<string[]>(fallbackCategories);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [query, setQuery] = useState('');
-  const [sortMode, setSortMode] = useState<'name_asc' | 'name_desc' | 'date_newest' | 'date_oldest'>('date_newest');
+  const [sortMode, setSortMode] = useState<'name_asc' | 'name_desc' | 'date_newest' | 'date_oldest'>('name_asc');
   const [expandedContractorId, setExpandedContractorId] = useState<string | null>(null);
   const [contractorNotes, setContractorNotes] = useState<Record<string, ContractorNote[]>>({});
   const [noteInputs, setNoteInputs] = useState<Record<string, string>>({});
