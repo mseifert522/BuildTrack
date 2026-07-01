@@ -5480,11 +5480,11 @@ function ConstructionPlanBoard({ projectId, canManage }: { projectId: string; ca
   useEffect(() => { load(); }, [projectId]);
 
   const statusColors: Record<string, string> = {
-    not_started: 'bg-gray-100 text-gray-700',
-    in_progress: 'bg-blue-100 text-blue-700',
-    waiting_materials: 'bg-amber-100 text-amber-700',
-    needs_review: 'bg-purple-100 text-purple-700',
-    completed: 'bg-green-100 text-green-700',
+    not_started: 'bg-slate-500/15 text-slate-200 border border-slate-400/30',
+    in_progress: 'bg-blue-500/20 text-blue-200 border border-blue-400/40',
+    waiting_materials: 'bg-amber-500/20 text-amber-200 border border-amber-400/40',
+    needs_review: 'bg-purple-500/20 text-purple-200 border border-purple-400/40',
+    completed: 'bg-emerald-500/20 text-emerald-200 border border-emerald-400/40',
   };
   const materialColors: Record<string, string> = {
     planned: 'bg-gray-100 text-gray-700',
@@ -6077,11 +6077,11 @@ function ConstructionPlanTab({ projectId, canManage }: { projectId: string; canM
   };
 
   const statusColors: Record<string, string> = {
-    not_started: 'bg-gray-100 text-gray-700',
-    in_progress: 'bg-blue-100 text-blue-700',
-    waiting_materials: 'bg-amber-100 text-amber-700',
-    needs_review: 'bg-purple-100 text-purple-700',
-    completed: 'bg-green-100 text-green-700',
+    not_started: 'bg-slate-500/15 text-slate-200 border border-slate-400/30',
+    in_progress: 'bg-blue-500/20 text-blue-200 border border-blue-400/40',
+    waiting_materials: 'bg-amber-500/20 text-amber-200 border border-amber-400/40',
+    needs_review: 'bg-purple-500/20 text-purple-200 border border-purple-400/40',
+    completed: 'bg-emerald-500/20 text-emerald-200 border border-emerald-400/40',
   };
   const materialColors: Record<string, string> = {
     planned: 'bg-gray-100 text-gray-700',
@@ -6390,8 +6390,8 @@ function PunchListTab({
     }
   };
 
-  const priorityColors: Record<string, string> = { low: 'bg-gray-100 text-gray-600', medium: 'bg-blue-100 text-blue-700', high: 'bg-orange-100 text-orange-700', urgent: 'bg-red-100 text-red-700' };
-  const statusColors: Record<string, string> = { not_started: 'bg-gray-100 text-gray-600', in_progress: 'bg-blue-100 text-blue-700', waiting_materials: 'bg-orange-100 text-orange-700', needs_review: 'bg-purple-100 text-purple-700', completed: 'bg-green-100 text-green-700' };
+  const priorityColors: Record<string, string> = { low: 'bg-slate-500/15 text-slate-200 border border-slate-400/30', medium: 'bg-sky-500/20 text-sky-200 border border-sky-400/40', high: 'bg-orange-500/20 text-orange-200 border border-orange-400/40', urgent: 'bg-red-500/20 text-red-200 border border-red-400/40' };
+  const statusColors: Record<string, string> = { not_started: 'bg-slate-500/15 text-slate-200 border border-slate-400/30', in_progress: 'bg-sky-500/20 text-sky-200 border border-sky-400/40', waiting_materials: 'bg-orange-500/20 text-orange-200 border border-orange-400/40', needs_review: 'bg-fuchsia-500/20 text-fuchsia-200 border border-fuchsia-400/40', completed: 'bg-emerald-500/20 text-emerald-200 border border-emerald-400/40' };
 
   return (
     <div className="space-y-4">
@@ -6401,7 +6401,7 @@ function PunchListTab({
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="text-xl font-black tracking-normal text-white">{isActive ? 'Punch List Active' : 'Start Punch List'}</h3>
               {isActive && <span className="rounded-full border border-amber-200/70 bg-amber-300 px-3 py-1 text-xs font-black uppercase tracking-wide text-slate-950 shadow-sm">Punch List Active</span>}
-              <span className="rounded-full border border-emerald-300/55 bg-emerald-400/18 px-3 py-1 text-xs font-black uppercase tracking-wide text-emerald-50">Active Rehab</span>
+              <span className="rounded-full border border-emerald-400/50 bg-emerald-500/20 px-3 py-1 text-xs font-black uppercase tracking-wide text-emerald-200">Active Rehab</span>
             </div>
             <p className="mt-2 text-sm font-semibold leading-6 text-slate-100">Punch list is the final 90% completion workflow. It stays separate from scope of work and only opens when management activates it.</p>
           </div>
@@ -8335,7 +8335,7 @@ function InvoicesTab({ projectId, user, project }: { projectId: string; user: an
 
   useEffect(() => { load(); }, []);
 
-  const statusColors: Record<string, string> = { draft: 'bg-gray-100 text-gray-600', submitted: 'bg-blue-100 text-blue-700', reviewed: 'bg-yellow-100 text-yellow-700', approved: 'bg-green-100 text-green-700', paid: 'bg-emerald-100 text-emerald-700' };
+  const statusColors: Record<string, string> = { draft: 'bg-slate-500/15 text-slate-200 border border-slate-400/30', submitted: 'bg-blue-500/20 text-blue-200 border border-blue-400/40', reviewed: 'bg-amber-500/20 text-amber-200 border border-amber-400/40', approved: 'bg-emerald-500/20 text-emerald-200 border border-emerald-400/40', paid: 'bg-teal-500/20 text-teal-200 border border-teal-400/40' };
 
   return (
     <div className="space-y-4">
