@@ -548,7 +548,7 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
   const [expandedCalendarNoteId, setExpandedCalendarNoteId] = useState<string | null>(null);
   const [calendarDetailEventId, setCalendarDetailEventId] = useState<string | null>(null);
   const [calendarQueueFilter, setCalendarQueueFilter] = useState<CalendarQueueFilter>('upcoming');
-  const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>(calendarOnly ? 'month' : 'week');
+  const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>('month');
   const [calendarAnchorDateKey, setCalendarAnchorDateKey] = useState(() => formatLocalDateInput());
   const [calendarExpanded, setCalendarExpanded] = useState(() => (
     calendarOnly ? true : calendarPreference.get('bt.operationsCalendar.v2.expanded', true)

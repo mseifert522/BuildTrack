@@ -3165,11 +3165,6 @@ function ProjectTimelineTab({ projectId, project, canManage, canDelete }: { proj
   const completedCount = flatRows.filter(row => ['completed', 'delivered', 'installed'].includes(row.status)).length;
   const waitingCount = flatRows.filter(row => ['waiting_materials', 'waiting', 'ordered', 'quote_requested'].includes(row.status)).length;
   const reviewCount = flatRows.filter(row => row.status === 'needs_review').length;
-  const upcomingRows = flatRows
-    .filter(row => row.kind !== 'stage' && !['completed', 'delivered', 'installed', 'cancelled'].includes(row.status))
-    .filter(row => row.start <= addTimelineDays(today, 28) || row.end <= addTimelineDays(today, 28))
-    .sort((left, right) => left.start.getTime() - right.start.getTime())
-    .slice(0, 8);
   const projectStartLabel = project?.start_date
     ? formatEasternDate(project.start_date, { month: 'short', day: 'numeric', year: 'numeric' })
     : 'Start date not set';
@@ -3342,7 +3337,7 @@ function ProjectTimelineTab({ projectId, project, canManage, canDelete }: { proj
           </div>
         )}
 
-        <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="p-4">
           <div className="min-w-0 overflow-hidden rounded-xl border border-cyan-300/25 bg-slate-950/45 shadow-[0_16px_42px_rgba(2,6,23,0.35)]">
             <div className="overflow-x-auto">
               <div className="min-w-[1120px]">
@@ -3374,45 +3369,6 @@ function ProjectTimelineTab({ projectId, project, canManage, canDelete }: { proj
               </div>
             </div>
           </div>
-
-          <aside className="space-y-3">
-            <div className="rounded-xl border border-cyan-300/25 bg-slate-950/65 p-3 shadow-inner">
-              <h4 className="text-sm font-black text-white">Next Work Window</h4>
-              <p className="mt-1 text-xs font-semibold text-blue-100/80">Construction items and material orders due in the next 28 days.</p>
-              <div className="mt-3 space-y-2">
-                {upcomingRows.map(row => (
-                  <div key={`upcoming-${row.id}`} className="rounded-lg border border-white/10 bg-white/10 p-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="line-clamp-2 text-xs font-black text-white">{row.label}</p>
-                      <span className={`flex-shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-black ${row.statusClass}`}>{row.statusLabel}</span>
-                    </div>
-                    <p className="mt-1 text-[11px] font-semibold text-slate-300">
-                      {formatTimelineDate(row.start)} - {formatTimelineDate(row.end)}
-                    </p>
-                    {row.owner && <p className="mt-1 truncate text-[11px] font-semibold text-cyan-100">{row.owner}</p>}
-                  </div>
-                ))}
-                {!upcomingRows.length && (
-                  <p className="rounded-lg border border-dashed border-white/15 bg-white/5 px-3 py-6 text-center text-xs font-semibold text-slate-300">No open timeline items in the next 28 days.</p>
-                )}
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-emerald-300/25 bg-gradient-to-br from-slate-950 via-emerald-950 to-slate-950 p-3 shadow-inner">
-              <h4 className="text-sm font-black text-white">Rehab Stage Framework</h4>
-              <div className="mt-3 space-y-1.5">
-                {standardRehabTimelineTemplate.map((stage, index) => (
-                  <div key={stage.id} className="grid grid-cols-[28px_minmax(0,1fr)] items-center gap-2 rounded-lg border border-white/10 bg-white/10 px-2 py-1.5">
-                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-emerald-400 text-[10px] font-black text-slate-950">{index + 1}</span>
-                    <div className="min-w-0">
-                      <p className="truncate text-xs font-black text-white">{stage.category}</p>
-                      <p className="truncate text-[10px] font-semibold text-emerald-100/80">{stage.label}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </aside>
         </div>
       </section>
     </div>
