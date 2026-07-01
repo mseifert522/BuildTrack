@@ -1705,7 +1705,7 @@ export default function ProjectDetail() {
               <div className="mt-1.5 flex items-center gap-2 flex-wrap">
                 <StatusBadge status={project.status} />
                 {punchlistStageActive && (
-                  <span className="inline-flex items-center rounded-full border border-yellow-300 bg-yellow-400 px-3 py-1 text-xs font-black uppercase tracking-wide text-yellow-950 shadow-sm">
+                  <span className="inline-flex items-center rounded-full border border-amber-400/40 bg-amber-500/20 px-3 py-1 text-xs font-black uppercase tracking-wide text-amber-200">
                     Punch List Active
                   </span>
                 )}
@@ -6400,7 +6400,7 @@ function PunchListTab({
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="text-xl font-black tracking-normal text-white">{isActive ? 'Punch List Active' : 'Start Punch List'}</h3>
-              {isActive && <span className="rounded-full border border-amber-200/70 bg-amber-300 px-3 py-1 text-xs font-black uppercase tracking-wide text-slate-950 shadow-sm">Punch List Active</span>}
+              {isActive && <span className="rounded-full border border-amber-400/40 bg-amber-500/20 px-3 py-1 text-xs font-black uppercase tracking-wide text-amber-200">Punch List Active</span>}
               <span className="rounded-full border border-emerald-400/50 bg-emerald-500/20 px-3 py-1 text-xs font-black uppercase tracking-wide text-emerald-200">Active Rehab</span>
             </div>
             <p className="mt-2 text-sm font-semibold leading-6 text-slate-100">Punch list is the final 90% completion workflow. It stays separate from scope of work and only opens when management activates it.</p>
