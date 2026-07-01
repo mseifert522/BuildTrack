@@ -1348,6 +1348,19 @@
     linear-gradient(180deg, rgba(15, 23, 42, 0.82), rgba(8, 12, 17, 0.92)) !important;
 }
 
+/* The expanded vendor detail sits on a dark surface and its text is remapped to
+   light (via .bt-directory-card). Force the light Tailwind card backgrounds dark
+   so field labels/values stay readable instead of light-on-light. */
+.bt-directory-expanded .bg-white,
+.bt-directory-expanded .bg-slate-50,
+.bt-directory-expanded .bg-slate-100 {
+  background-color: rgba(15, 23, 42, 0.55) !important;
+}
+.bt-directory-expanded .border-slate-200,
+.bt-directory-expanded .border-slate-300 {
+  border-color: rgba(148, 163, 184, 0.22) !important;
+}
+
 .bt-directory-info-panel {
   border-color: rgba(148, 163, 184, 0.34) !important;
   background:

@@ -1736,7 +1736,7 @@ export default function ProjectDetail() {
               sourceId={id || project.id}
               contextLabel={[project.address, project.job_name].filter(Boolean).join(' - ')}
               onSaved={loadProjectCalendar}
-              buttonClassName="bt-project-tab-button inline-flex min-h-10 min-w-0 items-center justify-center gap-1.5 rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-black leading-tight text-white shadow-sm transition-colors hover:bg-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-300/50 sm:text-sm"
+              buttonClassName="bt-project-tab-button inline-flex min-h-10 min-w-0 items-center justify-center gap-1 rounded-lg border border-slate-600 bg-gradient-to-br from-slate-800 via-slate-950 to-blue-950 px-1.5 py-1.5 text-center text-[10px] font-black leading-tight text-slate-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.11),0_8px_16px_rgba(2,6,23,0.36)] transition-all duration-150 hover:border-cyan-300 hover:from-slate-700 hover:via-blue-950 hover:to-cyan-950 hover:text-white sm:px-2"
             />
           </div>
         </div>
@@ -3261,7 +3261,7 @@ function ProjectTimelineTab({ projectId, project, canManage, canDelete }: { proj
                   key={option.id}
                   type="button"
                   onClick={() => setTimelineMode(option.id)}
-                  className={`inline-flex min-h-10 items-center justify-center rounded-xl border px-4 text-sm font-black transition ${timelineMode === option.id ? 'border-cyan-200 bg-cyan-400 text-slate-950 shadow-[0_0_22px_rgba(34,211,238,0.28)]' : 'border-white/15 bg-white/10 text-slate-100 hover:bg-white/15'}`}
+                  className={`inline-flex min-h-10 items-center justify-center rounded-xl border px-4 text-sm font-black transition-all duration-150 ${timelineMode === option.id ? 'border-cyan-200 bg-gradient-to-br from-blue-500 via-indigo-600 to-cyan-500 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_10px_20px_rgba(37,99,235,0.42)] ring-1 ring-cyan-200/50' : 'border-slate-600 bg-gradient-to-br from-slate-800 via-slate-950 to-blue-950 text-slate-100 hover:border-cyan-300 hover:from-slate-700 hover:via-blue-950 hover:to-cyan-950 hover:text-white'}`}
                 >
                   {option.label}
                 </button>
@@ -3270,7 +3270,7 @@ function ProjectTimelineTab({ projectId, project, canManage, canDelete }: { proj
                 <button
                   type="button"
                   onClick={() => setShowAddTask(v => !v)}
-                  className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-emerald-300/70 bg-emerald-400 px-4 text-sm font-black text-slate-950 shadow-[0_0_22px_rgba(16,185,129,0.28)] transition hover:bg-emerald-300"
+                  className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-600 bg-gradient-to-br from-slate-800 via-slate-950 to-blue-950 px-4 text-sm font-black text-slate-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.11),0_8px_16px_rgba(2,6,23,0.36)] transition-all duration-150 hover:border-cyan-300 hover:from-slate-700 hover:via-blue-950 hover:to-cyan-950 hover:text-white"
                 >
                   <Plus className="h-4 w-4" />
                   Add Timeline Task
@@ -3329,7 +3329,7 @@ function ProjectTimelineTab({ projectId, project, canManage, canDelete }: { proj
             </div>
             <div className="mt-3 flex justify-end gap-2">
               <button type="button" onClick={() => { setShowAddTask(false); setTaskForm(emptyTaskForm); }} className="rounded-lg border border-white/15 bg-white/10 px-4 py-2 text-sm font-black text-slate-100 hover:bg-white/15">Cancel</button>
-              <button type="button" onClick={handleAddTimelineTask} disabled={savingTask} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300/70 bg-emerald-400 px-4 py-2 text-sm font-black text-slate-950 hover:bg-emerald-300 disabled:opacity-60">
+              <button type="button" onClick={handleAddTimelineTask} disabled={savingTask} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-gradient-to-br from-slate-800 via-slate-950 to-blue-950 px-4 py-2 text-sm font-black text-slate-100 transition-all duration-150 hover:border-cyan-300 hover:text-white disabled:opacity-60">
                 <Plus className="h-4 w-4" />
                 {savingTask ? 'Adding...' : 'Add Task'}
               </button>
@@ -4525,10 +4525,10 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
               <p className="text-sm text-gray-500 mt-1">Add separate scopes for kitchen, bath, exterior, mechanicals, site work, or any project section.</p>
               {canManage && (
                 <div className="mt-4 flex flex-wrap justify-center gap-2">
-                  <button type="button" onClick={openBulkScopes} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-800 text-sm font-bold">
+                  <button type="button" onClick={openBulkScopes} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-600 bg-gradient-to-br from-slate-800 via-slate-950 to-blue-950 text-slate-100 text-sm font-bold transition-all duration-150 hover:border-cyan-300 hover:text-white">
                     <ClipboardList className="w-4 h-4" /> Add Bulk Scope of Work
                   </button>
-                  <button type="button" onClick={openAddScope} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-bold">
+                  <button type="button" onClick={openAddScope} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-600 bg-gradient-to-br from-slate-800 via-slate-950 to-blue-950 text-slate-100 text-sm font-bold transition-all duration-150 hover:border-cyan-300 hover:text-white">
                     <Plus className="w-4 h-4" /> Add first scope
                   </button>
                 </div>
@@ -4538,10 +4538,10 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
             <div className="space-y-1.5">
               {canManage && (
                 <div className="mb-2 flex flex-wrap items-center justify-end gap-2">
-                  <button type="button" onClick={openBulkScopes} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-800 text-sm font-bold hover:bg-emerald-100">
+                  <button type="button" onClick={openBulkScopes} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-600 bg-gradient-to-br from-slate-800 via-slate-950 to-blue-950 text-slate-100 text-sm font-bold transition-all duration-150 hover:border-cyan-300 hover:text-white">
                     <ClipboardList className="w-4 h-4" /> Add Bulk Scope
                   </button>
-                  <button type="button" onClick={openAddScope} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-bold hover:bg-blue-500">
+                  <button type="button" onClick={openAddScope} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-600 bg-gradient-to-br from-slate-800 via-slate-950 to-blue-950 text-slate-100 text-sm font-bold transition-all duration-150 hover:border-cyan-300 hover:text-white">
                     <Plus className="w-4 h-4" /> Add Scope of Work
                   </button>
                 </div>
@@ -6290,6 +6290,7 @@ function PunchListTab({
   const [punchPhotoPickerItem, setPunchPhotoPickerItem] = useState<any | null>(null);
   const [markupPhoto, setMarkupPhoto] = useState<any | null>(null);
   const { register, handleSubmit, reset, formState: { isSubmitting } } = useForm();
+  const canDelete = Boolean(user && ['super_admin', 'operations_manager'].includes(user.role));
 
   const load = async () => {
     try {
@@ -6322,6 +6323,18 @@ function PunchListTab({
       await api.put(`/projects/${projectId}/punch-list/${itemId}`, { status });
       load();
     } catch (err) { toast.error('Failed to update'); }
+  };
+
+  const deleteItem = async (itemId: string, title: string) => {
+    if (!window.confirm(`Delete punch list item "${title}"? This cannot be undone.`)) return;
+    try {
+      await api.delete(`/projects/${projectId}/punch-list/${itemId}`);
+      toast.success('Punch list item deleted');
+      if (expandedItem === itemId) setExpandedItem(null);
+      load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to delete item');
+    }
   };
 
   const uploadItemPhoto = async (itemId: string, files?: FileList | File[] | null) => {
@@ -6450,6 +6463,17 @@ function PunchListTab({
                     {item.photo_count > 0 && <span className="text-xs text-blue-500">{item.photo_count} photos</span>}
                   </div>
                 </div>
+                {canDelete && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); deleteItem(item.id, item.title); }}
+                    title="Delete punch list item"
+                    aria-label={`Delete ${item.title}`}
+                    className="flex-shrink-0 rounded-lg border border-red-400/40 bg-red-500/15 p-1.5 text-red-300 transition-colors hover:bg-red-500/30 hover:text-red-200"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
               </div>
               {expandedItem === item.id && (
                 <div className="px-4 pb-4 border-t border-gray-100 pt-3">
