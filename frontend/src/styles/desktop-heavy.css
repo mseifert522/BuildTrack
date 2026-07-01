@@ -1086,13 +1086,11 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 1px solid rgba(251, 146, 60, 0.72);
+  border: 1px solid rgba(71, 85, 105, 0.9);
   border-radius: 6px;
-  background:
-    linear-gradient(180deg, rgba(251, 146, 60, 0.34), rgba(251, 146, 60, 0.14)),
-    #19110B;
+  background: linear-gradient(135deg, #334155, #0f172a);
   padding: 0 16px;
-  color: #FFE8D1;
+  color: #E2E8F0;
   font-size: 13px;
   font-weight: 950;
   box-shadow:
@@ -1102,7 +1100,7 @@
 }
 
 .bt-directory-primary-action:hover {
-  border-color: #FDBA74;
+  border-color: #67E8F9;
   transform: translateY(-1px);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.12),
@@ -1110,15 +1108,31 @@
 }
 
 .bt-suppliers-page .bt-directory-primary-action {
-  border-color: rgba(96, 165, 250, 0.72);
-  background:
-    linear-gradient(180deg, rgba(37, 99, 235, 0.40), rgba(37, 99, 235, 0.18)),
-    #0B1526;
-  color: #DBEAFE;
+  border-color: rgba(71, 85, 105, 0.9);
+  background: linear-gradient(135deg, #334155, #0f172a);
+  color: #E2E8F0;
 }
 
 .bt-suppliers-page .bt-directory-primary-action:hover {
-  border-color: #93C5FD;
+  border-color: #67E8F9;
+}
+
+/* Site-wide button standardization: convert blue primary BUTTONS (not badges)
+   to the canonical dark-navy style. Targets button/anchor elements only so
+   status chips/badges keep their color. Destructive (red) and semantic
+   approve/deny buttons are intentionally left alone. */
+button.bg-blue-600,
+a.bg-blue-600 {
+  background-color: transparent !important;
+  background-image: linear-gradient(135deg, #334155, #0f172a) !important;
+  border: 1px solid #475569 !important;
+  color: #E2E8F0 !important;
+}
+button.bg-blue-600:hover,
+a.bg-blue-600:hover {
+  background-image: linear-gradient(135deg, #3e4c63, #101827) !important;
+  border-color: #67E8F9 !important;
+  color: #FFFFFF !important;
 }
 
 .bt-contractors-page .bt-directory-hero {

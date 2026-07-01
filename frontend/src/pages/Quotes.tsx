@@ -547,8 +547,8 @@ export default function Quotes() {
             onClick={() => setTab(key)}
             className="inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors"
             style={{
-              borderColor: tab === key ? '#D99D26' : 'transparent',
-              color: tab === key ? '#FBBF24' : '#94A3B8',
+              borderColor: tab === key ? '#22D3EE' : 'transparent',
+              color: tab === key ? '#67E8F9' : '#94A3B8',
             }}
           >
             <Icon className="h-4 w-4" /> {label}
