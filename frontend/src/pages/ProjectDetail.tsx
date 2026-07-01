@@ -4536,6 +4536,16 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
             </div>
           ) : (
             <div className="space-y-1.5">
+              {canManage && (
+                <div className="mb-2 flex flex-wrap items-center justify-end gap-2">
+                  <button type="button" onClick={openBulkScopes} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-800 text-sm font-bold hover:bg-emerald-100">
+                    <ClipboardList className="w-4 h-4" /> Add Bulk Scope
+                  </button>
+                  <button type="button" onClick={openAddScope} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-bold hover:bg-blue-500">
+                    <Plus className="w-4 h-4" /> Add Scope of Work
+                  </button>
+                </div>
+              )}
               {scopes.map((scope, index) => {
                 const estimateDocuments = Array.isArray(scope.estimate_documents) ? scope.estimate_documents : [];
                 const scopeCardStyle = scopeCardStyles[index % scopeCardStyles.length];
