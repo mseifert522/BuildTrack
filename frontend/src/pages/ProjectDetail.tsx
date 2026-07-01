@@ -2,7 +2,7 @@ import { type ChangeEvent, type Dispatch, type DragEvent, type KeyboardEvent, ty
 import { useParams, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore, canChangeProjectStatus, canManageProjects, isAdminRole } from '../store/authStore';
 import api from '../lib/api';
-import { Loading, StatusBadge, Modal } from '../components/ui';
+import { Loading, StatusBadge, Modal, statusLabels } from '../components/ui';
 import Avatar from '../components/Avatar';
 import VoiceTextarea from '../components/VoiceTextarea';
 import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, ClipboardList, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle, Send, Phone, Mail, Building2, AlertTriangle, Check, Paperclip, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, CalendarDays, Search, GripVertical, CheckCircle2, XCircle, Database, ListFilter, Bot } from 'lucide-react';
@@ -1216,14 +1216,14 @@ export default function ProjectDetail() {
   const fieldWork = project.field_work || { counts: {}, tasks: [], invoice_holds: [] };
 
   const tabs: { id: Tab; label: string; icon: any }[] = [
+    { id: 'details', label: 'Project Details', icon: ListFilter },
     { id: 'notes', label: 'Notes', icon: MessageSquare },
-    { id: 'details', label: 'Details', icon: ListFilter },
     { id: 'construction-plan', label: 'Scope of Work', icon: FileText },
     { id: 'project-timeline', label: 'Project Timeline', icon: CalendarDays },
     { id: 'quotes', label: 'Quotes', icon: FileText },
     { id: 'punch-list', label: punchlistStageActive ? 'Punch List Active' : 'Start Punch List', icon: ClipboardList },
     { id: 'photos', label: 'Photos Bucket', icon: Camera },
-    { id: 'team', label: 'Assign Contractors', icon: Users },
+    { id: 'team', label: 'Assigned Contractors', icon: Users },
     { id: 'texts', label: 'Text Contractors', icon: MessageSquare },
   ];
 
@@ -1806,8 +1806,23 @@ export default function ProjectDetail() {
               </div>
               <div className="grid sm:grid-cols-2 gap-4 text-sm">
                 {[
-                  { label: 'Status', value: <StatusBadge status={project.status} /> },
-                  ...(punchlistStageActive ? [{ label: 'Punch List', value: <span className="inline-flex items-center rounded-full border border-yellow-300 bg-yellow-400 px-2.5 py-1 text-xs font-black uppercase tracking-wide text-yellow-950">Active</span> }] : []),
+                  { label: 'Status', value: (
+                    <span
+                      className="text-sm font-black"
+                      style={{ color: project.status === 'active_rehab' || project.status === 'active'
+                        ? '#6EE7A0'
+                        : project.status === 'rehab_completed'
+                          ? '#93C5FD'
+                          : project.status === 'closed_sold'
+                            ? '#CBD5E1'
+                            : project.status === 'on_market' || project.status === 'long_term_holding'
+                              ? '#FCD34D'
+                              : '#FFF4E8' }}
+                    >
+                      {statusLabels[project.status] || String(project.status || '').replace(/_/g, ' ')}
+                    </span>
+                  ) },
+                  ...(punchlistStageActive ? [{ label: 'Punch List', value: <span className="text-sm font-black" style={{ color: '#FCD34D' }}>Active</span> }] : []),
                   { label: 'Start Date', value: project.start_date ? format(new Date(project.start_date), 'MMM d, yyyy') : '—' },
                   { label: 'Target Completion', value: project.target_completion ? format(new Date(project.target_completion), 'MMM d, yyyy') : '—' },
                   { label: 'Budget', value: project.budget ? `$${Number(project.budget).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—' },
@@ -1834,7 +1849,7 @@ export default function ProjectDetail() {
         )}
 
         {tab === 'project-timeline' && (
-          <ProjectTimelineTab projectId={id!} project={project} />
+          <ProjectTimelineTab projectId={id!} project={project} canManage={!!canEdit} canDelete={!!canChangeStatus} />
         )}
 
         {tab === 'quotes' && (
@@ -3023,12 +3038,18 @@ function rowOverlapsWindow(row: ProjectTimelineRow, windowStart: Date, windowEnd
   return row.end >= windowStart && row.start <= windowEnd;
 }
 
-function ProjectTimelineTab({ projectId, project }: { projectId: string; project: any }) {
+function ProjectTimelineTab({ projectId, project, canManage, canDelete }: { projectId: string; project: any; canManage: boolean; canDelete: boolean }) {
   const [scopes, setScopes] = useState<any[]>([]);
   const [planItems, setPlanItems] = useState<any[]>([]);
   const [materials, setMaterials] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [timelineMode, setTimelineMode] = useState<'full' | 'lookahead'>('full');
+  const [reloadNonce, setReloadNonce] = useState(0);
+  const [showAddTask, setShowAddTask] = useState(false);
+  const [savingTask, setSavingTask] = useState(false);
+  const [deletingScopeId, setDeletingScopeId] = useState<string | null>(null);
+  const emptyTaskForm = { scope_title: '', section_name: '', status: 'active', timeline_start: '', timeline_end: '' };
+  const [taskForm, setTaskForm] = useState(emptyTaskForm);
 
   useEffect(() => {
     let active = true;
@@ -3052,7 +3073,47 @@ function ProjectTimelineTab({ projectId, project }: { projectId: string; project
     };
     loadTimeline();
     return () => { active = false; };
-  }, [projectId]);
+  }, [projectId, reloadNonce]);
+
+  const handleAddTimelineTask = async () => {
+    const title = taskForm.scope_title.trim();
+    if (!title) { toast.error('Enter a task type / name'); return; }
+    if (!taskForm.timeline_start || !taskForm.timeline_end) { toast.error('Enter a start and end date for the time frame'); return; }
+    if (taskForm.timeline_end < taskForm.timeline_start) { toast.error('End date cannot be before the start date'); return; }
+    setSavingTask(true);
+    try {
+      await api.post(`/projects/${projectId}/scopes`, {
+        scope_title: title,
+        section_name: taskForm.section_name.trim() || 'Timeline',
+        scope_of_work: '',
+        status: taskForm.status,
+        timeline_start: taskForm.timeline_start,
+        timeline_end: taskForm.timeline_end,
+      });
+      toast.success('Timeline task added');
+      setTaskForm(emptyTaskForm);
+      setShowAddTask(false);
+      setReloadNonce(n => n + 1);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to add timeline task');
+    } finally {
+      setSavingTask(false);
+    }
+  };
+
+  const handleDeleteTimelineTask = async (scopeId: string, label: string) => {
+    if (!window.confirm(`Delete timeline task "${label}"? This removes it from the schedule.`)) return;
+    setDeletingScopeId(scopeId);
+    try {
+      await api.delete(`/projects/${projectId}/scopes/${scopeId}`);
+      toast.success('Timeline task deleted');
+      setReloadNonce(n => n + 1);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to delete timeline task');
+    } finally {
+      setDeletingScopeId(null);
+    }
+  };
 
   const timelineRows = useMemo(
     () => buildProjectTimelineRows(project, scopes, planItems, materials),
@@ -3126,6 +3187,18 @@ function ProjectTimelineTab({ projectId, project }: { projectId: string; project
                 <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{startLabel} - {endLabel}</span>
               </div>
             </div>
+            {!nested && canDelete && row.id.startsWith('scope-') && (
+              <button
+                type="button"
+                onClick={() => handleDeleteTimelineTask(row.id.slice(6), row.label)}
+                disabled={deletingScopeId === row.id.slice(6)}
+                title="Delete this timeline task"
+                aria-label={`Delete timeline task ${row.label}`}
+                className="flex-shrink-0 rounded-lg border border-red-400/40 bg-red-500/15 p-1.5 text-red-200 transition hover:bg-red-500/30 disabled:opacity-50"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
         </div>
         <div className={`relative border-t border-cyan-300/15 px-2 py-2 ${rowHeightClass}`}>
@@ -3183,6 +3256,16 @@ function ProjectTimelineTab({ projectId, project }: { projectId: string; project
                   {option.label}
                 </button>
               ))}
+              {canManage && (
+                <button
+                  type="button"
+                  onClick={() => setShowAddTask(v => !v)}
+                  className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-emerald-300/70 bg-emerald-400 px-4 text-sm font-black text-slate-950 shadow-[0_0_22px_rgba(16,185,129,0.28)] transition hover:bg-emerald-300"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add Timeline Task
+                </button>
+              )}
             </div>
           </div>
 
@@ -3200,6 +3283,49 @@ function ProjectTimelineTab({ projectId, project }: { projectId: string; project
             ))}
           </div>
         </div>
+
+        {showAddTask && canManage && (
+          <div className="mx-4 mt-4 rounded-xl border border-emerald-300/40 bg-slate-950/70 p-4 shadow-inner">
+            <div className="mb-3 flex items-center justify-between">
+              <h4 className="text-sm font-black text-white">Add Timeline Task</h4>
+              <button type="button" onClick={() => { setShowAddTask(false); setTaskForm(emptyTaskForm); }} className="rounded-lg px-2 py-1 text-xs font-black text-slate-300 hover:bg-white/10">Close</button>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              <label className="xl:col-span-2">
+                <span className="text-[11px] font-black uppercase tracking-wide text-slate-300">Task type / name</span>
+                <input value={taskForm.scope_title} onChange={e => setTaskForm(f => ({ ...f, scope_title: e.target.value }))} placeholder="e.g. Demo, Rough Plumbing, Drywall" className="mt-1 w-full rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-sm font-bold text-white placeholder:text-slate-400 outline-none focus:border-emerald-300" />
+              </label>
+              <label>
+                <span className="text-[11px] font-black uppercase tracking-wide text-slate-300">Phase (optional)</span>
+                <input value={taskForm.section_name} onChange={e => setTaskForm(f => ({ ...f, section_name: e.target.value }))} placeholder="e.g. MEP" className="mt-1 w-full rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-sm font-bold text-white placeholder:text-slate-400 outline-none focus:border-emerald-300" />
+              </label>
+              <label>
+                <span className="text-[11px] font-black uppercase tracking-wide text-slate-300">Start date</span>
+                <input type="date" value={taskForm.timeline_start} onChange={e => setTaskForm(f => ({ ...f, timeline_start: e.target.value }))} className="mt-1 w-full rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-sm font-bold text-white outline-none focus:border-emerald-300" />
+              </label>
+              <label>
+                <span className="text-[11px] font-black uppercase tracking-wide text-slate-300">End date</span>
+                <input type="date" value={taskForm.timeline_end} onChange={e => setTaskForm(f => ({ ...f, timeline_end: e.target.value }))} className="mt-1 w-full rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-sm font-bold text-white outline-none focus:border-emerald-300" />
+              </label>
+              <label>
+                <span className="text-[11px] font-black uppercase tracking-wide text-slate-300">Status</span>
+                <select value={taskForm.status} onChange={e => setTaskForm(f => ({ ...f, status: e.target.value }))} className="mt-1 w-full rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-sm font-bold text-white outline-none focus:border-emerald-300">
+                  <option value="active">Active</option>
+                  <option value="draft">Draft</option>
+                  <option value="on_hold">On Hold</option>
+                  <option value="completed">Completed</option>
+                </select>
+              </label>
+            </div>
+            <div className="mt-3 flex justify-end gap-2">
+              <button type="button" onClick={() => { setShowAddTask(false); setTaskForm(emptyTaskForm); }} className="rounded-lg border border-white/15 bg-white/10 px-4 py-2 text-sm font-black text-slate-100 hover:bg-white/15">Cancel</button>
+              <button type="button" onClick={handleAddTimelineTask} disabled={savingTask} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300/70 bg-emerald-400 px-4 py-2 text-sm font-black text-slate-950 hover:bg-emerald-300 disabled:opacity-60">
+                <Plus className="h-4 w-4" />
+                {savingTask ? 'Adding...' : 'Add Task'}
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_320px]">
           <div className="min-w-0 overflow-hidden rounded-xl border border-cyan-300/25 bg-slate-950/45 shadow-[0_16px_42px_rgba(2,6,23,0.35)]">

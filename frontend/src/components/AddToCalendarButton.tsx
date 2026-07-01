@@ -205,9 +205,9 @@ export default function AddToCalendarButton({
       >
         <div className="space-y-4">
           {contextLabel ? (
-            <div className="rounded-xl border border-cyan-200 bg-gradient-to-br from-cyan-50 to-blue-50 px-4 py-3">
-              <p className="text-xs font-black uppercase tracking-wide text-cyan-800">Calendar source</p>
-              <p className="mt-1 text-sm font-black text-slate-950">{contextLabel}</p>
+            <div className="rounded-xl border border-cyan-400/40 bg-slate-900/55 px-4 py-3">
+              <p className="text-xs font-black uppercase tracking-wide text-cyan-300">Calendar source</p>
+              <p className="mt-1 text-sm font-black text-white">{contextLabel}</p>
             </div>
           ) : null}
 
