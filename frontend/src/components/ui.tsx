@@ -57,6 +57,30 @@ export const statusLabels: Record<string, string> = {
   paid: 'Paid',
 };
 
+// Bright, readable lettering colors for status badges rendered WITHOUT a
+// background overlay (keeps them legible on the app's dark surfaces).
+export const statusTextColors: Record<string, string> = {
+  active_rehab: 'text-emerald-400',
+  rehab_completed: 'text-sky-400',
+  long_term_holding: 'text-amber-300',
+  commercial: 'text-cyan-300',
+  on_market: 'text-amber-300',
+  closed_sold: 'text-slate-300',
+  active: 'text-emerald-400',
+  in_progress: 'text-sky-400',
+  on_hold: 'text-amber-300',
+  completed: 'text-slate-300',
+  archived: 'text-red-400',
+  not_started: 'text-slate-300',
+  waiting_materials: 'text-orange-300',
+  needs_review: 'text-fuchsia-300',
+  draft: 'text-slate-400',
+  submitted: 'text-sky-400',
+  reviewed: 'text-amber-300',
+  approved: 'text-emerald-400',
+  paid: 'text-emerald-400',
+};
+
 interface BadgeProps {
   status: string;
   type?: 'status' | 'priority';
@@ -64,10 +88,17 @@ interface BadgeProps {
 }
 
 export function StatusBadge({ status, type = 'status', className = '' }: BadgeProps) {
-  const colors = type === 'priority' ? priorityColors : statusColors;
   const label = statusLabels[status] || status.replace(/_/g, ' ');
+  if (type === 'priority') {
+    return (
+      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${priorityColors[status] || 'bg-gray-100 text-gray-700'} ${className}`}>
+        {label}
+      </span>
+    );
+  }
+  // Status badge: no background overlay, just bright colored lettering.
   return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${colors[status] || 'bg-gray-100 text-gray-700'} ${className}`}>
+    <span className={`inline-flex items-center text-xs font-bold ${statusTextColors[status] || 'text-slate-200'} ${className}`}>
       {label}
     </span>
   );

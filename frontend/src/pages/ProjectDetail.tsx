@@ -3101,15 +3101,30 @@ function ProjectTimelineTab({ projectId, project, canManage, canDelete }: { proj
     }
   };
 
-  const handleDeleteTimelineTask = async (scopeId: string, label: string) => {
-    if (!window.confirm(`Delete timeline task "${label}"? This removes it from the schedule.`)) return;
-    setDeletingScopeId(scopeId);
+  // Map any real (record-backed) timeline row to its delete endpoint. Returns
+  // null for synthetic rows (template phases, "Unassigned"/"Procurement"
+  // container stages) that are not backed by a deletable record.
+  const timelineRowDeletePath = (row: ProjectTimelineRow): string | null => {
+    const rid = row.id;
+    if (rid.startsWith('scope-')) return `scopes/${rid.slice(6)}`;
+    if (rid.startsWith('task-unassigned-')) return `construction-plan/${rid.slice('task-unassigned-'.length)}`;
+    if (rid.startsWith('task-')) return `construction-plan/${rid.slice(5)}`;
+    if (rid.startsWith('material-unlinked-')) return `materials/${rid.slice('material-unlinked-'.length)}`;
+    if (rid.startsWith('material-')) return `materials/${rid.slice(9)}`;
+    return null;
+  };
+
+  const handleDeleteTimelineRow = async (row: ProjectTimelineRow) => {
+    const path = timelineRowDeletePath(row);
+    if (!path) return;
+    if (!window.confirm(`Delete timeline item "${row.label}"? This removes it from the schedule.`)) return;
+    setDeletingScopeId(row.id);
     try {
-      await api.delete(`/projects/${projectId}/scopes/${scopeId}`);
-      toast.success('Timeline task deleted');
+      await api.delete(`/projects/${projectId}/${path}`);
+      toast.success('Timeline item deleted');
       setReloadNonce(n => n + 1);
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Failed to delete timeline task');
+      toast.error(err.response?.data?.error || 'Failed to delete timeline item');
     } finally {
       setDeletingScopeId(null);
     }
@@ -3187,13 +3202,13 @@ function ProjectTimelineTab({ projectId, project, canManage, canDelete }: { proj
                 <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{startLabel} - {endLabel}</span>
               </div>
             </div>
-            {!nested && canDelete && row.id.startsWith('scope-') && (
+            {canDelete && timelineRowDeletePath(row) && (
               <button
                 type="button"
-                onClick={() => handleDeleteTimelineTask(row.id.slice(6), row.label)}
-                disabled={deletingScopeId === row.id.slice(6)}
-                title="Delete this timeline task"
-                aria-label={`Delete timeline task ${row.label}`}
+                onClick={() => handleDeleteTimelineRow(row)}
+                disabled={deletingScopeId === row.id}
+                title="Delete this timeline item"
+                aria-label={`Delete timeline item ${row.label}`}
                 className="flex-shrink-0 rounded-lg border border-red-400/40 bg-red-500/15 p-1.5 text-red-200 transition hover:bg-red-500/30 disabled:opacity-50"
               >
                 <Trash2 className="h-3.5 w-3.5" />
