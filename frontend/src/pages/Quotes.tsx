@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ClipboardList, Scale, CheckCircle2, Paperclip, History, Plus, Search, Download,
-  Check, X, ChevronRight, ChevronDown, RefreshCw, FileText, Trash2, Wand2, Ban,
+  Check, X, ChevronRight, ChevronDown, RefreshCw, FileText, Trash2, Wand2, Ban, RotateCcw,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader, Loading, Empty, Modal } from '../components/ui';
@@ -9,7 +9,7 @@ import api from '../lib/api';
 import { useAuthStore } from '../store/authStore';
 import {
   fetchQuoteOptions, fetchQuoteSummary, fetchQuotes, fetchBidComparison,
-  fetchQuoteActivity, approveQuote, denyQuote, deleteQuote, createQuote, updateQuote, uploadQuote, extractQuote,
+  fetchQuoteActivity, approveQuote, denyQuote, restoreQuote, deleteQuote, createQuote, updateQuote, uploadQuote, extractQuote,
   fetchQuoteNotes, addQuoteNote, deleteQuoteNote,
   type ContractorQuote, type QuoteOptions, type QuoteListParams,
   type CompareResponse, type ActivityRow, type QuoteNote,
@@ -19,10 +19,9 @@ import '../styles/quotes.css';
 
 const PAGE_SIZE = 50;
 
-type TabKey = 'intake' | 'all' | 'compare' | 'approved' | 'rejected' | 'attachments' | 'audit';
+type TabKey = 'all' | 'compare' | 'approved' | 'rejected' | 'attachments' | 'audit';
 
 const TABS: Array<{ key: TabKey; label: string; icon: typeof ClipboardList }> = [
-  { key: 'intake', label: 'Intake Bin', icon: ClipboardList },
   { key: 'all', label: 'All Quotes', icon: FileText },
   { key: 'compare', label: 'Compare Bids', icon: Scale },
   { key: 'approved', label: 'Approved Quotes', icon: CheckCircle2 },
@@ -198,7 +197,7 @@ function csvCell(value: unknown): string {
 export default function Quotes() {
   const [options, setOptions] = useState<QuoteOptions | null>(null);
   const [budgets, setBudgets] = useState<Record<string, number | null>>({});
-  const [tab, setTab] = useState<TabKey>('intake');
+  const [tab, setTab] = useState<TabKey>('all');
   const [filters, setFilters] = useState<QuoteFilters>(blankFilters);
 
   const [quotes, setQuotes] = useState<ContractorQuote[]>([]);
@@ -263,8 +262,6 @@ export default function Quotes() {
     if (filters.end_date) params.end_date = filters.end_date;
     if (filters.status) {
       params.status = filters.status;
-    } else if (tab === 'intake') {
-      params.quote_filter = 'review';
     } else if (tab === 'approved') {
       params.quote_filter = 'approved';
     } else if (tab === 'rejected') {
@@ -458,6 +455,17 @@ export default function Quotes() {
     } finally { setBusyId(null); }
   };
 
+  const handleRestore = async (quote: ContractorQuote) => {
+    setBusyId(quote.id);
+    try {
+      await restoreQuote(quote.id, {});
+      toast.success(`Restored ${quote.quote_number} to review`);
+      reloadAll();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Failed to restore quote');
+    } finally { setBusyId(null); }
+  };
+
   const handleModify = (quote: ContractorQuote) => setEditQuote(quote);
 
   const handleDelete = async (quote: ContractorQuote) => {
@@ -571,7 +579,7 @@ export default function Quotes() {
         </select>
         <select value={filters.status} onChange={e => setFilters(f => ({ ...f, status: e.target.value }))}
           className="rounded-lg border border-gray-200 px-2 py-2 text-sm focus:border-amber-400 focus:outline-none">
-          <option value="">{tab === 'intake' ? 'For review (default)' : tab === 'approved' ? 'Approved (default)' : tab === 'rejected' ? 'Rejected (default)' : 'Any status'}</option>
+          <option value="">{tab === 'approved' ? 'Approved (default)' : tab === 'rejected' ? 'Rejected (default)' : 'Any status'}</option>
           {(options?.statuses || []).map(s => <option key={s} value={s}>{STATUS_STYLES[s]?.label || s}</option>)}
         </select>
         <input type="date" value={filters.start_date} onChange={e => setFilters(f => ({ ...f, start_date: e.target.value }))}
@@ -622,6 +630,7 @@ export default function Quotes() {
           setExpanded={setExpanded}
           onApprove={handleApprove}
           onDeny={handleDeny}
+          onRestore={handleRestore}
           onDelete={handleDelete}
           onModify={handleModify}
           canDelete={canDelete}
@@ -650,7 +659,7 @@ export default function Quotes() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Quote grid (Intake Bin / All Quotes / Approved)
+// Quote grid (All Quotes / Approved / Rejected)
 // ─────────────────────────────────────────────────────────────────────────────
 function QuoteGrid(props: {
   rows: ContractorQuote[];
@@ -660,6 +669,7 @@ function QuoteGrid(props: {
   setExpanded: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   onApprove: (q: ContractorQuote) => void;
   onDeny: (q: ContractorQuote) => void;
+  onRestore: (q: ContractorQuote) => void;
   onDelete: (q: ContractorQuote) => void;
   onModify: (q: ContractorQuote) => void;
   canDelete: boolean;
@@ -672,10 +682,10 @@ function QuoteGrid(props: {
   totalPages: number;
   totalRows: number;
 }) {
-  const { rows, loading, tab, expanded, setExpanded, onApprove, onDeny, onDelete, onModify, canDelete, busyId, sortKey, sortDir, toggleSort, page, setPage, totalPages, totalRows } = props;
+  const { rows, loading, tab, expanded, setExpanded, onApprove, onDeny, onRestore, onDelete, onModify, canDelete, busyId, sortKey, sortDir, toggleSort, page, setPage, totalPages, totalRows } = props;
   if (loading) return <Loading message="Loading quotes…" />;
   if (totalRows === 0) {
-    return <Empty message={tab === 'approved' ? 'No approved quotes yet.' : tab === 'intake' ? 'No quotes awaiting review.' : tab === 'rejected' ? 'No rejected quotes yet.' : 'No quotes found.'} icon={<ClipboardList className="h-8 w-8" />} />;
+    return <Empty message={tab === 'approved' ? 'No approved quotes yet.' : tab === 'rejected' ? 'No rejected quotes yet.' : 'No quotes found.'} icon={<ClipboardList className="h-8 w-8" />} />;
   }
   const arrow = (key: 'date' | 'total') => (sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '');
   const locked = tab === 'approved';
@@ -733,13 +743,14 @@ function QuoteGrid(props: {
                     </td>
                     <td className="px-2 py-1.5 text-right align-top">
                       <div className="flex justify-end gap-1">
-                        {!locked && (
+                        {!locked && q.status !== 'rejected' && (
                           <>
-                            <button disabled={busyId === q.id} onClick={() => onApprove(q)} title={q.status === 'rejected' ? 'Restore & approve this quote' : 'Approve quote'} className="rounded-md border border-green-200 bg-green-50 p-1 text-green-700 hover:bg-green-100 disabled:opacity-50"><Check className="h-3.5 w-3.5" /></button>
-                            {q.status !== 'rejected' && (
-                              <button disabled={busyId === q.id} onClick={() => onDeny(q)} title="Deny (mark rejected)" className="rounded-md border border-amber-200 bg-amber-50 p-1 text-amber-700 hover:bg-amber-100 disabled:opacity-50"><X className="h-3.5 w-3.5" /></button>
-                            )}
+                            <button disabled={busyId === q.id} onClick={() => onApprove(q)} title="Approve quote" className="rounded-md border border-green-200 bg-green-50 p-1 text-green-700 hover:bg-green-100 disabled:opacity-50"><Check className="h-3.5 w-3.5" /></button>
+                            <button disabled={busyId === q.id} onClick={() => onDeny(q)} title="Deny (mark rejected)" className="rounded-md border border-amber-200 bg-amber-50 p-1 text-amber-700 hover:bg-amber-100 disabled:opacity-50"><X className="h-3.5 w-3.5" /></button>
                           </>
+                        )}
+                        {q.status === 'rejected' && (
+                          <button disabled={busyId === q.id} onClick={() => onRestore(q)} title="Restore this quote to pending review" className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-1.5 py-1 text-[11px] font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-50"><RotateCcw className="h-3.5 w-3.5" /> Restore</button>
                         )}
                         {canDelete && q.status !== 'rejected' ? (
                           <button disabled={busyId === q.id} onClick={() => onDelete(q)} title="Delete quote permanently" className="rounded-md border border-red-200 bg-red-50 p-1 text-red-700 hover:bg-red-100 disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" /></button>

@@ -189,6 +189,13 @@ export async function denyQuote(id: string, body: { review_note?: string } = {})
   return res.data;
 }
 
+// Restore a mistakenly-rejected quote back to pending review (status -> submitted).
+// Server-side only allows this transition from a 'rejected' quote.
+export async function restoreQuote(id: string, body: { review_note?: string } = {}): Promise<any> {
+  const res = await api.post(`/quote-analytics/quotes/${id}/restore`, body);
+  return res.data;
+}
+
 // Permanently delete a quote (super_admin / operations_manager only, enforced server-side).
 export async function deleteQuote(id: string): Promise<any> {
   const res = await api.delete(`/quote-analytics/quotes/${id}`);

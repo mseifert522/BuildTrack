@@ -554,7 +554,7 @@ function updateQuote(req, res, forcedProjectId = null) {
 }
 
 function updateQuoteReviewStatus(req, res, forcedProjectId = null, nextStatus) {
-  if (!['approved', 'rejected'].includes(nextStatus)) {
+  if (!['approved', 'rejected', 'submitted'].includes(nextStatus)) {
     return res.status(400).json({ error: 'Unsupported quote review action' });
   }
 
@@ -563,9 +563,14 @@ function updateQuoteReviewStatus(req, res, forcedProjectId = null, nextStatus) {
   if (!quote || (forcedProjectId && quote.project_id !== forcedProjectId)) {
     return res.status(404).json({ error: 'Quote not found' });
   }
+  // Restore-to-review (submitted) is only valid for a quote that was rejected by
+  // mistake - it moves the quote back into the Intake Bin / pending-review queue.
+  if (nextStatus === 'submitted' && String(quote.status || '').toLowerCase() !== 'rejected') {
+    return res.status(400).json({ error: 'Only rejected quotes can be restored to pending review.' });
+  }
 
   const previousStatus = quote.status;
-  const action = nextStatus === 'approved' ? 'approved' : 'rejected';
+  const action = nextStatus === 'approved' ? 'approved' : nextStatus === 'submitted' ? 'restored' : 'rejected';
   const reviewNote = String(req.body?.review_note || req.body?.note || '').trim();
   const approvedAmount = nextStatus === 'approved'
     ? numberValue(req.body?.final_approved_amount, numberValue(quote.final_approved_amount, numberValue(quote.total_quote_amount)))
@@ -589,7 +594,7 @@ function updateQuoteReviewStatus(req, res, forcedProjectId = null, nextStatus) {
     logActivity({
       userId: req.user.id,
       projectId: quote.project_id,
-      action: nextStatus === 'approved' ? 'quote_approved' : 'quote_rejected',
+      action: nextStatus === 'approved' ? 'quote_approved' : nextStatus === 'submitted' ? 'quote_restored' : 'quote_rejected',
       entityType: 'contractor_quote',
       entityId: quote.id,
       details: {
@@ -1321,6 +1326,7 @@ analyticsRouter.post('/quotes/upload', upload.single('quote_file'), (req, res) =
 analyticsRouter.put('/quotes/:id', (req, res) => updateQuote(req, res));
 analyticsRouter.post('/quotes/:id/approve', (req, res) => updateQuoteReviewStatus(req, res, null, 'approved'));
 analyticsRouter.post('/quotes/:id/deny', (req, res) => updateQuoteReviewStatus(req, res, null, 'rejected'));
+analyticsRouter.post('/quotes/:id/restore', (req, res) => updateQuoteReviewStatus(req, res, null, 'submitted'));
 analyticsRouter.delete('/quotes/:id', (req, res) => deleteQuote(req, res));
 analyticsRouter.get('/quotes/:id/notes', (req, res) => listQuoteNotes(req, res));
 analyticsRouter.post('/quotes/:id/notes', (req, res) => addQuoteNote(req, res));
@@ -1342,6 +1348,7 @@ projectQuotesRouter.put('/:id', (req, res) => updateQuote(req, res, req.params.p
 projectQuotesRouter.post('/extract', extractUpload.single('quote_file'), (req, res) => extractQuoteFromPdf(req, res, req.params.projectId));
 projectQuotesRouter.post('/:id/approve', (req, res) => updateQuoteReviewStatus(req, res, req.params.projectId, 'approved'));
 projectQuotesRouter.post('/:id/deny', (req, res) => updateQuoteReviewStatus(req, res, req.params.projectId, 'rejected'));
+projectQuotesRouter.post('/:id/restore', (req, res) => updateQuoteReviewStatus(req, res, req.params.projectId, 'submitted'));
 projectQuotesRouter.delete('/:id', (req, res) => deleteQuote(req, res, req.params.projectId));
 projectQuotesRouter.get('/:id/notes', (req, res) => listQuoteNotes(req, res, req.params.projectId));
 projectQuotesRouter.post('/:id/notes', (req, res) => addQuoteNote(req, res, req.params.projectId));
