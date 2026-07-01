@@ -1390,7 +1390,7 @@ export default function Contractors() {
                         type="button"
                         onClick={() => deleteContractor(contractor)}
                         disabled={Boolean(deletingContractorId)}
-                        className="absolute right-3 top-3 z-10 inline-flex min-h-9 items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-black text-red-700 shadow-sm transition hover:bg-red-100 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-60 xl:top-1/2 xl:-translate-y-1/2"
+                        className="absolute right-3 top-3 z-10 inline-flex min-h-9 items-center justify-center gap-1.5 rounded-lg border border-red-400/40 bg-red-500/15 px-3 py-2 text-xs font-black text-red-300 shadow-sm transition hover:bg-red-500/30 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-60"
                         title={`Delete ${contractor.name}`}
                         aria-label={`Delete ${contractor.name}`}
                       >

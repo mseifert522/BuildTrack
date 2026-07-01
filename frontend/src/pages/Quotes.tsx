@@ -991,8 +991,8 @@ function BidLeveling(props: {
           <thead className="bg-gray-50 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">
             <tr>
               <th className="sticky left-0 z-10 bg-gray-50 px-3 py-2">Trade / Category</th>
-              {contractors.map(c => (
-                <th key={c.quote_id} className="px-3 py-2 text-right">
+              {contractors.map((c, ci) => (
+                <th key={c.quote_id} className="border-l border-white/10 px-3 py-2 text-right" style={{ background: ci % 2 === 1 ? 'rgba(255,255,255,0.03)' : undefined }}>
                   <button
                     type="button"
                     onClick={() => setExpandedQuote(prev => (prev === c.quote_id ? null : c.quote_id))}
@@ -1007,7 +1007,7 @@ function BidLeveling(props: {
                   </button>
                 </th>
               ))}
-              <th className="px-3 py-2 text-right">Low</th>
+              <th className="border-l-2 border-white/20 px-3 py-2 text-right">Low</th>
               <th className="px-3 py-2 text-right">High</th>
               <th className="px-3 py-2 text-right">Avg</th>
             </tr>
@@ -1019,21 +1019,30 @@ function BidLeveling(props: {
                   {row.category}
                   {row.has_missing && <span className="ml-1.5 inline-flex items-center rounded bg-amber-100 px-1 py-0.5 text-[10px] font-semibold text-amber-700" title="Not every contractor quoted this category">gap</span>}
                 </td>
-                {contractors.map(c => {
+                {contractors.map((c, ci) => {
                   const cell = row.cells[c.quote_id];
                   const present = cell?.present;
                   const amount = cell?.amount;
                   const isLow = present && amount === row.low && row.present_count > 1;
                   const isHigh = present && amount === row.high && row.present_count > 1 && row.high !== row.low;
+                  const colTint = ci % 2 === 1 ? 'rgba(255,255,255,0.03)' : 'transparent';
                   return (
-                    <td key={c.quote_id} className="px-3 py-1.5 text-right"
-                      style={{ background: !present ? 'rgba(239,68,68,0.14)' : isLow ? 'rgba(34,197,94,0.14)' : isHigh ? 'rgba(249,115,22,0.14)' : undefined, color: !present ? '#FCA5A5' : isLow ? '#4ADE80' : isHigh ? '#FDBA74' : '#E5D8C9' }}>
-                      {present ? money(amount) : 'missing'}
+                    <td key={c.quote_id} className="border-l border-white/10 px-3 py-1.5 text-right"
+                      style={{ background: !present ? 'rgba(239,68,68,0.10)' : isLow ? 'rgba(16,185,129,0.16)' : isHigh ? 'rgba(245,158,11,0.14)' : colTint }}>
+                      {present ? (
+                        <span className="inline-flex items-center justify-end gap-1.5 tabular-nums" style={{ color: isLow ? '#34D399' : isHigh ? '#FBBF24' : '#E8EDF4', fontWeight: (isLow || isHigh) ? 800 : 600 }}>
+                          {isLow && <span className="rounded bg-emerald-500/25 px-1 py-0.5 text-[9px] font-black uppercase tracking-wide text-emerald-200">Low</span>}
+                          {isHigh && <span className="rounded bg-amber-500/25 px-1 py-0.5 text-[9px] font-black uppercase tracking-wide text-amber-200">High</span>}
+                          {money(amount)}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] font-semibold text-rose-300/80">—</span>
+                      )}
                     </td>
                   );
                 })}
-                <td className="px-3 py-1.5 text-right text-gray-500">{money(row.low)}</td>
-                <td className="px-3 py-1.5 text-right text-gray-500">{money(row.high)}</td>
+                <td className="border-l-2 border-white/20 px-3 py-1.5 text-right font-semibold" style={{ color: '#6EE7A0' }}>{money(row.low)}</td>
+                <td className="px-3 py-1.5 text-right font-semibold" style={{ color: '#FDBA74' }}>{money(row.high)}</td>
                 <td className="px-3 py-1.5 text-right text-gray-500">{money(row.average)}</td>
               </tr>
             ))}
@@ -1051,8 +1060,8 @@ function BidLeveling(props: {
           <tfoot>
             <tr className="bg-white">
               <td className="sticky left-0 z-10 bg-white px-3 py-2 text-xs font-medium text-gray-500">Decision</td>
-              {contractors.map(c => (
-                <td key={c.quote_id} className="px-3 py-2 text-right">
+              {contractors.map((c, ci) => (
+                <td key={c.quote_id} className="border-l border-white/10 px-3 py-2 text-right" style={{ background: ci % 2 === 1 ? 'rgba(255,255,255,0.03)' : undefined }}>
                   <div className="flex items-center justify-end gap-1.5">
                     {c.has_document && (
                       <button
@@ -1070,7 +1079,7 @@ function BidLeveling(props: {
                   </div>
                 </td>
               ))}
-              <td colSpan={3}></td>
+              <td colSpan={3} className="border-l-2 border-white/20"></td>
             </tr>
           </tfoot>
         </table>
