@@ -13,6 +13,7 @@ const QUOTE_STATUSES = ['draft', 'submitted', 'approved', 'rejected', 'paid', 'c
 const QUOTE_FILTER_STATUSES = {
   review: ['submitted'],
   approved: ['approved', 'paid', 'completed'],
+  rejected: ['rejected'],
   database: QUOTE_STATUSES,
 };
 const FINANCIAL_FIELDS = [
@@ -618,6 +619,11 @@ function deleteQuote(req, res, forcedProjectId = null) {
   const quote = db.prepare('SELECT * FROM contractor_quotes WHERE id = ?').get(req.params.id);
   if (!quote || (forcedProjectId && quote.project_id !== forcedProjectId)) {
     return res.status(404).json({ error: 'Quote not found' });
+  }
+  // Rejected quotes are a permanent bucket kept for long-term market/pricing
+  // analysis (vendor, contractor, category, price). They are never deleted.
+  if (String(quote.status || '').toLowerCase() === 'rejected') {
+    return res.status(409).json({ error: 'Rejected quotes are preserved for market analysis and cannot be deleted.' });
   }
 
   try {

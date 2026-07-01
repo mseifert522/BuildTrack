@@ -77,7 +77,7 @@ export interface QuoteListResponse {
 export interface QuoteListParams {
   project_id?: string;
   status?: string;
-  quote_filter?: 'review' | 'approved' | 'database';
+  quote_filter?: 'review' | 'approved' | 'rejected' | 'database';
   contractor?: string;
   category?: string;
   start_date?: string;

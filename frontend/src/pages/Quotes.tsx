@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ClipboardList, Scale, CheckCircle2, Paperclip, History, Plus, Search, Download,
-  Check, X, ChevronRight, ChevronDown, RefreshCw, FileText, Trash2, Wand2,
+  Check, X, ChevronRight, ChevronDown, RefreshCw, FileText, Trash2, Wand2, Ban,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader, Loading, Empty, Modal } from '../components/ui';
@@ -19,13 +19,14 @@ import '../styles/quotes.css';
 
 const PAGE_SIZE = 50;
 
-type TabKey = 'intake' | 'all' | 'compare' | 'approved' | 'attachments' | 'audit';
+type TabKey = 'intake' | 'all' | 'compare' | 'approved' | 'rejected' | 'attachments' | 'audit';
 
 const TABS: Array<{ key: TabKey; label: string; icon: typeof ClipboardList }> = [
   { key: 'intake', label: 'Intake Bin', icon: ClipboardList },
   { key: 'all', label: 'All Quotes', icon: FileText },
   { key: 'compare', label: 'Compare Bids', icon: Scale },
   { key: 'approved', label: 'Approved Quotes', icon: CheckCircle2 },
+  { key: 'rejected', label: 'Rejected Quotes', icon: Ban },
   { key: 'attachments', label: 'Attachments', icon: Paperclip },
   { key: 'audit', label: 'Audit Log', icon: History },
 ];
@@ -142,7 +143,7 @@ const STATUS_STYLES: Record<string, { bg: string; color: string; label: string }
   draft: { bg: 'rgba(148,163,184,0.20)', color: '#CBD5E1', label: 'Draft' },
   submitted: { bg: 'rgba(59,130,246,0.22)', color: '#93C5FD', label: 'For Review' },
   approved: { bg: 'rgba(34,197,94,0.22)', color: '#6EE7A0', label: 'Approved' },
-  rejected: { bg: 'rgba(239,68,68,0.22)', color: '#FCA5A5', label: 'Denied' },
+  rejected: { bg: 'rgba(239,68,68,0.22)', color: '#FCA5A5', label: 'Rejected' },
   paid: { bg: 'rgba(16,185,129,0.22)', color: '#6EE7B7', label: 'Paid' },
   completed: { bg: 'rgba(129,140,248,0.24)', color: '#BFC6FF', label: 'Completed' },
   historical: { bg: 'rgba(148,163,184,0.18)', color: '#AEBBD2', label: 'In Database' },
@@ -266,6 +267,8 @@ export default function Quotes() {
       params.quote_filter = 'review';
     } else if (tab === 'approved') {
       params.quote_filter = 'approved';
+    } else if (tab === 'rejected') {
+      params.quote_filter = 'rejected';
     } else {
       params.quote_filter = 'database';
     }
@@ -568,7 +571,7 @@ export default function Quotes() {
         </select>
         <select value={filters.status} onChange={e => setFilters(f => ({ ...f, status: e.target.value }))}
           className="rounded-lg border border-gray-200 px-2 py-2 text-sm focus:border-amber-400 focus:outline-none">
-          <option value="">{tab === 'intake' ? 'For review (default)' : tab === 'approved' ? 'Approved (default)' : 'Any status'}</option>
+          <option value="">{tab === 'intake' ? 'For review (default)' : tab === 'approved' ? 'Approved (default)' : tab === 'rejected' ? 'Rejected (default)' : 'Any status'}</option>
           {(options?.statuses || []).map(s => <option key={s} value={s}>{STATUS_STYLES[s]?.label || s}</option>)}
         </select>
         <input type="date" value={filters.start_date} onChange={e => setFilters(f => ({ ...f, start_date: e.target.value }))}
@@ -586,6 +589,13 @@ export default function Quotes() {
           </button>
         )}
       </div>
+
+      {tab === 'rejected' && (
+        <div className="mb-3 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-medium text-red-800">
+          <Ban className="mt-0.5 h-4 w-4 flex-shrink-0" />
+          <span>Rejected quotes are preserved here permanently for market &amp; pricing analysis (vendor, contractor, category, price). They can never be deleted.</span>
+        </div>
+      )}
 
       {/* Body */}
       {tab === 'compare' ? (
@@ -665,7 +675,7 @@ function QuoteGrid(props: {
   const { rows, loading, tab, expanded, setExpanded, onApprove, onDeny, onDelete, onModify, canDelete, busyId, sortKey, sortDir, toggleSort, page, setPage, totalPages, totalRows } = props;
   if (loading) return <Loading message="Loading quotes…" />;
   if (totalRows === 0) {
-    return <Empty message={tab === 'approved' ? 'No approved quotes yet.' : tab === 'intake' ? 'No quotes awaiting review.' : 'No quotes found.'} icon={<ClipboardList className="h-8 w-8" />} />;
+    return <Empty message={tab === 'approved' ? 'No approved quotes yet.' : tab === 'intake' ? 'No quotes awaiting review.' : tab === 'rejected' ? 'No rejected quotes yet.' : 'No quotes found.'} icon={<ClipboardList className="h-8 w-8" />} />;
   }
   const arrow = (key: 'date' | 'total') => (sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '');
   const locked = tab === 'approved';
@@ -725,12 +735,16 @@ function QuoteGrid(props: {
                       <div className="flex justify-end gap-1">
                         {!locked && (
                           <>
-                            <button disabled={busyId === q.id} onClick={() => onApprove(q)} title="Approve quote" className="rounded-md border border-green-200 bg-green-50 p-1 text-green-700 hover:bg-green-100 disabled:opacity-50"><Check className="h-3.5 w-3.5" /></button>
-                            <button disabled={busyId === q.id} onClick={() => onDeny(q)} title="Deny (mark rejected)" className="rounded-md border border-amber-200 bg-amber-50 p-1 text-amber-700 hover:bg-amber-100 disabled:opacity-50"><X className="h-3.5 w-3.5" /></button>
+                            <button disabled={busyId === q.id} onClick={() => onApprove(q)} title={q.status === 'rejected' ? 'Restore & approve this quote' : 'Approve quote'} className="rounded-md border border-green-200 bg-green-50 p-1 text-green-700 hover:bg-green-100 disabled:opacity-50"><Check className="h-3.5 w-3.5" /></button>
+                            {q.status !== 'rejected' && (
+                              <button disabled={busyId === q.id} onClick={() => onDeny(q)} title="Deny (mark rejected)" className="rounded-md border border-amber-200 bg-amber-50 p-1 text-amber-700 hover:bg-amber-100 disabled:opacity-50"><X className="h-3.5 w-3.5" /></button>
+                            )}
                           </>
                         )}
-                        {canDelete ? (
+                        {canDelete && q.status !== 'rejected' ? (
                           <button disabled={busyId === q.id} onClick={() => onDelete(q)} title="Delete quote permanently" className="rounded-md border border-red-200 bg-red-50 p-1 text-red-700 hover:bg-red-100 disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" /></button>
+                        ) : q.status === 'rejected' ? (
+                          <span title="Rejected quotes are preserved for market analysis and cannot be deleted" className="text-[11px] font-medium text-gray-400">Kept</span>
                         ) : locked ? (
                           <span className="text-[11px] font-medium text-gray-400">Locked</span>
                         ) : null}
