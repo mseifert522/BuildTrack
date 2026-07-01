@@ -2707,72 +2707,112 @@
 
 .bt-qbo-split-list {
   display: grid;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 3px;
+  margin-top: 6px;
   max-width: 520px;
 }
 
-.bt-qbo-split-line {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 10px;
-  border: 1px solid rgba(59, 130, 246, 0.24);
-  border-radius: 8px;
-  padding: 7px 8px;
-  background: rgba(15, 23, 42, 0.72);
-}
-
-.bt-qbo-split-line.is-matched {
-  border-color: rgba(34, 197, 94, 0.34);
-  background:
-    linear-gradient(90deg, rgba(16, 185, 129, 0.18), rgba(15, 23, 42, 0.76));
-}
-
-.bt-qbo-split-line.needs-match {
-  border-color: rgba(251, 191, 36, 0.48);
-  background:
-    linear-gradient(90deg, rgba(217, 119, 6, 0.18), rgba(15, 23, 42, 0.76));
-}
-
-.bt-qbo-split-line span,
-.bt-qbo-split-line small,
-.bt-qbo-split-line a {
-  display: block;
-  overflow: hidden;
-  max-width: 360px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.bt-qbo-split-line span {
-  color: #F8FAFC;
-  font-size: 12px;
-  font-weight: 950;
-}
-
-.bt-qbo-split-line small {
-  margin-top: 2px;
-  color: #CBD5E1;
-  font-size: 10px;
-  font-weight: 800;
-}
-
-.bt-qbo-split-line a {
-  margin-top: 3px;
-  color: #BFDBFE;
+/* Thin toggle "bar" that expands/collapses the split line items */
+.bt-qbo-split-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 2px 9px;
+  border: 1px solid rgba(96, 165, 250, 0.42);
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.16);
+  color: #DBEAFE;
   font-size: 11px;
-  font-weight: 950;
-  text-decoration: none;
+  font-weight: 900;
+  line-height: 1.6;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
-.bt-qbo-split-line a:hover {
+.bt-qbo-split-toggle:hover {
+  background: rgba(37, 99, 235, 0.30);
   color: #FFFFFF;
 }
 
+/* Thin single-line split item: [label · project] .......... [amount] */
+.bt-qbo-split-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 24px;
+  border: 1px solid rgba(59, 130, 246, 0.22);
+  border-left-width: 3px;
+  border-radius: 6px;
+  padding: 3px 8px;
+  background: rgba(15, 23, 42, 0.66);
+}
+
+.bt-qbo-split-line.is-matched {
+  border-color: rgba(34, 197, 94, 0.30);
+  border-left-color: rgba(34, 197, 94, 0.78);
+}
+
+.bt-qbo-split-line.needs-match {
+  border-color: rgba(251, 191, 36, 0.42);
+  border-left-color: rgba(251, 191, 36, 0.85);
+}
+
+.bt-qbo-split-line-text {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: baseline;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bt-qbo-split-line-label {
+  flex-shrink: 0;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #F8FAFC;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.bt-qbo-bill-table .bt-qbo-split-line-proj {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #BFDBFE;
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.bt-qbo-bill-table .bt-qbo-split-line-proj:hover {
+  color: #FFFFFF;
+  text-decoration: underline;
+}
+
+.bt-qbo-split-line-proj.is-need {
+  color: #FCD34D;
+}
+
+.bt-qbo-split-line-proj::before {
+  content: '·';
+  margin-right: 6px;
+  color: #64748B;
+}
+
 .bt-qbo-bill-table .bt-qbo-split-line > strong {
+  flex-shrink: 0;
   max-width: none;
   color: #FFF4E8;
+  font-size: 12px;
+  font-weight: 950;
   text-align: right;
   white-space: nowrap;
 }

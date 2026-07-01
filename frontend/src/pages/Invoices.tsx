@@ -9,6 +9,7 @@ import {
   ArrowUpDown,
   CalendarDays,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
@@ -830,6 +831,8 @@ export default function Invoices() {
   const [removingQboBillId, setRemovingQboBillId] = useState<string | null>(null);
   const [markingQboPaidId, setMarkingQboPaidId] = useState<string | null>(null);
   const [deletingQboBillId, setDeletingQboBillId] = useState<string | null>(null);
+  const [expandedSplitBills, setExpandedSplitBills] = useState<Record<string, boolean>>({});
+  const toggleSplitExpanded = (key: string) => setExpandedSplitBills(prev => ({ ...prev, [key]: !prev[key] }));
   const [uploadingQboBillPdfId, setUploadingQboBillPdfId] = useState<string | null>(null);
   const [draggingQboBillPdfId, setDraggingQboBillPdfId] = useState<string | null>(null);
   const [notifyingPaymentQueue, setNotifyingPaymentQueue] = useState(false);
@@ -2106,6 +2109,7 @@ export default function Invoices() {
                         const paidDateLabel = isPaid ? formatQuickBooksPaidDate(bill) : '';
                         const deiDateLabel = formatQuickBooksDeiDate(bill, invoice);
                         const rowKey = isSplitScoped ? `${bill.qbo_id}:${bill.split_scope_line_id}` : bill.qbo_id;
+                        const isSplitsExpanded = Boolean(expandedSplitBills[rowKey]);
                         return (
                           <tr key={rowKey} className={`${isPaid || isBuildTrackPaid ? 'is-paid' : isApprovedForPay ? 'is-approved-for-pay' : 'is-unpaid'} ${needsReview ? 'needs-review' : ''}`}>
                             <td>
@@ -2138,30 +2142,40 @@ export default function Invoices() {
                                 <>
                                   <strong>{isSplitScoped ? 'Project split matched' : splitMatched ? `${splitLineCount} class splits matched` : `${unmatchedSplitCount} class split${unmatchedSplitCount === 1 ? '' : 's'} need match`}</strong>
                                   <small>{isSplitScoped ? 'Showing only the selected project split.' : 'Approval stays on one QBO balance'}</small>
-                                  <div className="bt-qbo-split-list">
-                                    {splitLines.map(line => (
-                                      <div
-                                        key={line.id || `${bill.qbo_id}-${line.qbo_line_id || line.line_num || line.description}`}
-                                        className={`bt-qbo-split-line ${line.project_id ? 'is-matched' : 'needs-match'}`}
-                                      >
-                                        <div>
-                                          <span>{line.description || `Line ${line.line_num || ''}`.trim() || 'Split line'}</span>
-                                          <small>
-                                            {line.class_name ? `QBO class: ${line.class_name}` : 'No QBO class'}
-                                            {line.category_name ? ` | ${line.category_name}` : ''}
-                                          </small>
-                                          {line.project_id ? (
-                                            <Link to={`/projects/${line.project_id}`}>
-                                              {line.project_address || line.project_job_name || 'Open project'}
-                                            </Link>
-                                          ) : (
-                                            <small>Project match needed</small>
-                                          )}
+                                  <button
+                                    type="button"
+                                    className="bt-qbo-split-toggle"
+                                    onClick={() => toggleSplitExpanded(rowKey)}
+                                    aria-expanded={isSplitsExpanded}
+                                  >
+                                    {isSplitsExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                                    <span>{isSplitsExpanded ? 'Hide split lines' : `Show ${visibleSplitLineCount} split line${visibleSplitLineCount === 1 ? '' : 's'}`}</span>
+                                  </button>
+                                  {isSplitsExpanded ? (
+                                    <div className="bt-qbo-split-list">
+                                      {splitLines.map(line => (
+                                        <div
+                                          key={line.id || `${bill.qbo_id}-${line.qbo_line_id || line.line_num || line.description}`}
+                                          className={`bt-qbo-split-line ${line.project_id ? 'is-matched' : 'needs-match'}`}
+                                        >
+                                          <span
+                                            className="bt-qbo-split-line-text"
+                                            title={[line.description, line.class_name ? `QBO class: ${line.class_name}` : 'No QBO class', line.category_name].filter(Boolean).join('  |  ')}
+                                          >
+                                            <span className="bt-qbo-split-line-label">{line.description || line.class_name || `Line ${line.line_num || ''}`.trim() || 'Split line'}</span>
+                                            {line.project_id ? (
+                                              <Link to={`/projects/${line.project_id}`} className="bt-qbo-split-line-proj">
+                                                {line.project_address || line.project_job_name || 'Open project'}
+                                              </Link>
+                                            ) : (
+                                              <span className="bt-qbo-split-line-proj is-need">Project match needed</span>
+                                            )}
+                                          </span>
+                                          <strong>{money(line.amount || 0)}</strong>
                                         </div>
-                                        <strong>{money(line.amount || 0)}</strong>
-                                      </div>
-                                    ))}
-                                  </div>
+                                      ))}
+                                    </div>
+                                  ) : null}
                                 </>
                               ) : invoice ? (
                                 <>
