@@ -485,6 +485,7 @@ export default function Contractors() {
   const [categories, setCategories] = useState<string[]>(fallbackCategories);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [query, setQuery] = useState('');
+  const [sortMode, setSortMode] = useState<'name_asc' | 'name_desc' | 'date_newest' | 'date_oldest'>('date_newest');
   const [expandedContractorId, setExpandedContractorId] = useState<string | null>(null);
   const [contractorNotes, setContractorNotes] = useState<Record<string, ContractorNote[]>>({});
   const [noteInputs, setNoteInputs] = useState<Record<string, string>>({});
@@ -993,12 +994,32 @@ export default function Contractors() {
       return true;
     });
 
-    return rows.sort((a, b) =>
-      (dateValue(b.created_at) - dateValue(a.created_at))
-      || (dateValue(b.updated_at) - dateValue(a.updated_at))
-      || a.name.localeCompare(b.name)
-    );
-  }, [combinedDirectoryRows, query]);
+    const sorted = [...rows];
+    switch (sortMode) {
+      case 'name_asc':
+        sorted.sort((a, b) => a.name.localeCompare(b.name));
+        break;
+      case 'name_desc':
+        sorted.sort((a, b) => b.name.localeCompare(a.name));
+        break;
+      case 'date_oldest':
+        sorted.sort((a, b) =>
+          (dateValue(a.created_at) - dateValue(b.created_at))
+          || (dateValue(a.updated_at) - dateValue(b.updated_at))
+          || a.name.localeCompare(b.name)
+        );
+        break;
+      case 'date_newest':
+      default:
+        sorted.sort((a, b) =>
+          (dateValue(b.created_at) - dateValue(a.created_at))
+          || (dateValue(b.updated_at) - dateValue(a.updated_at))
+          || a.name.localeCompare(b.name)
+        );
+        break;
+    }
+    return sorted;
+  }, [combinedDirectoryRows, query, sortMode]);
 
   // Keep the multi-select selection scoped to what is currently visible, so a
   // search/filter change can never leave hidden rows silently selected for deletion.
@@ -1203,6 +1224,21 @@ export default function Contractors() {
           </div>
         ) : (
           <div className="bt-table-wrap bt-directory-list p-2">
+            <div className="bt-directory-sortbar mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5">
+              <label htmlFor="vendor-sort" className="text-xs font-black uppercase tracking-wide text-slate-600">Sort by</label>
+              <select
+                id="vendor-sort"
+                value={sortMode}
+                onChange={(e) => setSortMode(e.target.value as typeof sortMode)}
+                className="min-h-9 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-gray-900 shadow-sm outline-none focus:border-blue-400"
+              >
+                <option value="name_asc">Name (A-Z)</option>
+                <option value="name_desc">Name (Z-A)</option>
+                <option value="date_newest">Date entered - Newest first</option>
+                <option value="date_oldest">Date entered - Oldest first</option>
+              </select>
+              <span className="text-xs font-semibold text-slate-400">{filteredContractors.length} records</span>
+            </div>
             {canDeleteContractors && (
               <div className="bt-directory-bulkbar mb-2 flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5">
                 <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-black uppercase tracking-wide text-slate-600">
