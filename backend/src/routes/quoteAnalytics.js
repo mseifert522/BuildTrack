@@ -1182,6 +1182,9 @@ function compareQuotes(req, res, forcedProjectId = null) {
   const categoryFilter = String(req.query.category || '').trim();
   const includeHistorical = String(req.query.include_historical || '') === '1';
 
+  // When a category filter is applied, only compare quotes that actually contain
+  // a line item in that category. Otherwise unrelated quotes (e.g. an electrical
+  // quote) would still show up as columns under a different category (e.g. roofing).
   const quoteRows = db.prepare(`
     SELECT id, quote_number, contractor_name, contractor_company, contractor_email,
            status, quote_date, total_quote_amount, final_approved_amount, data_quality_flags, created_at,
@@ -1189,8 +1192,9 @@ function compareQuotes(req, res, forcedProjectId = null) {
     FROM contractor_quotes
     WHERE project_id = ?
     ${includeHistorical ? '' : "AND status != 'historical'"}
+    ${categoryFilter ? "AND EXISTS (SELECT 1 FROM quote_line_items li WHERE li.quote_id = contractor_quotes.id AND li.category = ?)" : ''}
     ORDER BY date(quote_date) DESC, datetime(created_at) DESC
-  `).all(projectId);
+  `).all(projectId, ...(categoryFilter ? [categoryFilter] : []));
 
   const quoteIds = quoteRows.map(row => row.id);
   const lineItemsByQuote = new Map();

@@ -1736,7 +1736,7 @@ export default function ProjectDetail() {
               sourceId={id || project.id}
               contextLabel={[project.address, project.job_name].filter(Boolean).join(' - ')}
               onSaved={loadProjectCalendar}
-              buttonClassName="bt-project-tab-button inline-flex min-h-10 min-w-0 items-center justify-center gap-1 rounded-lg border border-amber-400/65 bg-gradient-to-br from-slate-800 via-slate-950 to-amber-950 px-1.5 py-1.5 text-center text-[10px] font-black leading-tight text-amber-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.13),0_8px_16px_rgba(2,6,23,0.36)] transition-all duration-150 hover:border-amber-300 hover:from-amber-500 hover:via-amber-700 hover:to-slate-950 hover:text-white hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_10px_22px_rgba(245,158,11,0.26)] sm:px-2"
+              buttonClassName="bt-project-tab-button inline-flex min-h-10 min-w-0 items-center justify-center gap-1.5 rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-black leading-tight text-white shadow-sm transition-colors hover:bg-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-300/50 sm:text-sm"
             />
           </div>
         </div>
