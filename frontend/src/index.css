@@ -2374,3 +2374,232 @@ textarea,
 .bt-desktop-shell.bt-desktop-shell .bg-lime-50 { background-color: rgba(132,204,22,0.14) !important; }
 .bt-desktop-shell.bt-desktop-shell .text-cyan-900,
 .bt-desktop-shell.bt-desktop-shell .text-cyan-800 { color: #a5e8ff !important; }
+
+/* ---- VENDOR EXPANDED CARD READABILITY (2026-07-01) ---- */
+.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded {
+  border-color: rgba(59, 130, 246, 0.58) !important;
+  border-left-color: #3b82f6 !important;
+  background:
+    linear-gradient(180deg, rgba(30, 36, 50, 0.98), rgba(20, 23, 30, 0.98)) !important;
+  box-shadow:
+    0 16px 34px rgba(0, 0, 0, 0.38),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+}
+
+.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded .bt-directory-row {
+  background: linear-gradient(90deg, rgba(37, 50, 76, 0.98), rgba(34, 38, 50, 0.98)) !important;
+}
+
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded,
+.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded > div > div[style*="rgba(13, 18, 24"] {
+  background:
+    linear-gradient(180deg, #151923 0%, #121822 100%) !important;
+  border-color: #333a47 !important;
+  color: #ededed !important;
+}
+
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .bg-white,
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .bg-gray-50,
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .bg-slate-50,
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .bg-slate-100,
+.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded > div > div[style*="rgba(13, 18, 24"] .bg-white {
+  background-color: #1c1f29 !important;
+  border-color: #333a47 !important;
+  color: #ededed !important;
+}
+
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .bg-slate-900,
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .bg-slate-900\/55,
+.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded > div > div[style*="rgba(13, 18, 24"] .bg-slate-900\/55 {
+  background-color: #14171e !important;
+  border-color: #333a47 !important;
+}
+
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .text-gray-950,
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .text-gray-900,
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .text-gray-800,
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .text-slate-950,
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .text-slate-900,
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .text-slate-800,
+.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded > div > div[style*="rgba(13, 18, 24"] .text-gray-950,
+.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded > div > div[style*="rgba(13, 18, 24"] .text-gray-900 {
+  color: #f8fafc !important;
+}
+
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .text-gray-700,
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .text-gray-600,
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .text-slate-700,
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .text-slate-600,
+.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded > div > div[style*="rgba(13, 18, 24"] .text-gray-700,
+.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded > div > div[style*="rgba(13, 18, 24"] .text-gray-600 {
+  color: #d7dce6 !important;
+}
+
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .text-gray-500,
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .text-gray-400,
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .text-slate-500,
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .text-slate-400,
+.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded > div > div[style*="rgba(13, 18, 24"] .text-gray-500,
+.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded > div > div[style*="rgba(13, 18, 24"] .text-gray-400 {
+  color: #aeb8c7 !important;
+}
+
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .text-blue-700,
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .text-blue-900 {
+  color: #93c5fd !important;
+}
+
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .text-emerald-700,
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .text-emerald-800,
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .text-emerald-900 {
+  color: #6ee7b7 !important;
+}
+
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .text-amber-700,
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .text-amber-800,
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .text-amber-900 {
+  color: #fcd34d !important;
+}
+
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .text-red-500,
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .text-red-700,
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded .text-red-900 {
+  color: #fca5a5 !important;
+}
+
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded input,
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded textarea,
+.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded > div > div[style*="rgba(13, 18, 24"] input,
+.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded > div > div[style*="rgba(13, 18, 24"] textarea {
+  background-color: #111827 !important;
+  border-color: #3d4658 !important;
+  color: #f8fafc !important;
+}
+
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded input::placeholder,
+.bt-desktop-shell .bt-contractors-page .bt-directory-expanded textarea::placeholder,
+.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded > div > div[style*="rgba(13, 18, 24"] input::placeholder,
+.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded > div > div[style*="rgba(13, 18, 24"] textarea::placeholder {
+  color: #9fb0c4 !important;
+  opacity: 1 !important;
+}
+
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded .text-gray-950,
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded .text-gray-900,
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded .text-gray-800,
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded .text-slate-950,
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded .text-slate-900,
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded .text-slate-800 {
+  color: #f8fafc !important;
+}
+
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded .text-gray-700,
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded .text-gray-600,
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded .text-slate-700,
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded .text-slate-600 {
+  color: #d7dce6 !important;
+}
+
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded .text-gray-500,
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded .text-gray-400,
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded .text-slate-500,
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded .text-slate-400 {
+  color: #aeb8c7 !important;
+}
+
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded .text-blue-700,
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded .text-blue-900 {
+  color: #93c5fd !important;
+}
+
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded .text-emerald-700,
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded .text-emerald-800,
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded .text-emerald-900 {
+  color: #6ee7b7 !important;
+}
+
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded .text-amber-700,
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded .text-amber-800,
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded .text-amber-900 {
+  color: #fcd34d !important;
+}
+
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded .text-red-500,
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded .text-red-700,
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded .text-red-900 {
+  color: #fca5a5 !important;
+}
+
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded input,
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded textarea {
+  background-color: #111827 !important;
+  border-color: #3d4658 !important;
+  color: #f8fafc !important;
+}
+
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded input::placeholder,
+.bt-desktop-shell.bt-desktop-shell .bt-contractors-page .bt-directory-card.is-expanded textarea::placeholder {
+  color: #9fb0c4 !important;
+  opacity: 1 !important;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   LOADING SKELETON PRIMITIVES (moved into the always-loaded bundle)
+   These classes back the shared <Loading> component. They previously lived
+   only in mobile-heavy.css, which is dynamically imported for mobile hosts
+   only — so every DESKTOP page rendered an invisible skeleton (blank/black
+   screen during data fetch, e.g. the Security page). Defining them here fixes
+   the loading indicator on all desktop pages at once.
+   ────────────────────────────────────────────────────────────────────────── */
+.bt-fluid-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  gap: clamp(12px, 2vw, 24px);
+}
+
+.bt-skeleton-card {
+  border-radius: 4px;
+  border: 1px solid var(--bt-border);
+  background: var(--bt-surface);
+  padding: 16px;
+  box-shadow: none;
+}
+
+.bt-skeleton-line,
+.bt-skeleton-block {
+  position: relative;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bt-text-muted) 16%, transparent);
+}
+
+.bt-skeleton-block {
+  border-radius: 4px;
+}
+
+.bt-skeleton-line::after,
+.bt-skeleton-block::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.38), transparent);
+  animation: bt-skeleton-shimmer 1.25s ease-in-out infinite;
+}
+
+@keyframes bt-skeleton-shimmer {
+  100% { transform: translateX(100%); }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   WIDE-TABLE TOUCH SCROLL
+   The mobile shell locks touch gestures to vertical panning (touch-action:
+   pan-y) to prevent page rubber-banding. That also blocked finger horizontal
+   scrolling inside wide data tables (Invoices, directories), so their right-
+   hand action columns (Approve for Pay / Delete) were unreachable on phones.
+   Re-assert horizontal panning on the table scroll containers.
+   ────────────────────────────────────────────────────────────────────────── */
+.bt-table-wrap,
+.bt-qbo-table-wrap {
+  touch-action: pan-x pan-y;
+}

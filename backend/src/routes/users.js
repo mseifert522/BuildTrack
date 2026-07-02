@@ -494,7 +494,8 @@ router.get('/', authorize('super_admin', 'operations_manager'), (req, res) => {
   const users = db.prepare(
     `SELECT
       id, name, email, role, phone, company, contractor_category, contractor_secondary_category, avatar_url,
-      is_active, pin, created_at, last_login_at, last_seen_at,
+      is_active, created_at, last_login_at, last_seen_at,
+      CASE WHEN pin IS NOT NULL AND pin != '' THEN 1 ELSE 0 END as has_pin,
       CASE WHEN last_seen_at IS NOT NULL AND datetime(last_seen_at) >= datetime('now', '-2 minutes') THEN 1 ELSE 0 END as is_online
      FROM users
      WHERE deleted_at IS NULL
@@ -1744,6 +1745,27 @@ router.post('/:id/avatar', authorize('super_admin', 'operations_manager'), (req,
 });
 
 // PUT /api/users/:id/pin - update PIN (admin only)
+// GET /api/users/:id/pin - reveal a single PIN on demand (audited). PINs are no
+// longer shipped in the bulk directory payload; admins fetch one at a time here.
+router.get('/:id/pin', authorize('super_admin', 'operations_manager'), (req, res) => {
+  try {
+    const db = getDb();
+    const target = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+    if (!target || target.deleted_at) return res.status(404).json({ error: 'User not found' });
+    if (!canManageTargetUser(req.user, target)) return res.status(403).json({ error: 'Cannot view this user PIN' });
+    logDataAccess(req, {
+      action: 'user_pin_revealed',
+      accessType: 'sensitive_view',
+      entityType: 'user',
+      entityId: req.params.id,
+      riskLevel: 'high',
+    });
+    res.json({ pin: target.pin || null });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load PIN' });
+  }
+});
+
 router.put('/:id/pin', authorize('super_admin', 'operations_manager'), (req, res) => {
   try {
     const { pin } = req.body;

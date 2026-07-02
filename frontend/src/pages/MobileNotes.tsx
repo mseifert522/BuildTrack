@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { formatEasternDate, formatEasternDateTime, formatEasternRelative } from '../lib/time';
 import { fileDropHandlers } from '../lib/fileDrop';
+import { mobilePath } from '../lib/appUrls';
 import { appendProgressUploadAudit, PROGRESS_MEDIA_ACCEPT } from '../lib/progressUpload';
 import { notifyMobileDataChanged } from '../lib/mobileEvents';
 import Avatar from '../components/Avatar';
@@ -185,7 +186,11 @@ export default function MobileNotes() {
     const baseUrl = (api.defaults.baseURL || '').replace(/\/api$/, '');
     const sseUrl = `${baseUrl}/api/projects/${projectId}/notes/stream`;
 
+    let mounted = true;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+
     const connect = () => {
+      if (!mounted) return;
       // Append token as query param since EventSource doesn't support custom headers
       const es = new EventSource(`${sseUrl}?token=${token}`);
       eventSourceRef.current = es;
@@ -197,9 +202,10 @@ export default function MobileNotes() {
           const data = JSON.parse(event.data);
           if (data.type === 'new_note') {
             setNotes(prev => {
-              // Avoid duplicates
+              // Avoid duplicates by server id, and drop our own optimistic temp note.
               if (prev.find(n => n.id === data.note.id)) return prev;
-              return [...prev, data.note];
+              const withoutTemp = prev.filter(n => !(String(n.id).startsWith('temp-') && n.user_id === data.note.user_id && n.note === data.note.note));
+              return [...withoutTemp, data.note];
             });
           } else if (data.type === 'update_note') {
             setNotes(prev => prev.map(n => n.id === data.note.id ? data.note : n));
@@ -212,14 +218,16 @@ export default function MobileNotes() {
       es.onerror = () => {
         setConnected(false);
         es.close();
-        // Reconnect after 3 seconds
-        setTimeout(connect, 3000);
+        // Reconnect after 3 seconds (only while still mounted).
+        if (mounted) reconnectTimer = setTimeout(connect, 3000);
       };
     };
 
     connect();
 
     return () => {
+      mounted = false;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       eventSourceRef.current?.close();
     };
   }, [projectId, token]);
@@ -455,7 +463,7 @@ export default function MobileNotes() {
       <div style={{ background: 'linear-gradient(135deg, #0D1117 0%, #181D25 100%)', flexShrink: 0 }}>
         <div className="flex items-center gap-3 px-4 pt-4 pb-3">
           <button
-            onClick={() => navigate(-1)}
+            onClick={() => navigate(mobilePath(`/project/${projectId}`))}
             className="p-2 rounded-xl flex-shrink-0"
             style={{ background: 'rgba(255,255,255,0.08)' }}
           >

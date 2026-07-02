@@ -324,7 +324,7 @@ router.get('/all', authorize('super_admin', 'operations_manager', 'project_manag
 });
 
 // GET /api/projects/:projectId/invoices/next-number
-router.get('/next-number', (req, res) => {
+router.get('/next-number', authorizeProjectAccess, (req, res) => {
   const db = getDb();
   const maxNum = db.prepare("SELECT invoice_number FROM invoices ORDER BY CAST(REPLACE(invoice_number, 'NUD-', '') AS INTEGER) DESC LIMIT 1").get();
   let nextNum = 1023;

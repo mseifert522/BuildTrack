@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import VoiceTextarea from '../components/VoiceTextarea';
 import { fileDropHandlers } from '../lib/fileDrop';
+import { mobilePath } from '../lib/appUrls';
 import { notifyMobileDataChanged } from '../lib/mobileEvents';
 
 interface LineItem {
@@ -162,7 +163,11 @@ export default function MobileInvoice() {
     recognition.onresult = (e: any) => {
       const transcript = e.results[0][0].transcript;
       const item = lineItems[index];
-      if (item) updateLine(item.localId, field, transcript);
+      if (!item) return;
+      // The amount field is a number input; spoken words like "one fifty" or
+      // "150 dollars" would be rejected and clear the value. Keep only digits.
+      const value = field === 'amount' ? transcript.replace(/[^0-9.]/g, '') : transcript;
+      updateLine(item.localId, field, value);
     };
     recognition.onerror = () => { toast.error('Voice input failed'); };
     recognition.onend = () => { setListeningIndex(null); setListeningField(null); };
@@ -254,11 +259,16 @@ export default function MobileInvoice() {
       } else {
         const res = await api.post(`/projects/${projectId}/invoices`, payload);
         invoiceId = res.data.id;
+        // Record the new id immediately so a retry after a later failure updates
+        // this invoice instead of creating a duplicate (and duplicate emails).
+        setEditingId(res.data.id);
       }
       await uploadAttachments(invoiceId);
-      // Trigger email send
-      await api.post(`/projects/${projectId}/invoices/${invoiceId}/submit`).catch(() => {});
-      toast.success('Invoice submitted! Copies sent to office and your email.');
+      // Trigger email send; report honestly if delivery fails (submission still succeeded).
+      const emailRes = await api.post(`/projects/${projectId}/invoices/${invoiceId}/submit`).catch(() => null);
+      toast.success(emailRes
+        ? 'Invoice submitted! Copies sent to office and your email.'
+        : 'Invoice submitted. Email delivery is pending — the office can still see it.');
       const invRes = await api.get(`/projects/${projectId}/invoices`);
       setSavedInvoices(Array.isArray(invRes.data) ? invRes.data : []);
       setView('list');
@@ -301,7 +311,7 @@ export default function MobileInvoice() {
           <button
             onClick={() => {
               if (view === 'builder' && savedInvoices.length > 0) setView('list');
-              else navigate(-1);
+              else navigate(mobilePath(`/project/${projectId}`));
             }}
             className="p-2 rounded-xl flex-shrink-0"
             style={{ background: 'rgba(255,255,255,0.08)' }}

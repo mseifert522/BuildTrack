@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthStore, canChangeProjectStatus, canCreateProjects, isAdminRole } from '../store/authStore';
 import api from '../lib/api';
@@ -150,7 +150,9 @@ export default function Projects() {
     defaultValues: DEFAULT_PROJECT_FORM_VALUES,
   });
 
+  const reqSeq = useRef(0);
   const load = async () => {
+    const seq = ++reqSeq.current;
     try {
       const params = new URLSearchParams();
       if (statusFilter) params.set('status', statusFilter);
@@ -161,17 +163,29 @@ export default function Projects() {
           ? api.get('/projects/unreviewed-summary').catch(() => ({ data: { projects: [] } }))
           : Promise.resolve({ data: { projects: [] } }),
       ]);
+      // Ignore out-of-order responses from a superseded search query.
+      if (seq !== reqSeq.current) return;
       setProjects(res.data);
       const summaries = Array.isArray(reviewRes.data?.projects) ? reviewRes.data.projects : [];
       setReviewSummaries(Object.fromEntries(summaries.map((s: ProjectReviewSummary) => [s.project_id, s])));
     } catch (err) {
-      toast.error('Failed to load projects');
+      if (seq === reqSeq.current) toast.error('Failed to load projects');
     } finally {
-      setLoading(false);
+      if (seq === reqSeq.current) setLoading(false);
     }
   };
 
   useEffect(() => { load(); }, [statusFilter, user?.id, user?.role]);
+
+  // Live search: debounce keystrokes so the list filters as you type. The
+  // Search button and Enter still force an immediate load via handleSearch.
+  const searchInitRef = useRef(false);
+  useEffect(() => {
+    if (!searchInitRef.current) { searchInitRef.current = true; return; }
+    const handle = setTimeout(() => { load(); }, 300);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -798,8 +812,8 @@ export default function Projects() {
 
           {documentFiles.length > 0 && (
             <div className="max-h-32 overflow-y-auto rounded-xl border border-gray-200 bg-white">
-              {documentFiles.map(file => (
-                <div key={`${file.name}-${file.size}`} className="flex items-center gap-2 border-b border-gray-100 px-3 py-2 last:border-b-0">
+              {documentFiles.map((file, index) => (
+                <div key={`${file.name}-${file.size}-${index}`} className="flex items-center gap-2 border-b border-gray-100 px-3 py-2 last:border-b-0">
                   <FileText className="h-4 w-4 flex-shrink-0 text-gray-400" />
                   <span className="truncate text-sm font-semibold text-gray-700">{file.name}</span>
                 </div>

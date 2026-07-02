@@ -1,8 +1,9 @@
-import { type FormEvent, useEffect, useState } from 'react';
+import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from 'react';
 import { useAuthStore } from '../store/authStore';
 import api from '../lib/api';
 import { PageHeader } from '../components/ui';
-import { Bot, Copy, Key, Power, RefreshCw, Shield, User } from 'lucide-react';
+import Avatar from '../components/Avatar';
+import { Bot, Camera, Copy, Key, Power, RefreshCw, Shield, Trash2, User } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 
@@ -23,6 +24,36 @@ export default function Settings() {
     defaultValues: { name: user?.name, phone: user?.phone, company: user?.company },
   });
   const { register: regPwd, handleSubmit: handlePwd, reset: resetPwd, formState: { isSubmitting: savingPwd } } = useForm();
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+
+  const onUploadAvatar = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingAvatar(true);
+    try {
+      const formData = new FormData();
+      formData.append('avatar', file);
+      const res = await api.post('/users/me/avatar', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      updateUser({ avatar_url: res.data.avatar_url });
+      toast.success('Profile photo updated');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to upload photo');
+    } finally {
+      setUploadingAvatar(false);
+      if (avatarInputRef.current) avatarInputRef.current.value = '';
+    }
+  };
+
+  const onRemoveAvatar = async () => {
+    try {
+      await api.delete('/users/me/avatar');
+      updateUser({ avatar_url: null });
+      toast.success('Profile photo removed');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to remove photo');
+    }
+  };
 
   const onSaveProfile = async (data: any) => {
     try {
@@ -142,12 +173,12 @@ export default function Settings() {
       <PageHeader title="Settings" subtitle="Manage your account settings" />
 
       {/* Tabs */}
-      <div className="flex gap-2 mb-6">
+      <div className="flex gap-2 mb-6 overflow-x-auto">
         {tabs.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             onClick={() => setActiveTab(id)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${activeTab === id ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50'}`}
+            className={`flex items-center gap-2 flex-shrink-0 whitespace-nowrap px-4 py-2 rounded-xl text-sm font-medium transition-colors ${activeTab === id ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50'}`}
           >
             <Icon className="w-4 h-4" />
             {label}
@@ -158,15 +189,42 @@ export default function Settings() {
       {activeTab === 'profile' && (
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <div className="flex items-center gap-4 mb-6">
-            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
-              <span className="text-blue-700 font-bold text-2xl">{user?.name?.[0]?.toUpperCase()}</span>
+            <div className="relative">
+              <Avatar src={user?.avatar_url} name={user?.name} size={64} roundedClassName="rounded-full" />
+              <button
+                type="button"
+                onClick={() => avatarInputRef.current?.click()}
+                disabled={uploadingAvatar}
+                aria-label="Change profile photo"
+                className="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-white shadow ring-2 ring-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                <Camera className="h-3.5 w-3.5" />
+              </button>
+              <input ref={avatarInputRef} type="file" accept="image/*" onChange={onUploadAvatar} className="hidden" />
             </div>
             <div>
               <p className="font-bold text-gray-900 text-lg">{user?.name}</p>
               <p className="text-gray-500 text-sm">{user?.email}</p>
               <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium capitalize">{user?.role?.replace(/_/g, ' ')}</span>
+              <div className="mt-2 flex items-center gap-3">
+                <button type="button" onClick={() => avatarInputRef.current?.click()} disabled={uploadingAvatar} className="text-xs font-semibold text-blue-600 hover:text-blue-700 disabled:opacity-50">
+                  {uploadingAvatar ? 'Uploading...' : (user?.avatar_url ? 'Change photo' : 'Upload photo')}
+                </button>
+                {user?.avatar_url && (
+                  <button type="button" onClick={onRemoveAvatar} className="inline-flex items-center gap-1 text-xs font-semibold text-gray-400 hover:text-red-600">
+                    <Trash2 className="h-3 w-3" /> Remove
+                  </button>
+                )}
+              </div>
             </div>
           </div>
+
+          {(!user?.phone || !user?.company) && (
+            <div className="mb-4 flex items-start gap-2 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-700">
+              <User className="mt-0.5 h-4 w-4 flex-shrink-0" />
+              <span>Complete your profile by adding your {[!user?.phone && 'phone number', !user?.company && 'company'].filter(Boolean).join(' and ')}.</span>
+            </div>
+          )}
 
           <form onSubmit={handleProfile(onSaveProfile)} className="space-y-4">
             <div>

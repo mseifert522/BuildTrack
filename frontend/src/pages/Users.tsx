@@ -3,7 +3,7 @@ import { useAuthStore, roleLabels, canManageUsers } from '../store/authStore';
 import api from '../lib/api';
 import { Loading, Modal, PageHeader } from '../components/ui';
 import Avatar from '../components/Avatar';
-import { Plus, Edit2, Key, Mail, ShieldOff, ShieldCheck, Camera, Trash2, Radio } from 'lucide-react';
+import { Plus, Edit2, Key, Mail, ShieldOff, ShieldCheck, Camera, Trash2, Radio, Eye, EyeOff } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { format, formatDistanceToNow } from 'date-fns';
@@ -19,7 +19,7 @@ interface User {
   contractor_category?: string | null;
   contractor_secondary_category?: string | null;
   avatar_url: string | null;
-  pin: string | null;
+  has_pin?: number;
   is_active: number;
   is_online: number;
   last_seen_at?: string | null;
@@ -69,7 +69,31 @@ export default function Users() {
   const [resetSubmitting, setResetSubmitting] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [categories, setCategories] = useState<string[]>(fallbackCategories);
+  const [revealedPins, setRevealedPins] = useState<Record<string, string>>({});
+  const [pinLoadingId, setPinLoadingId] = useState<string | null>(null);
   const { register, handleSubmit, reset, setValue, formState: { isSubmitting } } = useForm();
+
+  // PINs are no longer shipped in the directory payload; reveal fetches one on
+  // demand (each reveal is audited server-side).
+  const togglePin = async (u: User) => {
+    if (revealedPins[u.id]) {
+      setRevealedPins(prev => {
+        const next = { ...prev };
+        delete next[u.id];
+        return next;
+      });
+      return;
+    }
+    setPinLoadingId(u.id);
+    try {
+      const res = await api.get(`/users/${u.id}/pin`);
+      setRevealedPins(prev => ({ ...prev, [u.id]: res.data?.pin || '—' }));
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to load PIN');
+    } finally {
+      setPinLoadingId(null);
+    }
+  };
 
   const canManage = currentUser ? canManageUsers(currentUser.role) : false;
   const canAddCategories = currentUser ? ['super_admin', 'operations_manager'].includes(currentUser.role) : false;
@@ -303,13 +327,38 @@ export default function Users() {
                       Seen {formatDistanceToNow(new Date(/[zZ]|[+-]\d{2}:?\d{2}$/.test(u.last_seen_at) ? u.last_seen_at : `${u.last_seen_at}Z`), { addSuffix: true })}
                     </p>
                   )}
-                  {u.pin && <span className="text-xs font-mono font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded">Personal PIN: {u.pin}</span>}
+                  {u.has_pin && canManageUserRecord(u) && (
+                    <span className="inline-flex items-center gap-1 text-xs font-mono font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded">
+                      Personal PIN: {revealedPins[u.id] || '•••••'}
+                      <button
+                        type="button"
+                        onClick={() => togglePin(u)}
+                        disabled={pinLoadingId === u.id}
+                        className="text-amber-500 hover:text-amber-700 disabled:opacity-50"
+                        aria-label={revealedPins[u.id] ? 'Hide PIN' : 'Reveal PIN'}
+                        title={revealedPins[u.id] ? 'Hide PIN' : 'Reveal PIN'}
+                      >
+                        {revealedPins[u.id] ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                      </button>
+                    </span>
+                  )}
                 </div>
               </div>
               {canManageUserRecord(u) && (
                 <div className="flex items-center gap-1 flex-shrink-0">
                   <button
-                    onClick={() => { setEditUser(u); Object.entries(u).forEach(([k, v]) => setValue(k, v)); }}
+                    onClick={() => {
+                      setEditUser(u);
+                      reset({
+                        name: u.name,
+                        email: u.email,
+                        role: u.role,
+                        phone: u.phone,
+                        company: u.company,
+                        contractor_category: u.contractor_category,
+                        contractor_secondary_category: u.contractor_secondary_category,
+                      });
+                    }}
                     className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                     title="Edit user"
                   >

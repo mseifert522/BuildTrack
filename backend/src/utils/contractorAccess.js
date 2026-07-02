@@ -11,7 +11,7 @@ function generatePin(db) {
   let pin;
   let attempts = 0;
   do {
-    pin = String(Math.floor(10000 + Math.random() * 90000));
+    pin = String(crypto.randomInt(10000, 100000));
     const existing = db.prepare('SELECT id FROM users WHERE pin = ?').get(pin);
     if (!existing) return pin;
     attempts++;

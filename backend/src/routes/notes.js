@@ -246,6 +246,13 @@ router.delete('/:id', (req, res) => {
     action: 'note_deleted',
     entityType: 'note',
     entityId: req.params.id,
+    // Preserve the deleted note body so a hard delete stays recoverable from the audit trail.
+    details: {
+      note: existing.note,
+      note_type: existing.note_type,
+      author_id: existing.user_id,
+      created_at: existing.created_at,
+    },
   });
   res.json({ message: 'Note deleted' });
 });

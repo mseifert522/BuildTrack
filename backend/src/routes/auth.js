@@ -28,6 +28,33 @@ const MOBILE_APP_HOSTS = new Set(
     .filter(Boolean)
 );
 
+// ── Brute-force protection (in-process; single-container deployment) ──
+// Blocks credential/PIN/2FA guessing. Keyed by IP or user id; counts every
+// attempt in the window and blocks once max is exceeded. Successful auth clears
+// the key so legitimate users are never penalized.
+const authAttempts = new Map();
+function tooManyAttempts(key, max, windowMs) {
+  const now = Date.now();
+  const rec = authAttempts.get(key);
+  if (!rec || now - rec.first > windowMs) {
+    authAttempts.set(key, { count: 1, first: now });
+    return false;
+  }
+  rec.count += 1;
+  return rec.count > max;
+}
+function clearAttempts(key) {
+  authAttempts.delete(key);
+}
+// Periodic sweep so the Map cannot grow unbounded.
+const authAttemptsSweep = setInterval(() => {
+  const now = Date.now();
+  for (const [key, rec] of authAttempts) {
+    if (now - rec.first > 60 * 60 * 1000) authAttempts.delete(key);
+  }
+}, 10 * 60 * 1000);
+if (authAttemptsSweep.unref) authAttemptsSweep.unref();
+
 function sqliteDateTime(date) {
   return date.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
 }
@@ -41,7 +68,7 @@ function daysFromNow(days) {
 }
 
 function generate2FACode() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return crypto.randomInt(100000, 1000000).toString();
 }
 
 function shouldTrustDevice(value) {
@@ -281,12 +308,18 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
+    const clientIp = getClientIp(req) || 'unknown';
+    if (tooManyAttempts(`login:${clientIp}`, 15, 15 * 60 * 1000)) {
+      return res.status(429).json({ error: 'Too many login attempts. Please wait a few minutes and try again.' });
+    }
+
     const db = getDb();
     const user = db.prepare('SELECT * FROM users WHERE email = ? AND is_active = 1').get(email.toLowerCase().trim());
     if (!user) return res.status(401).json({ error: 'Invalid email or password' });
 
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return res.status(401).json({ error: 'Invalid email or password' });
+    clearAttempts(`login:${clientIp}`);
 
     if (!MANAGEMENT_ROLES.includes(user.role)) {
       const payload = issueSession(db, user, { two_factor: 'not_required', trusted_device: trustDevice }, req);
@@ -300,6 +333,9 @@ router.post('/login', async (req, res) => {
     }
 
     if (twofa_code) {
+      if (tooManyAttempts(`2fa:${user.id}`, 8, 10 * 60 * 1000)) {
+        return res.status(429).json({ error: 'Too many verification attempts. Please request a new code shortly.' });
+      }
       const codeRow = db.prepare(`
         SELECT * FROM two_factor_codes
         WHERE user_id = ? AND code = ? AND used = 0 AND datetime(expires_at) > datetime('now')
@@ -311,6 +347,7 @@ router.post('/login', async (req, res) => {
       }
 
       db.prepare('UPDATE two_factor_codes SET used = 1 WHERE id = ?').run(codeRow.id);
+      clearAttempts(`2fa:${user.id}`);
       const payload = issueSession(db, user, { two_factor: true, trusted_device: trustDevice }, req);
 
       if (trustDevice) {
@@ -321,8 +358,15 @@ router.post('/login', async (req, res) => {
     }
 
     if (!process.env.SMTP_PASS || process.env.SMTP_PASS === 'REPLACE_WITH_RESEND_API_KEY') {
-      const payload = issueSession(db, user, { two_factor: 'skipped_no_smtp' }, req);
-      return res.json(addMobileQuickAccess(payload, db, user, req));
+      // Fail closed: never downgrade management login to single-factor because
+      // mail delivery is unconfigured. A break-glass path can be enabled with
+      // an explicit env flag rather than silently inferring it from missing SMTP.
+      if (process.env.BUILDTRACK_ALLOW_2FA_BYPASS === 'true') {
+        const payload = issueSession(db, user, { two_factor: 'bypass_flag_enabled' }, req);
+        return res.json(addMobileQuickAccess(payload, db, user, req));
+      }
+      console.error('[AUTH] 2FA required but SMTP is not configured; refusing password-only management login for', user.email);
+      return res.status(503).json({ error: 'Two-factor delivery is temporarily unavailable. Please contact your administrator.' });
     }
 
     db.prepare('UPDATE two_factor_codes SET used = 1 WHERE user_id = ? AND used = 0').run(user.id);
@@ -440,12 +484,18 @@ router.post('/pin-login', async (req, res) => {
       return res.status(400).json({ error: 'Please enter a valid 5-digit PIN' });
     }
 
+    const clientIp = getClientIp(req) || 'unknown';
+    if (tooManyAttempts(`pin:${clientIp}`, 10, 15 * 60 * 1000)) {
+      return res.status(429).json({ error: 'Too many attempts. Please wait a few minutes and try again.' });
+    }
+
     const db = getDb();
     const user = db.prepare('SELECT * FROM users WHERE pin = ? AND is_active = 1').get(pin);
     if (!user) return res.status(401).json({ error: 'Invalid PIN' });
     if (user.role !== 'contractor') {
       return res.status(403).json({ error: 'PIN login is only available for contractor accounts' });
     }
+    clearAttempts(`pin:${clientIp}`);
 
     const projects = getLoginProjects(db, user);
 
@@ -466,6 +516,11 @@ router.post('/contractor/forgot-pin', async (req, res) => {
   try {
     const email = normalizeEmail(req.body?.email);
     if (!email) return res.status(400).json({ error: 'Valid contractor email is required' });
+
+    const clientIp = getClientIp(req) || 'unknown';
+    if (tooManyAttempts(`pinmail:${clientIp}`, 5, 15 * 60 * 1000)) {
+      return res.status(429).json({ error: 'Too many requests. Please wait a few minutes and try again.' });
+    }
 
     const db = getDb();
     const account = ensureContractorMobileAccountByEmail(db, email);
@@ -495,6 +550,11 @@ router.post('/contractor/email-login/request', async (req, res) => {
   try {
     const email = normalizeEmail(req.body?.email);
     if (!email) return res.status(400).json({ error: 'Valid contractor email is required' });
+
+    const clientIp = getClientIp(req) || 'unknown';
+    if (tooManyAttempts(`emaillogin:${clientIp}`, 5, 15 * 60 * 1000)) {
+      return res.status(429).json({ error: 'Too many requests. Please wait a few minutes and try again.' });
+    }
 
     const db = getDb();
     const account = ensureContractorMobileAccountByEmail(db, email);
@@ -537,6 +597,10 @@ router.post('/contractor/email-login/verify', async (req, res) => {
     const user = account.user;
     if (!user || user.role !== 'contractor') return res.status(401).json({ error: 'Invalid or expired verification code' });
 
+    if (tooManyAttempts(`2fa:${user.id}`, 8, 10 * 60 * 1000)) {
+      return res.status(429).json({ error: 'Too many verification attempts. Please request a new code shortly.' });
+    }
+
     const codeRow = db.prepare(`
       SELECT * FROM two_factor_codes
       WHERE user_id = ? AND code = ? AND used = 0 AND datetime(expires_at) > datetime('now')
@@ -546,6 +610,7 @@ router.post('/contractor/email-login/verify', async (req, res) => {
     if (!codeRow) return res.status(401).json({ error: 'Invalid or expired verification code' });
 
     db.prepare('UPDATE two_factor_codes SET used = 1 WHERE id = ?').run(codeRow.id);
+    clearAttempts(`2fa:${user.id}`);
     const payload = issueSession(db, user, { contractor_email_2fa: true, trusted_device: trustDevice }, req, 'mobile_app');
     payload.projects = getLoginProjects(db, user);
     if (trustDevice) Object.assign(payload, issueTrustedDevice(db, user, req, deviceToken));

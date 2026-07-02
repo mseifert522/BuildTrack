@@ -1279,7 +1279,7 @@ export default function Contractors() {
                 )}
               </div>
             )}
-            <div className={`bt-directory-list-header hidden rounded-lg border border-slate-200 bg-slate-50 py-3 text-xs font-black uppercase tracking-wide text-slate-500 xl:grid xl:grid-cols-[minmax(210px,1.1fr)_minmax(220px,1fr)_minmax(260px,1.25fr)_minmax(190px,0.9fr)_minmax(160px,0.75fr)_80px] xl:gap-4 ${canDeleteContractors ? 'pl-12 pr-4' : 'px-4'}`}>
+            <div className={`bt-directory-list-header hidden rounded-lg border border-slate-200 bg-slate-50 py-3 text-xs font-black uppercase tracking-wide text-slate-500 xl:grid xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,1.25fr)_minmax(0,0.9fr)_minmax(0,0.75fr)_minmax(96px,auto)] xl:gap-4 ${canDeleteContractors ? 'pl-12 pr-32 sm:pr-36 xl:pr-40' : 'px-4'}`}>
               <span>Name</span>
               <span>Category</span>
               <span>Address</span>
@@ -1332,7 +1332,7 @@ export default function Contractors() {
                       onClick={() => setExpandedContractorId(current => current === contractor.id ? null : contractor.id)}
                       aria-expanded={isExpanded}
                       aria-controls={`contractor-directory-details-${contractor.id}`}
-                      className={`bt-directory-row grid w-full cursor-pointer grid-cols-1 gap-3 py-4 text-left xl:grid-cols-[minmax(210px,1.1fr)_minmax(220px,1fr)_minmax(260px,1.25fr)_minmax(190px,0.9fr)_minmax(160px,0.75fr)_80px] xl:items-center xl:gap-4 ${canDeleteContractors ? 'pl-12 pr-32 sm:pr-36 xl:pr-40' : 'px-4'}`}
+                      className={`bt-directory-row grid w-full cursor-pointer grid-cols-1 gap-3 py-4 text-left xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,1.25fr)_minmax(0,0.9fr)_minmax(0,0.75fr)_minmax(96px,auto)] xl:items-center xl:gap-4 ${canDeleteContractors ? 'pl-12 pr-32 sm:pr-36 xl:pr-40' : 'px-4'}`}
                     >
                       <div className="flex min-w-0 items-center gap-3">
                         <div className="bt-directory-avatar flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-slate-100 text-xs font-black text-slate-700 ring-1 ring-slate-200">
@@ -1390,7 +1390,7 @@ export default function Contractors() {
                         type="button"
                         onClick={() => deleteContractor(contractor)}
                         disabled={Boolean(deletingContractorId)}
-                        className="absolute right-3 top-3 z-10 inline-flex min-h-9 items-center justify-center gap-1.5 rounded-lg border border-red-400/40 bg-red-500/15 px-3 py-2 text-xs font-black text-red-300 shadow-sm transition hover:bg-red-500/30 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="absolute right-3 top-3 z-10 inline-flex min-h-9 items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-black text-red-700 shadow-sm transition hover:bg-red-100 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-60"
                         title={`Delete ${contractor.name}`}
                         aria-label={`Delete ${contractor.name}`}
                       >

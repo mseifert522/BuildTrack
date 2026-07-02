@@ -1,6 +1,7 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 
 let db;
 
@@ -2682,7 +2683,7 @@ function initializeSchema() {
     const existingPins = new Set(db.prepare("SELECT pin FROM users WHERE pin IS NOT NULL").all().map(r => r.pin));
     for (const u of usersWithoutPin) {
       let pin;
-      do { pin = String(Math.floor(10000 + Math.random() * 90000)); } while (existingPins.has(pin));
+      do { pin = String(crypto.randomInt(10000, 100000)); } while (existingPins.has(pin));
       existingPins.add(pin);
       db.prepare("UPDATE users SET pin = ? WHERE id = ?").run(pin, u.id);
     }

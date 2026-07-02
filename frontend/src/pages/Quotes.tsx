@@ -95,6 +95,18 @@ function money(value: number | string | null | undefined): string {
   return num(value).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
 }
 
+// Lump-sum / AI-extracted line items store the whole amount in total_line_item_price
+// and leave unit_price at 0, which used to render a misleading "$0.00" unit cost.
+// Derive an effective per-unit figure from total/qty, and tag single-line lump sums.
+function unitCostCell(item: { unit_price?: number | string | null; quantity?: number | string | null; total_line_item_price?: number | string | null }): { text: string; lump: boolean } {
+  const unit = num(item.unit_price);
+  if (unit > 0) return { text: money(unit), lump: false };
+  const qty = num(item.quantity);
+  const total = num(item.total_line_item_price);
+  if (total > 0 && qty > 0) return { text: money(total / qty), lump: qty === 1 };
+  return { text: money(0), lump: false };
+}
+
 function shortDate(value: string | null | undefined): string {
   if (!value) return '—';
   const parsed = new Date(value);
@@ -190,7 +202,9 @@ function clipText(text: string, n = 50): string {
 }
 
 function csvCell(value: unknown): string {
-  const text = value === null || value === undefined ? '' : String(value);
+  let text = value === null || value === undefined ? '' : String(value);
+  // Neutralize spreadsheet formula injection from contractor-supplied fields.
+  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
@@ -530,7 +544,17 @@ export default function Quotes() {
         <SummaryCard label="Total Approved" value={money(approvedAgg.total)} hint={`${approvedAgg.count} approved`} accent="#34D399" />
         <SummaryCard label="Contractors" value={String(summary?.metrics?.contractors_count ?? 0)} hint="quoting" />
         <SummaryCard label="Pending Review" value={String(pendingCount)} hint="awaiting decision" accent="#60A5FA" />
-        <SummaryCard label="Lowest / Highest Bid" value={`${money(catRange.low)} / ${money(catRange.high)}`} hint={filters.category ? `${filters.category} category` : 'select a category'} />
+        <SummaryCard
+          label="Lowest / Highest Bid"
+          value={
+            filters.category
+              ? `${money(catRange.low)} / ${money(catRange.high)}`
+              : (num(summary?.metrics?.lowest_quote) > 0 || num(summary?.metrics?.highest_quote) > 0)
+                ? `${money(summary?.metrics?.lowest_quote)} / ${money(summary?.metrics?.highest_quote)}`
+                : '—'
+          }
+          hint={filters.category ? `${filters.category} category` : 'all quotes · pick a category to narrow'}
+        />
         <SummaryCard
           label="Budget Variance"
           value={selectedBudget ? money(approvedAgg.total - selectedBudget) : '—'}
@@ -819,16 +843,19 @@ function LineItemsTable({ quote }: { quote: ContractorQuote }) {
         </tr>
       </thead>
       <tbody>
-        {items.map((item, idx) => (
+        {items.map((item, idx) => {
+          const unit = unitCostCell(item);
+          return (
           <tr key={item.id || idx} className="border-t border-gray-100">
             <td className="py-1 pr-3 text-gray-600">{item.category || '—'}{item.subcategory ? ` · ${item.subcategory}` : ''}</td>
             <td className="py-1 pr-3 text-gray-700">{item.description || '—'}</td>
             <td className="py-1 pr-3 text-right text-gray-600">{num(item.quantity)}</td>
             <td className="py-1 pr-3 text-gray-500">{item.unit || '—'}</td>
-            <td className="py-1 pr-3 text-right text-gray-600">{money(item.unit_price)}</td>
+            <td className="py-1 pr-3 text-right text-gray-600">{unit.text}{unit.lump && <span className="ml-1 rounded bg-gray-100 px-1 text-[9px] font-semibold uppercase tracking-wide text-gray-400">lump</span>}</td>
             <td className="py-1 pr-3 text-right font-medium text-gray-900">{money(item.total_line_item_price)}</td>
           </tr>
-        ))}
+          );
+        })}
       </tbody>
     </table>
   );
@@ -945,6 +972,7 @@ function BidLeveling(props: {
   const { compare, loading, hasProject, candidates, onPickProject, categoryLabel, onApprove, busyId } = props;
   const [viewing, setViewing] = useState<{ quoteId: string; title: string } | null>(null);
   const [expandedQuote, setExpandedQuote] = useState<string | null>(null);
+
   if (!hasProject) {
     return (
       <div className="flex flex-col items-center justify-center px-4 py-14 text-center">
@@ -973,9 +1001,129 @@ function BidLeveling(props: {
   if (!compare || compare.contractors.length === 0) return <Empty message="No quotes to compare for this project yet." icon={<Scale className="h-8 w-8" />} />;
 
   const { contractors, rows, project } = compare;
-  const totalCols = 1 + contractors.length + 3;
+  type CompareContractorRow = CompareResponse['contractors'][number];
+  type CompareCategoryRow = CompareResponse['rows'][number];
+
   const expandedContractor = expandedQuote ? contractors.find(c => c.quote_id === expandedQuote) || null : null;
   const expandedLineItems = expandedQuote ? rows.flatMap(r => r.cells[expandedQuote]?.line_items || []) : [];
+  const isCategoryFocused = Boolean(categoryLabel);
+  const matrixMinWidth = Math.max(980, 590 + rows.length * 170);
+
+  const contractorLabel = (contractor: CompareContractorRow) =>
+    contractor.contractor_company || contractor.contractor_name || 'Unnamed provider';
+
+  const categoryCell = (row: CompareCategoryRow, contractor: CompareContractorRow) => row.cells[contractor.quote_id];
+
+  const amountForRow = (row: CompareCategoryRow, contractor: CompareContractorRow) => {
+    const cell = categoryCell(row, contractor);
+    return cell?.present ? num(cell.amount) : 0;
+  };
+
+  const quoteCategoryTotal = (contractor: CompareContractorRow) =>
+    rows.reduce((sum, row) => sum + amountForRow(row, contractor), 0);
+
+  const quoteTotal = (contractor: CompareContractorRow) =>
+    num((compare.totals.by_quote[contractor.quote_id] ?? quoteCategoryTotal(contractor)) || contractor.total_quote_amount);
+
+  const quotedCategoryCount = (contractor: CompareContractorRow) =>
+    rows.reduce((count, row) => count + (categoryCell(row, contractor)?.present ? 1 : 0), 0);
+
+  const rankMetaForCategory = (row: CompareCategoryRow, amount: number, present: boolean) => {
+    const isComparable = present && row.present_count > 1;
+    return {
+      isLow: isComparable && amount === row.low,
+      isHigh: isComparable && row.high !== row.low && amount === row.high,
+    };
+  };
+
+  const focusedAmounts = contractors.map(contractor => {
+    const present = rows.some(row => Boolean(categoryCell(row, contractor)?.present));
+    return { contractor, present, amount: quoteCategoryTotal(contractor) };
+  });
+  const focusedPresentAmounts = focusedAmounts.filter(item => item.present).map(item => item.amount);
+  const focusedLow = focusedPresentAmounts.length ? Math.min(...focusedPresentAmounts) : 0;
+  const focusedHigh = focusedPresentAmounts.length ? Math.max(...focusedPresentAmounts) : 0;
+  const focusedAverage = focusedPresentAmounts.length
+    ? focusedPresentAmounts.reduce((sum, value) => sum + value, 0) / focusedPresentAmounts.length
+    : 0;
+  const focusedSpread = focusedHigh && focusedLow ? focusedHigh - focusedLow : 0;
+  const focusedContractors = [...contractors].sort((a, b) => {
+    const aPresent = rows.some(row => Boolean(categoryCell(row, a)?.present));
+    const bPresent = rows.some(row => Boolean(categoryCell(row, b)?.present));
+    if (aPresent !== bPresent) return aPresent ? -1 : 1;
+    const diff = quoteCategoryTotal(a) - quoteCategoryTotal(b);
+    return diff || contractorLabel(a).localeCompare(contractorLabel(b));
+  });
+
+  const amountBadge = (label: 'Low' | 'High') => (
+    <span
+      className={`rounded px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide ${
+        label === 'Low' ? 'bg-emerald-500/20 text-emerald-200' : 'bg-amber-500/20 text-amber-200'
+      }`}
+    >
+      {label}
+    </span>
+  );
+
+  const amountCell = (row: CompareCategoryRow, contractor: CompareContractorRow) => {
+    const cell = categoryCell(row, contractor);
+    if (!cell?.present) {
+      return <span className="text-xs font-semibold text-gray-400">No bid</span>;
+    }
+    const amount = num(cell.amount);
+    const { isLow, isHigh } = rankMetaForCategory(row, amount, true);
+    return (
+      <span className="inline-flex items-center justify-end gap-1.5 tabular-nums text-gray-900">
+        {isLow ? amountBadge('Low') : null}
+        {isHigh ? amountBadge('High') : null}
+        <span className="font-bold">{money(amount)}</span>
+      </span>
+    );
+  };
+
+  const renderQuoteActions = (contractor: CompareContractorRow) => (
+    <div className="flex flex-wrap items-center justify-end gap-1.5">
+      <button
+        type="button"
+        onClick={() => setExpandedQuote(prev => (prev === contractor.quote_id ? null : contractor.quote_id))}
+        className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-[11px] font-semibold text-gray-700 hover:bg-gray-50"
+        title="Show quote line items"
+      >
+        {expandedQuote === contractor.quote_id ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        Details
+      </button>
+      {contractor.has_document && (
+        <button
+          type="button"
+          onClick={() => setViewing({ quoteId: contractor.quote_id, title: `${contractorLabel(contractor)} · ${contractor.quote_number}` })}
+          className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-[11px] font-semibold text-gray-700 hover:bg-gray-50"
+          title="View the original quote document"
+        >
+          <FileText className="h-3 w-3" /> View quote
+        </button>
+      )}
+      {APPROVED_STATUSES.has(contractor.status)
+        ? <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-green-700"><CheckCircle2 className="h-3.5 w-3.5" /> Approved</span>
+        : <button disabled={busyId === contractor.quote_id} onClick={() => onApprove({ id: contractor.quote_id, quote_number: contractor.quote_number } as ContractorQuote)} className="rounded-md border border-green-200 bg-green-50 px-2 py-1 text-[11px] font-semibold text-green-700 hover:bg-green-100 disabled:opacity-50">Approve</button>}
+    </div>
+  );
+
+  const expandedDetails = expandedQuote && expandedContractor ? (
+    <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-3 shadow-sm">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <p className="text-sm font-semibold text-gray-900">
+          {contractorLabel(expandedContractor)}
+        </p>
+        <span className="rounded-full border border-gray-200 px-2 py-0.5 text-[11px] font-semibold text-gray-500">
+          {expandedContractor.quote_number}
+        </span>
+        <span className="ml-auto text-sm font-bold text-gray-900">
+          {money(quoteTotal(expandedContractor))}
+        </span>
+      </div>
+      <LineItemsTable quote={{ line_items: expandedLineItems } as ContractorQuote} />
+    </div>
+  ) : null;
 
   return (
     <div className="space-y-3">
@@ -986,104 +1134,144 @@ function BidLeveling(props: {
         </span>
       </div>
 
-      <div className="overflow-auto rounded-xl border border-gray-200 bg-white shadow-sm">
-        <table className="w-full border-collapse text-sm">
-          <thead className="bg-gray-50 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-            <tr>
-              <th className="sticky left-0 z-10 bg-gray-50 px-3 py-2">Trade / Category</th>
-              {contractors.map((c, ci) => (
-                <th key={c.quote_id} className="border-l border-white/10 px-3 py-2 text-right" style={{ background: ci % 2 === 1 ? 'rgba(255,255,255,0.03)' : undefined }}>
-                  <button
-                    type="button"
-                    onClick={() => setExpandedQuote(prev => (prev === c.quote_id ? null : c.quote_id))}
-                    className="ml-auto flex w-full flex-col items-end text-right normal-case hover:opacity-80"
-                    title="Click to view this quote's line-item details"
-                  >
-                    <span className="flex items-center gap-1 font-semibold text-gray-900">
-                      {expandedQuote === c.quote_id ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                      {c.contractor_company || c.contractor_name}
-                    </span>
-                    <span className="font-normal text-gray-400">{c.quote_number}</span>
-                  </button>
-                </th>
-              ))}
-              <th className="border-l-2 border-white/20 px-3 py-2 text-right">Low</th>
-              <th className="px-3 py-2 text-right">High</th>
-              <th className="px-3 py-2 text-right">Avg</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(row => (
-              <tr key={row.category} className="border-t border-gray-100">
-                <td className="sticky left-0 z-10 bg-white px-3 py-1.5 font-medium text-gray-700">
-                  {row.category}
-                  {row.has_missing && <span className="ml-1.5 inline-flex items-center rounded bg-amber-100 px-1 py-0.5 text-[10px] font-semibold text-amber-700" title="Not every contractor quoted this category">gap</span>}
-                </td>
-                {contractors.map((c, ci) => {
-                  const cell = row.cells[c.quote_id];
-                  const present = cell?.present;
-                  const amount = cell?.amount;
-                  const isLow = present && amount === row.low && row.present_count > 1;
-                  const isHigh = present && amount === row.high && row.present_count > 1 && row.high !== row.low;
-                  const colTint = ci % 2 === 1 ? 'rgba(255,255,255,0.03)' : 'transparent';
+      {isCategoryFocused ? (
+        <>
+          <div className="grid gap-2 sm:grid-cols-4">
+            <SummaryCard label="Low bid" value={money(focusedLow)} accent="#6EE7A0" />
+            <SummaryCard label="High bid" value={money(focusedHigh)} accent="#FDBA74" />
+            <SummaryCard label="Average" value={money(focusedAverage)} />
+            <SummaryCard label="Spread" value={money(focusedSpread)} hint={`${focusedPresentAmounts.length} quote${focusedPresentAmounts.length === 1 ? '' : 's'}`} />
+          </div>
+          <div className="overflow-auto rounded-xl border border-gray-200 bg-white shadow-sm">
+            <table className="w-full min-w-[880px] border-collapse text-sm">
+              <thead className="bg-gray-50 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                <tr>
+                  <th className="px-3 py-2">Service provider</th>
+                  <th className="px-3 py-2 text-right">{categoryLabel}</th>
+                  <th className="px-3 py-2 text-right">Difference from low</th>
+                  <th className="px-3 py-2">Status</th>
+                  <th className="px-3 py-2 text-right">Decision</th>
+                </tr>
+              </thead>
+              <tbody>
+                {focusedContractors.map(contractor => {
+                  const present = rows.some(row => Boolean(categoryCell(row, contractor)?.present));
+                  const amount = quoteCategoryTotal(contractor);
+                  const isLow = present && focusedPresentAmounts.length > 1 && amount === focusedLow;
+                  const isHigh = present && focusedPresentAmounts.length > 1 && focusedHigh !== focusedLow && amount === focusedHigh;
+                  const difference = present ? amount - focusedLow : 0;
                   return (
-                    <td key={c.quote_id} className="border-l border-white/10 px-3 py-1.5 text-right"
-                      style={{ background: !present ? 'rgba(239,68,68,0.10)' : isLow ? 'rgba(16,185,129,0.16)' : isHigh ? 'rgba(245,158,11,0.14)' : colTint }}>
-                      {present ? (
-                        <span className="inline-flex items-center justify-end gap-1.5 tabular-nums" style={{ color: isLow ? '#34D399' : isHigh ? '#FBBF24' : '#E8EDF4', fontWeight: (isLow || isHigh) ? 800 : 600 }}>
-                          {isLow && <span className="rounded bg-emerald-500/25 px-1 py-0.5 text-[9px] font-black uppercase tracking-wide text-emerald-200">Low</span>}
-                          {isHigh && <span className="rounded bg-amber-500/25 px-1 py-0.5 text-[9px] font-black uppercase tracking-wide text-amber-200">High</span>}
-                          {money(amount)}
-                        </span>
-                      ) : (
-                        <span className="text-[11px] font-semibold text-rose-300/80">—</span>
-                      )}
-                    </td>
+                    <tr key={contractor.quote_id} className="border-t border-gray-100">
+                      <td className="px-3 py-2">
+                        <button
+                          type="button"
+                          onClick={() => setExpandedQuote(prev => (prev === contractor.quote_id ? null : contractor.quote_id))}
+                          className="flex min-w-0 flex-col text-left hover:opacity-85"
+                        >
+                          <span className="flex items-center gap-1 font-semibold text-gray-900">
+                            {expandedQuote === contractor.quote_id ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                            {contractorLabel(contractor)}
+                          </span>
+                          <span className="text-xs text-gray-400">{contractor.quote_number}</span>
+                        </button>
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {present ? (
+                          <span className="inline-flex items-center justify-end gap-1.5 tabular-nums text-gray-900">
+                            {isLow ? amountBadge('Low') : null}
+                            {isHigh ? amountBadge('High') : null}
+                            <span className="font-bold">{money(amount)}</span>
+                          </span>
+                        ) : (
+                          <span className="text-xs font-semibold text-gray-400">No bid</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {present ? (
+                          <span className={`text-xs font-semibold tabular-nums ${difference === 0 ? 'text-green-700' : 'text-gray-500'}`}>
+                            {difference === 0 ? 'Lowest' : `+${money(difference)}`}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-gray-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2"><StatusPill status={contractor.status} /></td>
+                      <td className="px-3 py-2 text-right">{renderQuoteActions(contractor)}</td>
+                    </tr>
                   );
                 })}
-                <td className="border-l-2 border-white/20 px-3 py-1.5 text-right font-semibold" style={{ color: '#6EE7A0' }}>{money(row.low)}</td>
-                <td className="px-3 py-1.5 text-right font-semibold" style={{ color: '#FDBA74' }}>{money(row.high)}</td>
-                <td className="px-3 py-1.5 text-right text-gray-500">{money(row.average)}</td>
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : (
+        <div className="overflow-auto rounded-xl border border-gray-200 bg-white shadow-sm">
+          <table className="w-full border-collapse text-sm" style={{ minWidth: `${matrixMinWidth}px` }}>
+            <thead className="bg-gray-50 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+              <tr>
+                <th className="sticky left-0 z-10 bg-gray-50 px-3 py-2">Service provider</th>
+                {rows.map(row => (
+                  <th key={row.category} className="border-l border-white/10 px-3 py-2 text-right">
+                    <span className="block text-gray-700">{row.category}</span>
+                    <span className="block text-[10px] font-medium normal-case text-gray-400">
+                      {row.present_count}/{contractors.length} quoted
+                    </span>
+                  </th>
+                ))}
+                <th className="border-l-2 border-white/20 px-3 py-2 text-right">Total bid</th>
+                <th className="px-3 py-2 text-center">Coverage</th>
+                <th className="px-3 py-2 text-right">Decision</th>
               </tr>
-            ))}
-            {expandedQuote && expandedContractor && (
-              <tr className="bg-gray-50/60">
-                <td colSpan={totalCols} className="px-3 py-3">
-                  <p className="mb-2 text-sm font-semibold text-gray-900">
-                    {expandedContractor.contractor_company || expandedContractor.contractor_name} — {money(expandedContractor.total_quote_amount)}
-                  </p>
-                  <LineItemsTable quote={{ line_items: expandedLineItems } as ContractorQuote} />
-                </td>
-              </tr>
-            )}
-          </tbody>
-          <tfoot>
-            <tr className="bg-white">
-              <td className="sticky left-0 z-10 bg-white px-3 py-2 text-xs font-medium text-gray-500">Decision</td>
-              {contractors.map((c, ci) => (
-                <td key={c.quote_id} className="border-l border-white/10 px-3 py-2 text-right" style={{ background: ci % 2 === 1 ? 'rgba(255,255,255,0.03)' : undefined }}>
-                  <div className="flex items-center justify-end gap-1.5">
-                    {c.has_document && (
+            </thead>
+            <tbody>
+              {contractors.map(contractor => {
+                const presentCount = quotedCategoryCount(contractor);
+                const missingCount = Math.max(rows.length - presentCount, 0);
+                return (
+                  <tr key={contractor.quote_id} className="border-t border-gray-100">
+                    <td className="sticky left-0 z-10 bg-white px-3 py-2">
                       <button
                         type="button"
-                        onClick={() => setViewing({ quoteId: c.quote_id, title: `${c.contractor_company || c.contractor_name} · ${c.quote_number}` })}
-                        className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-[11px] font-semibold text-gray-700 hover:bg-gray-50"
-                        title="View the original quote document"
+                        onClick={() => setExpandedQuote(prev => (prev === contractor.quote_id ? null : contractor.quote_id))}
+                        className="flex min-w-0 flex-col text-left hover:opacity-85"
                       >
-                        <FileText className="h-3 w-3" /> View quote
+                        <span className="flex items-center gap-1 font-semibold text-gray-900">
+                          {expandedQuote === contractor.quote_id ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                          {contractorLabel(contractor)}
+                        </span>
+                        <span className="text-xs text-gray-400">{contractor.quote_number}</span>
                       </button>
-                    )}
-                    {APPROVED_STATUSES.has(c.status)
-                      ? <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-green-700"><CheckCircle2 className="h-3.5 w-3.5" /> Approved</span>
-                      : <button disabled={busyId === c.quote_id} onClick={() => onApprove({ id: c.quote_id, quote_number: c.quote_number } as ContractorQuote)} className="rounded-md border border-green-200 bg-green-50 px-2 py-1 text-[11px] font-semibold text-green-700 hover:bg-green-100 disabled:opacity-50">Approve</button>}
-                  </div>
-                </td>
-              ))}
-              <td colSpan={3} className="border-l-2 border-white/20"></td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
+                    </td>
+                    {rows.map(row => (
+                      <td key={`${contractor.quote_id}-${row.category}`} className="border-l border-white/10 px-3 py-2 text-right">
+                        {amountCell(row, contractor)}
+                      </td>
+                    ))}
+                    <td className="border-l-2 border-white/20 px-3 py-2 text-right">
+                      <span className="block font-bold tabular-nums text-gray-900">{money(quoteTotal(contractor))}</span>
+                      {missingCount > 0 ? (
+                        <span className="text-[11px] font-semibold text-amber-700">
+                          missing {missingCount}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                        missingCount ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-green-200 bg-green-50 text-green-700'
+                      }`}>
+                        {presentCount}/{rows.length}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right">{renderQuoteActions(contractor)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {expandedDetails}
 
       {viewing && (
         <QuotePdfModal quoteId={viewing.quoteId} title={viewing.title} onClose={() => setViewing(null)} />

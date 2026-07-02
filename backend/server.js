@@ -60,12 +60,28 @@ const uploadsPath = process.env.UPLOADS_PATH || './uploads';
 if (!fs.existsSync(uploadsPath)) fs.mkdirSync(uploadsPath, { recursive: true });
 
 // Middleware
-const allowedOrigins = [
+// CORS allowlist: the web + mobile apps are served same-origin (each host
+// reverse-proxies to this container), so browser XHR to /api never triggers a
+// cross-origin preflight. Reflecting an arbitrary Origin with credentials:true
+// is unsafe-by-default, so we bound it to the known BuildTrack hosts.
+const allowedOrigins = new Set([
   process.env.FRONTEND_URL || 'http://localhost:5173',
   'http://localhost:3001',
-];
+  'https://buildtrack.newurbandev.com',
+  'https://mobile.buildtrack.newurbandev.com',
+  'https://m.buildtrack.newurbandev.com',
+  'https://invoices.newurbandev.com',
+  'https://app.newurbandev.com',
+  MOBILE_APP_ORIGIN,
+  ...String(process.env.EXTRA_CORS_ORIGINS || '')
+    .split(',')
+    .map(o => o.trim())
+    .filter(Boolean),
+]);
 app.use(cors({
-  origin: (origin, cb) => cb(null, true),
+  // Allow same-origin/no-origin (mobile webviews, curl, server-to-server) and
+  // any explicitly allowlisted browser origin; reject everything else.
+  origin: (origin, cb) => cb(null, !origin || allowedOrigins.has(origin)),
   credentials: true,
 }));
 const bodyLimit = process.env.REQUEST_BODY_LIMIT || process.env.INBOUND_EMAIL_JSON_LIMIT || '25mb';
@@ -258,6 +274,7 @@ app.get('/api/dashboard/activity-feed', authenticate, (req, res) => {
     )
     ${noteAssignmentJoin}
     WHERE ${noteVisibilityWhere}
+      AND p.status != 'archived'
     ORDER BY datetime(n.created_at) DESC, n.created_at DESC
     LIMIT ?
   `).all(...(contractorOnly

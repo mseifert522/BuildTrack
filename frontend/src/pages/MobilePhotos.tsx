@@ -2117,7 +2117,7 @@ export default function MobilePhotos() {
                   onClick={() => stepCameraZoom(-1)}
                   disabled={cameraZoom <= cameraZoomMin + (cameraZoomStep / 2)}
                   aria-label="Zoom out"
-                  style={{ width: 34, height: 34, minWidth: 34, minHeight: 34, border: 'none', borderRadius: 11, background: 'rgba(255,255,255,0.12)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: cameraZoom <= cameraZoomMin + (cameraZoomStep / 2) ? 0.45 : 1 }}
+                  style={{ width: 44, height: 44, minWidth: 44, minHeight: 44, border: 'none', borderRadius: 12, background: 'rgba(255,255,255,0.12)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: cameraZoom <= cameraZoomMin + (cameraZoomStep / 2) ? 0.45 : 1 }}
                 >
                   <Minus size={16} color="white" />
                 </button>
@@ -2138,7 +2138,7 @@ export default function MobilePhotos() {
                   onClick={() => stepCameraZoom(1)}
                   disabled={cameraZoom >= cameraZoomMax - (cameraZoomStep / 2)}
                   aria-label="Zoom in"
-                  style={{ width: 34, height: 34, minWidth: 34, minHeight: 34, border: 'none', borderRadius: 11, background: 'rgba(255,255,255,0.12)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: cameraZoom >= cameraZoomMax - (cameraZoomStep / 2) ? 0.45 : 1 }}
+                  style={{ width: 44, height: 44, minWidth: 44, minHeight: 44, border: 'none', borderRadius: 12, background: 'rgba(255,255,255,0.12)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: cameraZoom >= cameraZoomMax - (cameraZoomStep / 2) ? 0.45 : 1 }}
                 >
                   <Plus size={16} color="white" />
                 </button>

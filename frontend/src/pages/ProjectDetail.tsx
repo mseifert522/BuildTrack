@@ -1100,7 +1100,9 @@ export default function ProjectDetail() {
       }
       const res = await api.post('/calendar/events', payload);
       if (res.data?.warning) {
-        toast.error(res.data.warning);
+        // The event WAS created; a warning is not a failure. Show it as a
+        // neutral success so users don't re-submit and create duplicates.
+        toast.success(`Added to operations calendar. ${res.data.warning}`);
       } else {
         toast.success(calendarReminderEnabled ? 'Added to calendar with email reminder' : 'Added to operations calendar');
       }
@@ -2442,7 +2444,7 @@ function ProjectTextMessagesTab({ projectId, project }: { projectId: string; pro
 
         <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
           <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
-          <span>Messages are saved as office records now. They will send automatically once the selected SMS provider is configured.</span>
+          <span>Outbound texting is not enabled yet, so nothing is sent to the contractor. Every message here is safely saved to this project as an office record. Automatic sending turns on once an admin connects a text-message provider on the server &mdash; there is no in-app setup for this yet.</span>
         </div>
       </div>
 
@@ -3245,7 +3247,12 @@ function ProjectTimelineTab({ projectId, project, canManage, canDelete }: { proj
                   <CalendarDays className="h-3.5 w-3.5" />
                   Project Only
                 </span>
-                <span className="inline-flex rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-slate-200">Not connected to operations calendar</span>
+                <span
+                  title="Project-only schedule. These timeline tasks stay on this project and do not appear on the shared dashboard Operations Calendar. To place a specific item on the Operations Calendar, use the 'Add to Calendar' button in this project's Notes / Overview section."
+                  className="inline-flex cursor-help rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-slate-200"
+                >
+                  Project-only schedule
+                </span>
               </div>
               <h3 className="text-2xl font-black tracking-tight text-white">Project Timeline</h3>
               <p className="mt-1 max-w-4xl text-sm font-semibold leading-6 text-blue-100">
@@ -9030,7 +9037,7 @@ function QuotesTab({ projectId, project }: { projectId: string; project: any }) 
                               <td className="py-1.5 px-2 font-semibold text-slate-100">{item.description || item.subcategory || '-'}</td>
                               <td className="py-1.5 px-2 text-right font-semibold text-slate-100">{quoteNumberValue(item.quantity).toLocaleString('en-US')}</td>
                               <td className="py-1.5 px-2 font-semibold text-slate-300">{item.unit || '-'}</td>
-                              <td className="py-1.5 px-2 text-right font-semibold text-slate-100">{quoteMoney(item.unit_price)}</td>
+                              <td className="py-1.5 px-2 text-right font-semibold text-slate-100">{quoteNumberValue(item.unit_price) > 0 ? quoteMoney(item.unit_price) : (quoteNumberValue(item.total_line_item_price) > 0 && quoteNumberValue(item.quantity) > 0 ? <>{quoteMoney(quoteNumberValue(item.total_line_item_price) / quoteNumberValue(item.quantity))}{quoteNumberValue(item.quantity) === 1 && <span className="ml-1 rounded bg-slate-800 px-1 text-[9px] font-bold uppercase tracking-wide text-slate-400">lump</span>}</> : quoteMoney(0))}</td>
                               <td className="py-1.5 px-2 text-right font-black text-white">{quoteMoney(item.total_line_item_price)}</td>
                             </tr>
                           ))}

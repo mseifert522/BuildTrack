@@ -1847,7 +1847,20 @@ router.delete('/:id/notes/:noteId', authorizeProjectAccess, (req, res) => {
 
   db.prepare('UPDATE photos SET note_id = NULL WHERE note_id = ?').run(req.params.noteId);
   db.prepare('DELETE FROM project_notes WHERE id = ? AND project_id = ?').run(req.params.noteId, req.params.id);
-  logActivity({ userId: req.user.id, projectId: req.params.id, action: 'note_deleted', entityType: 'note', entityId: req.params.noteId });
+  logActivity({
+    userId: req.user.id,
+    projectId: req.params.id,
+    action: 'note_deleted',
+    entityType: 'note',
+    entityId: req.params.noteId,
+    // Preserve the deleted note body so a hard delete stays recoverable from the audit trail.
+    details: {
+      note: existing.note,
+      note_type: existing.note_type,
+      author_id: existing.user_id,
+      created_at: existing.created_at,
+    },
+  });
   res.json({ message: 'Note deleted' });
 });
 

@@ -2528,6 +2528,16 @@ aside ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
     min-width: 48px;
   }
 
+  /* iOS Safari zooms the page when focusing a control whose font-size < 16px.
+     Because the mobile shell is position:fixed, that zoom gets "stuck" and
+     shifts the layout. Force >=16px on all form controls to stop focus-zoom.
+     !important is required to beat inline styles / Tailwind text-sm. */
+  .mobile-shell input,
+  .mobile-shell textarea,
+  .mobile-shell select {
+    font-size: 16px !important;
+  }
+
   .mobile-shell {
     font-size: 1rem;
   }

@@ -234,11 +234,18 @@ async function call(baseUrl, pathName, { method = 'GET', token, body } = {}) {
     assert.equal(res.status, 403, 'project_manager cannot delete quotes');
     assert.equal(db.prepare('SELECT COUNT(*) AS c FROM contractor_quotes WHERE id = ?').get(quoteB.id).c, 1, 'quote still present after blocked deletes');
 
+    // quoteB was denied above, and rejected quotes are a permanent bucket kept
+    // for market/pricing analysis - deletion must be refused even for admins.
     res = await call(baseUrl, `/quotes/${quoteB.id}`, { method: 'DELETE', token: adminToken });
-    assert.equal(res.status, 200, 'super_admin can delete a quote');
-    assert.equal(db.prepare('SELECT COUNT(*) AS c FROM contractor_quotes WHERE id = ?').get(quoteB.id).c, 0, 'quote removed');
-    assert.equal(db.prepare('SELECT COUNT(*) AS c FROM quote_line_items WHERE quote_id = ?').get(quoteB.id).c, 0, 'line items cascade-deleted');
-    assert.equal(db.prepare("SELECT COUNT(*) AS c FROM activity_log WHERE action = 'quote_deleted' AND entity_id = ?").get(quoteB.id).c, 1, 'deletion written to activity log');
+    assert.equal(res.status, 409, 'rejected quotes cannot be deleted');
+    assert.equal(db.prepare('SELECT COUNT(*) AS c FROM contractor_quotes WHERE id = ?').get(quoteB.id).c, 1, 'rejected quote preserved');
+
+    // quoteC is still 'submitted', so the admin delete path works there.
+    res = await call(baseUrl, `/quotes/${quoteC.id}`, { method: 'DELETE', token: adminToken });
+    assert.equal(res.status, 200, 'super_admin can delete a non-rejected quote');
+    assert.equal(db.prepare('SELECT COUNT(*) AS c FROM contractor_quotes WHERE id = ?').get(quoteC.id).c, 0, 'quote removed');
+    assert.equal(db.prepare('SELECT COUNT(*) AS c FROM quote_line_items WHERE quote_id = ?').get(quoteC.id).c, 0, 'line items cascade-deleted');
+    assert.equal(db.prepare("SELECT COUNT(*) AS c FROM activity_log WHERE action = 'quote_deleted' AND entity_id = ?").get(quoteC.id).c, 1, 'deletion written to activity log');
 
     res = await call(baseUrl, '/quotes/does-not-exist', { method: 'DELETE', token: adminToken });
     assert.equal(res.status, 404, 'deleting an unknown quote returns 404');

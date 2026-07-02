@@ -20,9 +20,16 @@ function loadGoogleMapsScript(cb: () => void) {
   };
 
   const script = document.createElement('script');
-  script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_API_KEY}&libraries=places&callback=__googleMapsInit`;
+  script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_API_KEY}&libraries=places&loading=async&callback=__googleMapsInit`;
   script.async = true;
   script.defer = true;
+  script.onerror = () => {
+    // Reset loader state so a later mount can retry; the plain <input> still
+    // accepts manual typing when autocomplete is unavailable.
+    scriptLoading = false;
+    callbacks.length = 0;
+    console.error('Google Maps failed to load');
+  };
   document.head.appendChild(script);
 }
 
