@@ -481,7 +481,9 @@ export default function Projects() {
                   )}
                 </label>
                 <div className="w-full flex-1 min-w-0 max-w-full">
-                  <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  {/* Stay stacked through tablet widths: the action cluster is flex-shrink-0,
+                      so a row layout below lg squeezes the address down to a few characters. */}
+                  <div className="flex min-w-0 flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
                     <div className="min-w-0">
                       <div className="mb-2 flex flex-wrap items-center gap-1.5">
                         {priority && (
@@ -533,9 +535,9 @@ export default function Projects() {
                           </span>
                         )}
                       </div>
-                      <p className="bt-project-title truncate text-lg font-black leading-6 text-gray-950 sm:text-xl">{p.address}</p>
+                      <p className="bt-project-title line-clamp-2 break-words text-lg font-black leading-6 text-gray-950 sm:text-xl">{p.address}</p>
                     </div>
-                    <div className="flex flex-shrink-0 flex-wrap items-start gap-2 sm:items-center sm:justify-end">
+                    <div className="flex flex-shrink-0 flex-wrap items-start gap-2 lg:items-center lg:justify-end">
                       {review && (
                         <span
                           className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-wide whitespace-nowrap"
