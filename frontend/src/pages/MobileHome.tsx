@@ -48,10 +48,6 @@ const STATUS_META: Record<string, { label: string; tone: string }> = {
   archived: { label: 'Archived', tone: 'neutral' },
 };
 
-function projectLabel(project: Project) {
-  return project.job_name || project.address.split(',')[0] || 'Project';
-}
-
 function statusMeta(status?: string) {
   return STATUS_META[status || ''] || {
     label: String(status || 'Active').replace(/_/g, ' '),
@@ -323,72 +319,25 @@ export default function MobileHome() {
           onClick={() => navigate(`/mobile/project/${project.id}`)}
           className="btm-project-main"
         >
-          <span className="btm-project-pin" aria-hidden="true">
-            <MapPin size={24} />
-          </span>
           <span className="btm-project-copy">
-            <strong>{project.address}</strong>
-            <small>{projectLabel(project)}</small>
-            <span className="btm-project-badges">
+            <span className="btm-project-topline">
+              <span
+                className={`btm-lockbox-chip${lockboxCode ? '' : ' btm-lockbox-empty'}`}
+                title={lockboxCode ? `Lockbox ${lockboxCode}` : 'Lockbox not set'}
+              >
+                <KeyRound size={14} aria-hidden="true" />
+                <span>Lockbox</span>
+                <strong>{lockboxCode || 'Not set'}</strong>
+              </span>
               <span className={`btm-status-pill btm-status-${meta.tone}`}>{meta.label}</span>
-              {openPunch > 0 && <span className="btm-status-pill btm-status-danger">{openPunch} punch</span>}
-              {lockboxCode && (
-                <span
-                  className="btm-status-pill"
-                  style={{
-                    gap: 5,
-                    background: 'linear-gradient(135deg, #0F172A 0%, #1E3A8A 52%, #312E81 100%)',
-                    border: '1px solid #60A5FA',
-                    color: '#F8FAFC',
-                    boxShadow: '0 8px 18px rgba(15, 23, 42, 0.22)',
-                  }}
-                  title={`Lock Box ${lockboxCode}`}
-                >
-                  <KeyRound size={13} aria-hidden="true" />
-                  <span>Lock Box</span>
-                  <span
-                    style={{
-                      display: 'inline-flex',
-                      borderRadius: 999,
-                      padding: '3px 6px',
-                      background: '#F8FAFC',
-                      color: '#0F172A',
-                      width: 'auto',
-                      fontSize: 12,
-                      fontWeight: 950,
-                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                      lineHeight: 1,
-                    }}
-                  >
-                    {lockboxCode}
-                  </span>
-                </span>
-              )}
             </span>
+            <span className="btm-project-address">{project.address}</span>
+            {openPunch > 0 && (
+              <span className="btm-project-alert">{openPunch} open punch item{openPunch === 1 ? '' : 's'}</span>
+            )}
           </span>
           <ChevronRight className="btm-project-chevron" size={22} />
         </button>
-
-        <div className="btm-project-actions btm-project-actions-compact">
-          <button
-            type="button"
-            onClick={() => navigate(`/mobile/photos?projectId=${project.id}&camera=1`)}
-            className="btm-action-button btm-action-photo"
-            aria-label={`Take photos for ${project.address}`}
-          >
-            <Camera size={22} />
-            <span>Take Photos</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate(`/mobile/project/${project.id}`)}
-            className="btm-action-button btm-action-open"
-            aria-label={`Open field workspace for ${project.address}`}
-          >
-            <FolderOpen size={22} />
-            <span>Open</span>
-          </button>
-        </div>
       </article>
     );
   }
