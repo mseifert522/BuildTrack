@@ -587,30 +587,34 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
 
       <div
         className={forceMobileLogin
-          ? 'w-full max-w-[430px] min-h-full flex flex-col items-center justify-start relative bg-[#071426] px-4 py-3'
+          ? `w-full max-w-[430px] min-h-full flex flex-col items-center ${showMobileQuickAccessOnly ? 'justify-center px-5 py-6' : 'justify-start px-4 py-3'} relative bg-[#071426]`
           : 'flex-1 flex flex-col items-center justify-center px-4 py-8 sm:px-6 md:px-10 relative'}
         style={{
           background: forceMobileLogin ? '#071426' : '#F8F9FC',
-          paddingBottom: forceMobileLogin ? 'max(0.75rem, env(safe-area-inset-bottom))' : undefined,
+          paddingBottom: forceMobileLogin ? (showMobileQuickAccessOnly ? 'max(1.5rem, env(safe-area-inset-bottom))' : 'max(0.75rem, env(safe-area-inset-bottom))') : undefined,
         }}
       >
-        <div className={`${forceMobileLogin ? 'flex gap-2 mb-2' : 'lg:hidden flex gap-3 mb-5'} items-center w-full max-w-[460px]`}>
+        <div
+          className={forceMobileLogin
+            ? `flex ${showMobileQuickAccessOnly ? 'flex-col justify-center gap-3 mb-6 text-center' : 'gap-2 mb-2'} items-center w-full max-w-[460px]`
+            : 'lg:hidden flex gap-3 mb-5 items-center w-full max-w-[460px]'}
+        >
           <div
-            className={`${forceMobileLogin ? 'h-10 w-10' : 'h-12 w-12'} rounded-lg overflow-hidden bg-slate-950 shadow-sm flex-shrink-0`}
+            className={`${showMobileQuickAccessOnly ? 'h-14 w-14' : forceMobileLogin ? 'h-10 w-10' : 'h-12 w-12'} rounded-lg overflow-hidden bg-slate-950 shadow-sm flex-shrink-0`}
             style={{ boxShadow: '0 0 0 1px rgba(217,157,38,0.46)' }}
           >
             <img src={BUILDTRACK_TRUTH_ICON_SRC} alt="BuildTrack" className="h-full w-full object-contain" />
           </div>
           <div>
-            <h1 className={`${forceMobileLogin ? 'text-lg' : 'text-xl'} font-black ${forceMobileLogin ? 'text-white' : 'text-gray-900'}`}>BuildTrack</h1>
-            <p className={`${forceMobileLogin ? 'text-[10px]' : 'text-xs'} font-semibold uppercase`} style={{ color: '#D99D26' }}>Construction Management</p>
+            <h1 className={`${showMobileQuickAccessOnly ? 'text-xl' : forceMobileLogin ? 'text-lg' : 'text-xl'} font-black ${forceMobileLogin ? 'text-white' : 'text-gray-900'}`}>BuildTrack</h1>
+            <p className={`${showMobileQuickAccessOnly ? 'text-xs' : forceMobileLogin ? 'text-[10px]' : 'text-xs'} font-semibold uppercase`} style={{ color: '#D99D26' }}>Construction Management</p>
           </div>
         </div>
 
-        <div className="w-full max-w-[460px]">
-          <div className={`${forceMobileLogin ? 'mb-2' : 'mb-5'} text-center`}>
-            <h2 className={`${forceMobileLogin ? 'text-xl' : 'text-3xl'} font-black ${forceMobileLogin ? 'text-white' : 'text-gray-900'}`}>Welcome back</h2>
-            <p className={`${forceMobileLogin ? 'mt-0.5 text-xs' : 'mt-2 text-sm'} ${forceMobileLogin ? 'text-slate-50' : 'text-gray-500'}`}>
+        <div className={`w-full ${showMobileQuickAccessOnly ? 'max-w-[390px]' : 'max-w-[460px]'}`}>
+          <div className={`${showMobileQuickAccessOnly ? 'mb-7' : forceMobileLogin ? 'mb-2' : 'mb-5'} text-center`}>
+            <h2 className={`${showMobileQuickAccessOnly ? 'text-2xl' : forceMobileLogin ? 'text-xl' : 'text-3xl'} font-black ${forceMobileLogin ? 'text-white' : 'text-gray-900'}`}>Welcome back</h2>
+            <p className={`${showMobileQuickAccessOnly ? 'mt-2 text-sm leading-snug' : forceMobileLogin ? 'mt-0.5 text-xs' : 'mt-2 text-sm'} ${forceMobileLogin ? 'text-slate-50' : 'text-gray-500'}`}>
               {showMobileQuickAccessOnly ? 'One Touch Access is ready on this device.' : 'Choose one secure sign-in method.'}
             </p>
           </div>
@@ -684,35 +688,35 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
               </div>
             </form>
           ) : (
-            <div className={forceMobileLogin ? 'space-y-2' : 'space-y-3'}>
+            <div className={showMobileQuickAccessOnly ? 'space-y-0' : forceMobileLogin ? 'space-y-2' : 'space-y-3'}>
               {quickAccessReady && (
-                <div className={showMobileQuickAccessOnly ? 'space-y-2 rounded-2xl bg-slate-950/20 p-3' : undefined}>
+                <div className={showMobileQuickAccessOnly ? 'space-y-4 rounded-2xl bg-slate-950/20 p-5 text-center' : undefined}>
                   <button
                     type="button"
                     onClick={handleMobileQuickAccessLogin}
                     disabled={quickAccessLoading}
-                    className={`w-full flex items-center justify-between gap-3 ${showMobileQuickAccessOnly ? 'p-4 rounded-xl' : forceMobileLogin ? 'p-3 rounded-xl' : 'p-4 rounded-lg'} text-left transition-all disabled:opacity-60`}
+                    className={`w-full ${showMobileQuickAccessOnly ? 'relative min-h-[108px] justify-center p-5 rounded-2xl text-center' : 'justify-between gap-3 text-left'} flex items-center ${forceMobileLogin && !showMobileQuickAccessOnly ? 'p-3 rounded-xl' : !showMobileQuickAccessOnly ? 'p-4 rounded-lg' : ''} transition-all disabled:opacity-60`}
                     style={{ background: 'linear-gradient(135deg, #F7B733, #D99D26)', color: '#06111F', boxShadow: '0 12px 28px rgba(217,157,38,0.28)' }}
                   >
-                    <span className="flex items-center gap-3 min-w-0">
-                      <span className={`${showMobileQuickAccessOnly ? 'h-11 w-11' : forceMobileLogin ? 'h-8 w-8' : 'h-11 w-11'} rounded-lg flex items-center justify-center flex-shrink-0`} style={{ background: 'rgba(255,255,255,0.18)' }}>
+                    <span className={`flex items-center ${showMobileQuickAccessOnly ? 'justify-center gap-4' : 'gap-3'} min-w-0`}>
+                      <span className={`${showMobileQuickAccessOnly ? 'h-12 w-12' : forceMobileLogin ? 'h-8 w-8' : 'h-11 w-11'} rounded-lg flex items-center justify-center flex-shrink-0`} style={{ background: 'rgba(255,255,255,0.18)' }}>
                         <Smartphone className={showMobileQuickAccessOnly ? 'h-5 w-5' : forceMobileLogin ? 'h-4 w-4' : 'h-5 w-5'} />
                       </span>
-                      <span className="min-w-0">
-                        <span className={`block ${showMobileQuickAccessOnly ? 'text-base' : forceMobileLogin ? 'text-xs' : 'text-sm'} font-black`}>One Touch Access</span>
-                        <span className={`block ${showMobileQuickAccessOnly ? 'text-xs leading-snug' : forceMobileLogin ? 'text-[11px] leading-snug' : 'text-xs mt-0.5'}`} style={{ color: 'rgba(6,17,31,0.78)' }}>
+                      <span className={`${showMobileQuickAccessOnly ? 'text-left' : ''} min-w-0`}>
+                        <span className={`block ${showMobileQuickAccessOnly ? 'text-lg whitespace-nowrap' : forceMobileLogin ? 'text-xs' : 'text-sm'} font-black`}>One Touch Access</span>
+                        <span className={`block ${showMobileQuickAccessOnly ? 'mt-1 text-sm leading-snug' : forceMobileLogin ? 'text-[11px] leading-snug' : 'text-xs mt-0.5'}`} style={{ color: 'rgba(6,17,31,0.78)' }}>
                           Continue as {quickAccessLabel}.
                         </span>
                       </span>
                     </span>
                     {quickAccessLoading ? (
-                      <span className="w-5 h-5 rounded-full animate-spin flex-shrink-0" style={{ border: '2px solid rgba(6,17,31,0.25)', borderTopColor: '#06111F' }} />
+                      <span className={`${showMobileQuickAccessOnly ? 'absolute right-5 top-1/2 -translate-y-1/2' : ''} w-5 h-5 rounded-full animate-spin flex-shrink-0`} style={{ border: '2px solid rgba(6,17,31,0.25)', borderTopColor: '#06111F' }} />
                     ) : (
-                      <ArrowRight className="w-5 h-5 flex-shrink-0" />
+                      <ArrowRight className={`${showMobileQuickAccessOnly ? 'absolute right-5 top-1/2 -translate-y-1/2 h-7 w-7' : 'w-5 h-5'} flex-shrink-0`} />
                     )}
                   </button>
                   {showMobileQuickAccessOnly && (
-                    <p className="px-1 text-center text-xs leading-snug text-slate-100">
+                    <p className="mx-auto max-w-[20rem] px-1 text-center text-sm leading-relaxed text-slate-100">
                       One Touch Access stays active for 7 days after signing in with a PIN and 2FA or Email & Password and 2FA.
                     </p>
                   )}
