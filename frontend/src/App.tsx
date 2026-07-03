@@ -236,8 +236,6 @@ function DeviceHostRedirect() {
 
     if (mobileDevice && onDesktopHost) {
       destination = mobileExternalUrl(requestedPath);
-    } else if (!mobileDevice && onMobileHost) {
-      destination = desktopExternalUrl(requestedPath);
     } else if (!mobileDevice && onDesktopHost && legacyMobilePath) {
       destination = desktopExternalUrl(requestedPath);
     } else if (mobileDevice && onMobileHost && legacyMobilePath) {
@@ -506,7 +504,7 @@ function MobileHostRoutes() {
       <Route path="/approval/mobile-login-preview" element={<MobileLoginDesignPreview />} />
 
       {/* Auth */}
-      <Route path="/login" element={<AuthRoute><Login initialMode="pin" /></AuthRoute>} />
+      <Route path="/login" element={<AuthRoute><Login initialMode="pin" forceMobileLogin /></AuthRoute>} />
       <Route path="/change-password" element={<ChangePassword />} />
       <Route path="/forgot-password" element={<AuthRoute><ForgotPassword /></AuthRoute>} />
       <Route path="/reset-password" element={<ResetPassword />} />
@@ -526,7 +524,7 @@ function MobileHostRoutes() {
 
       {/* Legacy mobile paths are normalized on the mobile host. */}
       <Route path="/mobile/*" element={<MobileRoute><LegacyMobilePathRedirect /></MobileRoute>} />
-      <Route path="/app" element={<AuthRoute><Login initialMode="pin" /></AuthRoute>} />
+      <Route path="/app" element={<AuthRoute><Login initialMode="pin" forceMobileLogin /></AuthRoute>} />
       <Route path="/app/*" element={<MobileRoute><LegacyMobilePathRedirect /></MobileRoute>} />
 
       {/* Management users can reach the full management surface from the mobile host. */}

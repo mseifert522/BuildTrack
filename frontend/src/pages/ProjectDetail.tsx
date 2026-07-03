@@ -5,7 +5,7 @@ import api from '../lib/api';
 import { Loading, StatusBadge, Modal, statusLabels } from '../components/ui';
 import Avatar from '../components/Avatar';
 import VoiceTextarea from '../components/VoiceTextarea';
-import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, ClipboardList, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle, Send, Phone, Mail, Building2, AlertTriangle, Check, Paperclip, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, CalendarDays, Search, GripVertical, CheckCircle2, XCircle, Database, ListFilter, Bot } from 'lucide-react';
+import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, ClipboardList, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle, Send, Phone, Mail, Building2, AlertTriangle, Check, Paperclip, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, CalendarDays, Search, GripVertical, CheckCircle2, XCircle, Database, ListFilter, Bot, Receipt, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useForm } from 'react-hook-form';
 import { format } from 'date-fns';
@@ -18,6 +18,7 @@ import {
   appendProgressUploadAudit,
   isSupportedProgressMediaFile,
   MAX_PROGRESS_UPLOAD_BATCH_FILES,
+  prepareProgressUploadFile,
   PROGRESS_MEDIA_ACCEPT,
   type ProgressCaptureSource,
 } from '../lib/progressUpload';
@@ -122,6 +123,13 @@ type ContractorTextMessage = {
 };
 
 type DictationStatus = 'idle' | 'starting' | 'listening';
+type NoteAttachmentProgress = {
+  phase: 'preparing' | 'uploading' | 'processing' | 'finishing';
+  current: number;
+  total: number;
+  percent: number;
+  fileName?: string;
+};
 const PROJECT_BUDGET_ROLES = new Set(['super_admin', 'operations_manager', 'project_manager']);
 const PROJECT_CALENDAR_ROLES = new Set(['super_admin', 'operations_manager', 'project_manager']);
 const PROJECT_CALENDAR_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -140,6 +148,24 @@ function canViewProjectBudget(role?: string | null) {
 
 function canViewProjectCalendar(role?: string | null) {
   return PROJECT_CALENDAR_ROLES.has(String(role || ''));
+}
+
+function noteAttachmentProgressLabel(progress: NoteAttachmentProgress) {
+  if (progress.phase === 'finishing') return 'Finishing...';
+  if (progress.phase === 'processing') {
+    return progress.total > 1
+      ? `Processing ${progress.current}/${progress.total}`
+      : 'Processing...';
+  }
+  if (progress.phase === 'preparing') {
+    return progress.total > 1
+      ? `Preparing ${progress.current}/${progress.total}`
+      : 'Preparing...';
+  }
+  const percent = Math.max(0, Math.min(100, Math.round(progress.percent || 0)));
+  return progress.total > 1
+    ? `Uploading ${progress.current}/${progress.total} ${percent}%`
+    : `Uploading ${percent}%`;
 }
 
 function appendDictationText(base: string, spokenText: string) {
@@ -789,6 +815,8 @@ export default function ProjectDetail() {
   const [notePhotoSource, setNotePhotoSource] = useState<ProgressCaptureSource>('desktop');
   const [attachNoteId, setAttachNoteId] = useState<string | null>(null);
   const [attachingNoteId, setAttachingNoteId] = useState<string | null>(null);
+  const [attachProgress, setAttachProgress] = useState<NoteAttachmentProgress | null>(null);
+  const [noteLightbox, setNoteLightbox] = useState<ProgressLightboxState | null>(null);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editingNoteText, setEditingNoteText] = useState('');
   const [editingNoteType, setEditingNoteType] = useState('general');
@@ -989,16 +1017,67 @@ export default function ProjectDetail() {
     }
   };
 
-  const uploadProgressPicturesToNote = async (noteId: string, files: File[], source: ProgressCaptureSource = 'desktop') => {
+  const uploadProgressPicturesToNote = async (
+    noteId: string,
+    files: File[],
+    source: ProgressCaptureSource = 'desktop',
+    onProgress?: (progress: NoteAttachmentProgress) => void
+  ) => {
     if (!files.length) return;
-    const formData = new FormData();
-    files.forEach(file => formData.append('photos', file));
-    formData.append('note_id', noteId);
-    formData.append('photo_type', 'progress');
-    formData.append('caption', 'Photos attached to project note');
-    await appendProgressUploadAudit(formData, files, files.map(() => source), { projectId: id });
-    await api.post(`/projects/${id}/photos?type=progress`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
+    const batchId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const total = files.length;
+
+    for (const [index, originalFile] of files.entries()) {
+      const current = index + 1;
+      onProgress?.({
+        phase: 'preparing',
+        current,
+        total,
+        percent: Math.round((index / total) * 100),
+        fileName: originalFile.name,
+      });
+      const uploadFile = await prepareProgressUploadFile(originalFile);
+      const formData = new FormData();
+
+      formData.append('note_id', noteId);
+      formData.append('photo_type', 'progress');
+      formData.append('caption', 'Photos attached to project note');
+      await appendProgressUploadAudit(formData, [originalFile], [source], {
+        projectId: id,
+        batchId,
+        batchSequenceStart: current,
+        skipDeviceLocation: source === 'desktop',
+      });
+      formData.append('photos', uploadFile);
+
+      onProgress?.({
+        phase: 'uploading',
+        current,
+        total,
+        percent: Math.round((index / total) * 100),
+        fileName: originalFile.name,
+      });
+      await api.post(`/projects/${id}/photos?type=progress`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: event => {
+          const totalBytes = event.total || uploadFile.size || 0;
+          const ratio = totalBytes ? Math.min(event.loaded / totalBytes, 1) : 0;
+          onProgress?.({
+            phase: ratio >= 0.999 ? 'processing' : 'uploading',
+            current,
+            total,
+            percent: Math.min(99, Math.round(((index + ratio) / total) * 100)),
+            fileName: originalFile.name,
+          });
+        },
+      });
+    }
+
+    onProgress?.({
+      phase: 'finishing',
+      current: total,
+      total,
+      percent: 100,
     });
   };
 
@@ -1007,8 +1086,20 @@ export default function ProjectDetail() {
     const targetNoteId = explicitNoteId || attachNoteId;
     if (!targetNoteId || selectedFiles.length === 0) return;
     setAttachingNoteId(targetNoteId);
+    setAttachProgress({
+      phase: 'preparing',
+      current: 1,
+      total: selectedFiles.length,
+      percent: 0,
+      fileName: selectedFiles[0]?.name,
+    });
     try {
-      await uploadProgressPicturesToNote(targetNoteId, selectedFiles, isMobileCaptureContext() ? 'device_camera' : 'desktop');
+      await uploadProgressPicturesToNote(
+        targetNoteId,
+        selectedFiles,
+        isMobileCaptureContext() ? 'device_camera' : 'desktop',
+        setAttachProgress
+      );
       toast.success(`${selectedFiles.length} progress picture${selectedFiles.length === 1 ? '' : 's'} attached`);
       await loadNotes();
     } catch (err: any) {
@@ -1016,6 +1107,7 @@ export default function ProjectDetail() {
     } finally {
       setAttachNoteId(null);
       setAttachingNoteId(null);
+      setAttachProgress(null);
       if (attachExistingNoteInputRef.current) attachExistingNoteInputRef.current.value = '';
     }
   };
@@ -1225,6 +1317,7 @@ export default function ProjectDetail() {
     { id: 'quotes', label: 'Quotes', icon: FileText },
     { id: 'punch-list', label: punchlistStageActive ? 'Punch List Active' : 'Start Punch List', icon: ClipboardList },
     { id: 'photos', label: 'Photos Bucket', icon: Camera },
+    { id: 'invoices', label: 'Invoices', icon: Receipt },
     { id: 'team', label: 'Assigned Contractors', icon: Users },
     { id: 'texts', label: 'Text Contractors', icon: MessageSquare },
   ];
@@ -1589,41 +1682,68 @@ export default function ProjectDetail() {
                   <span className={`inline-flex mt-2 rounded-full border px-2.5 py-0.5 text-sm font-bold ${note.visibility === 'public' ? 'border-emerald-300/40 bg-emerald-500/15 text-emerald-100' : 'border-slate-500 bg-slate-800 text-slate-200'}`}>
                     {note.visibility === 'public' ? 'Public to contractors' : 'Private management note'}
                   </span>
-                  {getNotePhotos(note).length > 0 && (
-                    <div className="bt-project-note-media-panel mt-2 rounded-lg border border-cyan-300/25 bg-slate-950/70 p-2 shadow-inner">
-                      <div className="bt-project-note-media-grid grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
-                        {getNotePhotos(note).map((photo: any) => {
-                          const src = `/uploads/${note.project_id}/${photo.filename}`;
-                          const mediaKind = getProgressMediaKind(photo);
-                          const isVideo = mediaKind === 'video';
-                          return (
-                            <div
-                              key={photo.id}
-                              className={`bt-project-note-media-tile relative aspect-square overflow-hidden rounded-lg border border-slate-300 bg-white shadow-sm ${mediaKind === 'file' ? 'cursor-pointer' : ''}`}
-                              onClick={() => {
-                                if (mediaKind === 'file') window.open(src, '_blank', 'noopener,noreferrer');
-                              }}
-                            >
-                              {isVideo ? (
-                                <>
-                                  <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
-                                  <PlayCircle className="absolute inset-0 m-auto h-7 w-7 text-white drop-shadow" />
-                                </>
-                              ) : mediaKind === 'image' ? (
-                                <img src={src} alt={photo.original_name || 'Note attachment'} className="h-full w-full object-cover" loading="lazy" />
-                              ) : (
-                                <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
-                              )}
-                              <div className="absolute bottom-1 left-1 rounded-full bg-black/65 px-1.5 py-0.5 text-[10px] font-black text-white">
-                                {formatEasternDateTime(photo.taken_at || photo.created_at, { hour: 'numeric', minute: '2-digit' })}
-                              </div>
-                            </div>
-                          );
-                        })}
+                  {(() => {
+                    const notePhotos = getNotePhotos(note);
+                    if (notePhotos.length === 0) return null;
+
+                    const noteProjectId = String(note.project_id || id || '');
+                    const noteLightboxItems = buildProgressLightboxItems(noteProjectId, notePhotos);
+
+                    return (
+                      <div className="bt-project-note-media-panel mt-2 rounded-lg border border-cyan-300/25 bg-slate-950/70 p-2 shadow-inner">
+                        <div className="bt-project-note-media-grid grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
+                          {notePhotos.map((photo: any) => {
+                            const src = progressPhotoSrc(noteProjectId, photo);
+                            const mediaKind = getProgressMediaKind(photo);
+                            const isVideo = mediaKind === 'video';
+                            const mediaKey = progressPhotoKey(photo);
+                            const lightboxIndex = noteLightboxItems.findIndex(item => item.id === mediaKey);
+                            const canPreviewInProject = mediaKind !== 'file' && lightboxIndex >= 0;
+                            const attachmentName = photo.original_name || photo.filename || 'Note attachment';
+                            const openNoteMedia = () => {
+                              if (mediaKind === 'file') {
+                                window.open(src, '_blank', 'noopener,noreferrer');
+                                return;
+                              }
+                              if (canPreviewInProject) setNoteLightbox({ items: noteLightboxItems, index: lightboxIndex });
+                            };
+
+                            return (
+                              <button
+                                type="button"
+                                key={mediaKey || attachmentName}
+                                data-no-image-lightbox="true"
+                                className="bt-project-note-media-tile group relative aspect-square overflow-hidden rounded-lg border border-slate-300 bg-white text-left shadow-sm transition hover:border-cyan-200 hover:shadow-cyan-900/30 focus:outline-none focus:ring-2 focus:ring-cyan-300"
+                                onClick={openNoteMedia}
+                                aria-label={
+                                  canPreviewInProject
+                                    ? `Open note photo ${lightboxIndex + 1} of ${noteLightboxItems.length}`
+                                    : `Open note attachment ${attachmentName}`
+                                }
+                              >
+                                {isVideo ? (
+                                  <>
+                                    <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+                                    <PlayCircle className="absolute inset-0 m-auto h-7 w-7 text-white drop-shadow" />
+                                  </>
+                                ) : mediaKind === 'image' ? (
+                                  <img src={src} alt={attachmentName} className="h-full w-full object-cover transition duration-200 group-hover:scale-[1.02]" loading="lazy" />
+                                ) : (
+                                  <UnsupportedProgressMediaTile name={attachmentName} />
+                                )}
+                                <div className="absolute bottom-1 left-1 rounded-full bg-black/65 px-1.5 py-0.5 text-[10px] font-black text-white">
+                                  {formatEasternDateTime(photo.taken_at || photo.created_at, { hour: 'numeric', minute: '2-digit' })}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <p className="bt-project-note-media-label px-1 pt-2 text-sm font-bold text-cyan-100/85">
+                          {noteLightboxItems.length || notePhotos.length} photo{(noteLightboxItems.length || notePhotos.length) === 1 ? '' : 's'} attached to this note
+                        </p>
                       </div>
-                      <p className="bt-project-note-media-label px-1 pt-2 text-sm font-bold text-cyan-100/85">Photos attached to this note</p>
-                    </div>
-                  )}
+                    );
+                  })()}
                   {note.edited_at && (
                     <p className="text-sm text-slate-300 mt-2">Edited by {note.edited_by_name || note.user_name} on {formatEasternDateTime(note.edited_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time</p>
                   )}
@@ -1660,10 +1780,16 @@ export default function ProjectDetail() {
                     disabled: attachingNoteId === note.id,
                     multiple: true,
                   })}
-                  className="mt-2 ml-3 inline-flex items-center gap-1 text-xs font-bold text-amber-200 hover:text-white hover:underline disabled:opacity-50"
+                  className="mt-2 ml-3 inline-flex min-h-8 items-center gap-1 rounded-lg px-1.5 text-xs font-bold text-amber-200 transition hover:text-white hover:underline disabled:cursor-wait disabled:text-amber-100 disabled:opacity-90"
                 >
-                  <ImagePlus className="w-3 h-3" />
-                  {attachingNoteId === note.id ? 'Attaching...' : 'Attach photos'}
+                  {attachingNoteId === note.id ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <ImagePlus className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
+                  {attachingNoteId === note.id && attachProgress
+                    ? noteAttachmentProgressLabel(attachProgress)
+                    : attachingNoteId === note.id ? 'Attaching...' : 'Attach photos'}
                 </button>
               )}
             </div>
@@ -1728,18 +1854,6 @@ export default function ProjectDetail() {
                 <span className="min-w-0 leading-tight">{label}</span>
               </button>
             ))}
-            <AddToCalendarButton
-              label="Add to Calendar"
-              defaultTitle={`Project reminder - ${project.address || project.job_name || 'project'}`}
-              defaultDescription={[project.job_name, project.address].filter(Boolean).join('\n')}
-              defaultDate={project.target_completion || project.start_date || null}
-              projectId={id || project.id}
-              sourceType="project"
-              sourceId={id || project.id}
-              contextLabel={[project.address, project.job_name].filter(Boolean).join(' - ')}
-              onSaved={loadProjectCalendar}
-              buttonClassName="bt-project-tab-button inline-flex min-h-10 min-w-0 items-center justify-center gap-1 rounded-lg border border-slate-600 bg-gradient-to-br from-slate-800 via-slate-950 to-blue-950 px-1.5 py-1.5 text-center text-[10px] font-black leading-tight text-slate-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.11),0_8px_16px_rgba(2,6,23,0.36)] transition-all duration-150 hover:border-cyan-300 hover:from-slate-700 hover:via-blue-950 hover:to-cyan-950 hover:text-white sm:px-2"
-            />
           </div>
         </div>
       </div>
@@ -1851,7 +1965,7 @@ export default function ProjectDetail() {
         )}
 
         {tab === 'project-timeline' && (
-          <ProjectTimelineTab projectId={id!} project={project} canManage={!!canEdit} canDelete={!!canChangeStatus} />
+          <ProjectTimelineTab projectId={id!} project={project} canManage={!!canEdit} canDelete={!!canChangeStatus} onCalendarSaved={loadProjectCalendar} />
         )}
 
         {tab === 'quotes' && (
@@ -1890,6 +2004,8 @@ export default function ProjectDetail() {
         )}
 
       </div>
+
+      <ProgressMediaLightbox state={noteLightbox} onChange={setNoteLightbox} />
 
       {/* Edit Project Modal */}
       <Modal isOpen={showEdit} onClose={() => setShowEdit(false)} title="Edit Project" size="lg">
@@ -3040,7 +3156,7 @@ function rowOverlapsWindow(row: ProjectTimelineRow, windowStart: Date, windowEnd
   return row.end >= windowStart && row.start <= windowEnd;
 }
 
-function ProjectTimelineTab({ projectId, project, canManage, canDelete }: { projectId: string; project: any; canManage: boolean; canDelete: boolean }) {
+function ProjectTimelineTab({ projectId, project, canManage, canDelete, onCalendarSaved }: { projectId: string; project: any; canManage: boolean; canDelete: boolean; onCalendarSaved?: () => void | Promise<void> }) {
   const [scopes, setScopes] = useState<any[]>([]);
   const [planItems, setPlanItems] = useState<any[]>([]);
   const [materials, setMaterials] = useState<any[]>([]);
@@ -3248,7 +3364,7 @@ function ProjectTimelineTab({ projectId, project, canManage, canDelete }: { proj
                   Project Only
                 </span>
                 <span
-                  title="Project-only schedule. These timeline tasks stay on this project and do not appear on the shared dashboard Operations Calendar. To place a specific item on the Operations Calendar, use the 'Add to Calendar' button in this project's Notes / Overview section."
+                  title="Project-only schedule. These timeline tasks stay on this project and do not appear on the shared dashboard Operations Calendar. To place a project reminder on the Operations Calendar, use Add to Calendar in this timeline header."
                   className="inline-flex cursor-help rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-slate-200"
                 >
                   Project-only schedule
@@ -3260,6 +3376,18 @@ function ProjectTimelineTab({ projectId, project, canManage, canDelete }: { proj
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
+              <AddToCalendarButton
+                label="Add to Calendar"
+                defaultTitle={`Project reminder - ${project?.address || project?.job_name || 'project'}`}
+                defaultDescription={[project?.job_name, project?.address].filter(Boolean).join('\n')}
+                defaultDate={project?.target_completion || project?.start_date || null}
+                projectId={projectId || project?.id}
+                sourceType="project"
+                sourceId={projectId || project?.id}
+                contextLabel={[project?.address, project?.job_name].filter(Boolean).join(' - ')}
+                onSaved={onCalendarSaved}
+                buttonClassName="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-amber-300/45 bg-amber-500/15 px-4 text-sm font-black text-amber-100 transition-colors hover:bg-amber-500/25 hover:text-white"
+              />
               {[
                 { id: 'full' as const, label: 'Full Timeline' },
                 { id: 'lookahead' as const, label: '4-Week Lookahead' },
@@ -7219,21 +7347,32 @@ function ProgressMediaLightbox({
   if (!state || !activeItem) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4" onClick={() => onChange(null)}>
+    <div className="fixed inset-0 z-[1300] flex items-center justify-center bg-black/90 p-3 sm:p-4" onClick={() => onChange(null)}>
       <div className="relative flex h-[90dvh] max-h-[90vh] w-[94vw] max-w-7xl flex-col overflow-hidden rounded-xl border border-white/20 bg-slate-950 shadow-2xl" onClick={event => event.stopPropagation()}>
         <div className="flex min-h-14 items-center justify-between gap-3 border-b border-white/10 bg-black/45 px-4 py-3">
-          <div className="min-w-0">
-            <p className="text-[11px] font-black uppercase tracking-wide text-orange-300">Progress picture preview</p>
-            <h3 className="truncate text-sm font-black text-white">{activeItem.name || 'Progress picture'}</h3>
-            <p className="truncate text-xs font-semibold text-white/60">
-              {activeItem.meta || 'Project media'}{itemCount > 1 ? ` - ${state.index + 1} of ${itemCount}` : ''}
-            </p>
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <button
+              type="button"
+              className="inline-flex min-h-10 flex-shrink-0 items-center gap-2 rounded-lg border border-white/20 bg-white/10 px-3 text-sm font-black text-white transition hover:border-cyan-300 hover:bg-cyan-400/15 hover:text-cyan-100 focus:outline-none focus:ring-2 focus:ring-cyan-300"
+              onClick={() => onChange(null)}
+              aria-label="Back to project"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span className="hidden sm:inline">Back to project</span>
+            </button>
+            <div className="min-w-0">
+              <p className="text-[11px] font-black uppercase tracking-wide text-cyan-300">Project picture viewer</p>
+              <h3 className="truncate text-sm font-black text-white">{activeItem.name || 'Project picture'}</h3>
+              <p className="truncate text-xs font-semibold text-white/60">
+                {activeItem.meta || 'Project media'}{itemCount > 1 ? ` - ${state.index + 1} of ${itemCount}` : ''}
+              </p>
+            </div>
           </div>
           <button
             type="button"
             className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-white/20 bg-white/10 text-white transition hover:border-orange-300 hover:text-orange-200"
             onClick={() => onChange(null)}
-            aria-label="Close progress picture preview"
+            aria-label="Close project picture viewer"
           >
             <XIcon />
           </button>
@@ -7259,7 +7398,7 @@ function ProgressMediaLightbox({
                 type="button"
                 onClick={() => move(-1)}
                 className="absolute left-3 top-1/2 inline-flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/70 text-white shadow-lg transition hover:border-orange-300 hover:bg-black/90 hover:text-orange-200"
-                aria-label="Previous progress picture"
+                aria-label="Previous project picture"
               >
                 <ChevronLeft className="h-7 w-7" />
               </button>
@@ -7267,7 +7406,7 @@ function ProgressMediaLightbox({
                 type="button"
                 onClick={() => move(1)}
                 className="absolute right-3 top-1/2 inline-flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/70 text-white shadow-lg transition hover:border-orange-300 hover:bg-black/90 hover:text-orange-200"
-                aria-label="Next progress picture"
+                aria-label="Next project picture"
               >
                 <ChevronRight className="h-7 w-7" />
               </button>
@@ -7731,7 +7870,11 @@ function PhotoBucketPickerModal({
             disabled={saving}
             className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-cyan-300 bg-cyan-600 px-4 text-sm font-black text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            <Camera className="h-4 w-4" />
+            {saving ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Camera className="h-4 w-4" aria-hidden="true" />
+            )}
             {saving ? 'Attaching...' : `Use ${selectedPhotos.length} Photo${selectedPhotos.length === 1 ? '' : 's'}`}
           </button>
         </div>
@@ -8317,7 +8460,11 @@ function PhotosTab({ projectId, project, user }: { projectId: string; project: a
                 disabled={assigningScopes || scopeAssignIds.size === 0}
                 className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-black text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
               >
-                <ClipboardList className="h-4 w-4" />
+                {assigningScopes ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <ClipboardList className="h-4 w-4" aria-hidden="true" />
+                )}
                 {assigningScopes ? 'Assigning...' : 'Save Photo Assignments'}
               </button>
             </div>
@@ -8328,46 +8475,273 @@ function PhotosTab({ projectId, project, user }: { projectId: string; project: a
   );
 }
 
+type ProjectInvoiceLineItem = {
+  id: string;
+  invoice_id: string;
+  description?: string | null;
+  amount?: number | string | null;
+  sort_order?: number | null;
+  source?: string | null;
+  quickbooks_bill_id?: string | null;
+  category_name?: string | null;
+  class_name?: string | null;
+};
+
+type ProjectInvoiceRow = {
+  id: string;
+  source?: string | null;
+  source_label?: string | null;
+  invoice_number?: string | null;
+  external_invoice_number?: string | null;
+  contractor_id?: string | null;
+  contractor_name?: string | null;
+  contractor_email?: string | null;
+  total?: number | string | null;
+  balance?: number | string | null;
+  status?: string | null;
+  created_at?: string | null;
+  submitted_at?: string | null;
+  updated_at?: string | null;
+  due_date?: string | null;
+  linked_work_count?: number | null;
+  payment_hold_count?: number | null;
+  line_item_count?: number | null;
+  line_items?: ProjectInvoiceLineItem[];
+  quickbooks_bill_id?: string | null;
+  quickbooks_payment_status?: string | null;
+  quickbooks_approval_status?: string | null;
+  matched_invoice_id?: string | null;
+  detail_url?: string | null;
+};
+
+function formatInvoiceMoney(value: any) {
+  return Number(value || 0).toLocaleString('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function invoiceStatusLabel(status?: string | null) {
+  return String(status || 'draft').replace(/_/g, ' ');
+}
+
+function projectInvoiceSourceLabel(invoice: ProjectInvoiceRow) {
+  return invoice.source_label || (invoice.source === 'quickbooks' ? 'QuickBooks' : 'BuildTrack');
+}
+
+function projectInvoiceStatusLabel(invoice: ProjectInvoiceRow, status?: string | null) {
+  if (invoice.source !== 'quickbooks') return invoiceStatusLabel(status);
+  const paymentStatus = String(invoice.quickbooks_payment_status || '').toLowerCase();
+  const approvalStatus = String(invoice.quickbooks_approval_status || '').toLowerCase();
+  if (status === 'paid' || paymentStatus === 'paid' || Number(invoice.balance || 0) <= 0) return 'paid';
+  if (paymentStatus === 'partial') return 'partial';
+  if (approvalStatus === 'approved_for_payment') return 'friday queue';
+  return 'open';
+}
+
 function InvoicesTab({ projectId, user, project }: { projectId: string; user: any; project: any }) {
   const navigate = useNavigate();
-  const [invoices, setInvoices] = useState<any[]>([]);
+  const [invoices, setInvoices] = useState<ProjectInvoiceRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedContractorId, setSelectedContractorId] = useState('all');
+  const [error, setError] = useState('');
 
   const load = async () => {
     try {
+      setError('');
       const res = await api.get(`/projects/${projectId}/invoices`);
-      setInvoices(res.data);
-    } catch (err) { } finally { setLoading(false); }
+      setInvoices(Array.isArray(res.data) ? res.data : []);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to load project invoices');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [projectId]);
 
-  const statusColors: Record<string, string> = { draft: 'bg-slate-500/15 text-slate-200 border border-slate-400/30', submitted: 'bg-blue-500/20 text-blue-200 border border-blue-400/40', reviewed: 'bg-amber-500/20 text-amber-200 border border-amber-400/40', approved: 'bg-emerald-500/20 text-emerald-200 border border-emerald-400/40', paid: 'bg-teal-500/20 text-teal-200 border border-teal-400/40' };
+  const contractorOptions = useMemo(() => {
+    const rows = new Map<string, string>();
+    invoices.forEach(invoice => {
+      const id = String(invoice.contractor_id || '').trim();
+      const name = String(invoice.contractor_name || invoice.contractor_email || 'Unknown contractor').trim();
+      if (id && !rows.has(id)) rows.set(id, name);
+    });
+    return Array.from(rows.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }, [invoices]);
+
+  const visibleInvoices = useMemo(() => {
+    if (selectedContractorId === 'all') return invoices;
+    return invoices.filter(invoice => String(invoice.contractor_id || '') === selectedContractorId);
+  }, [invoices, selectedContractorId]);
+
+  const visibleTotal = useMemo(
+    () => visibleInvoices.reduce((sum, invoice) => sum + Number(invoice.total || 0), 0),
+    [visibleInvoices]
+  );
+
+  const visibleInvoiceRows = useMemo(
+    () => visibleInvoices.flatMap(invoice => {
+      const lineItems = Array.isArray(invoice.line_items) ? invoice.line_items : [];
+      if (!lineItems.length) {
+        return [{
+          key: `${invoice.id}:total`,
+          invoice,
+          description: invoice.invoice_number ? `Invoice #${invoice.invoice_number}` : 'Invoice total',
+          amount: Number(invoice.total || 0),
+        }];
+      }
+      return lineItems.map((item, index) => ({
+        key: item.id || `${invoice.id}:${index}`,
+        invoice,
+        description: String(item.description || item.category_name || item.class_name || `Line item ${index + 1}`).trim(),
+        amount: Number(item.amount ?? invoice.total ?? 0),
+      }));
+    }),
+    [visibleInvoices]
+  );
+
+  const canCreateInvoice = user?.role !== 'contractor';
+  const selectedContractorLabel = selectedContractorId === 'all'
+    ? 'All contractors'
+    : contractorOptions.find(contractor => contractor.id === selectedContractorId)?.name || 'Selected contractor';
+  const statusColors: Record<string, string> = {
+    draft: 'border-slate-500/50 bg-slate-500/15 text-slate-200',
+    submitted: 'border-sky-300/45 bg-sky-400/15 text-sky-100',
+    reviewed: 'border-amber-300/45 bg-amber-400/15 text-amber-100',
+    approved: 'border-emerald-300/45 bg-emerald-400/15 text-emerald-100',
+    rejected: 'border-rose-300/45 bg-rose-400/15 text-rose-100',
+    paid: 'border-emerald-300/50 bg-emerald-400/15 text-emerald-100',
+    partial: 'border-amber-300/45 bg-amber-400/15 text-amber-100',
+    open: 'border-orange-300/45 bg-orange-400/15 text-orange-100',
+    'friday queue': 'border-indigo-300/45 bg-indigo-400/15 text-indigo-100',
+  };
 
   return (
-    <div className="space-y-4">
-      <button onClick={() => navigate(`/projects/${projectId}/invoices/new`)} className="w-full flex items-center justify-center gap-2 py-3.5 bg-blue-600 text-white rounded-xl font-semibold text-sm hover:bg-blue-700 transition-colors shadow-sm">
-        <Plus className="w-5 h-5" /> CREATE INVOICE
-      </button>
-
-      {loading ? <Loading /> : (
-        <div className="space-y-3">
-          {invoices.map(inv => (
-            <div key={inv.id} className="bg-white rounded-xl border border-gray-200 p-4 flex items-center gap-3">
-              <div className="w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center flex-shrink-0">
-                <FileText className="w-5 h-5 text-purple-600" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold text-gray-900 text-sm">#{inv.invoice_number}</p>
-                <p className="text-xs text-gray-500">{inv.contractor_name} · {formatEasternDate(inv.created_at, { month: 'short', day: 'numeric', year: 'numeric' })}</p>
-              </div>
-              <div className="text-right">
-                <p className="font-bold text-gray-900">${Number(inv.total).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColors[inv.status]}`}>{inv.status}</span>
-              </div>
+    <div className="bt-project-invoices-tab space-y-4">
+      <div className="rounded-xl border border-cyan-300/20 bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950 p-4 text-white shadow-[0_18px_42px_rgba(2,6,23,0.32)]">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase tracking-wide text-cyan-200/80">Project invoices</p>
+            <h3 className="mt-1 text-xl font-black text-white">{project?.job_name || formatProjectAddressLabel(project?.address) || 'Invoices'}</h3>
+            <p className="mt-1 text-sm font-semibold text-slate-300">
+              {visibleInvoices.length} invoice{visibleInvoices.length === 1 ? '' : 's'} | {visibleInvoiceRows.length} item{visibleInvoiceRows.length === 1 ? '' : 's'} | {selectedContractorLabel}
+            </p>
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div className="rounded-xl border border-emerald-300/30 bg-emerald-400/10 px-4 py-3 sm:min-w-[180px] sm:text-right">
+              <p className="text-xs font-black uppercase tracking-wide text-emerald-200/80">Total</p>
+              <p className="mt-1 text-2xl font-black tabular-nums text-white">{formatInvoiceMoney(visibleTotal)}</p>
             </div>
-          ))}
-          {invoices.length === 0 && <div className="text-center py-12 bg-white rounded-xl border border-gray-200"><FileText className="w-8 h-8 text-gray-300 mx-auto mb-2" /><p className="text-gray-400 text-sm">No invoices yet</p></div>}
+            <label className="block min-w-[240px]">
+              <span className="mb-1 block text-xs font-black uppercase tracking-wide text-slate-300">Contractor</span>
+              <select
+                value={selectedContractorId}
+                onChange={event => setSelectedContractorId(event.target.value)}
+                className="min-h-11 w-full rounded-lg border border-cyan-300/35 bg-slate-950 px-3 py-2 text-sm font-bold text-white shadow-inner outline-none focus:border-cyan-200 focus:ring-2 focus:ring-cyan-300/40"
+                aria-label="Filter project invoices by contractor"
+              >
+                <option value="all">All contractors</option>
+                {contractorOptions.map(contractor => (
+                  <option key={contractor.id} value={contractor.id}>{contractor.name}</option>
+                ))}
+              </select>
+            </label>
+            {canCreateInvoice && (
+              <button
+                type="button"
+                onClick={() => navigate(`/projects/${projectId}/invoices/new`)}
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-cyan-300/35 bg-cyan-500/15 px-4 text-sm font-black text-cyan-50 transition-colors hover:bg-cyan-400/25"
+              >
+                <Plus className="h-4 w-4" /> Create Invoice
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {loading ? <Loading /> : error ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div>
+      ) : (
+        <div className="overflow-hidden rounded-xl border border-slate-700/80 bg-slate-950/75 shadow-[0_16px_36px_rgba(2,6,23,0.28)]">
+          <div className="hidden grid-cols-[minmax(14rem,1.55fr)_minmax(8rem,1fr)_minmax(7rem,.75fr)_minmax(7rem,.7fr)_minmax(7rem,.65fr)] gap-3 border-b border-slate-700/80 bg-slate-900/90 px-4 py-3 text-xs font-black uppercase tracking-wide text-slate-300 lg:grid">
+            <span>Item</span>
+            <span>Contractor</span>
+            <span>Date</span>
+            <span>Status</span>
+            <span className="text-right">Total</span>
+          </div>
+          {visibleInvoiceRows.map(row => {
+            const invoice = row.invoice;
+            const status = String(invoice.status || 'draft');
+            const statusLabel = projectInvoiceStatusLabel(invoice, status);
+            const statusClass = statusColors[statusLabel] || statusColors[status] || statusColors.draft;
+            const sourceLabel = projectInvoiceSourceLabel(invoice);
+            const isQuickBooksInvoice = invoice.source === 'quickbooks';
+            const detailUrl = invoice.detail_url || (!isQuickBooksInvoice ? `/projects/${projectId}/invoices/${invoice.id}` : '');
+            const canOpenDetail = Boolean(detailUrl);
+            const invoiceDate = invoice.submitted_at || invoice.created_at || invoice.due_date || invoice.updated_at;
+            const invoiceNumber = String(invoice.invoice_number || invoice.id);
+            const quickBooksBillId = String(invoice.quickbooks_bill_id || '').trim();
+            const showBillId = isQuickBooksInvoice && quickBooksBillId && quickBooksBillId !== invoiceNumber;
+            return (
+              <button
+                key={row.key}
+                type="button"
+                onClick={() => { if (canOpenDetail) navigate(detailUrl); }}
+                aria-disabled={!canOpenDetail}
+                className={`block w-full border-b border-slate-800/90 px-4 py-4 text-left transition-colors last:border-b-0 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-cyan-300/70 ${canOpenDetail ? 'hover:bg-cyan-950/30' : 'cursor-default'}`}
+              >
+                <div className="grid gap-3 lg:grid-cols-[minmax(14rem,1.55fr)_minmax(8rem,1fr)_minmax(7rem,.75fr)_minmax(7rem,.7fr)_minmax(7rem,.65fr)] lg:items-center">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-black text-white">{row.description || 'Invoice item'}</p>
+                    <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-xs font-semibold text-slate-400">
+                      <span className="inline-flex items-center gap-1">
+                        <Receipt className="h-3.5 w-3.5 shrink-0 text-cyan-200" />
+                        #{invoiceNumber}
+                      </span>
+                      <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-black uppercase tracking-wide ${isQuickBooksInvoice ? 'border-cyan-300/45 bg-cyan-400/10 text-cyan-100' : 'border-indigo-300/45 bg-indigo-400/10 text-indigo-100'}`}>
+                        {sourceLabel}
+                      </span>
+                      {showBillId && <span>Bill {quickBooksBillId}</span>}
+                    </div>
+                    {Number(invoice.payment_hold_count || 0) > 0 && (
+                      <p className="mt-1 text-xs font-bold text-rose-200">{invoice.payment_hold_count} payment hold{Number(invoice.payment_hold_count) === 1 ? '' : 's'}</p>
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold text-slate-100">{invoice.contractor_name || 'Unknown contractor'}</p>
+                    {invoice.contractor_email && <p className="mt-0.5 truncate text-xs font-semibold text-slate-400">{invoice.contractor_email}</p>}
+                  </div>
+                  <p className="text-sm font-bold text-slate-200">{invoiceDate ? formatEasternDate(invoiceDate, { month: 'short', day: 'numeric', year: 'numeric' }) : 'No date'}</p>
+                  <div>
+                    <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-black capitalize ${statusClass}`}>
+                      {statusLabel}
+                    </span>
+                  </div>
+                  <div className="text-left lg:text-right">
+                    <p className="text-lg font-black tabular-nums text-white">{formatInvoiceMoney(row.amount)}</p>
+                    {isQuickBooksInvoice && Number(invoice.balance || 0) > 0 && (
+                      <p className="mt-0.5 text-xs font-bold text-slate-400">Open {formatInvoiceMoney(invoice.balance)}</p>
+                    )}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+          {visibleInvoiceRows.length === 0 && (
+            <div className="px-4 py-12 text-center">
+              <FileText className="mx-auto mb-2 h-8 w-8 text-slate-500" />
+              <p className="text-sm font-black text-slate-100">{invoices.length ? 'No invoices for this contractor' : 'No invoices yet'}</p>
+              <p className="mt-1 text-xs font-semibold text-slate-400">
+                {invoices.length ? 'Switch the contractor filter to see other project invoices.' : 'Invoices created for this project will appear here with their line items.'}
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -270,7 +270,7 @@ async function sendInviteEmail({ name, email, setupUrl, role, invitedBy, pin, is
       If the button does not open, copy and paste this secure link into your browser:<br />
       <span style="word-break: break-all; color: #111827;">${safeSetupUrl}</span>
     </p>
-    ${pin ? `<p style="color: #6B7280; font-size: 12px; line-height: 1.6; margin: 0 0 14px;">Keep your personal PIN private. Contractor accounts can use it for quick mobile access; management accounts still use password and verification-code sign-in for security.</p>` : ''}
+    ${pin ? `<p style="color: #6B7280; font-size: 12px; line-height: 1.6; margin: 0 0 14px;">Keep your personal PIN private. Any active BuildTrack user with a PIN can use it for quick mobile access with email verification on first-time or untrusted devices.</p>` : ''}
     <p style="color: #9CA3AF; font-size: 12px; text-align: center; margin: 0;">
       This link opens BuildTrack directly and lets you choose your own password.
     </p>
@@ -289,9 +289,9 @@ async function sendContractorPinEmail({ name, email, pin }) {
   const displayName = escapeHtml(name || 'there');
 
   const html = emailWrapper(`
-    <h2 style="color: #111827; font-size: 20px; font-weight: 700; margin: 0 0 8px;">Your BuildTrack Mobile App Pin#</h2>
+    <h2 style="color: #111827; font-size: 20px; font-weight: 700; margin: 0 0 8px;">Your BuildTrack User PIN Number</h2>
     <p style="color: #6B7280; font-size: 14px; line-height: 1.6; margin: 0 0 24px;">
-      Hi ${displayName}, use this 5-digit PIN to open your assigned projects in the BuildTrack mobile app.
+      Hi ${displayName}, use this 5-digit PIN number to sign in to the BuildTrack mobile app.
     </p>
     <div style="text-align: center; margin: 0 0 24px;">
       <span style="display: inline-block; background: #111827; border-radius: 16px; padding: 18px 34px; font-size: 34px; font-weight: 900; letter-spacing: 9px; color: #ffffff; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;">
@@ -302,7 +302,7 @@ async function sendContractorPinEmail({ name, email, pin }) {
       Open BuildTrack Mobile
     </a>
     <p style="color: #6B7280; font-size: 12px; line-height: 1.6; text-align: center; margin: 0 0 14px;">
-      If you do not want to use a PIN, you can request an email login code on the same screen.
+      Keep this PIN private. First-time and untrusted devices verify by email before the app opens.
     </p>
     <p style="color: #9CA3AF; font-size: 12px; text-align: center; margin: 0;">
       If you did not request this PIN, contact New Urban Development.
@@ -312,7 +312,7 @@ async function sendContractorPinEmail({ name, email, pin }) {
   await transporter.sendMail({
     from: process.env.EMAIL_FROM || `BuildTrack <noreply@newurbandev.com>`,
     to: email,
-    subject: `Your BuildTrack Mobile App Pin#`,
+    subject: `Your BuildTrack User PIN Number`,
     html,
   });
 }

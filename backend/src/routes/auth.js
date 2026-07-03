@@ -21,6 +21,7 @@ const MOBILE_QUICK_ACCESS_DAYS = 7;
 const DESKTOP_SESSION_EXPIRES_IN = `${DESKTOP_SESSION_IDLE_TIMEOUT_MINUTES}m`;
 const MOBILE_SESSION_EXPIRES_IN = `${MOBILE_SESSION_MAX_AGE_HOURS}h`;
 const CONTRACTOR_EMAIL_LOGIN_MESSAGE = 'If that contractor email is on file, BuildTrack will send login instructions.';
+const USER_PIN_RECOVERY_MESSAGE = 'If that BuildTrack user email is on file, BuildTrack will send the PIN number.';
 const MOBILE_APP_HOSTS = new Set(
   String(process.env.MOBILE_APP_HOSTS || 'mobile.buildtrack.newurbandev.com,m.buildtrack.newurbandev.com')
     .split(',')
@@ -475,10 +476,10 @@ router.post('/trusted-device-login', async (req, res) => {
   }
 });
 
-// POST /api/auth/pin-login - contractor quick login via 5-digit PIN
+// POST /api/auth/pin-login - user quick login via 5-digit PIN
 router.post('/pin-login', async (req, res) => {
   try {
-    const { pin, device_token, trust_device } = req.body;
+    const { pin, twofa_code, device_token, trust_device } = req.body;
     const trustDevice = shouldTrustDevice(trust_device);
     if (!pin || !/^\d{5}$/.test(pin)) {
       return res.status(400).json({ error: 'Please enter a valid 5-digit PIN' });
@@ -492,17 +493,62 @@ router.post('/pin-login', async (req, res) => {
     const db = getDb();
     const user = db.prepare('SELECT * FROM users WHERE pin = ? AND is_active = 1').get(pin);
     if (!user) return res.status(401).json({ error: 'Invalid PIN' });
-    if (user.role !== 'contractor') {
-      return res.status(403).json({ error: 'PIN login is only available for contractor accounts' });
-    }
     clearAttempts(`pin:${clientIp}`);
 
-    const projects = getLoginProjects(db, user);
+    const trustedDevice = isDeviceTrusted(db, user.id, device_token);
+    if (!trustedDevice) {
+      if (twofa_code) {
+        if (tooManyAttempts(`2fa:${user.id}`, 8, 10 * 60 * 1000)) {
+          return res.status(429).json({ error: 'Too many verification attempts. Please request a new code shortly.' });
+        }
+
+        const codeRow = db.prepare(`
+          SELECT * FROM two_factor_codes
+          WHERE user_id = ? AND code = ? AND used = 0 AND datetime(expires_at) > datetime('now')
+          ORDER BY created_at DESC LIMIT 1
+        `).get(user.id, twofa_code);
+
+        if (!codeRow) {
+          return res.status(401).json({ error: 'Invalid or expired verification code', requires_2fa: true });
+        }
+
+        db.prepare('UPDATE two_factor_codes SET used = 1 WHERE id = ?').run(codeRow.id);
+        clearAttempts(`2fa:${user.id}`);
+      } else {
+        if (!process.env.SMTP_PASS || process.env.SMTP_PASS === 'REPLACE_WITH_RESEND_API_KEY') {
+          console.error('[AUTH] PIN 2FA required but SMTP is not configured; refusing PIN-only mobile login for', user.email);
+          return res.status(503).json({ error: 'Two-factor delivery is temporarily unavailable. Please contact your administrator.' });
+        }
+
+        db.prepare('UPDATE two_factor_codes SET used = 1 WHERE user_id = ? AND used = 0').run(user.id);
+        const code = generate2FACode();
+        const expiresAt = minutesFromNow(10);
+        db.prepare(
+          'INSERT INTO two_factor_codes (id, user_id, code, expires_at) VALUES (?, ?, ?, ?)'
+        ).run(uuidv4(), user.id, code, expiresAt);
+
+        try {
+          await send2FACodeEmail({ name: user.name, email: user.email, code });
+        } catch (emailErr) {
+          console.error('Failed to send PIN 2FA email:', emailErr);
+          return res.status(500).json({ error: 'Unable to send verification code. Please try again.' });
+        }
+
+        return res.json({
+          requires_2fa: true,
+          message: 'Verification code sent to the email on file for this PIN',
+        });
+      }
+    }
 
     logActivity({ userId: user.id, action: 'pin_login', entityType: 'user', entityId: user.id });
-    const payload = issueSession(db, user, { pin_login: true, trusted_device: trustDevice }, req, 'mobile_app');
-    payload.projects = projects;
-    if (trustDevice) Object.assign(payload, issueTrustedDevice(db, user, req, device_token));
+    const payload = issueSession(db, user, {
+      pin_login: true,
+      trusted_device: trustedDevice || trustDevice,
+      two_factor: trustedDevice ? 'trusted_device' : true,
+    }, req, 'mobile_app');
+    payload.projects = getLoginProjects(db, user);
+    if (trustDevice && !trustedDevice) Object.assign(payload, issueTrustedDevice(db, user, req, device_token));
 
     res.json(addMobileQuickAccess(payload, db, user, req));
   } catch (err) {
@@ -511,11 +557,11 @@ router.post('/pin-login', async (req, res) => {
   }
 });
 
-// POST /api/auth/contractor/forgot-pin - email a contractor their mobile PIN.
+// POST /api/auth/contractor/forgot-pin - email an existing user their mobile PIN.
 router.post('/contractor/forgot-pin', async (req, res) => {
   try {
     const email = normalizeEmail(req.body?.email);
-    if (!email) return res.status(400).json({ error: 'Valid contractor email is required' });
+    if (!email) return res.status(400).json({ error: 'Valid user email is required' });
 
     const clientIp = getClientIp(req) || 'unknown';
     if (tooManyAttempts(`pinmail:${clientIp}`, 5, 15 * 60 * 1000)) {
@@ -523,25 +569,25 @@ router.post('/contractor/forgot-pin', async (req, res) => {
     }
 
     const db = getDb();
-    const account = ensureContractorMobileAccountByEmail(db, email);
-    if (account.user?.role === 'contractor' && account.user.pin) {
+    const user = db.prepare('SELECT * FROM users WHERE lower(email) = ? AND is_active = 1 AND pin IS NOT NULL AND pin != ?').get(email, '');
+    if (user?.pin) {
       await sendContractorPinEmail({
-        name: account.user.name,
-        email: account.user.email,
-        pin: account.user.pin,
+        name: user.name,
+        email: user.email,
+        pin: user.pin,
       });
       logActivity({
-        userId: account.user.id,
-        action: 'contractor_pin_recovery_requested',
+        userId: user.id,
+        action: 'user_pin_recovery_requested',
         entityType: 'user',
-        entityId: account.user.id,
+        entityId: user.id,
       });
     }
 
-    res.json({ message: CONTRACTOR_EMAIL_LOGIN_MESSAGE });
+    res.json({ message: USER_PIN_RECOVERY_MESSAGE });
   } catch (err) {
-    console.error('Contractor PIN recovery error:', err);
-    res.status(err.statusCode || 500).json({ error: err.message || 'Unable to send contractor login instructions' });
+    console.error('User PIN recovery error:', err);
+    res.status(err.statusCode || 500).json({ error: err.message || 'Unable to send user PIN instructions' });
   }
 });
 

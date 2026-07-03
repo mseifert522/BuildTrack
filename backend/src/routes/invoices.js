@@ -62,6 +62,211 @@ function canMutateOwnInvoice(invoice, user) {
   return isUpperManagement(user) || invoice.contractor_id === user.id;
 }
 
+const QUICKBOOKS_PROJECT_INVOICE_ROLES = ['super_admin', 'operations_manager'];
+const QUICKBOOKS_PAYMENT_APPROVAL_DEFAULT_STATUS = 'not_approved';
+const QUICKBOOKS_PAYMENT_APPROVAL_STATUS = 'approved_for_payment';
+const QUICKBOOKS_PAYMENT_APPROVAL_PAID_STATUS = 'paid_from_buildtrack';
+const QUICKBOOKS_PAYMENT_APPROVAL_DELETED_STATUS = 'deleted_from_buildtrack';
+const DEFAULT_EXCLUDED_QUICKBOOKS_BILL_VENDORS = ['great lakes mortgage fund'];
+
+function normalizeMatchText(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function excludedQuickBooksBillVendors() {
+  const configured = String(process.env.QBO_EXCLUDED_BILL_VENDOR_NAMES || process.env.QUICKBOOKS_EXCLUDED_BILL_VENDOR_NAMES || '')
+    .split(/[,\n|]/)
+    .map(value => normalizeMatchText(value))
+    .filter(Boolean);
+  return Array.from(new Set([...DEFAULT_EXCLUDED_QUICKBOOKS_BILL_VENDORS, ...configured]));
+}
+
+function canViewQuickBooksProjectInvoices(user) {
+  return QUICKBOOKS_PROJECT_INVOICE_ROLES.includes(user?.role);
+}
+
+function quickBooksBillIsPaid(bill) {
+  return String(bill?.payment_status || '').toLowerCase() === 'paid'
+    || bill?.payment_approval_status === QUICKBOOKS_PAYMENT_APPROVAL_PAID_STATUS
+    || Number(bill?.balance || 0) <= 0;
+}
+
+function quickBooksProjectLineOpenBalance(bill, lineAmount) {
+  if (quickBooksBillIsPaid(bill)) return 0;
+  const amount = Math.max(Number(lineAmount || 0), 0);
+  const parentTotal = Math.max(Number(bill?.total_amt || 0), 0);
+  const parentBalance = Math.max(Number(bill?.balance || 0), 0);
+  if (!amount || !parentBalance) return 0;
+  if (parentTotal > 0 && parentBalance < parentTotal) {
+    return Math.min(amount, parentBalance * (amount / parentTotal));
+  }
+  return amount;
+}
+
+function quickBooksProjectInvoiceStatus(bill, scopedBalance) {
+  if (quickBooksBillIsPaid({ ...bill, balance: scopedBalance })) return 'paid';
+  if (bill?.payment_approval_status === QUICKBOOKS_PAYMENT_APPROVAL_STATUS) return 'approved';
+  return 'submitted';
+}
+
+function quickBooksVendorContractorId(bill) {
+  const vendorKey = String(bill?.vendor_id || bill?.vendor_name || bill?.qbo_id || 'unknown').trim();
+  return `quickbooks-vendor:${vendorKey}`;
+}
+
+function getQuickBooksBillLinesByBillId(db, qboIds) {
+  const ids = [...new Set(qboIds.map(id => String(id || '').trim()).filter(Boolean))];
+  if (!ids.length) return new Map();
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = db.prepare(`
+    SELECT
+      qbl.*,
+      p.address as project_address,
+      p.job_name as project_job_name
+    FROM quickbooks_bill_lines qbl
+    LEFT JOIN projects p ON p.id = qbl.project_id
+    WHERE qbl.qbo_bill_id IN (${placeholders})
+    ORDER BY qbl.qbo_bill_id ASC, CAST(COALESCE(qbl.line_num, 999999) AS INTEGER) ASC, qbl.id ASC
+  `).all(...ids);
+  const byBillId = new Map();
+  rows.forEach(line => {
+    if (!byBillId.has(line.qbo_bill_id)) byBillId.set(line.qbo_bill_id, []);
+    byBillId.get(line.qbo_bill_id).push(line);
+  });
+  return byBillId;
+}
+
+function quickBooksLineItemForInvoice(rowId, bill, line, index) {
+  return {
+    id: line?.id ? `quickbooks-line:${line.id}` : `quickbooks-line:${bill.qbo_id}:${index + 1}`,
+    invoice_id: rowId,
+    description: line?.description || line?.category_name || line?.class_name || bill.private_note || 'QuickBooks bill line',
+    amount: Number(line?.amount ?? bill.total_amt ?? 0),
+    sort_order: Number(line?.line_num ?? index),
+    source: 'quickbooks',
+    quickbooks_bill_id: bill.qbo_id,
+    quickbooks_line_id: line?.qbo_line_id || null,
+    project_id: line?.project_id || bill.project_id || bill.matched_project_id || null,
+    category_name: line?.category_name || null,
+    class_name: line?.class_name || bill.qbo_class_name || null,
+  };
+}
+
+function quickBooksProjectInvoiceRow(bill, { projectId, lineItems, total, balance, splitLine = null, index = 0 }) {
+  const paid = quickBooksBillIsPaid({ ...bill, balance });
+  const rowId = splitLine?.id
+    ? `quickbooks:${bill.qbo_id}:${splitLine.id}`
+    : `quickbooks:${bill.qbo_id}`;
+  const docNumber = bill.doc_number || bill.matched_invoice_number || bill.qbo_id;
+  return {
+    id: rowId,
+    source: 'quickbooks',
+    source_label: 'QuickBooks',
+    invoice_number: docNumber,
+    external_invoice_number: bill.doc_number || null,
+    project_id: projectId,
+    contractor_id: quickBooksVendorContractorId(bill),
+    contractor_name: bill.vendor_name || 'QuickBooks vendor',
+    contractor_email: null,
+    total: Number(total || 0),
+    balance: paid ? 0 : Number(balance || 0),
+    status: quickBooksProjectInvoiceStatus(bill, balance),
+    submitted_at: bill.txn_date || bill.due_date || bill.qbo_updated_at || bill.last_seen_at || null,
+    created_at: bill.first_seen_at || bill.last_seen_at || null,
+    updated_at: bill.qbo_updated_at || bill.updated_at || bill.last_seen_at || null,
+    due_date: bill.due_date || null,
+    linked_work_count: 0,
+    payment_hold_count: 0,
+    line_item_count: lineItems.length,
+    line_items: lineItems.length
+      ? lineItems
+      : [quickBooksLineItemForInvoice(rowId, bill, null, index)],
+    quickbooks_bill_id: bill.qbo_id,
+    quickbooks_payment_status: bill.payment_status || null,
+    quickbooks_approval_status: bill.payment_approval_status || QUICKBOOKS_PAYMENT_APPROVAL_DEFAULT_STATUS,
+    quickbooks_class_id: splitLine?.class_id || bill.qbo_class_id || null,
+    quickbooks_class_name: splitLine?.class_name || bill.qbo_class_name || null,
+    matched_invoice_id: bill.matched_invoice_id || null,
+    detail_url: bill.matched_invoice_id ? `/projects/${projectId}/invoices/${bill.matched_invoice_id}` : null,
+  };
+}
+
+function getProjectQuickBooksInvoices(db, projectId) {
+  const params = [
+    QUICKBOOKS_PAYMENT_APPROVAL_DEFAULT_STATUS,
+    QUICKBOOKS_PAYMENT_APPROVAL_DELETED_STATUS,
+    projectId,
+    projectId,
+    projectId,
+  ];
+  const where = [`
+    COALESCE(qb.payment_approval_status, ?) != ?
+    AND (
+      qb.project_id = ?
+      OR i.project_id = ?
+      OR EXISTS (
+        SELECT 1
+        FROM quickbooks_bill_lines qbl_scope
+        WHERE qbl_scope.qbo_bill_id = qb.qbo_id
+          AND qbl_scope.project_id = ?
+      )
+    )
+  `];
+  const excludedVendors = excludedQuickBooksBillVendors();
+  if (excludedVendors.length) {
+    where.push(`lower(trim(COALESCE(qb.vendor_name, ''))) NOT IN (${excludedVendors.map(() => '?').join(',')})`);
+    params.push(...excludedVendors);
+  }
+
+  const bills = db.prepare(`
+    SELECT
+      qb.*,
+      i.project_id as matched_project_id,
+      i.invoice_number as matched_invoice_number
+    FROM quickbooks_bills qb
+    LEFT JOIN invoices i ON i.id = qb.matched_invoice_id
+    WHERE ${where.join(' AND ')}
+    ORDER BY
+      date(COALESCE(qb.txn_date, qb.due_date, qb.qbo_updated_at, qb.last_seen_at)) DESC,
+      lower(COALESCE(qb.vendor_name, '')) ASC,
+      CAST(COALESCE(qb.doc_number, qb.qbo_id) AS TEXT) ASC
+  `).all(...params);
+
+  const linesByBillId = getQuickBooksBillLinesByBillId(db, bills.map(bill => bill.qbo_id));
+  return bills.flatMap(bill => {
+    const allLines = linesByBillId.get(bill.qbo_id) || [];
+    const projectLines = allLines.filter(line => line.project_id === projectId);
+    if (projectLines.length) {
+      return projectLines.map((line, index) => {
+        const total = Number(line.amount || 0);
+        const balance = quickBooksProjectLineOpenBalance(bill, total);
+        const rowId = `quickbooks:${bill.qbo_id}:${line.id || line.qbo_line_id || index + 1}`;
+        return quickBooksProjectInvoiceRow(bill, {
+          projectId,
+          lineItems: [quickBooksLineItemForInvoice(rowId, bill, line, index)],
+          total,
+          balance,
+          splitLine: line,
+          index,
+        });
+      });
+    }
+
+    const linesWithProject = allLines.filter(line => line.project_id);
+    if (linesWithProject.length) return [];
+    if (bill.project_id !== projectId && bill.matched_project_id !== projectId) return [];
+
+    const rowId = `quickbooks:${bill.qbo_id}`;
+    const lineItems = allLines.map((line, index) => quickBooksLineItemForInvoice(rowId, bill, line, index));
+    return quickBooksProjectInvoiceRow(bill, {
+      projectId,
+      lineItems,
+      total: Number(bill.total_amt || 0),
+      balance: quickBooksBillIsPaid(bill) ? 0 : Number(bill.balance || 0),
+    });
+  });
+}
+
 function formatInvoiceAttachment(row) {
   return {
     id: row.id,
@@ -265,20 +470,63 @@ router.get('/', authorizeProjectAccess, (req, res) => {
   }
 
   query += ' ORDER BY i.created_at DESC';
-  const invoices = db.prepare(query).all(...params).map(invoice => {
+  const invoiceRows = db.prepare(query).all(...params);
+  const lineItemsByInvoice = new Map();
+  if (invoiceRows.length) {
+    const placeholders = invoiceRows.map(() => '?').join(',');
+    const lineItems = db.prepare(`
+      SELECT *
+      FROM invoice_line_items
+      WHERE invoice_id IN (${placeholders})
+      ORDER BY invoice_id, sort_order
+    `).all(...invoiceRows.map(invoice => invoice.id));
+    lineItems.forEach(item => {
+      const items = lineItemsByInvoice.get(item.invoice_id) || [];
+      items.push(item);
+      lineItemsByInvoice.set(item.invoice_id, items);
+    });
+  }
+  const invoices = invoiceRows.map(invoice => {
     const linkedWorkCount = db.prepare('SELECT COUNT(*) as count FROM invoice_work_items WHERE invoice_id = ?').get(invoice.id).count;
     const holds = getFieldWorkPaymentHolds(db, invoice.project_id, invoice.id);
-    return { ...invoice, linked_work_count: linkedWorkCount, payment_hold_count: holds.length };
+    const lineItems = lineItemsByInvoice.get(invoice.id) || [];
+    return {
+      ...invoice,
+      source_label: invoice.quickbooks_bill_id ? 'BuildTrack + QuickBooks' : 'BuildTrack',
+      detail_url: `/projects/${req.params.projectId}/invoices/${invoice.id}`,
+      linked_work_count: linkedWorkCount,
+      payment_hold_count: holds.length,
+      line_item_count: lineItems.length,
+      line_items: lineItems,
+    };
+  });
+  const quickBooksInvoices = canViewQuickBooksProjectInvoices(req.user)
+    ? getProjectQuickBooksInvoices(db, req.params.projectId)
+    : [];
+  const rows = [...invoices, ...quickBooksInvoices].sort((left, right) => {
+    const leftTime = Date.parse(left.submitted_at || left.created_at || left.updated_at || '');
+    const rightTime = Date.parse(right.submitted_at || right.created_at || right.updated_at || '');
+    if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+      return rightTime - leftTime;
+    }
+    if (Number.isFinite(leftTime) !== Number.isFinite(rightTime)) {
+      return Number.isFinite(rightTime) ? 1 : -1;
+    }
+    return String(left.invoice_number || left.id).localeCompare(String(right.invoice_number || right.id));
   });
   logDataAccess(req, {
     action: 'project_invoice_list_viewed',
     accessType: 'view',
     entityType: 'invoice',
     projectId: req.params.projectId,
-    recordCount: invoices.length,
+    recordCount: rows.length,
     riskLevel: 'high',
+    details: {
+      buildtrack_invoice_count: invoices.length,
+      quickbooks_invoice_count: quickBooksInvoices.length,
+    },
   });
-  res.json(invoices);
+  res.json(rows);
 });
 
 // GET /api/invoices - all invoices (admin view)
