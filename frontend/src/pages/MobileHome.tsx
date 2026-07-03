@@ -69,7 +69,6 @@ export default function MobileHome() {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
   const location = useLocation();
-  const contractorUser = user?.role === 'contractor';
   const storageKey = `buildtrack-mobile-photo-project:${user?.id || 'session'}`;
   const lastDataChangeRef = useRef(lastMobileDataChangedAt());
 
@@ -151,10 +150,9 @@ export default function MobileHome() {
   }, [location.search, navItems]);
 
   const filteredProjects = projects;
+  const projectListLabel = user?.role === 'contractor' ? 'Assigned Projects' : 'Projects';
 
   const rememberedProject = projects.find(project => project.id === localStorage.getItem(storageKey));
-  const activeProjects = projects.filter(project => project.status === 'active_rehab').length;
-  const openPunchCount = projects.reduce((count, project) => count + (project.open_punch_items || 0), 0);
 
   const handleLogout = () => {
     logout();
@@ -167,8 +165,6 @@ export default function MobileHome() {
     clearMobilePhotoProjectState();
     navigate('/login');
   };
-
-  const currentNav = navItems.find(item => item.key === tab) || navItems[0];
 
   if (loading) {
     return (
@@ -201,38 +197,12 @@ export default function MobileHome() {
             </button>
           </div>
         </div>
-
-        {contractorUser ? (
-          <div className="btm-context-strip btm-context-strip-assigned">
-            <div>
-              <span>Your Assigned Projects</span>
-              <strong>{filteredProjects.length}</strong>
-            </div>
-          </div>
-        ) : (
-          <div className="btm-context-strip">
-            <div>
-              <span>{currentNav.label}</span>
-              <strong>{tab === 'projects' ? `${filteredProjects.length} jobs` : 'Field workspace'}</strong>
-            </div>
-            <div>
-              <span>Active</span>
-              <strong>{activeProjects}</strong>
-            </div>
-            <div>
-              <span>Punch</span>
-              <strong>{openPunchCount}</strong>
-            </div>
-          </div>
-        )}
       </header>
 
       <main className="mobile-content btm-home-content">
         {tab === 'projects' && (
           <section className="btm-list-section" aria-label="Projects">
-            <SectionHeader
-              label={`${filteredProjects.length} Project${filteredProjects.length === 1 ? '' : 's'}`}
-            />
+            <SectionHeader label={projectListLabel} />
 
             {filteredProjects.length === 0 ? (
               <EmptyState icon={<FolderOpen size={38} />} title="No projects found" />

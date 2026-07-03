@@ -3605,7 +3605,7 @@ body,
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
-  padding: 14px 16px 10px;
+  padding: 14px 16px 14px;
 }
 
 .btm-brand {
