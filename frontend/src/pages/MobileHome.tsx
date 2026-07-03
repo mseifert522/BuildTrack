@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
@@ -31,13 +31,11 @@ interface Project {
 
 type Tab = 'projects' | 'photos' | 'invoices';
 
-type MobileNavItem = {
-  key: Tab;
-  label: string;
-  shortLabel: string;
-  Icon: typeof FolderOpen;
-  tone: 'blue' | 'amber' | 'teal' | 'violet';
-};
+const HOME_TABS: Tab[] = ['projects', 'photos', 'invoices'];
+
+function isHomeTab(value: string | null): value is Tab {
+  return !!value && HOME_TABS.includes(value as Tab);
+}
 
 const STATUS_META: Record<string, { label: string; tone: string }> = {
   not_started: { label: 'Not started', tone: 'neutral' },
@@ -74,19 +72,11 @@ export default function MobileHome() {
 
   const [tab, setTab] = useState<Tab>(() => {
     const requested = new URLSearchParams(window.location.search).get('tab') as Tab | null;
-    return requested && ['projects', 'photos', 'invoices'].includes(requested) ? requested : 'projects';
+    return isHomeTab(requested) ? requested : 'projects';
   });
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-
-  const navItems = useMemo<MobileNavItem[]>(() => {
-    return [
-      { key: 'projects', label: 'Projects', shortLabel: 'Projects', Icon: FolderOpen, tone: 'blue' },
-      { key: 'photos', label: 'Photos', shortLabel: 'Photos', Icon: Camera, tone: 'amber' },
-      { key: 'invoices', label: 'Invoices', shortLabel: 'Invoices', Icon: FileText, tone: 'violet' },
-    ];
-  }, []);
 
   const loadData = useCallback(async (silent = false) => {
     if (silent) setRefreshing(true);
@@ -141,13 +131,9 @@ export default function MobileHome() {
   }, [loadData]);
 
   useEffect(() => {
-    if (!navItems.some(item => item.key === tab)) setTab('projects');
-  }, [navItems, tab]);
-
-  useEffect(() => {
     const requested = new URLSearchParams(location.search).get('tab') as Tab | null;
-    if (requested && navItems.some(item => item.key === requested)) setTab(requested);
-  }, [location.search, navItems]);
+    if (isHomeTab(requested)) setTab(requested);
+  }, [location.search]);
 
   const filteredProjects = projects;
   const projectListLabel = user?.role === 'contractor' ? 'Assigned Projects' : 'Projects';
@@ -256,24 +242,6 @@ export default function MobileHome() {
         )}
 
       </main>
-
-      <nav className="btm-bottom-nav" aria-label="Mobile sections">
-        {navItems.map(item => {
-          const active = tab === item.key;
-          return (
-            <button
-              key={item.key}
-              type="button"
-              onClick={() => setTab(item.key)}
-              className={`btm-nav-item btm-tone-${item.tone}${active ? ' is-active' : ''}`}
-              aria-current={active ? 'page' : undefined}
-            >
-              <item.Icon size={22} />
-              <span>{item.shortLabel}</span>
-            </button>
-          );
-        })}
-      </nav>
     </div>
   );
 
