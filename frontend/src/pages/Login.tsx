@@ -468,6 +468,8 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
     setPinDigits('');
   };
 
+  const showMobileQuickAccessOnly = mobileLoginHost && quickAccessReady;
+
   const handleResendCode = async () => {
     try {
       const challenge = twofaChallenge || { method: 'password' as const, email, password };
@@ -608,7 +610,9 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
         <div className="w-full max-w-[460px]">
           <div className={`${forceMobileLogin ? 'mb-2' : 'mb-5'} text-center`}>
             <h2 className={`${forceMobileLogin ? 'text-xl' : 'text-3xl'} font-black ${forceMobileLogin ? 'text-white' : 'text-gray-900'}`}>Welcome back</h2>
-            <p className={`${forceMobileLogin ? 'mt-0.5 text-xs' : 'mt-2 text-sm'} ${forceMobileLogin ? 'text-slate-50' : 'text-gray-500'}`}>Choose one secure sign-in method.</p>
+            <p className={`${forceMobileLogin ? 'mt-0.5 text-xs' : 'mt-2 text-sm'} ${forceMobileLogin ? 'text-slate-50' : 'text-gray-500'}`}>
+              {showMobileQuickAccessOnly ? 'One Touch Access is ready on this device.' : 'Choose one secure sign-in method.'}
+            </p>
           </div>
 
           {needs2FA ? (
@@ -682,30 +686,37 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
           ) : (
             <div className={forceMobileLogin ? 'space-y-2' : 'space-y-3'}>
               {quickAccessReady && (
-                <button
-                  type="button"
-                  onClick={handleMobileQuickAccessLogin}
-                  disabled={quickAccessLoading}
-                  className={`w-full flex items-center justify-between gap-3 ${forceMobileLogin ? 'p-3 rounded-xl' : 'p-4 rounded-lg'} text-left transition-all disabled:opacity-60`}
-                  style={{ background: 'linear-gradient(135deg, #F7B733, #D99D26)', color: '#06111F', boxShadow: '0 12px 28px rgba(217,157,38,0.28)' }}
-                >
-                  <span className="flex items-center gap-3 min-w-0">
-                    <span className={`${forceMobileLogin ? 'h-8 w-8' : 'h-11 w-11'} rounded-lg flex items-center justify-center flex-shrink-0`} style={{ background: 'rgba(255,255,255,0.18)' }}>
-                      <Smartphone className={forceMobileLogin ? 'h-4 w-4' : 'h-5 w-5'} />
-                    </span>
-                    <span className="min-w-0">
-                      <span className={`block ${forceMobileLogin ? 'text-xs' : 'text-sm'} font-black`}>One-Touch App Login</span>
-                      <span className={`block ${forceMobileLogin ? 'text-[11px] leading-snug' : 'text-xs mt-0.5'}`} style={{ color: 'rgba(6,17,31,0.78)' }}>
-                        Continue as {quickAccessLabel}. {forceMobileLogin ? '7-day reset.' : 'Resets after 7 days.'}
+                <div className={showMobileQuickAccessOnly ? 'space-y-2 rounded-2xl bg-slate-950/20 p-3' : undefined}>
+                  <button
+                    type="button"
+                    onClick={handleMobileQuickAccessLogin}
+                    disabled={quickAccessLoading}
+                    className={`w-full flex items-center justify-between gap-3 ${showMobileQuickAccessOnly ? 'p-4 rounded-xl' : forceMobileLogin ? 'p-3 rounded-xl' : 'p-4 rounded-lg'} text-left transition-all disabled:opacity-60`}
+                    style={{ background: 'linear-gradient(135deg, #F7B733, #D99D26)', color: '#06111F', boxShadow: '0 12px 28px rgba(217,157,38,0.28)' }}
+                  >
+                    <span className="flex items-center gap-3 min-w-0">
+                      <span className={`${showMobileQuickAccessOnly ? 'h-11 w-11' : forceMobileLogin ? 'h-8 w-8' : 'h-11 w-11'} rounded-lg flex items-center justify-center flex-shrink-0`} style={{ background: 'rgba(255,255,255,0.18)' }}>
+                        <Smartphone className={showMobileQuickAccessOnly ? 'h-5 w-5' : forceMobileLogin ? 'h-4 w-4' : 'h-5 w-5'} />
+                      </span>
+                      <span className="min-w-0">
+                        <span className={`block ${showMobileQuickAccessOnly ? 'text-base' : forceMobileLogin ? 'text-xs' : 'text-sm'} font-black`}>One Touch Access</span>
+                        <span className={`block ${showMobileQuickAccessOnly ? 'text-xs leading-snug' : forceMobileLogin ? 'text-[11px] leading-snug' : 'text-xs mt-0.5'}`} style={{ color: 'rgba(6,17,31,0.78)' }}>
+                          Continue as {quickAccessLabel}.
+                        </span>
                       </span>
                     </span>
-                  </span>
-                  {quickAccessLoading ? (
-                    <span className="w-5 h-5 rounded-full animate-spin flex-shrink-0" style={{ border: '2px solid rgba(6,17,31,0.25)', borderTopColor: '#06111F' }} />
-                  ) : (
-                    <ArrowRight className="w-5 h-5 flex-shrink-0" />
+                    {quickAccessLoading ? (
+                      <span className="w-5 h-5 rounded-full animate-spin flex-shrink-0" style={{ border: '2px solid rgba(6,17,31,0.25)', borderTopColor: '#06111F' }} />
+                    ) : (
+                      <ArrowRight className="w-5 h-5 flex-shrink-0" />
+                    )}
+                  </button>
+                  {showMobileQuickAccessOnly && (
+                    <p className="px-1 text-center text-xs leading-snug text-slate-100">
+                      One Touch Access stays active for 7 days after signing in with a PIN and 2FA or Email & Password and 2FA.
+                    </p>
                   )}
-                </button>
+                </div>
               )}
 
               {!mobileLoginHost && trustedDeviceReady && (
@@ -733,7 +744,7 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
                 </button>
               )}
 
-              {mobileLoginHost && (
+              {mobileLoginHost && !showMobileQuickAccessOnly && (
                 <>
                   <div className="rounded-xl bg-slate-950/30 p-2">
                     <p className="mb-1 text-center text-[10px] font-black uppercase text-white">Ways to login</p>
@@ -784,7 +795,7 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
                 </>
               )}
 
-              {loginMode === 'password' ? (
+              {!showMobileQuickAccessOnly && loginMode === 'password' ? (
                 <form onSubmit={handleSubmit} className={forceMobileLogin ? 'space-y-2' : 'space-y-3'}>
                   <div>
                     <label className={`block text-xs font-bold uppercase ${forceMobileLogin ? 'mb-1 text-slate-50' : 'mb-2 text-gray-500'}`}>
@@ -883,7 +894,7 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
                     )}
                   </button>
                 </form>
-              ) : mobileLoginHost ? (
+              ) : !showMobileQuickAccessOnly && mobileLoginHost ? (
                 <div className={forceMobileLogin ? 'space-y-2' : 'space-y-3'}>
                   {contractorAccessMode === 'pin' && (
                     <form onSubmit={handlePinLogin} className={forceMobileLogin ? 'space-y-2' : 'space-y-3'}>
