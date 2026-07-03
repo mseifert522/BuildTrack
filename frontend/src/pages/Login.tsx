@@ -207,15 +207,15 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
     const enabled = wantsTrustedDevice();
     return (
       <div
-        className="flex items-center justify-between gap-4 rounded-2xl p-4"
+        className={`flex items-center justify-between gap-3 ${forceMobileLogin ? 'rounded-xl p-3' : 'rounded-2xl p-4'}`}
         style={{
           background: forceMobileLogin ? 'rgba(2, 6, 23, 0.28)' : 'white',
           border: forceMobileLogin ? '0' : '1px solid #E5E7EB',
         }}
       >
-        <div>
-          <p className={`text-sm font-semibold ${forceMobileLogin ? 'text-slate-50' : 'text-gray-800'}`}>{title}</p>
-          <p className={`text-xs mt-0.5 ${forceMobileLogin ? 'text-slate-100' : 'text-gray-400'}`}>{description}</p>
+        <div className="min-w-0">
+          <p className={`${forceMobileLogin ? 'text-xs' : 'text-sm'} font-semibold ${forceMobileLogin ? 'text-slate-50' : 'text-gray-800'}`}>{title}</p>
+          <p className={`${forceMobileLogin ? 'text-[11px] leading-snug' : 'text-xs'} mt-0.5 ${forceMobileLogin ? 'text-slate-100' : 'text-gray-400'}`}>{description}</p>
         </div>
         <button
           type="button"
@@ -492,10 +492,15 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
 
   return (
     <div
-      className={forceMobileLogin ? 'min-h-screen flex items-center justify-center px-4 py-8 sm:px-5' : 'min-h-screen flex'}
+      className={forceMobileLogin ? 'bt-mobile-login-page flex items-start justify-center px-3 py-2 sm:px-5 sm:py-4' : 'min-h-screen flex'}
       style={{
         fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
         background: forceMobileLogin ? 'linear-gradient(180deg, #020617 0%, #07142A 48%, #0F172A 100%)' : undefined,
+        minHeight: forceMobileLogin ? '100dvh' : undefined,
+        height: forceMobileLogin ? '100dvh' : undefined,
+        overflowY: forceMobileLogin ? 'auto' : undefined,
+        overflowX: forceMobileLogin ? 'hidden' : undefined,
+        overscrollBehavior: forceMobileLogin ? 'contain' : undefined,
       }}
     >
       {!forceMobileLogin && (
@@ -580,27 +585,30 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
 
       <div
         className={forceMobileLogin
-          ? 'w-full max-w-[430px] min-h-dvh flex flex-col items-center justify-center relative bg-[#071426] px-5 py-7'
+          ? 'w-full max-w-[430px] min-h-full flex flex-col items-center justify-start relative bg-[#071426] px-4 py-3'
           : 'flex-1 flex flex-col items-center justify-center px-4 py-8 sm:px-6 md:px-10 relative'}
-        style={{ background: forceMobileLogin ? '#071426' : '#F8F9FC' }}
+        style={{
+          background: forceMobileLogin ? '#071426' : '#F8F9FC',
+          paddingBottom: forceMobileLogin ? 'max(0.75rem, env(safe-area-inset-bottom))' : undefined,
+        }}
       >
-        <div className={`${forceMobileLogin ? 'flex' : 'lg:hidden flex'} items-center gap-3 mb-5 w-full max-w-[460px]`}>
+        <div className={`${forceMobileLogin ? 'flex gap-2 mb-2' : 'lg:hidden flex gap-3 mb-5'} items-center w-full max-w-[460px]`}>
           <div
-            className="w-12 h-12 rounded-lg overflow-hidden bg-slate-950 shadow-sm"
+            className={`${forceMobileLogin ? 'h-10 w-10' : 'h-12 w-12'} rounded-lg overflow-hidden bg-slate-950 shadow-sm flex-shrink-0`}
             style={{ boxShadow: '0 0 0 1px rgba(217,157,38,0.46)' }}
           >
             <img src={BUILDTRACK_TRUTH_ICON_SRC} alt="BuildTrack" className="h-full w-full object-contain" />
           </div>
           <div>
-            <h1 className={`text-xl font-black ${forceMobileLogin ? 'text-white' : 'text-gray-900'}`}>BuildTrack</h1>
-            <p className="text-xs font-semibold uppercase" style={{ color: '#D99D26' }}>Construction Management</p>
+            <h1 className={`${forceMobileLogin ? 'text-lg' : 'text-xl'} font-black ${forceMobileLogin ? 'text-white' : 'text-gray-900'}`}>BuildTrack</h1>
+            <p className={`${forceMobileLogin ? 'text-[10px]' : 'text-xs'} font-semibold uppercase`} style={{ color: '#D99D26' }}>Construction Management</p>
           </div>
         </div>
 
         <div className="w-full max-w-[460px]">
-          <div className="mb-5 text-center">
-            <h2 className={`${forceMobileLogin ? 'text-2xl' : 'text-3xl'} font-black ${forceMobileLogin ? 'text-white' : 'text-gray-900'}`}>Welcome back</h2>
-            <p className={`mt-2 text-sm ${forceMobileLogin ? 'text-slate-50' : 'text-gray-500'}`}>Choose one secure sign-in method.</p>
+          <div className={`${forceMobileLogin ? 'mb-2' : 'mb-5'} text-center`}>
+            <h2 className={`${forceMobileLogin ? 'text-xl' : 'text-3xl'} font-black ${forceMobileLogin ? 'text-white' : 'text-gray-900'}`}>Welcome back</h2>
+            <p className={`${forceMobileLogin ? 'mt-0.5 text-xs' : 'mt-2 text-sm'} ${forceMobileLogin ? 'text-slate-50' : 'text-gray-500'}`}>Choose one secure sign-in method.</p>
           </div>
 
           {needs2FA ? (
@@ -672,23 +680,23 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
               </div>
             </form>
           ) : (
-            <div className="space-y-3">
+            <div className={forceMobileLogin ? 'space-y-2' : 'space-y-3'}>
               {quickAccessReady && (
                 <button
                   type="button"
                   onClick={handleMobileQuickAccessLogin}
                   disabled={quickAccessLoading}
-                  className="w-full flex items-center justify-between gap-3 p-4 rounded-lg text-left transition-all disabled:opacity-60"
+                  className={`w-full flex items-center justify-between gap-3 ${forceMobileLogin ? 'p-3 rounded-xl' : 'p-4 rounded-lg'} text-left transition-all disabled:opacity-60`}
                   style={{ background: 'linear-gradient(135deg, #F7B733, #D99D26)', color: '#06111F', boxShadow: '0 12px 28px rgba(217,157,38,0.28)' }}
                 >
                   <span className="flex items-center gap-3 min-w-0">
-                    <span className="w-11 h-11 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(255,255,255,0.18)' }}>
-                      <Smartphone className="w-5 h-5" />
+                    <span className={`${forceMobileLogin ? 'h-8 w-8' : 'h-11 w-11'} rounded-lg flex items-center justify-center flex-shrink-0`} style={{ background: 'rgba(255,255,255,0.18)' }}>
+                      <Smartphone className={forceMobileLogin ? 'h-4 w-4' : 'h-5 w-5'} />
                     </span>
                     <span className="min-w-0">
-                      <span className="block text-sm font-black">One-Touch App Login</span>
-                      <span className="block text-xs mt-0.5" style={{ color: 'rgba(6,17,31,0.78)' }}>
-                        Continue as {quickAccessLabel}. Resets after 7 days.
+                      <span className={`block ${forceMobileLogin ? 'text-xs' : 'text-sm'} font-black`}>One-Touch App Login</span>
+                      <span className={`block ${forceMobileLogin ? 'text-[11px] leading-snug' : 'text-xs mt-0.5'}`} style={{ color: 'rgba(6,17,31,0.78)' }}>
+                        Continue as {quickAccessLabel}. {forceMobileLogin ? '7-day reset.' : 'Resets after 7 days.'}
                       </span>
                     </span>
                   </span>
@@ -727,9 +735,9 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
 
               {mobileLoginHost && (
                 <>
-                  <div className="rounded-2xl bg-slate-950/30 p-2">
-                    <p className="mb-2 text-center text-xs font-black uppercase text-white">Ways to login</p>
-                    <div className="grid grid-cols-1 gap-1.5">
+                  <div className="rounded-xl bg-slate-950/30 p-2">
+                    <p className="mb-1 text-center text-[10px] font-black uppercase text-white">Ways to login</p>
+                    <div className="grid grid-cols-2 gap-1.5">
                     {[
                       { id: 'password', label: 'Email & Password', icon: Mail },
                       { id: 'pin', label: 'PIN Number Access', icon: KeyRound },
@@ -745,7 +753,7 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
                             setContractorAccessMode('pin');
                             setPinDigits('');
                           }}
-                          className="flex min-h-12 items-center justify-center gap-2 rounded-xl px-3 py-3 text-sm font-black transition-all"
+                          className="flex min-h-11 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[12px] font-black transition-all whitespace-nowrap"
                           style={{
                             background: selected ? 'linear-gradient(135deg, #F7B733 0%, #D99D26 100%)' : 'rgba(15, 23, 42, 0.52)',
                             color: selected ? '#06111F' : '#F8FAFC',
@@ -753,7 +761,7 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
                             boxShadow: selected ? '0 10px 24px rgba(217,157,38,0.22)' : 'none',
                           }}
                         >
-                          <Icon className="h-4 w-4" />
+                          <Icon className="h-3.5 w-3.5" />
                           {item.label}
                         </button>
                       );
@@ -761,15 +769,15 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
                     </div>
                   </div>
 
-                  <div className="rounded-2xl bg-slate-950/20 p-3">
-                    <p className="mb-2 text-center text-[11px] font-black uppercase tracking-wide text-slate-200">Need help signing in?</p>
+                  <div className="rounded-xl bg-slate-950/20 px-2 py-1.5">
+                    <p className="mb-1 text-center text-[10px] font-black uppercase tracking-wide text-slate-200">Need help signing in?</p>
                     <button
                       type="button"
                       onClick={handleMobileHelp}
-                      className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl px-3 py-3 text-sm font-black text-slate-50 transition-all"
+                      className="flex min-h-9 w-full items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] font-black text-slate-50 transition-all"
                       style={{ background: 'rgba(15, 23, 42, 0.58)', border: '0' }}
                     >
-                      <ShieldCheck className="h-4 w-4" />
+                      <ShieldCheck className="h-3.5 w-3.5" />
                       {mobileHelpLabel}
                     </button>
                   </div>
@@ -777,9 +785,9 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
               )}
 
               {loginMode === 'password' ? (
-                <form onSubmit={handleSubmit} className="space-y-3">
+                <form onSubmit={handleSubmit} className={forceMobileLogin ? 'space-y-2' : 'space-y-3'}>
                   <div>
-                    <label className={`block text-xs font-bold uppercase mb-2 ${forceMobileLogin ? 'text-slate-50' : 'text-gray-500'}`}>
+                    <label className={`block text-xs font-bold uppercase ${forceMobileLogin ? 'mb-1 text-slate-50' : 'mb-2 text-gray-500'}`}>
                       Email Address
                     </label>
                     <div
@@ -801,14 +809,14 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
                         onBlur={() => setFocusedField(null)}
                         required
                         autoComplete="username email"
-                        className="w-full pl-12 pr-4 py-4 bg-transparent text-gray-900 text-sm font-medium placeholder-gray-500 focus:outline-none rounded-lg"
+                        className={`${forceMobileLogin ? 'py-3' : 'py-4'} w-full pl-12 pr-4 bg-transparent text-gray-900 text-sm font-medium placeholder-gray-500 focus:outline-none rounded-lg`}
                         placeholder="you@company.com"
                       />
                     </div>
                   </div>
 
                   <div>
-                    <label className={`block text-xs font-bold uppercase mb-2 ${forceMobileLogin ? 'text-slate-50' : 'text-gray-500'}`}>
+                    <label className={`block text-xs font-bold uppercase ${forceMobileLogin ? 'mb-1 text-slate-50' : 'mb-2 text-gray-500'}`}>
                       Password
                     </label>
                     <div
@@ -830,7 +838,7 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
                         onBlur={() => setFocusedField(null)}
                         required
                         autoComplete="current-password"
-                        className="w-full pl-12 pr-14 py-4 bg-transparent text-gray-900 text-sm font-medium placeholder-gray-500 focus:outline-none rounded-lg"
+                        className={`${forceMobileLogin ? 'py-3' : 'py-4'} w-full pl-12 pr-14 bg-transparent text-gray-900 text-sm font-medium placeholder-gray-500 focus:outline-none rounded-lg`}
                         placeholder="Password"
                       />
                       <button
@@ -858,7 +866,7 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
                   <button
                     type="submit"
                     disabled={loading}
-                    className="w-full py-4 rounded-lg font-bold text-sm transition-all duration-200 relative overflow-hidden"
+                    className={`${forceMobileLogin ? 'min-h-11 py-2.5' : 'py-4'} w-full rounded-lg font-bold text-sm transition-all duration-200 relative overflow-hidden`}
                     style={{
                       background: loading ? '#D99D26' : 'linear-gradient(135deg, #F7B733 0%, #D99D26 100%)',
                       color: '#06111F',
@@ -876,18 +884,18 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
                   </button>
                 </form>
               ) : mobileLoginHost ? (
-                <div className="space-y-3">
+                <div className={forceMobileLogin ? 'space-y-2' : 'space-y-3'}>
                   {contractorAccessMode === 'pin' && (
-                    <form onSubmit={handlePinLogin} className="space-y-3">
+                    <form onSubmit={handlePinLogin} className={forceMobileLogin ? 'space-y-2' : 'space-y-3'}>
                       <div
-                        className="rounded-2xl p-4 text-center"
+                        className={`${forceMobileLogin ? 'rounded-xl p-3' : 'rounded-2xl p-4'} text-center`}
                         style={{ background: 'rgba(2, 6, 23, 0.28)', border: '0' }}
                       >
-                        <div className="w-10 h-10 rounded-lg flex items-center justify-center mx-auto mb-3" style={{ background: 'rgba(217,157,38,0.1)' }}>
-                          <Smartphone className="w-5 h-5" style={{ color: '#D99D26' }} />
+                        <div className={`${forceMobileLogin ? 'h-8 w-8 mb-2' : 'h-10 w-10 mb-3'} rounded-lg flex items-center justify-center mx-auto`} style={{ background: 'rgba(217,157,38,0.1)' }}>
+                          <Smartphone className={forceMobileLogin ? 'h-4 w-4' : 'h-5 w-5'} style={{ color: '#D99D26' }} />
                         </div>
-                        <h3 className="font-black text-white text-lg">Enter User PIN Number</h3>
-                        <p className="text-sm text-slate-50 mt-1 mb-4">Enter the user PIN number assigned in BuildTrack. First-time and untrusted devices verify by email before the app opens.</p>
+                        <h3 className={`${forceMobileLogin ? 'text-base' : 'text-lg'} font-black text-white`}>Enter User PIN Number</h3>
+                        <p className={`${forceMobileLogin ? 'text-xs mt-0.5 mb-2' : 'text-sm mt-1 mb-4'} text-slate-50`}>{forceMobileLogin ? '5-digit user PIN. Email verification may be required.' : 'Enter the user PIN number assigned in BuildTrack. First-time and untrusted devices verify by email before the app opens.'}</p>
                         <input
                           name="one-time-code"
                           type="text"
@@ -896,18 +904,27 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
                           value={pinDigits}
                           onChange={e => setPinDigits(e.target.value.replace(/\D/g, '').slice(0, 5))}
                           autoComplete="one-time-code"
-                          className="w-full text-center text-2xl font-black py-3 rounded-lg bg-slate-50 text-slate-950 placeholder:text-slate-500 focus:outline-none"
+                          className={`${forceMobileLogin ? 'py-2 text-xl' : 'py-3 text-2xl'} w-full text-center font-black rounded-lg bg-slate-50 text-slate-950 placeholder:text-slate-500 focus:outline-none`}
                           style={{ border: '0', caretColor: '#D99D26', boxShadow: 'inset 0 0 0 1px rgba(15,23,42,0.08)' }}
                           placeholder="00000"
                         />
                       </div>
 
-                      {loading && (
+                      {loading && !forceMobileLogin && (
                         <div className="flex items-center justify-center gap-3 rounded-xl py-3 text-sm font-bold text-slate-50" style={{ background: 'rgba(2, 6, 23, 0.28)' }}>
                           <span className="w-5 h-5 rounded-full animate-spin" style={{ border: '2px solid rgba(255,255,255,0.25)', borderTopColor: 'white' }} />
                           Checking PIN...
                         </div>
                       )}
+
+                      <button
+                        type="submit"
+                        disabled={loading || pinDigits.length !== 5}
+                        className={`${forceMobileLogin ? 'min-h-11 py-2.5' : 'py-4'} w-full rounded-lg font-bold text-sm disabled:opacity-50`}
+                        style={{ background: 'linear-gradient(135deg, #F7B733 0%, #D99D26 100%)', color: '#06111F' }}
+                      >
+                        {loading ? 'Checking PIN...' : 'Sign In'}
+                      </button>
 
                       {renderTrustDevicePreference(
                         'Enable one-touch app login',
@@ -917,10 +934,10 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
                   )}
 
                   {contractorAccessMode === 'forgot' && (
-                    <form onSubmit={sendContractorPin} className="space-y-3">
-                      <div className="rounded-2xl p-4" style={{ background: 'rgba(2, 6, 23, 0.28)', border: '0' }}>
-                        <h3 className="font-black text-white text-lg">Forgot PIN Number</h3>
-                        <p className="text-sm text-slate-50 mt-1 mb-5">Enter the email on the BuildTrack user account. If a PIN exists, BuildTrack will email it.</p>
+                    <form onSubmit={sendContractorPin} className={forceMobileLogin ? 'space-y-2' : 'space-y-3'}>
+                      <div className={`${forceMobileLogin ? 'rounded-xl p-3' : 'rounded-2xl p-4'}`} style={{ background: 'rgba(2, 6, 23, 0.28)', border: '0' }}>
+                        <h3 className={`${forceMobileLogin ? 'text-base' : 'text-lg'} font-black text-white`}>Forgot PIN Number</h3>
+                        <p className={`${forceMobileLogin ? 'text-xs mt-0.5 mb-3' : 'text-sm mt-1 mb-5'} text-slate-50`}>Enter the email on the BuildTrack user account. If a PIN exists, BuildTrack will email it.</p>
                         <label className="block text-xs font-bold text-slate-50 uppercase mb-2">User Email</label>
                         <input
                           type="email"
@@ -935,7 +952,7 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
                       <button
                         type="submit"
                         disabled={contractorActionLoading}
-                        className="w-full py-4 rounded-lg font-bold text-sm disabled:opacity-50"
+                        className={`${forceMobileLogin ? 'min-h-11 py-2.5' : 'py-4'} w-full rounded-lg font-bold text-sm disabled:opacity-50`}
                         style={{ background: 'linear-gradient(135deg, #F7B733 0%, #D99D26 100%)', color: '#06111F' }}
                       >
                         {contractorActionLoading ? 'Sending...' : 'Email PIN Number'}
@@ -947,7 +964,7 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
             </div>
           )}
 
-          <p className={`text-center text-xs mt-8 ${forceMobileLogin ? 'text-slate-200' : 'text-gray-400'}`}>
+          <p className={`text-center ${forceMobileLogin ? 'mt-2 text-[10px] text-slate-400' : 'mt-8 text-xs text-gray-400'}`}>
             (c) 2026 New Urban Development. All rights reserved.
           </p>
         </div>
