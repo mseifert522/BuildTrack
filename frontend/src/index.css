@@ -2827,6 +2827,29 @@ textarea,
   .bt-desktop-shell .bt-sidebar-nav-dot {
     margin-left: 2px;
   }
+
+  .bt-desktop-shell:has(.bt-dashboard-page) {
+    position: relative;
+  }
+
+  .bt-desktop-shell:has(.bt-dashboard-page) .bt-desktop-topbar {
+    position: absolute !important;
+    inset: 56px 0 auto 0 !important;
+    height: 118px !important;
+    padding-inline: 24px !important;
+    border-bottom: 0 !important;
+    background: transparent !important;
+  }
+
+  .bt-desktop-shell .bt-desktop-topbar .bt-profile-chip > div > p:first-child {
+    color: #17324a !important;
+    background: transparent !important;
+  }
+
+  .bt-desktop-shell .bt-desktop-topbar .bt-profile-chip > div > div > p {
+    color: #2d6fa5 !important;
+    background: transparent !important;
+  }
 }
 
 .bt-desktop-shell .bt-dashboard-page .tracking-tight,
