@@ -2752,6 +2752,83 @@ textarea,
   background: #e5eef5 !important;
 }
 
+/* Desktop primary navigation: full-width top bar instead of a left rail. */
+@media (min-width: 1024px) {
+  .bt-desktop-shell {
+    flex-direction: column !important;
+  }
+
+  .bt-desktop-shell > .bt-sidebar-frame {
+    width: 100% !important;
+    height: 56px !important;
+    min-height: 56px !important;
+    max-height: 56px !important;
+    flex-direction: row !important;
+    border-right: 0 !important;
+    border-bottom: 1px solid #416c90 !important;
+  }
+
+  .bt-desktop-shell > .bt-sidebar-frame > div {
+    width: 100%;
+    height: 56px;
+    flex-direction: row !important;
+    align-items: stretch;
+  }
+
+  .bt-desktop-shell > .bt-sidebar-frame > div > div:first-child {
+    width: 208px;
+    height: 56px !important;
+    flex: 0 0 208px;
+    padding-inline: 18px !important;
+    border-right: 1px solid #416c90 !important;
+    border-bottom: 0 !important;
+  }
+
+  .bt-desktop-shell > .bt-sidebar-frame > div > div:first-child > button,
+  .bt-desktop-shell > .bt-sidebar-frame > div > div:last-child {
+    display: none !important;
+  }
+
+  .bt-desktop-shell .bt-sidebar-nav-list {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 16px !important;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .bt-desktop-shell .bt-sidebar-nav-list::-webkit-scrollbar {
+    display: none;
+  }
+
+  .bt-desktop-shell .bt-sidebar-nav-item {
+    width: auto;
+    min-height: 38px !important;
+    flex: 0 0 auto;
+    gap: 8px !important;
+    margin: 0 !important;
+    padding: 8px 12px !important;
+  }
+
+  .bt-desktop-shell .bt-sidebar-nav-label {
+    flex: 0 0 auto !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+  }
+
+  .bt-desktop-shell > .bt-sidebar-frame .bt-sidebar-nav-item .bt-sidebar-nav-icon {
+    width: 18px !important;
+    height: 18px !important;
+  }
+
+  .bt-desktop-shell .bt-sidebar-nav-dot {
+    margin-left: 2px;
+  }
+}
+
 .bt-desktop-shell .bt-dashboard-page .tracking-tight,
 .bt-desktop-shell .bt-dashboard-page .tracking-wide {
   letter-spacing: 0 !important;
