@@ -2603,3 +2603,390 @@ textarea,
 .bt-qbo-table-wrap {
   touch-action: pan-x pan-y;
 }
+
+/* Dashboard: flat navy professional workspace */
+.bt-desktop-shell:has(.bt-dashboard-page) {
+  --bt-dashboard-navy-950: #06101d;
+  --bt-dashboard-navy-900: #081725;
+  --bt-dashboard-navy-850: #0b1d30;
+  --bt-dashboard-navy-800: #10253b;
+  --bt-dashboard-border: #29445f;
+  --bt-dashboard-border-strong: #3b6289;
+  --bt-dashboard-text: #e6eef8;
+  --bt-dashboard-text-soft: #a9bdd2;
+  --bt-dashboard-accent: #4c8bc7;
+  background: var(--bt-dashboard-navy-950) !important;
+}
+
+.bt-desktop-shell:has(.bt-dashboard-page) main,
+.bt-desktop-shell .bt-dashboard-page {
+  background: linear-gradient(135deg, #06101d 0%, #0a1b2e 52%, #12324f 100%) !important;
+  color: var(--bt-dashboard-text) !important;
+}
+
+.bt-desktop-shell:has(.bt-dashboard-page) *,
+.bt-desktop-shell:has(.bt-dashboard-page) *::before,
+.bt-desktop-shell:has(.bt-dashboard-page) *::after {
+  box-shadow: none !important;
+  text-shadow: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+}
+
+.bt-desktop-shell:has(.bt-dashboard-page) .bt-sidebar-frame,
+.bt-desktop-shell:has(.bt-dashboard-page) .bt-desktop-topbar {
+  background: #071421 !important;
+  background-image: none !important;
+}
+
+.bt-desktop-shell:has(.bt-dashboard-page) .bt-sidebar-frame {
+  border-right: 1px solid #233a52 !important;
+}
+
+.bt-desktop-shell:has(.bt-dashboard-page) .bt-sidebar-frame::before,
+.bt-desktop-shell:has(.bt-dashboard-page) .bt-sidebar-nav-item::before,
+.bt-desktop-shell:has(.bt-dashboard-page) .bt-sidebar-nav-item::after {
+  content: none !important;
+  display: none !important;
+}
+
+.bt-desktop-shell:has(.bt-dashboard-page) .bt-sidebar-frame > div > div:first-child,
+.bt-desktop-shell:has(.bt-dashboard-page) .bt-sidebar-frame > div > div:last-child {
+  border-color: #233a52 !important;
+}
+
+.bt-desktop-shell:has(.bt-dashboard-page) .bt-sidebar-frame div:has(> img[alt="BuildTrack"]) {
+  border: 1px solid #355a7c !important;
+  border-radius: 4px !important;
+  background: #0b1b2b !important;
+}
+
+.bt-desktop-shell:has(.bt-dashboard-page) .bt-sidebar-nav-list {
+  padding-top: 14px !important;
+}
+
+.bt-desktop-shell:has(.bt-dashboard-page) .bt-sidebar-nav-item {
+  min-height: 42px !important;
+  margin-bottom: 4px !important;
+  border: 1px solid transparent !important;
+  border-radius: 4px !important;
+  background: transparent !important;
+  color: #b6c6d8 !important;
+}
+
+.bt-desktop-shell:has(.bt-dashboard-page) .bt-sidebar-nav-item:hover {
+  border-color: #2d4c69 !important;
+  background: #0e2236 !important;
+  color: #f1f6fb !important;
+  transform: none !important;
+}
+
+.bt-desktop-shell:has(.bt-dashboard-page) .bt-sidebar-nav-item.is-active {
+  border-color: #47739c !important;
+  background: #15324f !important;
+  color: #ffffff !important;
+}
+
+.bt-desktop-shell:has(.bt-dashboard-page) .bt-sidebar-nav-icon {
+  color: #8db3d7 !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+}
+
+.bt-desktop-shell:has(.bt-dashboard-page) .bt-sidebar-nav-item.is-active .bt-sidebar-nav-icon {
+  color: #8cc4f5 !important;
+  background: transparent !important;
+}
+
+.bt-desktop-shell:has(.bt-dashboard-page) .bt-sidebar-nav-dot {
+  color: #8cc4f5 !important;
+  background: #8cc4f5 !important;
+}
+
+.bt-desktop-shell:has(.bt-dashboard-page) .bt-sidebar-frame > div > div:last-child > div {
+  border: 1px solid #29445f !important;
+  border-radius: 4px !important;
+  background: #0b1b2b !important;
+}
+
+.bt-desktop-shell:has(.bt-dashboard-page) .bt-desktop-topbar {
+  border-bottom: 1px solid #29445f !important;
+}
+
+.bt-desktop-shell:has(.bt-dashboard-page) .bt-desktop-topbar input,
+.bt-desktop-shell:has(.bt-dashboard-page) .bt-topbar-action,
+.bt-desktop-shell:has(.bt-dashboard-page) .bt-desktop-topbar button {
+  border: 1px solid #2d4965 !important;
+  border-radius: 4px !important;
+  background: #0b1b2b !important;
+  color: #c5d4e4 !important;
+}
+
+.bt-desktop-shell:has(.bt-dashboard-page) .bt-desktop-topbar input:focus,
+.bt-desktop-shell:has(.bt-dashboard-page) .bt-topbar-action:hover,
+.bt-desktop-shell:has(.bt-dashboard-page) .bt-desktop-topbar button:hover {
+  border-color: #4d7ba5 !important;
+  background: #102941 !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .tracking-tight,
+.bt-desktop-shell .bt-dashboard-page .tracking-wide {
+  letter-spacing: 0 !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .font-black {
+  font-weight: 650 !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .font-bold {
+  font-weight: 600 !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-hero {
+  border-color: var(--bt-dashboard-border) !important;
+  background: #091827 !important;
+  background-image: none !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-hero h1 {
+  color: #f3f7fb !important;
+  font-weight: 700 !important;
+  letter-spacing: 0 !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-hero p {
+  color: var(--bt-dashboard-text-soft) !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-hero-kicker {
+  border: 1px solid #456985 !important;
+  border-radius: 4px !important;
+  background: #102941 !important;
+  color: #c6ddf0 !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-ops-panel,
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-activity-panel,
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-payment-queue-reminder,
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module {
+  border: 1px solid var(--bt-dashboard-border) !important;
+  border-radius: 6px !important;
+  background: #0b1b2b !important;
+  background-image: none !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-ops-strip,
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-payment-queue-reminder__topline,
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__topline {
+  height: 2px !important;
+  background: var(--bt-dashboard-accent) !important;
+  background-image: none !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-ops-header,
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-notes-panel-header,
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__header,
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__controls,
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__agenda {
+  border-color: var(--bt-dashboard-border) !important;
+  background: #0e2236 !important;
+  background-image: none !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-ops-header h2,
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-notes-panel-header h2,
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module h3,
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-payment-queue-reminder strong {
+  color: #f2f6fb !important;
+  font-weight: 650 !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-section-kicker,
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-payment-queue-reminder__kicker,
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__kicker {
+  color: #8fb8dc !important;
+  letter-spacing: 0 !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-payment-queue-reminder__body,
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-payment-queue-reminder__amount {
+  border-color: var(--bt-dashboard-border) !important;
+  background: #0b1b2b !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-payment-queue-reminder:hover {
+  border-color: var(--bt-dashboard-border-strong) !important;
+  background: #0b1b2b !important;
+  transform: none !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__controls button,
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__open,
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__grid button {
+  border: 1px solid #2b4661 !important;
+  border-radius: 4px !important;
+  background: #0a1928 !important;
+  color: #c8d5e3 !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__controls button:hover,
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__open:hover,
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__grid button:hover {
+  border-color: #4d779d !important;
+  background: #102941 !important;
+  transform: none !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__grid button.is-today,
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__grid button.is-selected {
+  border-color: #6598c5 !important;
+  background: #173b5f !important;
+  background-image: none !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__agenda-item {
+  border: 1px solid #29445f !important;
+  border-radius: 4px !important;
+  background: #091827 !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-note-row {
+  border: 1px solid #29445f !important;
+  border-radius: 4px !important;
+  background: #091827 !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-note-row:hover {
+  border-color: #47739c !important;
+  background: #0d2237 !important;
+  transform: none !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-note-summary {
+  border: 1px solid #203a52 !important;
+  border-radius: 4px !important;
+  background: #071421 !important;
+  color: #e5edf6 !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-filter-row button,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-filter-panel,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-filter-panel input,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-filter-panel select,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-filter-panel button,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-toolbar button,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-toolbar label,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-toolbar input,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-toolbar span.bg-slate-50 {
+  border: 1px solid #304d69 !important;
+  border-radius: 4px !important;
+  background: #0d2236 !important;
+  background-image: none !important;
+  color: #d8e3ef !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-filter-row button:hover,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-filter-panel button:hover:not(:disabled),
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-toolbar button:hover {
+  border-color: #527fa6 !important;
+  background: #15314d !important;
+  transform: none !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-filter-row button.bg-blue-600,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-toolbar button.bg-blue-600,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-toolbar .bg-slate-100 button.bg-blue-600 {
+  border-color: #6092bf !important;
+  background: #255f94 !important;
+  color: #ffffff !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-summary-chip {
+  border: 1px solid #304d69 !important;
+  border-left: 3px solid #4c8bc7 !important;
+  border-radius: 4px !important;
+  background: #10253b !important;
+  background-image: none !important;
+  color: #dce8f3 !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-filter-panel,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-shell,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-toolbar,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-preview,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-preview-list,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-day-card,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-day-agenda,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-agenda-group,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-empty-state,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-shell > .bg-slate-50,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-shell > .overflow-x-auto.bg-slate-50,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-shell .grid.bg-white,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-shell .grid.bg-slate-100,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-shell section.bg-white,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-shell section.bg-slate-50,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-shell section.bg-blue-50 {
+  border-color: #29445f !important;
+  border-radius: 4px !important;
+  background: #091827 !important;
+  background-image: none !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-toolbar {
+  border-bottom: 1px solid #29445f !important;
+  background: #0e2236 !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-event-card,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-preview-task,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-month-pill {
+  border: 1px solid #304d69 !important;
+  border-radius: 4px !important;
+  background: #10253b !important;
+  background-image: none !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-event-card:hover,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-preview-task:hover,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-month-pill:hover,
+.bt-desktop-shell .bt-dashboard-page .bt-calendar-event-card--open {
+  border-color: #527fa6 !important;
+  background: #142e49 !important;
+  transform: none !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page button,
+.bt-desktop-shell .bt-dashboard-page input,
+.bt-desktop-shell .bt-dashboard-page select,
+.bt-desktop-shell .bt-dashboard-page textarea {
+  box-shadow: none !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page button:focus-visible,
+.bt-desktop-shell .bt-dashboard-page input:focus-visible,
+.bt-desktop-shell .bt-dashboard-page select:focus-visible,
+.bt-desktop-shell .bt-dashboard-page textarea:focus-visible {
+  outline: 2px solid #74a7d3 !important;
+  outline-offset: 2px !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page footer,
+.bt-desktop-shell .bt-dashboard-page > div:last-of-type > div:last-child p {
+  color: #8499ae !important;
+}
+
+@media (max-width: 1023px) {
+  .bt-desktop-shell:has(.bt-dashboard-page) .bt-sidebar-frame {
+    border-right: 1px solid #29445f !important;
+    background: #071421 !important;
+  }
+
+  .bt-desktop-shell .bt-dashboard-page .bt-dashboard-ops-panel,
+  .bt-desktop-shell .bt-dashboard-page .bt-dashboard-activity-panel,
+  .bt-desktop-shell .bt-dashboard-page .bt-dashboard-payment-queue-reminder,
+  .bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module {
+    border-radius: 4px !important;
+  }
+}
