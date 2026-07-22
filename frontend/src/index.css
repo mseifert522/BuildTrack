@@ -2615,7 +2615,16 @@ textarea,
   --bt-dashboard-text: #17324a;
   --bt-dashboard-text-soft: #526d84;
   --bt-dashboard-accent: #2d6fa5;
+  --bt-dashboard-navy-texture:
+    linear-gradient(128deg, transparent 0 34%, rgba(214, 234, 247, 0.045) calc(34% + 1px), transparent calc(34% + 2px)),
+    linear-gradient(54deg, transparent 0 72%, rgba(255, 255, 255, 0.03) calc(72% + 1px), transparent calc(72% + 2px)),
+    linear-gradient(135deg, #1a5078 0%, #123a5d 100%);
+  --bt-dashboard-header-texture:
+    linear-gradient(126deg, transparent 0 29%, rgba(225, 240, 250, 0.055) calc(29% + 1px), transparent calc(29% + 2px)),
+    linear-gradient(58deg, transparent 0 76%, rgba(255, 255, 255, 0.04) calc(76% + 1px), transparent calc(76% + 2px)),
+    linear-gradient(110deg, #1d4f7b 0%, #3475a6 100%);
   background: #123858 !important;
+  font-family: "Aptos", "Segoe UI Variable Text", "Segoe UI", Helvetica, Arial, sans-serif !important;
 }
 
 .bt-desktop-shell:has(.bt-dashboard-page) main,
@@ -2635,8 +2644,7 @@ textarea,
 
 .bt-desktop-shell:has(.bt-dashboard-page) .bt-sidebar-frame,
 .bt-desktop-shell:has(.bt-dashboard-page) .bt-desktop-topbar {
-  background: #153f65 !important;
-  background-image: none !important;
+  background: var(--bt-dashboard-navy-texture) !important;
 }
 
 .bt-desktop-shell:has(.bt-dashboard-page) .bt-sidebar-frame {
@@ -2713,7 +2721,7 @@ textarea,
 
 .bt-desktop-shell:has(.bt-dashboard-page) .bt-desktop-topbar {
   border-bottom: 1px solid #416c90 !important;
-  background: #17456d !important;
+  background: var(--bt-dashboard-navy-texture) !important;
 }
 
 .bt-desktop-shell:has(.bt-dashboard-page) .bt-desktop-topbar input,
@@ -2747,7 +2755,7 @@ textarea,
 
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-hero {
   border-color: var(--bt-dashboard-border) !important;
-  background: linear-gradient(110deg, #1d4f7b 0%, #3475a6 100%) !important;
+  background: var(--bt-dashboard-header-texture) !important;
 }
 
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-hero h1 {
@@ -3041,7 +3049,7 @@ textarea,
 @media (max-width: 1023px) {
   .bt-desktop-shell:has(.bt-dashboard-page) .bt-sidebar-frame {
     border-right: 1px solid #416c90 !important;
-    background: #153f65 !important;
+    background: var(--bt-dashboard-navy-texture) !important;
   }
 
   .bt-desktop-shell .bt-dashboard-page .bt-dashboard-ops-panel,
