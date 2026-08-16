@@ -10,6 +10,7 @@ const { logDataAccess } = require('../utils/dataAccessAudit');
 const { recordWorkItemEvent } = require('../utils/workItemEvents');
 const { sendInvoiceEmail, sendApprovedPayNotificationEmail } = require('../utils/email');
 const { generateInvoicePDF } = require('../utils/pdf');
+const { nextInvoiceSeq } = require('../utils/invoiceNumbers');
 
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
@@ -167,7 +168,9 @@ function quickBooksProjectInvoiceRow(bill, { projectId, lineItems, total, balanc
     project_id: projectId,
     contractor_id: quickBooksVendorContractorId(bill),
     contractor_name: bill.vendor_name || 'QuickBooks vendor',
-    contractor_email: null,
+    contractor_email: bill.vendor_primary_email || null,
+    contractor_receipt_status: bill.vendor_receipt_notify_status || null,
+    contractor_receipt_notified_at: bill.vendor_receipt_notified_at || null,
     total: Number(total || 0),
     balance: paid ? 0 : Number(balance || 0),
     status: quickBooksProjectInvoiceStatus(bill, balance),
@@ -222,9 +225,11 @@ function getProjectQuickBooksInvoices(db, projectId) {
     SELECT
       qb.*,
       i.project_id as matched_project_id,
-      i.invoice_number as matched_invoice_number
+      i.invoice_number as matched_invoice_number,
+      qv.primary_email as vendor_primary_email
     FROM quickbooks_bills qb
     LEFT JOIN invoices i ON i.id = qb.matched_invoice_id
+    LEFT JOIN quickbooks_vendors qv ON qv.qbo_id = qb.vendor_id
     WHERE ${where.join(' AND ')}
     ORDER BY
       date(COALESCE(qb.txn_date, qb.due_date, qb.qbo_updated_at, qb.last_seen_at)) DESC,
@@ -574,12 +579,7 @@ router.get('/all', authorize('super_admin', 'operations_manager', 'project_manag
 // GET /api/projects/:projectId/invoices/next-number
 router.get('/next-number', authorizeProjectAccess, (req, res) => {
   const db = getDb();
-  const maxNum = db.prepare("SELECT invoice_number FROM invoices ORDER BY CAST(REPLACE(invoice_number, 'NUD-', '') AS INTEGER) DESC LIMIT 1").get();
-  let nextNum = 1023;
-  if (maxNum && maxNum.invoice_number) {
-    const num = parseInt(maxNum.invoice_number.replace('NUD-', ''));
-    if (!isNaN(num) && num >= 1023) nextNum = num + 1;
-  }
+  const nextNum = nextInvoiceSeq(db);
   res.json({ invoice_number: `NUD-${nextNum}` });
 });
 

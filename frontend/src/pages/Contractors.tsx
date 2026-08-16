@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Building2,
   ChevronDown,
@@ -480,11 +480,12 @@ const emptySupplierForm = {
 
 export default function Contractors() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user: currentUser } = useAuthStore();
   const [contractors, setContractors] = useState<ContractorRow[]>([]);
   const [categories, setCategories] = useState<string[]>(fallbackCategories);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
-  const [query, setQuery] = useState('');
+  const query = searchParams.get('search') || '';
   const [sortMode, setSortMode] = useState<'name_asc' | 'name_desc' | 'date_newest' | 'date_oldest'>('name_asc');
   const [expandedContractorId, setExpandedContractorId] = useState<string | null>(null);
   const [contractorNotes, setContractorNotes] = useState<Record<string, ContractorNote[]>>({});
@@ -953,6 +954,7 @@ export default function Contractors() {
       const lastInvoice = contractor.last_invoice;
 
       if (q) {
+        const qboVendor = quickBooksVendorInfo(contractor);
         const haystack = [
           contractor.name,
           contractor.vendor_name,
@@ -969,6 +971,32 @@ export default function Contractors() {
           contractor.tax_id_last4,
           contractor.bank_account_last4,
           contractor.routing_last4,
+          contractor.created_at,
+          contractor.updated_at,
+          contractor.quickbooks_vendor_id,
+          contractor.quickbooks_display_name,
+          contractor.quickbooks_company_name,
+          contractor.quickbooks_print_on_check_name,
+          contractor.quickbooks_primary_email,
+          contractor.quickbooks_primary_phone,
+          contractor.quickbooks_bill_addr,
+          contractor.quickbooks_account_number,
+          contractor.quickbooks_tax_identifier_last4,
+          contractor.quickbooks_balance,
+          contractor.quickbooks_active,
+          contractor.quickbooks_synced_at,
+          qboVendor?.id,
+          qboVendor?.display_name,
+          qboVendor?.company_name,
+          qboVendor?.print_on_check_name,
+          qboVendor?.primary_email,
+          qboVendor?.primary_phone,
+          qboVendor?.billing_address,
+          qboVendor?.account_number,
+          qboVendor?.tax_identifier_last4,
+          qboVendor?.balance,
+          qboVendor?.active,
+          qboVendor?.synced_at,
           contractor.connected_project_count,
           contractor.invoice_count,
           contractor.total_paid,
@@ -976,7 +1004,7 @@ export default function Contractors() {
           ...contractorCategories,
           ...(contractor.latest_notes || []).flatMap(note => [note.note, note.user_name, note.created_at]),
           ...(contractor.project_addresses || []),
-          ...(contractor.connected_projects || []).flatMap(project => [project.address, project.job_name, project.status]),
+          ...(contractor.connected_projects || []).flatMap(project => [project.id, project.address, project.job_name, project.status]),
           lastPaid?.invoice_number,
           lastPaid?.address,
           lastPaid?.job_name,
@@ -1194,22 +1222,6 @@ export default function Contractors() {
               <Plus className="w-4 h-4" />
               Add Vendor
             </button>
-            <div className="bt-directory-search-stack flex w-full flex-col gap-1 sm:w-[420px]">
-              <div
-                className="bt-directory-search flex min-h-11 w-full items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 shadow-sm"
-              >
-                <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  aria-label="Search contractors and suppliers"
-                  className="w-full bg-transparent text-sm outline-none text-gray-900 placeholder:text-gray-500"
-                />
-              </div>
-              <p className="bt-directory-record-count" aria-live="polite">
-                {filteredContractors.length} Records
-              </p>
-            </div>
           </div>
         </div>
 

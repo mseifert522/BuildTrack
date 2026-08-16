@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader, Loading, Empty, Modal } from '../components/ui';
+import VoiceTextarea from '../components/VoiceTextarea';
 import api from '../lib/api';
 import { useAuthStore } from '../store/authStore';
 import {
@@ -935,12 +936,16 @@ function QuoteNotes({ quoteId }: { quoteId: string }) {
         <p className="mb-2 text-xs text-gray-400">No notes yet.</p>
       )}
       <div className="flex items-center gap-2">
-        <input
+        <VoiceTextarea
           value={text}
           onChange={e => setText(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void add(); } }}
           placeholder="Add a quoting note…"
-          className="flex-1 rounded-md border border-gray-200 px-2 py-1.5 text-xs focus:border-amber-400 focus:outline-none"
+          rows={1}
+          wrapperClassName="flex-1"
+          buttonClassName="!right-1 !top-1 !h-7 !w-7 !rounded-md"
+          className="min-h-9 w-full resize-none rounded-md border border-gray-200 px-2 py-1.5 text-xs focus:border-amber-400 focus:outline-none"
+          style={{ paddingRight: 40 }}
         />
         <button
           type="button"
@@ -1748,7 +1753,7 @@ function AddQuoteModal({ options, defaultProjectId, editQuote, onClose, onSaved 
 
         <label className="block text-sm">
           <span className="mb-1 block font-medium text-gray-600">Internal notes</span>
-          <textarea className={field} rows={2} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+          <VoiceTextarea name="quote_internal_notes" className={field} rows={2} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
         </label>
 
         <div className="flex items-center justify-end gap-2 border-t border-gray-100 pt-3">

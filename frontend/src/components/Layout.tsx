@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { useAuthStore, roleLabels, canManageUsers, canAccessSettings, canAccessSecurity } from '../store/authStore';
+import { useAuthStore, roleLabels, canManageUsers, canAccessSettings, canAccessSecurity, canAccessHumanResources } from '../store/authStore';
 import {
   LayoutDashboard, FolderOpen, ClipboardList, FileText,
   Users, Settings, LogOut, Menu, X, Bell, ChevronRight,
   Camera, Search, Trash2, ShieldCheck, MessageSquare,
-  ArrowLeft, CalendarDays
+  BriefcaseBusiness, CalendarDays
 } from 'lucide-react';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
@@ -16,6 +16,19 @@ import { fileDropHandlers } from '../lib/fileDrop';
 import { formatEasternRelative, parseBuildTrackTimestamp } from '../lib/time';
 
 interface LayoutProps { children: React.ReactNode; }
+const ACTIVE_HEARTBEAT_WINDOW_MS = 90 * 1000;
+
+function hasRecentUserActivity() {
+  const token = localStorage.getItem('token');
+  const contractorToken = localStorage.getItem('contractor_token');
+  const activityKey = contractorToken && contractorToken === token
+    ? 'contractor_last_activity_at'
+    : 'auth_last_activity_at';
+  const lastActivity = Number(localStorage.getItem(activityKey) || 0);
+  return Number.isFinite(lastActivity)
+    && lastActivity > 0
+    && Date.now() - lastActivity <= ACTIVE_HEARTBEAT_WINDOW_MS;
+}
 
 interface NavItem {
   to: string;
@@ -96,6 +109,7 @@ function notificationLabel(action: string, details?: Record<string, any> | null)
     supplier_profile_created: 'created a supplier record',
     supplier_profile_updated: 'updated a supplier record',
     avatar_updated: 'updated a profile photo',
+    quickbooks_invoice_received: 'entered a contractor invoice in QuickBooks',
   };
   return labels[action] || action.replace(/_/g, ' ');
 }
@@ -113,7 +127,7 @@ function notificationLink(log: ActivityLog) {
 }
 
 export default function Layout({ children }: LayoutProps) {
-  useEffect(() => { void import('../styles/desktop-heavy.css'); }, []);
+  useEffect(() => { void import('../styles/desktop-heavy.css'); void import('../styles/waiting-approval-flat.css'); }, []);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -130,6 +144,11 @@ export default function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isVendorDirectory = location.pathname.startsWith('/contractors') || location.pathname.startsWith('/suppliers');
+  const vendorSearchTerm = isVendorDirectory
+    ? new URLSearchParams(location.search).get('search') || ''
+    : '';
+  const headerSearchTerm = isVendorDirectory ? vendorSearchTerm : searchTerm;
 
   const handleLogout = () => {
     logout();
@@ -200,17 +219,29 @@ export default function Layout({ children }: LayoutProps) {
 
   useEffect(() => {
     if (!user) return;
-    api.post('/auth/heartbeat').catch(() => {});
+    const sendActiveHeartbeat = () => {
+      if (hasRecentUserActivity()) {
+        api.post('/auth/heartbeat').catch(() => {});
+      }
+    };
+    sendActiveHeartbeat();
     api.get('/auth/me')
       .then(res => updateUser(res.data))
       .catch(() => {});
     const timer = window.setInterval(() => {
-      api.post('/auth/heartbeat').catch(() => {});
+      sendActiveHeartbeat();
     }, 45000);
     return () => window.clearInterval(timer);
   }, [user?.id]);
 
   useEffect(() => {
+    if (isVendorDirectory) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      setSearchOpen(false);
+      return;
+    }
+
     const q = searchTerm.trim();
     if (q.length < 2) {
       setSearchResults([]);
@@ -232,7 +263,27 @@ export default function Layout({ children }: LayoutProps) {
     }, 250);
 
     return () => window.clearTimeout(timer);
-  }, [searchTerm]);
+  }, [isVendorDirectory, searchTerm]);
+
+  const updateHeaderSearch = (value: string) => {
+    if (!isVendorDirectory) {
+      setSearchTerm(value);
+      setSearchOpen(true);
+      return;
+    }
+
+    const params = new URLSearchParams(location.search);
+    if (value.trim()) params.set('search', value);
+    else params.delete('search');
+    const nextSearch = params.toString();
+    navigate({
+      pathname: location.pathname,
+      search: nextSearch ? `?${nextSearch}` : '',
+      hash: location.hash,
+    }, { replace: true });
+    setSearchResults([]);
+    setSearchOpen(false);
+  };
 
   const goToSearchResult = (result: SearchResult) => {
     setSearchTerm('');
@@ -283,12 +334,12 @@ export default function Layout({ children }: LayoutProps) {
     { to: '/invoices', icon: FileText, label: 'Invoices' },
     { to: '/contractors', icon: Users, label: 'Vendors', match: ['/contractors', '/suppliers'] },
     ...(user && canAccessSecurity(user.role) ? [{ to: '/security', icon: ShieldCheck, label: 'Security' }] : []),
+    ...(user && canAccessHumanResources(user.role) ? [{ to: '/human-resources', icon: BriefcaseBusiness, label: 'Human Resources' }] : []),
   ];
 
   const isActive = (path: string, matchPaths: string[] = [path]) =>
     matchPaths.some(matchPath => location.pathname.startsWith(matchPath));
 
-  const showBackToDashboard = !location.pathname.startsWith('/dashboard');
 
   useEffect(() => {
     setProfileOpen(false);
@@ -500,16 +551,6 @@ export default function Layout({ children }: LayoutProps) {
             >
               <Menu className="w-5 h-5" />
             </button>
-            {showBackToDashboard && (
-              <Link
-                to="/dashboard"
-                className="bt-back-dashboard-button hidden flex-shrink-0 items-center gap-1.5 sm:inline-flex"
-                aria-label="Back to Dashboard"
-              >
-                <ArrowLeft className="h-3.5 w-3.5" />
-                Back to Dashboard
-              </Link>
-            )}
           </div>
 
           {/* Global search */}
@@ -517,13 +558,13 @@ export default function Layout({ children }: LayoutProps) {
             <div className="relative">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: '#8A929C' }} />
               <input
-                value={searchTerm}
-                onChange={e => {
-                  setSearchTerm(e.target.value);
-                  setSearchOpen(true);
+                value={headerSearchTerm}
+                onChange={e => updateHeaderSearch(e.target.value)}
+                onFocus={() => {
+                  if (!isVendorDirectory) setSearchOpen(true);
                 }}
-                onFocus={() => setSearchOpen(true)}
-                aria-label="Search BuildTrack"
+                aria-label={isVendorDirectory ? 'Search vendors' : 'Search BuildTrack'}
+                placeholder={isVendorDirectory ? 'Search all vendor records' : 'Search BuildTrack'}
                 className="w-full rounded-md py-2 pl-10 pr-10 text-sm font-medium placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 style={{
                   background: '#111315',
@@ -531,13 +572,9 @@ export default function Layout({ children }: LayoutProps) {
                   border: '1px solid var(--bt-border)',
                 }}
               />
-              {searchTerm && (
+              {headerSearchTerm && (
                 <button
-                  onClick={() => {
-                    setSearchTerm('');
-                    setSearchResults([]);
-                    setSearchOpen(false);
-                  }}
+                  onClick={() => updateHeaderSearch('')}
                   className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-lg text-gray-400 hover:text-gray-700"
                   title="Clear search"
                   aria-label="Clear search"
@@ -546,7 +583,7 @@ export default function Layout({ children }: LayoutProps) {
                 </button>
               )}
             </div>
-            {searchOpen && searchTerm.trim().length >= 2 && (
+            {!isVendorDirectory && searchOpen && searchTerm.trim().length >= 2 && (
               <>
                 <div className="fixed inset-0 z-[990]" onClick={() => setSearchOpen(false)} />
                 <div className="absolute left-0 right-0 top-full z-[1010] mt-2 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl">

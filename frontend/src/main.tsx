@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import '@fontsource-variable/inter'
 import './index.css'
 import './operations-calendar-pro.css'
+import './styles/flat-ui.css'
 import App from './App.tsx'
 
 createRoot(document.getElementById('root')!).render(

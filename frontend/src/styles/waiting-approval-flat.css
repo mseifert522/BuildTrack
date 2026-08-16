@@ -1,0 +1,128 @@
+/* Waiting for Approval — flat boxes only. No 3D, glow, bevel, or lift. */
+
+.bt-qbo-mirror-section,
+.bt-qbo-mirror-section .bt-invoice-section-header,
+.bt-qbo-mirror-section .bt-invoice-section-header > .flex:first-child,
+.bt-qbo-mirror-section .bt-invoice-icon,
+.bt-qbo-mirror-section .bt-invoice-filter,
+.bt-qbo-mirror-section .bt-invoice-refresh,
+.bt-qbo-mirror-section .bt-qbo-status-row div,
+.bt-qbo-mirror-section .bt-qbo-status-row button,
+.bt-qbo-mirror-section .bt-qbo-status-row button.is-active,
+.bt-qbo-mirror-section .bt-qbo-filter-row,
+.bt-qbo-mirror-section .bt-qbo-invoice-filter-panel,
+.bt-qbo-mirror-section .bt-qbo-invoice-filter-panel select,
+.bt-qbo-mirror-section .bt-qbo-invoice-filter-panel input,
+.bt-qbo-mirror-section .bt-qbo-invoice-filter-panel select:focus,
+.bt-qbo-mirror-section .bt-qbo-invoice-filter-panel input:focus,
+.bt-qbo-mirror-section .bt-qbo-invoice-filter-count,
+.bt-qbo-mirror-section .bt-qbo-invoice-filter-count.is-active,
+.bt-qbo-mirror-section .bt-qbo-clear-invoice-filter,
+.bt-qbo-mirror-section .bt-qbo-period-note,
+.bt-qbo-mirror-section .bt-qbo-project-spend-summary,
+.bt-qbo-mirror-section .bt-qbo-project-spend-summary__cards > div,
+.bt-qbo-mirror-section .bt-qbo-table-shell,
+.bt-qbo-mirror-section .bt-qbo-table-title,
+.bt-qbo-mirror-section .bt-qbo-bill-table th,
+.bt-qbo-mirror-section .bt-qbo-status-chip,
+.bt-qbo-mirror-section .bt-qbo-status-chip.is-unpaid,
+.bt-qbo-mirror-section .bt-qbo-status-chip.is-paid,
+.bt-qbo-mirror-section .bt-qbo-status-chip.is-approved-for-pay,
+.bt-qbo-mirror-section .bt-qbo-pdf-control,
+.bt-qbo-mirror-section .bt-qbo-pdf-view-button,
+.bt-qbo-mirror-section .bt-qbo-pdf-upload-button,
+.bt-qbo-mirror-section button,
+.bt-qbo-mirror-section select,
+.bt-qbo-mirror-section input {
+  background-image: none !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  filter: none !important;
+  transform: none !important;
+}
+
+.bt-qbo-mirror-section .bt-qbo-status-row button:hover,
+.bt-qbo-mirror-section .bt-qbo-status-row button:active,
+.bt-qbo-mirror-section .bt-qbo-clear-invoice-filter:hover,
+.bt-qbo-mirror-section .bt-qbo-bill-table tr:hover,
+.bt-qbo-mirror-section button:hover,
+.bt-qbo-mirror-section button:active {
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.bt-qbo-mirror-section .bt-qbo-status-row div::before,
+.bt-qbo-mirror-section .bt-qbo-status-row button::before,
+.bt-qbo-mirror-section .bt-qbo-project-spend-summary::before {
+  display: none !important;
+}
+
+.bt-qbo-mirror-section {
+  background: #0b1220 !important;
+  border: 1px solid #334155 !important;
+}
+
+.bt-qbo-mirror-section .bt-invoice-section-header,
+.bt-qbo-mirror-section .bt-invoice-section-header > .flex:first-child {
+  background: #111827 !important;
+  border-color: #334155 !important;
+}
+
+.bt-qbo-mirror-section .bt-invoice-icon {
+  background: #1e293b !important;
+}
+
+.bt-qbo-mirror-section .bt-invoice-filter,
+.bt-qbo-mirror-section .bt-invoice-refresh {
+  background: #111827 !important;
+}
+
+.bt-qbo-mirror-section .bt-qbo-status-row div,
+.bt-qbo-mirror-section .bt-qbo-status-row button {
+  background: #111827 !important;
+  border: 1px solid #334155 !important;
+}
+
+.bt-qbo-mirror-section .bt-qbo-status-row button.is-active {
+  background: #1e293b !important;
+  border-color: #64748b !important;
+}
+
+.bt-qbo-mirror-section .bt-qbo-filter-row,
+.bt-qbo-mirror-section .bt-qbo-invoice-filter-panel {
+  background: #111827 !important;
+  border-color: #334155 !important;
+}
+
+.bt-qbo-mirror-section .bt-qbo-invoice-filter-panel select,
+.bt-qbo-mirror-section .bt-qbo-invoice-filter-panel input {
+  background: #f8fafc !important;
+  box-shadow: none !important;
+}
+
+.bt-qbo-mirror-section .bt-qbo-invoice-filter-count,
+.bt-qbo-mirror-section .bt-qbo-clear-invoice-filter,
+.bt-qbo-mirror-section .bt-qbo-period-note {
+  background: #111827 !important;
+}
+
+.bt-qbo-mirror-section .bt-qbo-project-spend-summary,
+.bt-qbo-mirror-section .bt-qbo-project-spend-summary__cards > div,
+.bt-qbo-mirror-section .bt-qbo-table-shell,
+.bt-qbo-mirror-section .bt-qbo-table-title,
+.bt-qbo-mirror-section .bt-qbo-bill-table th {
+  background: #111827 !important;
+}
+
+.bt-qbo-mirror-section .bt-qbo-status-chip,
+.bt-qbo-mirror-section .bt-qbo-status-chip.is-unpaid {
+  background: #1e293b !important;
+  border: 1px solid #475569 !important;
+}
+
+.bt-qbo-mirror-section .bt-qbo-pdf-control,
+.bt-qbo-mirror-section .bt-qbo-pdf-view-button,
+.bt-qbo-mirror-section .bt-qbo-pdf-upload-button {
+  background: #1e293b !important;
+  box-shadow: none !important;
+}

@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { AlertTriangle, Building2, Camera, CheckCircle2, FileText, Loader2, Send, X } from 'lucide-react';
+import VoiceTextarea from '../components/VoiceTextarea';
 
 type QuoteCategory = {
   id: string;
@@ -573,7 +574,7 @@ export default function VendorQuoteRequest() {
             </div>
             <div>
               <label className={labelClass} htmlFor="notes">Notes</label>
-              <textarea id="notes" value={form.notes} onChange={event => setForm(current => ({ ...current, notes: event.target.value }))} rows={4} className={`${inputClass} resize-y`} />
+              <VoiceTextarea id="notes" name="vendor_quote_notes" value={form.notes} onChange={event => setForm(current => ({ ...current, notes: event.target.value }))} rows={4} className={`${inputClass} resize-y`} />
             </div>
             <div>
               <label className={labelClass} htmlFor="pdf_total_amount">Total quote amount</label>

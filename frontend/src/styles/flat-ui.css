@@ -1,0 +1,262 @@
+/*
+ * BuildTrack flat visual system.
+ *
+ * This file intentionally loads after the shared application styles. It removes
+ * visual depth without changing layout, status colors, content media, or the
+ * semantic borders that keep controls and records easy to scan.
+ */
+
+html body #root,
+html body #root *,
+html body #root *::before,
+html body #root *::after {
+  box-shadow: none !important;
+  text-shadow: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  perspective: none !important;
+  transform-style: flat !important;
+  border-image: none !important;
+}
+
+/* Replace decorative gradients with the element's existing solid color. */
+html body #root :where(*):not(img):not(picture):not(video):not(canvas):not(svg):not([style*="url("]) {
+  background-image: none !important;
+}
+
+html body #root *::before,
+html body #root *::after {
+  background-image: none !important;
+}
+
+/* Stop raised/pressed motion while retaining transforms used for positioning. */
+html body #root :where([class*="hover:-translate"], [class*="hover:translate"], [class*="hover:scale"]):hover,
+html body #root :where([class*="active:-translate"], [class*="active:translate"], [class*="active:scale"]):active {
+  transform: none !important;
+}
+
+/* Shadows previously carried some focus indication, so provide a flat outline. */
+html body #root :where(button, a, input, select, textarea, [role="button"], [tabindex]):focus-visible {
+  outline: 2px solid #3b82f6 !important;
+  outline-offset: 2px !important;
+  box-shadow: none !important;
+}
+
+/* Invoice workspace: flat, strongly separated payment stages. */
+.bt-invoices-light .bt-invoice-page-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  border: 2px solid #334155;
+  border-left: 7px solid #60a5fa;
+  border-radius: 6px;
+  background: #0b1119 !important;
+  padding: 18px 20px;
+}
+
+.bt-invoices-light .bt-invoice-page-heading > div:first-child > span,
+.bt-invoices-light .bt-invoice-area-heading span {
+  display: block;
+  margin-bottom: 3px;
+  color: #93c5fd;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.bt-invoices-light .bt-invoice-page-heading h1 {
+  margin: 0;
+  font-size: 25px;
+  font-weight: 950;
+  line-height: 1.15;
+}
+
+.bt-invoices-light .bt-invoice-page-heading p,
+.bt-invoices-light .bt-invoice-area-heading p {
+  margin: 4px 0 0;
+  color: #cbd5e1;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.bt-invoices-light .bt-invoice-workflow-key {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.bt-invoices-light .bt-invoice-workflow-key > span {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #475569;
+  border-radius: 5px;
+  background: #111827 !important;
+  padding: 7px 10px;
+  color: #e2e8f0;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.bt-invoices-light .bt-invoice-workflow-key strong {
+  display: grid;
+  width: 21px;
+  height: 21px;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 10px;
+}
+
+.bt-invoices-light .bt-invoice-workflow-key [data-stage="waiting"] {
+  border-color: #60a5fa;
+  color: #bfdbfe;
+}
+
+.bt-invoices-light .bt-invoice-workflow-key [data-stage="approved"] {
+  border-color: #f59e0b;
+  color: #fde68a;
+}
+
+.bt-invoices-light .bt-invoice-workflow-key [data-stage="paid"] {
+  border-color: #10b981;
+  color: #a7f3d0;
+}
+
+.bt-invoices-light .bt-qbo-mirror-section {
+  border: 2px solid #3b82f6;
+  background: #080f18 !important;
+}
+
+.bt-invoices-light .bt-invoice-area-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 2px solid #3b82f6;
+  background: #101c2b !important;
+  padding: 16px 18px;
+}
+
+.bt-invoices-light .bt-invoice-area-heading h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 950;
+}
+
+.bt-invoices-light .bt-qbo-status-row {
+  gap: 12px;
+  border-bottom: 1px solid #334155;
+  background: #0b1119 !important;
+  padding: 16px;
+}
+
+.bt-invoices-light .bt-qbo-status-row > div,
+.bt-invoices-light .bt-qbo-status-row > button {
+  border-width: 2px;
+  background: #111827 !important;
+}
+
+.bt-invoices-light .bt-qbo-status-row > button:nth-child(2) {
+  border-color: #f59e0b;
+}
+
+.bt-invoices-light .bt-qbo-status-row > button:nth-child(3) {
+  border-color: #10b981;
+}
+
+.bt-invoices-light .bt-qbo-filter-row {
+  margin: 16px !important;
+  border: 1px solid #475569;
+  border-left: 6px solid #60a5fa;
+  border-radius: 5px;
+  background: #111827 !important;
+  padding: 12px;
+}
+
+.bt-invoices-light .bt-qbo-status-filter-pills {
+  padding-right: 12px;
+  border-right: 1px solid #475569;
+}
+
+.bt-invoices-light .bt-qbo-table-shell {
+  margin: 22px 16px 16px;
+  border: 2px solid #475569;
+  background: #0b1119 !important;
+}
+
+.bt-invoices-light .bt-qbo-table-title {
+  border-bottom: 2px solid #475569;
+  border-left: 6px solid #60a5fa;
+  background: #101827 !important;
+  padding: 13px 16px;
+}
+
+.bt-invoices-light .bt-qbo-table-title > div > span {
+  color: #bfdbfe;
+  font-size: 14px;
+  letter-spacing: 0.05em;
+}
+
+.bt-invoices-light .bt-qbo-table-title > div > p {
+  margin-top: 4px;
+  color: #cbd5e1;
+}
+
+.bt-invoices-light .bt-qbo-table-title .bt-qbo-table-count {
+  margin: 0;
+  border: 1px solid #60a5fa;
+  border-radius: 4px;
+  background: #172554 !important;
+  padding: 8px 10px;
+  color: #dbeafe;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.bt-invoices-light .bt-approved-pay-panel--embedded {
+  margin: 28px 16px 16px;
+  border: 2px solid #f59e0b;
+  border-radius: 6px;
+  background: #171208 !important;
+}
+
+.bt-invoices-light .bt-approved-pay-panel--embedded .bt-approved-pay-header {
+  border-bottom: 2px solid #f59e0b;
+  background: #211805 !important;
+}
+
+.bt-invoices-light .bt-qbo-bill-table tr.is-paid {
+  border-left: 5px solid #10b981;
+}
+
+.bt-invoices-light .bt-qbo-bill-table tr.is-approved-for-pay {
+  border-left: 5px solid #f59e0b;
+}
+
+.bt-invoices-light .bt-qbo-bill-table tr.is-unpaid {
+  border-left: 5px solid #60a5fa;
+}
+
+@media (max-width: 900px) {
+  .bt-invoices-light .bt-invoice-page-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .bt-invoices-light .bt-invoice-workflow-key {
+    justify-content: flex-start;
+  }
+
+  .bt-invoices-light .bt-qbo-status-filter-pills {
+    width: 100%;
+    padding-right: 0;
+    padding-bottom: 10px;
+    border-right: 0;
+    border-bottom: 1px solid #475569;
+  }
+}

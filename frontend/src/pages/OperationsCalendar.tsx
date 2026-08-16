@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../lib/api';
+import VoiceTextarea from '../components/VoiceTextarea';
 
 type CalendarView = 'day' | 'week' | 'month';
 type CalendarKind = 'event' | 'task';
@@ -1201,7 +1202,7 @@ function EventModal({
 
           <label className="ops-field ops-field--wide">
             <span>Notes</span>
-            <textarea value={form.notes} onChange={event => setValue('notes', event.target.value)} rows={4} maxLength={1000} />
+            <VoiceTextarea name="calendar_notes" value={form.notes} onChange={event => setValue('notes', event.target.value)} rows={4} maxLength={1000} />
           </label>
         </div>
 

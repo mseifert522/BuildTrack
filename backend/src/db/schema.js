@@ -1,5 +1,6 @@
 const Database = require('better-sqlite3');
 const path = require('path');
+const { assignMissingBtInvoiceNumbers } = require('../utils/invoiceNumbers');
 const fs = require('fs');
 const crypto = require('crypto');
 
@@ -757,6 +758,11 @@ function initializeSchema() {
       payment_run_date TEXT,
       payment_approval_notified_at TEXT,
       payment_approval_notified_by TEXT,
+      vendor_receipt_notify_status TEXT,
+      vendor_receipt_notified_at TEXT,
+      vendor_receipt_notified_email TEXT,
+      vendor_receipt_notify_error TEXT,
+      vendor_receipt_notify_attempts INTEGER NOT NULL DEFAULT 0,
       matched_invoice_id TEXT,
       project_id TEXT,
       line_json TEXT NOT NULL DEFAULT '[]',
@@ -1521,6 +1527,276 @@ function initializeSchema() {
     CREATE INDEX IF NOT EXISTS idx_project_documents_project_created
       ON project_documents(project_id, created_at);
 
+    -- Human Resources: management-only applicant and personnel operations.
+    -- Sensitive identity verification and medical records are deliberately excluded.
+    CREATE TABLE IF NOT EXISTS hr_candidates (
+      id TEXT PRIMARY KEY,
+      first_name TEXT NOT NULL,
+      last_name TEXT NOT NULL,
+      email TEXT,
+      phone TEXT,
+      position TEXT,
+      source TEXT,
+      status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new','contacted','screening','interview','offer','hired','not_selected','on_hold')),
+      last_contacted_at TEXT,
+      next_follow_up_at TEXT,
+      notes TEXT,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_hr_candidates_status_updated
+      ON hr_candidates(status, updated_at);
+
+    CREATE INDEX IF NOT EXISTS idx_hr_candidates_name
+      ON hr_candidates(last_name, first_name);
+
+    CREATE TABLE IF NOT EXISTS hr_candidate_activities (
+      id TEXT PRIMARY KEY,
+      candidate_id TEXT NOT NULL,
+      contact_type TEXT NOT NULL CHECK(contact_type IN ('call','email','voicemail','text','interview','note')),
+      direction TEXT NOT NULL DEFAULT 'outbound' CHECK(direction IN ('outbound','inbound','internal')),
+      outcome TEXT,
+      notes TEXT,
+      contacted_at TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (candidate_id) REFERENCES hr_candidates(id) ON DELETE CASCADE,
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_hr_candidate_activities_candidate
+      ON hr_candidate_activities(candidate_id, contacted_at);
+
+    CREATE TABLE IF NOT EXISTS hr_employees (
+      id TEXT PRIMARY KEY,
+      source_candidate_id TEXT,
+      linked_user_id TEXT,
+      first_name TEXT NOT NULL,
+      last_name TEXT NOT NULL,
+      preferred_name TEXT,
+      personal_email TEXT,
+      work_email TEXT,
+      phone TEXT,
+      mailing_address TEXT,
+      city TEXT,
+      state TEXT,
+      postal_code TEXT,
+      job_title TEXT,
+      department TEXT,
+      manager_name TEXT,
+      work_location TEXT,
+      employment_status TEXT NOT NULL DEFAULT 'active' CHECK(employment_status IN ('active','leave','terminated')),
+      employment_type TEXT NOT NULL DEFAULT 'full_time' CHECK(employment_type IN ('full_time','part_time','seasonal','temporary','contractor')),
+      classification TEXT NOT NULL DEFAULT 'non_exempt' CHECK(classification IN ('non_exempt','exempt','independent_contractor')),
+      hire_date TEXT,
+      termination_date TEXT,
+      pay_type TEXT NOT NULL DEFAULT 'hourly' CHECK(pay_type IN ('hourly','salary')),
+      pay_rate_cents INTEGER NOT NULL DEFAULT 0 CHECK(pay_rate_cents >= 0),
+      pay_frequency TEXT NOT NULL DEFAULT 'biweekly' CHECK(pay_frequency IN ('weekly','biweekly','semimonthly','monthly')),
+      standard_weekly_hours REAL NOT NULL DEFAULT 40 CHECK(standard_weekly_hours >= 0 AND standard_weekly_hours <= 168),
+      benefit_eligible INTEGER NOT NULL DEFAULT 0,
+      benefit_eligibility_date TEXT,
+      emergency_contact_name TEXT,
+      emergency_contact_relationship TEXT,
+      emergency_contact_phone TEXT,
+      notes TEXT,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (source_candidate_id) REFERENCES hr_candidates(id) ON DELETE SET NULL,
+      FOREIGN KEY (linked_user_id) REFERENCES users(id) ON DELETE SET NULL,
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_hr_employees_status_name
+      ON hr_employees(employment_status, last_name, first_name);
+
+    CREATE TABLE IF NOT EXISTS hr_time_entries (
+      id TEXT PRIMARY KEY,
+      employee_id TEXT NOT NULL,
+      work_date TEXT NOT NULL,
+      regular_hours REAL NOT NULL DEFAULT 0 CHECK(regular_hours >= 0),
+      overtime_hours REAL NOT NULL DEFAULT 0 CHECK(overtime_hours >= 0),
+      pto_hours REAL NOT NULL DEFAULT 0 CHECK(pto_hours >= 0),
+      sick_hours REAL NOT NULL DEFAULT 0 CHECK(sick_hours >= 0),
+      unpaid_hours REAL NOT NULL DEFAULT 0 CHECK(unpaid_hours >= 0),
+      notes TEXT,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (employee_id) REFERENCES hr_employees(id) ON DELETE CASCADE,
+      FOREIGN KEY (created_by) REFERENCES users(id),
+      UNIQUE(employee_id, work_date)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_hr_time_entries_date_employee
+      ON hr_time_entries(work_date, employee_id);
+
+    CREATE TABLE IF NOT EXISTS hr_leave_balances (
+      id TEXT PRIMARY KEY,
+      employee_id TEXT NOT NULL,
+      leave_type TEXT NOT NULL CHECK(leave_type IN ('pto','sick','vacation','fmla','unpaid','bereavement','other')),
+      benefit_year INTEGER NOT NULL,
+      opening_hours REAL NOT NULL DEFAULT 0,
+      accrued_hours REAL NOT NULL DEFAULT 0,
+      used_hours REAL NOT NULL DEFAULT 0,
+      annual_use_limit_hours REAL,
+      updated_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (employee_id) REFERENCES hr_employees(id) ON DELETE CASCADE,
+      FOREIGN KEY (updated_by) REFERENCES users(id),
+      UNIQUE(employee_id, leave_type, benefit_year)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_hr_leave_balances_employee_year
+      ON hr_leave_balances(employee_id, benefit_year);
+
+    CREATE TABLE IF NOT EXISTS hr_leave_requests (
+      id TEXT PRIMARY KEY,
+      employee_id TEXT NOT NULL,
+      leave_type TEXT NOT NULL CHECK(leave_type IN ('pto','sick','vacation','fmla','unpaid','bereavement','other')),
+      start_date TEXT NOT NULL,
+      end_date TEXT NOT NULL,
+      hours REAL NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'requested' CHECK(status IN ('requested','approved','denied','cancelled')),
+      notes TEXT,
+      reviewed_by TEXT,
+      reviewed_at TEXT,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (employee_id) REFERENCES hr_employees(id) ON DELETE CASCADE,
+      FOREIGN KEY (reviewed_by) REFERENCES users(id),
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_hr_leave_requests_status_dates
+      ON hr_leave_requests(status, start_date, end_date);
+
+    CREATE TABLE IF NOT EXISTS hr_benefit_enrollments (
+      id TEXT PRIMARY KEY,
+      employee_id TEXT NOT NULL,
+      benefit_type TEXT NOT NULL CHECK(benefit_type IN ('health','dental','vision','life','disability','retirement','other')),
+      plan_name TEXT NOT NULL,
+      coverage_level TEXT,
+      status TEXT NOT NULL DEFAULT 'offered' CHECK(status IN ('offered','waived','enrolled','ended')),
+      effective_date TEXT,
+      end_date TEXT,
+      employee_monthly_cents INTEGER NOT NULL DEFAULT 0,
+      employer_monthly_cents INTEGER NOT NULL DEFAULT 0,
+      notes TEXT,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (employee_id) REFERENCES hr_employees(id) ON DELETE CASCADE,
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_hr_benefits_employee_status
+      ON hr_benefit_enrollments(employee_id, status, benefit_type);
+
+    CREATE TABLE IF NOT EXISTS hr_compliance_tasks (
+      id TEXT PRIMARY KEY,
+      employee_id TEXT NOT NULL,
+      category TEXT NOT NULL,
+      task_name TEXT NOT NULL,
+      due_date TEXT,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','complete','not_applicable')),
+      completed_at TEXT,
+      completed_by TEXT,
+      notes TEXT,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (employee_id) REFERENCES hr_employees(id) ON DELETE CASCADE,
+      FOREIGN KEY (completed_by) REFERENCES users(id),
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_hr_compliance_status_due
+      ON hr_compliance_tasks(status, due_date, employee_id);
+
+    CREATE TABLE IF NOT EXISTS hr_documents (
+      id TEXT PRIMARY KEY,
+      owner_type TEXT NOT NULL CHECK(owner_type IN ('candidate','employee')),
+      owner_id TEXT NOT NULL,
+      document_type TEXT NOT NULL CHECK(document_type IN ('resume','offer_letter','handbook_acknowledgment','performance_review','training_record','other')),
+      stored_name TEXT UNIQUE NOT NULL,
+      original_name TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      uploaded_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (uploaded_by) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_hr_documents_owner_created
+      ON hr_documents(owner_type, owner_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS hr_ai_settings (
+      provider TEXT PRIMARY KEY CHECK(provider IN ('anthropic')),
+      api_key_encrypted TEXT NOT NULL,
+      api_key_last_four TEXT NOT NULL,
+      updated_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (updated_by) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS hr_resume_import_batches (
+      id TEXT PRIMARY KEY,
+      status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','processing','completed','partial','failed')),
+      total_files INTEGER NOT NULL DEFAULT 0 CHECK(total_files >= 0),
+      processed_files INTEGER NOT NULL DEFAULT 0 CHECK(processed_files >= 0),
+      imported_files INTEGER NOT NULL DEFAULT 0 CHECK(imported_files >= 0),
+      duplicate_files INTEGER NOT NULL DEFAULT 0 CHECK(duplicate_files >= 0),
+      failed_files INTEGER NOT NULL DEFAULT 0 CHECK(failed_files >= 0),
+      model TEXT NOT NULL,
+      input_tokens INTEGER NOT NULL DEFAULT 0 CHECK(input_tokens >= 0),
+      output_tokens INTEGER NOT NULL DEFAULT 0 CHECK(output_tokens >= 0),
+      error_message TEXT,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      started_at TEXT,
+      completed_at TEXT,
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_hr_resume_import_batches_created
+      ON hr_resume_import_batches(created_at, status);
+
+    CREATE TABLE IF NOT EXISTS hr_resume_import_items (
+      id TEXT PRIMARY KEY,
+      batch_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','processing','imported','duplicate','failed')),
+      original_name TEXT NOT NULL,
+      stored_name TEXT UNIQUE NOT NULL,
+      mime_type TEXT NOT NULL,
+      size INTEGER NOT NULL CHECK(size >= 0),
+      candidate_id TEXT,
+      matched_candidate_id TEXT,
+      document_id TEXT,
+      extracted_json TEXT,
+      review_required INTEGER NOT NULL DEFAULT 1 CHECK(review_required IN (0,1)),
+      error_message TEXT,
+      input_tokens INTEGER NOT NULL DEFAULT 0 CHECK(input_tokens >= 0),
+      output_tokens INTEGER NOT NULL DEFAULT 0 CHECK(output_tokens >= 0),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      started_at TEXT,
+      completed_at TEXT,
+      FOREIGN KEY (batch_id) REFERENCES hr_resume_import_batches(id) ON DELETE CASCADE,
+      FOREIGN KEY (candidate_id) REFERENCES hr_candidates(id) ON DELETE SET NULL,
+      FOREIGN KEY (matched_candidate_id) REFERENCES hr_candidates(id) ON DELETE SET NULL,
+      FOREIGN KEY (document_id) REFERENCES hr_documents(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_hr_resume_import_items_batch_status
+      ON hr_resume_import_items(batch_id, status, created_at);
+
     -- Estimate or agreed-scope documents attached to a specific scope-of-work section.
     CREATE TABLE IF NOT EXISTS project_scope_documents (
       id TEXT PRIMARY KEY,
@@ -2113,6 +2389,30 @@ function initializeSchema() {
 	  try { db.exec(`ALTER TABLE quickbooks_bills ADD COLUMN payment_approval_notified_by TEXT`); } catch (_) { /* already exists */ }
 	  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_quickbooks_bills_qbo_class ON quickbooks_bills(qbo_class_id, project_id)`); } catch (_) { /* best-effort */ }
 	  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_quickbooks_bills_payment_approval ON quickbooks_bills(payment_approval_status, payment_run_date, payment_status)`); } catch (_) { /* best-effort */ }
+	  try {
+	    // Column creation + historical backfill are ONE transaction: every bill existing
+	    // before this feature launched is permanently marked historical so contractor
+	    // pay-date emails only fire for bills first seen afterwards. Atomicity matters -
+	    // if the UPDATE ever failed after a bare ALTER, later boots would see the column
+	    // as "already exists", never backfill, and the queue would drain old bills as new.
+	    db.exec(`BEGIN;
+	      ALTER TABLE quickbooks_bills ADD COLUMN vendor_receipt_notify_status TEXT;
+	      UPDATE quickbooks_bills SET vendor_receipt_notify_status = 'historical' WHERE vendor_receipt_notify_status IS NULL;
+	      COMMIT;`);
+	  } catch (_) {
+	    // Duplicate-column boots land here AFTER the BEGIN succeeded - close the
+	    // dangling transaction or it would swallow the rest of the schema run.
+	    if (db.inTransaction) { try { db.exec('ROLLBACK'); } catch (_) { /* best-effort */ } }
+	  }
+	  try { db.exec(`ALTER TABLE quickbooks_bills ADD COLUMN vendor_receipt_notified_at TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE quickbooks_bills ADD COLUMN vendor_receipt_notified_email TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE quickbooks_bills ADD COLUMN vendor_receipt_notify_error TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE quickbooks_bills ADD COLUMN vendor_receipt_notify_attempts INTEGER NOT NULL DEFAULT 0`); } catch (_) { /* already exists */ }
+	  // Claims stranded mid-send by a restart become visible, retryable failures. The
+	  // attempt increments too (the email may have gone out just before the crash), so
+	  // the retry cap still bounds worst-case duplicates. Safe on every boot: no notify
+	  // loop can be in flight while the schema runs.
+	  try { db.exec(`UPDATE quickbooks_bills SET vendor_receipt_notify_status = 'failed', vendor_receipt_notify_error = 'interrupted by server restart during send', vendor_receipt_notify_attempts = COALESCE(vendor_receipt_notify_attempts, 0) + 1, updated_at = datetime('now') WHERE vendor_receipt_notify_status = 'processing'`); } catch (_) { /* best-effort */ }
 	  try { db.exec(`ALTER TABLE quickbooks_bill_attachments ADD COLUMN qbo_attachable_id TEXT`); } catch (_) { /* already exists */ }
 	  try { db.exec(`ALTER TABLE quickbooks_bill_attachments ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`); } catch (_) { /* already exists */ }
 	  try { db.exec(`ALTER TABLE quickbooks_bill_attachments ADD COLUMN qbo_file_access_uri TEXT`); } catch (_) { /* already exists */ }
@@ -2277,6 +2577,11 @@ function initializeSchema() {
       payment_run_date TEXT,
       payment_approval_notified_at TEXT,
       payment_approval_notified_by TEXT,
+      vendor_receipt_notify_status TEXT,
+      vendor_receipt_notified_at TEXT,
+      vendor_receipt_notified_email TEXT,
+      vendor_receipt_notify_error TEXT,
+      vendor_receipt_notify_attempts INTEGER NOT NULL DEFAULT 0,
       matched_invoice_id TEXT,
       project_id TEXT,
 	        line_json TEXT NOT NULL DEFAULT '[]',
@@ -2710,6 +3015,7 @@ function initializeSchema() {
     `);
   } catch (_) { /* lifecycle normalization best-effort */ }
 
+  assignMissingBtInvoiceNumbers(db);
   return db;
 }
 

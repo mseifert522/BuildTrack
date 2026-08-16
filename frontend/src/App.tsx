@@ -1,9 +1,10 @@
 import { Component, lazy, Suspense, useEffect, useRef, type ErrorInfo, type ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
-import { useAuthStore, canManageUsers, canAccessSettings, canAccessSecurity } from './store/authStore';
+import { useAuthStore, canManageUsers, canAccessSettings, canAccessSecurity, canAccessHumanResources } from './store/authStore';
 import Layout from './components/Layout';
 import GlobalImageLightbox from './components/GlobalImageLightbox';
+import DraftAutosave from './components/DraftAutosave';
 import { Loading } from './components/ui';
 import {
   isLegacyContractorAppPath,
@@ -32,6 +33,7 @@ const Contractors = lazy(() => import('./pages/Contractors'));
 const Users = lazy(() => import('./pages/Users'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Security = lazy(() => import('./pages/Security'));
+const HumanResources = lazy(() => import('./pages/HumanResources'));
 const ChangePassword = lazy(() => import('./pages/ChangePassword'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
@@ -48,10 +50,9 @@ const MobilePhotos = lazy(() => import('./pages/MobilePhotos'));
 const MobileFieldWork = lazy(() => import('./pages/MobileFieldWork'));
 const MobileContractorPreview = lazy(() => import('./pages/MobileContractorPreview'));
 
-const DESKTOP_SESSION_TIMEOUT_MS = 45 * 60 * 1000;
+const SESSION_IDLE_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 const ACTIVITY_WRITE_INTERVAL_MS = 15 * 1000;
 const TOKEN_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
-const AUTH_SESSION_STARTED_KEY = 'auth_session_started_at';
 const AUTH_LAST_ACTIVITY_KEY = 'auth_last_activity_at';
 const AUTH_LAST_REFRESH_KEY = 'auth_last_refresh_at';
 const CONTRACTOR_LAST_ACTIVITY_KEY = 'contractor_last_activity_at';
@@ -129,14 +130,6 @@ class BuildTrackErrorBoundary extends Component<{ children: ReactNode }, { error
     if (this.state.error) return <RootErrorFallback error={this.state.error} />;
     return this.props.children;
   }
-}
-
-function isMobileDeviceSession() {
-  if (typeof window === 'undefined') return false;
-  return isMobileAppHost()
-    || isLegacyMobilePath(window.location.pathname)
-    || isLegacyContractorAppPath(window.location.pathname)
-    || MOBILE_USER_AGENT_PATTERN.test(window.navigator.userAgent || '');
 }
 
 function isLikelyMobileDevice() {
@@ -286,6 +279,15 @@ function SecurityRoute({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+/** Only management roles can access Human Resources */
+function HumanResourcesRoute({ children }: { children: ReactNode }) {
+  const { user, token } = useAuthStore();
+  if (!token || !user) return <Navigate to="/login" replace />;
+  if (user.force_password_reset) return <Navigate to="/change-password" replace />;
+  if (!canAccessHumanResources(user.role)) return <Navigate to="/dashboard" replace />;
+  return <>{children}</>;
+}
+
 function AuthRoute({ children }: { children: ReactNode }) {
   const { token, user } = useAuthStore();
   if (token && user && !user.force_password_reset) {
@@ -309,13 +311,13 @@ function SessionTimeout() {
     let lastActivityWrite = 0;
 
     const clearDesktopSession = () => {
-      localStorage.removeItem(AUTH_SESSION_STARTED_KEY);
       localStorage.removeItem(AUTH_LAST_ACTIVITY_KEY);
       localStorage.removeItem(AUTH_LAST_REFRESH_KEY);
       logout();
     };
 
-    const markActivity = () => {
+    const markActivity = (event?: Event) => {
+      if (event?.type === 'visibilitychange' && document.visibilityState !== 'visible') return;
       const now = Date.now();
       if (now - lastActivityWrite < ACTIVITY_WRITE_INTERVAL_MS) return;
       lastActivityWrite = now;
@@ -339,9 +341,13 @@ function SessionTimeout() {
 
       refreshInFlight.current[sessionType] = true;
       try {
+        const activityKey = sessionType === 'desktop' ? AUTH_LAST_ACTIVITY_KEY : CONTRACTOR_LAST_ACTIVITY_KEY;
         const response = await fetch('/api/auth/refresh', {
           method: 'POST',
-          headers: { Authorization: `Bearer ${currentToken}` },
+          headers: {
+            Authorization: `Bearer ${currentToken}`,
+            'X-BuildTrack-Last-Activity': localStorage.getItem(activityKey) || '',
+          },
         });
         if (!response.ok) throw new Error('Refresh failed');
         const data = await response.json();
@@ -370,8 +376,7 @@ function SessionTimeout() {
       activityKey: string,
       refreshKey: string,
       userKey: 'user' | 'contractor_user',
-      sessionType: 'desktop' | 'contractor',
-      enforceDesktopTimeout: boolean
+      sessionType: 'desktop' | 'contractor'
     ) => {
       const now = Date.now();
       const activeToken = localStorage.getItem(tokenKey);
@@ -381,16 +386,16 @@ function SessionTimeout() {
         localStorage.setItem(activityKey, String(now));
       }
 
-      if (enforceDesktopTimeout) {
-        const startedAt = Number(localStorage.getItem(AUTH_SESSION_STARTED_KEY) || now);
-        if (!localStorage.getItem(AUTH_SESSION_STARTED_KEY)) {
-          localStorage.setItem(AUTH_SESSION_STARTED_KEY, String(startedAt));
-        }
-        if (now - startedAt >= DESKTOP_SESSION_TIMEOUT_MS) {
+      const lastActivity = Number(localStorage.getItem(activityKey) || now);
+      if (!Number.isFinite(lastActivity) || now - lastActivity >= SESSION_IDLE_TIMEOUT_MS) {
+        if (sessionType === 'desktop') {
           clearDesktopSession();
           navigate('/login', { replace: true });
-          return false;
+        } else {
+          clearContractorSession();
+          navigate(isMobileAppHost() ? '/login' : '/app', { replace: true });
         }
+        return false;
       }
 
       const lastRefresh = Number(localStorage.getItem(refreshKey) || 0);
@@ -410,18 +415,14 @@ function SessionTimeout() {
       );
 
       if (!normalTokenIsMirroredContractorToken) {
-        const enforceDesktopIdleTimeout = !isMobileDeviceSession() && user?.role !== 'contractor';
-        if (!checkActiveSession('token', AUTH_LAST_ACTIVITY_KEY, AUTH_LAST_REFRESH_KEY, 'user', 'desktop', enforceDesktopIdleTimeout)) return;
+        if (!checkActiveSession('token', AUTH_LAST_ACTIVITY_KEY, AUTH_LAST_REFRESH_KEY, 'user', 'desktop')) return;
       }
 
-      checkActiveSession('contractor_token', CONTRACTOR_LAST_ACTIVITY_KEY, CONTRACTOR_LAST_REFRESH_KEY, 'contractor_user', 'contractor', false);
+      checkActiveSession('contractor_token', CONTRACTOR_LAST_ACTIVITY_KEY, CONTRACTOR_LAST_REFRESH_KEY, 'contractor_user', 'contractor');
     };
 
     if (localStorage.getItem('token') && !localStorage.getItem(AUTH_LAST_ACTIVITY_KEY)) {
       localStorage.setItem(AUTH_LAST_ACTIVITY_KEY, String(Date.now()));
-    }
-    if (localStorage.getItem('token') && !localStorage.getItem(AUTH_SESSION_STARTED_KEY)) {
-      localStorage.setItem(AUTH_SESSION_STARTED_KEY, String(Date.now()));
     }
     if (localStorage.getItem('contractor_token') && !localStorage.getItem(CONTRACTOR_LAST_ACTIVITY_KEY)) {
       localStorage.setItem(CONTRACTOR_LAST_ACTIVITY_KEY, String(Date.now()));
@@ -543,6 +544,7 @@ function MobileHostRoutes() {
       <Route path="/users" element={<UpperManagementMobileRoute allowed={canManageUsers}><Layout><Users /></Layout></UpperManagementMobileRoute>} />
       <Route path="/settings" element={<UpperManagementMobileRoute allowed={canAccessSettings}><Layout><Settings /></Layout></UpperManagementMobileRoute>} />
       <Route path="/security" element={<UpperManagementMobileRoute allowed={canAccessSecurity}><Layout><Security /></Layout></UpperManagementMobileRoute>} />
+      <Route path="/human-resources" element={<UpperManagementMobileRoute allowed={canAccessHumanResources}><Layout><HumanResources /></Layout></UpperManagementMobileRoute>} />
 
       <Route path="/documents" element={<Navigate to="/" replace />} />
 
@@ -586,6 +588,7 @@ export default function App() {
       <BuildTrackErrorBoundary>
         <DeviceHostRedirect />
         <SessionTimeout />
+        <DraftAutosave />
         <MobileGestureShortcuts />
         <GlobalImageLightbox />
         <Toaster
@@ -715,6 +718,11 @@ export default function App() {
           <SecurityRoute>
             <Layout><Security /></Layout>
           </SecurityRoute>
+        } />
+        <Route path="/human-resources" element={
+          <HumanResourcesRoute>
+            <Layout><HumanResources /></Layout>
+          </HumanResourcesRoute>
         } />
 
         {/* Legacy contractor app entry points now leave the desktop host. */}

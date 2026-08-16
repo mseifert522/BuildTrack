@@ -7,7 +7,8 @@ const fs = require('fs');
 const { getDb } = require('../db/schema');
 const { authenticate, authorize } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
-const { sendApprovedPayNotificationEmail } = require('../utils/email');
+const { isEmailConfigured, sendApprovedPayNotificationEmail, sendContractorInvoiceReceivedEmail } = require('../utils/email');
+const { ensureBillHasInvoiceNumber, invDisplay } = require('../utils/invoiceNumbers');
 
 const router = express.Router();
 const MANAGEMENT_ROLES = ['super_admin', 'operations_manager', 'project_manager', 'admin_assistant'];
@@ -550,6 +551,20 @@ function paymentStatusForBill(bill) {
   if (balance <= 0) return 'paid';
   if (total > 0 && balance < total) return 'partial';
   return 'unpaid';
+}
+
+function shouldRestoreDeletedQuickBooksBill(paymentApprovalStatus, paymentStatus) {
+  // A bill hidden while open must reappear if QuickBooks later records it as
+  // paid. Paid accounting history is authoritative and cannot remain hidden
+  // behind a previous BuildTrack-only delete action.
+  return paymentApprovalStatus === PAYMENT_APPROVAL_DELETED_STATUS && paymentStatus === 'paid';
+}
+
+function missingQuickBooksBillIds(localBills, quickBooksBills) {
+  const liveIds = new Set((quickBooksBills || []).map(bill => String(bill?.Id || '')).filter(Boolean));
+  return (localBills || [])
+    .filter(bill => bill?.qbo_id && !liveIds.has(String(bill.qbo_id)))
+    .map(bill => String(bill.qbo_id));
 }
 
 function metadataTime(entity, key) {
@@ -1412,6 +1427,30 @@ function upsertBillsAndPayments(db, connection, bills, payments) {
       raw_json = excluded.raw_json,
       qbo_created_at = excluded.qbo_created_at,
       qbo_updated_at = excluded.qbo_updated_at,
+      payment_approval_status = CASE
+        WHEN quickbooks_bills.payment_approval_status = '${PAYMENT_APPROVAL_DELETED_STATUS}'
+          AND excluded.payment_status = 'paid'
+        THEN '${PAYMENT_APPROVAL_DEFAULT_STATUS}'
+        ELSE quickbooks_bills.payment_approval_status
+      END,
+      payment_approved_at = CASE
+        WHEN quickbooks_bills.payment_approval_status = '${PAYMENT_APPROVAL_DELETED_STATUS}'
+          AND excluded.payment_status = 'paid'
+        THEN NULL
+        ELSE quickbooks_bills.payment_approved_at
+      END,
+      payment_approved_by = CASE
+        WHEN quickbooks_bills.payment_approval_status = '${PAYMENT_APPROVAL_DELETED_STATUS}'
+          AND excluded.payment_status = 'paid'
+        THEN NULL
+        ELSE quickbooks_bills.payment_approved_by
+      END,
+      payment_run_date = CASE
+        WHEN quickbooks_bills.payment_approval_status = '${PAYMENT_APPROVAL_DELETED_STATUS}'
+          AND excluded.payment_status = 'paid'
+        THEN NULL
+        ELSE quickbooks_bills.payment_run_date
+      END,
       last_seen_at = datetime('now'),
       updated_at = datetime('now')
   `);
@@ -1450,6 +1489,11 @@ function upsertBillsAndPayments(db, connection, bills, payments) {
     WHERE qbo_id = ?
     LIMIT 1
   `);
+  const markBillReceiptHistorical = db.prepare(`
+    UPDATE quickbooks_bills
+    SET vendor_receipt_notify_status = 'historical'
+    WHERE qbo_id = ? AND vendor_receipt_notify_status IS NULL
+  `);
   const updateInvoice = db.prepare(`
     UPDATE invoices
     SET quickbooks_status = 'synced',
@@ -1478,6 +1522,7 @@ function upsertBillsAndPayments(db, connection, bills, payments) {
   let matched = 0;
   let ignored = 0;
   let markedPaidFromQueue = 0;
+  const newBills = [];
   const write = db.transaction(() => {
     if (deleteExcludedBills) deleteExcludedBills.run(...excludedVendors);
 
@@ -1508,6 +1553,7 @@ function upsertBillsAndPayments(db, connection, bills, payments) {
       const existingBillApproval = getExistingBillApproval.get(String(bill.Id));
       const paymentApprovalStatusAtSync = existingBillApproval?.payment_approval_status || PAYMENT_APPROVAL_DEFAULT_STATUS;
       const deletedFromBuildTrack = paymentApprovalStatusAtSync === PAYMENT_APPROVAL_DELETED_STATUS;
+      const restoreDeletedPaidBill = shouldRestoreDeletedQuickBooksBill(paymentApprovalStatusAtSync, paymentStatus);
       const classRef = primaryBillClassRef(bill);
       const project = findProjectForBill(db, bill, invoice, classRef);
       if (project && classRef) rememberProjectClass(db, project, classRef);
@@ -1539,7 +1585,23 @@ function upsertBillsAndPayments(db, connection, bills, payments) {
         metadataTime(bill, 'CreateTime'),
         metadataTime(bill, 'LastUpdatedTime')
       );
-      if (deletedFromBuildTrack) {
+      ensureBillHasInvoiceNumber(db, String(bill.Id), invoice?.invoice_number || null);
+      if (!existingBillApproval) {
+        // A row can be absent for reasons other than "the office just entered this bill"
+        // (rebuilt database, vendor removed from the exclusion list, restored backup), so
+        // "new" is decided by provenance: unpaid AND recently created in QuickBooks.
+        // Everything else is stamped historical so it can never be claimed for an email.
+        const createdMs = Date.parse(metadataTime(bill, 'CreateTime') || '');
+        const genuinelyNew = paymentStatus !== 'paid'
+          && Number.isFinite(createdMs)
+          && (Date.now() - createdMs) <= vendorReceiptFreshWindowMs();
+        if (genuinelyNew) {
+          newBills.push({ qbo_id: String(bill.Id), vendor_name: bill.VendorRef?.name || null });
+        } else {
+          markBillReceiptHistorical.run(String(bill.Id));
+        }
+      }
+      if (deletedFromBuildTrack && !restoreDeletedPaidBill) {
         deleteBillLines.run(String(bill.Id));
         continue;
       }
@@ -1599,7 +1661,60 @@ function upsertBillsAndPayments(db, connection, bills, payments) {
   });
 
   write();
-  return { matched, ignored, markedPaidFromQueue };
+  return { matched, ignored, markedPaidFromQueue, newBills };
+}
+
+function reconcileMissingQuickBooksBills(db, connection, bills) {
+  // This runs only after a complete, successful QBO Bill query. Transactions
+  // absent from that authoritative result were deleted/replaced in QBO. Keep
+  // their rows and attachments for auditability, but remove them from active
+  // BuildTrack balances and payment queues.
+  const localBills = db.prepare(`
+    SELECT qbo_id, vendor_name, total_amt, balance, payment_status, payment_approval_status, project_id
+    FROM quickbooks_bills
+    WHERE realm_id = ?
+      AND environment = ?
+      AND COALESCE(payment_approval_status, ?) != ?
+  `).all(
+    connection.realm_id,
+    connection.environment,
+    PAYMENT_APPROVAL_DEFAULT_STATUS,
+    PAYMENT_APPROVAL_DELETED_STATUS
+  );
+  const missingIds = missingQuickBooksBillIds(localBills, bills);
+  if (!missingIds.length) return { count: 0, bills: [] };
+
+  const localById = new Map(localBills.map(bill => [String(bill.qbo_id), bill]));
+  const updateMissing = db.prepare(`
+    UPDATE quickbooks_bills
+    SET payment_approval_status = ?,
+        payment_approved_at = NULL,
+        payment_approved_by = NULL,
+        payment_run_date = NULL,
+        payment_approval_notified_at = NULL,
+        payment_approval_notified_by = NULL,
+        updated_at = datetime('now')
+    WHERE qbo_id = ?
+  `);
+  db.transaction(() => {
+    for (const qboId of missingIds) updateMissing.run(PAYMENT_APPROVAL_DELETED_STATUS, qboId);
+  })();
+
+  return {
+    count: missingIds.length,
+    bills: missingIds.slice(0, 25).map(qboId => {
+      const bill = localById.get(qboId) || {};
+      return {
+        qbo_id: qboId,
+        vendor_name: bill.vendor_name || null,
+        total_amt: normalizeMoney(bill.total_amt),
+        balance: normalizeMoney(bill.balance),
+        prior_payment_status: bill.payment_status || null,
+        prior_approval_status: bill.payment_approval_status || PAYMENT_APPROVAL_DEFAULT_STATUS,
+        project_id: bill.project_id || null,
+      };
+    }),
+  };
 }
 
 function splitLinesFullyMatchedSql(billAlias = 'qb') {
@@ -1665,6 +1780,7 @@ function statusSummary(db) {
 function quickBooksBillSelectSql() {
   return `
       qb.qbo_id,
+      qb.bt_invoice_number,
       qb.doc_number,
       qb.vendor_id,
       qb.vendor_name,
@@ -1683,6 +1799,10 @@ function quickBooksBillSelectSql() {
       qb.payment_approval_notified_by,
       approved_user.name as payment_approved_by_name,
       notified_user.name as payment_approval_notified_by_name,
+      qb.vendor_receipt_notify_status,
+      qb.vendor_receipt_notified_at,
+      qb.vendor_receipt_notified_email,
+      qv.primary_email as vendor_email,
       qb.private_note,
       qb.matched_invoice_id,
       qb.project_id,
@@ -1704,6 +1824,7 @@ function quickBooksBillJoinsSql() {
     LEFT JOIN projects p ON p.id = COALESCE(qb.project_id, i.project_id)
     LEFT JOIN users approved_user ON approved_user.id = qb.payment_approved_by
     LEFT JOIN users notified_user ON notified_user.id = qb.payment_approval_notified_by
+    LEFT JOIN quickbooks_vendors qv ON qv.qbo_id = qb.vendor_id
   `;
 }
 
@@ -1863,8 +1984,8 @@ function approvedPaymentQueueRows(db, paymentRunDate = null) {
 function paymentQueueEmailRows(rows) {
   return rows.map(row => ({
     id: row.qbo_id,
-    invoice_number: row.doc_number ? `QBO #${row.doc_number}` : `QBO #${row.qbo_id}`,
-    external_invoice_number: row.doc_number ? `QBO #${row.doc_number}` : `QBO #${row.qbo_id}`,
+    invoice_number: invDisplay(row.bt_invoice_number || row.doc_number || row.qbo_id),
+    external_invoice_number: invDisplay(row.bt_invoice_number || row.doc_number || row.qbo_id),
     vendor_name: row.vendor_name || 'Vendor missing',
     contractor_name: row.vendor_name || 'Vendor missing',
     address: row.project_address || row.project_job_name || (
@@ -1937,6 +2058,229 @@ function markPaymentQueueRowsNotified(db, rows, userId) {
     for (const row of rows) updateNotified.run(userId || null, row.qbo_id);
   });
   write();
+}
+
+function vendorReceiptEmailEnabled() {
+  return process.env.QBO_VENDOR_RECEIPT_EMAIL_ENABLED !== 'false'
+    && process.env.QUICKBOOKS_VENDOR_RECEIPT_EMAIL_ENABLED !== 'false';
+}
+
+function vendorReceiptEmailMaxPerSync() {
+  const requested = Number.parseInt(process.env.QBO_VENDOR_RECEIPT_EMAIL_MAX_PER_SYNC || '20', 10);
+  return Math.max(Number.isFinite(requested) ? requested : 20, 1);
+}
+
+function vendorReceiptFreshWindowMs() {
+  const hours = Number.parseFloat(process.env.QBO_VENDOR_RECEIPT_FRESH_WINDOW_HOURS || '72');
+  return Math.max(Number.isFinite(hours) ? hours : 72, 1) * 60 * 60 * 1000;
+}
+
+const VENDOR_RECEIPT_MAX_ATTEMPTS = 3;
+
+function vendorReceiptStatusNote(status, vendorEmail) {
+  switch (status) {
+    case 'sent': return `contractor emailed at ${vendorEmail}`;
+    case 'skipped_no_email': return 'NO VENDOR EMAIL ON FILE - add it in QuickBooks and the email sends on the next sync';
+    case 'skipped_no_due_date': return 'NO DUE DATE SET - add it in QuickBooks and the email sends on the next sync';
+    case 'skipped_already_paid': return 'bill already paid - pay-date email not needed';
+    case 'skipped_stale': return 'due date already passed - pay-date email not sent';
+    case 'failed': return 'CONTRACTOR EMAIL FAILED - retries on upcoming syncs';
+    default: return 'contractor email skipped';
+  }
+}
+
+let vendorReceiptNotifyRunning = false;
+
+// Emails contractors their expected pay date (= QBO due date) for bills the office
+// just entered in QuickBooks, and drops an activity row the whole team sees in the
+// notification bell. The work queue is the DATABASE, not the sync pass that inserted
+// the bill: every quickbooks_bills row with vendor_receipt_notify_status NULL (or a
+// retryable 'failed') is a candidate, so crashes, SMTP outages, a missing vendor
+// email, or the kill switch defer the email instead of silently losing it.
+// Pre-launch and re-mirrored old bills are stamped 'historical' (schema backfill +
+// the insert-time provenance check in upsertBillsAndPayments) and never qualify.
+async function notifyNewQuickBooksBills(db, connection, { userId = null } = {}) {
+  const summary = { candidates: 0, attempted: 0, sent: 0, skipped: 0, failed: 0, deferred: 0 };
+  if (vendorReceiptNotifyRunning) return { ...summary, skipped_reason: 'already_running' };
+  if (!vendorReceiptEmailEnabled()) return { ...summary, skipped_reason: 'disabled' };
+  vendorReceiptNotifyRunning = true;
+  try {
+    // Re-arm data-missing skips once the office fixes the record in QuickBooks.
+    // A re-armed bill gets a fresh attempt budget - skips must never burn send tries.
+    db.prepare(`
+      UPDATE quickbooks_bills
+      SET vendor_receipt_notify_status = NULL,
+          vendor_receipt_notify_error = NULL,
+          vendor_receipt_notify_attempts = 0,
+          updated_at = datetime('now')
+      WHERE COALESCE(payment_approval_status, '') != '${PAYMENT_APPROVAL_DELETED_STATUS}'
+        AND ((vendor_receipt_notify_status = 'skipped_no_email'
+             AND EXISTS (
+               SELECT 1 FROM quickbooks_vendors qv
+               WHERE qv.qbo_id = quickbooks_bills.vendor_id
+                 AND TRIM(COALESCE(qv.primary_email, '')) != ''
+             ))
+         OR (vendor_receipt_notify_status = 'skipped_no_due_date' AND COALESCE(due_date, '') != ''))
+    `).run();
+
+    const candidates = db.prepare(`
+      SELECT
+        qb.qbo_id,
+        qb.doc_number,
+        qb.vendor_id,
+        qb.vendor_name,
+        qb.txn_date,
+        qb.due_date,
+        qb.total_amt,
+        qb.payment_status,
+        qb.project_id,
+        qb.vendor_receipt_notify_status AS prior_status,
+        COALESCE(qb.vendor_receipt_notify_attempts, 0) AS attempts,
+        qv.qbo_id AS vendor_row_id,
+        qv.display_name AS vendor_display_name,
+        qv.primary_email AS vendor_primary_email,
+        p.address AS project_address,
+        p.job_name AS project_job_name
+      FROM quickbooks_bills qb
+      LEFT JOIN quickbooks_vendors qv ON qv.qbo_id = qb.vendor_id
+      LEFT JOIN projects p ON p.id = qb.project_id
+      WHERE (qb.vendor_receipt_notify_status IS NULL
+         OR (qb.vendor_receipt_notify_status = 'failed'
+             AND COALESCE(qb.vendor_receipt_notify_attempts, 0) < ${VENDOR_RECEIPT_MAX_ATTEMPTS}
+             AND qb.updated_at < datetime('now', '-1 hour')))
+        AND COALESCE(qb.payment_approval_status, '') != '${PAYMENT_APPROVAL_DELETED_STATUS}'
+        AND (qb.vendor_id IS NULL OR qv.qbo_id IS NOT NULL)
+      ORDER BY datetime(qb.first_seen_at) ASC
+      LIMIT 200
+    `).all();
+    summary.candidates = candidates.length;
+    if (!candidates.length) return summary;
+
+    const automationUserId = userId || paymentQueueAutomationUserId(db) || connection.connected_by || null;
+    const claimBill = db.prepare(`
+      UPDATE quickbooks_bills
+      SET vendor_receipt_notify_status = 'processing',
+          updated_at = datetime('now')
+      WHERE qbo_id = ?
+        AND (vendor_receipt_notify_status IS NULL OR vendor_receipt_notify_status = 'failed')
+    `);
+    // Attempts count only real send failures - data-missing skips must not burn the
+    // retry budget of an email that has never actually been tried.
+    const finishBill = db.prepare(`
+      UPDATE quickbooks_bills
+      SET vendor_receipt_notify_status = ?,
+          vendor_receipt_notified_at = CASE WHEN ? = 'sent' THEN datetime('now') ELSE vendor_receipt_notified_at END,
+          vendor_receipt_notify_attempts = CASE WHEN ? = 'failed' THEN COALESCE(vendor_receipt_notify_attempts, 0) + 1 ELSE vendor_receipt_notify_attempts END,
+          vendor_receipt_notified_email = ?,
+          vendor_receipt_notify_error = ?,
+          updated_at = datetime('now')
+      WHERE qbo_id = ?
+        AND vendor_receipt_notify_status = 'processing'
+    `);
+
+    // Rate limit per pass instead of suppressing: the provenance check upstream
+    // keeps floods of "new" bills from ever existing, so a long candidate list is
+    // real work - drain it maxPerSync at a time (sync runs every minute).
+    const maxPerSync = vendorReceiptEmailMaxPerSync();
+    const workList = candidates.slice(0, maxPerSync);
+    if (candidates.length > workList.length) {
+      summary.deferred += candidates.length - workList.length;
+      console.warn(`[QBO] Contractor receipt queue: processing ${workList.length} of ${candidates.length} pending bills this pass.`);
+    }
+
+    for (const bill of workList) {
+      const isRetry = bill.prior_status === 'failed';
+      const vendorEmail = String(bill.vendor_primary_email || '').trim();
+      const vendorName = bill.vendor_display_name || bill.vendor_name || 'Contractor';
+      const projectLabel = bill.project_address || bill.project_job_name || null;
+
+      // Vendor not mirrored yet (vendor sync can fail transiently): leave the bill
+      // unclaimed so the next sync retries against a fresh vendor mirror.
+      if (bill.vendor_id && !bill.vendor_row_id) {
+        summary.deferred += 1;
+        continue;
+      }
+
+      let claimed;
+      try {
+        claimed = claimBill.run(bill.qbo_id);
+      } catch (err) {
+        console.error(`[QBO] Contractor receipt claim failed for bill ${bill.qbo_id}:`, err.message);
+        continue;
+      }
+      if (!claimed.changes) continue;
+      summary.attempted += 1;
+
+      const dueDatePassed = bill.due_date
+        ? Date.parse(`${bill.due_date}T23:59:59Z`) < Date.now()
+        : false;
+
+      let status = 'sent';
+      let sendError = null;
+      if (bill.payment_status === 'paid') status = 'skipped_already_paid';
+      else if (!vendorEmail) status = 'skipped_no_email';
+      else if (!bill.due_date) status = 'skipped_no_due_date';
+      else if (dueDatePassed) status = 'skipped_stale';
+      else if (!isEmailConfigured()) {
+        status = 'failed';
+        sendError = 'SMTP not configured - email not sent';
+        console.error(`[QBO] Contractor receipt email skipped for bill ${bill.qbo_id}: SMTP not configured.`);
+      } else {
+        try {
+          await sendContractorInvoiceReceivedEmail({
+            vendorName,
+            vendorEmail,
+            amount: bill.total_amt,
+            payDate: bill.due_date,
+            receivedDate: bill.txn_date,
+            invoiceNumber: bill.doc_number,
+            projectLabel,
+          });
+        } catch (err) {
+          status = 'failed';
+          sendError = String(err?.message || err).slice(0, 500);
+          console.error(`[QBO] Contractor receipt email failed for bill ${bill.qbo_id} (${vendorEmail}):`, sendError);
+        }
+      }
+
+      try {
+        finishBill.run(status, status, status, vendorEmail || null, sendError, bill.qbo_id);
+      } catch (err) {
+        console.error(`[QBO] Contractor receipt bookkeeping failed for bill ${bill.qbo_id}:`, err.message);
+      }
+      if (status === 'sent') summary.sent += 1;
+      else if (status === 'failed') summary.failed += 1;
+      else summary.skipped += 1;
+
+      // One bell entry per bill on first processing; retries only add an entry when
+      // they finally succeed, so a flaky SMTP night cannot flood the activity feed.
+      if (automationUserId && (!isRetry || status === 'sent')) {
+        const amountLabel = `$${Number(bill.total_amt || 0).toFixed(2)}`;
+        logActivity({
+          userId: automationUserId,
+          projectId: bill.project_id || null,
+          action: 'quickbooks_invoice_received',
+          entityType: 'quickbooks_bill',
+          entityId: bill.qbo_id,
+          details: {
+            title: `${vendorName} • ${amountLabel} • expected pay ${bill.due_date || 'not set'} • ${vendorReceiptStatusNote(status, vendorEmail)}`,
+            vendor_name: vendorName,
+            vendor_email: vendorEmail || null,
+            total_amt: bill.total_amt,
+            txn_date: bill.txn_date,
+            due_date: bill.due_date,
+            doc_number: bill.doc_number,
+            project_label: projectLabel,
+            contractor_email_status: status,
+          },
+        });
+      }
+    }
+
+    return summary;
+  } finally {
+    vendorReceiptNotifyRunning = false;
+  }
 }
 
 async function sendScheduledPaymentQueueEmail(now = new Date()) {
@@ -2103,6 +2447,13 @@ async function syncQuickBooksBills({ source = 'manual', userId = null } = {}) {
       const companyName = connection.company_name || await fetchCompanyName(db, connection);
       const vendorResult = upsertQuickBooksVendors(db, connection, vendors);
       const result = upsertBillsAndPayments(db, connection, bills, payments);
+      const missingBillReconciliation = reconcileMissingQuickBooksBills(db, connection, bills);
+      // Contractor pay-date notifications are MANUAL-ONLY (2026-08-15, Mike's
+      // directive): sync must never email a contractor on its own. The office
+      // sends each one from the "Send pay date" button on a Waiting for Approval
+      // row (POST /quickbooks/bills/:qboId/send-pay-date). notifyNewQuickBooksBills
+      // is intentionally no longer called from the sync path.
+      const vendorReceiptNotifications = { queued_new_bills: result.newBills.length, auto_send: 'disabled_manual_only' };
       let billPdfSync = null;
       if (process.env.QBO_BILL_PDF_SYNC_ON_BILL_SYNC !== 'false') {
         billPdfSync = await syncQuickBooksBillPdfs({ scope: process.env.QBO_BILL_PDF_SYNC_SCOPE || 'missing', source, userId }).catch(err => {
@@ -2135,6 +2486,10 @@ async function syncQuickBooksBills({ source = 'manual', userId = null } = {}) {
             matched: result.matched,
             ignored_bills: result.ignored,
             marked_paid_from_friday_queue: result.markedPaidFromQueue,
+            new_bills: result.newBills.length,
+            contractor_receipt_emails: vendorReceiptNotifications,
+            qbo_missing_bills_hidden: missingBillReconciliation.count,
+            qbo_missing_bill_samples: missingBillReconciliation.bills,
             bill_pdfs: billPdfSync,
           },
         });
@@ -2150,6 +2505,10 @@ async function syncQuickBooksBills({ source = 'manual', userId = null } = {}) {
         vendor_mirror: vendorResult,
         matched_invoices: result.matched,
         marked_paid_from_friday_queue: result.markedPaidFromQueue,
+        new_bills: result.newBills.length,
+        contractor_receipt_emails: vendorReceiptNotifications,
+        qbo_missing_bills_hidden: missingBillReconciliation.count,
+        qbo_missing_bill_samples: missingBillReconciliation.bills,
         ignored_bills: result.ignored,
         bill_pdfs: billPdfSync,
         stats: statusSummary(db),
@@ -2736,7 +3095,95 @@ router.put('/bills/:qboId/remove-from-pay', authorize(...QUICKBOOKS_ADMIN_ROLES)
   res.json(updated);
 });
 
-router.put('/bills/:qboId/mark-paid-from-queue', authorize(...QUICKBOOKS_ADMIN_ROLES), (req, res) => {
+// POST /api/quickbooks/bills/:qboId/send-pay-date - manually email this bill's
+// contractor their expected pay date (= the QBO due date). This button is the
+// ONLY way pay-date emails go out; the sync-time auto-send was removed 2026-08-15.
+router.post('/bills/:qboId/send-pay-date', authorize(...QUICKBOOKS_ADMIN_ROLES), async (req, res) => {
+  const db = getDb();
+  const bill = getQuickBooksBillRow(db, req.params.qboId);
+  if (!bill) return res.status(404).json({ error: 'QuickBooks bill not found.' });
+  if (bill.payment_approval_status === PAYMENT_APPROVAL_DELETED_STATUS) {
+    return res.status(409).json({ error: 'This bill was deleted from BuildTrack.' });
+  }
+  if (bill.payment_status === 'paid' || bill.payment_approval_status === PAYMENT_APPROVAL_PAID_STATUS) {
+    return res.status(409).json({ error: 'This bill is already paid - no pay-date email is needed.' });
+  }
+  const vendorEmail = String(bill.vendor_email || '').trim();
+  const vendorName = bill.vendor_name || 'Contractor';
+  if (!vendorEmail) {
+    return res.status(409).json({ error: "This vendor has no email in QuickBooks. Add it there, run a sync, then send again." });
+  }
+  if (!bill.due_date) {
+    return res.status(409).json({ error: "This bill has no due date (expected pay date) in QuickBooks. Set it there, run a sync, then send again." });
+  }
+  if (Date.parse(`${bill.due_date}T23:59:59Z`) < Date.now()) {
+    return res.status(409).json({ error: 'The expected pay date has already passed. Update the due date in QuickBooks, run a sync, then send again.' });
+  }
+  if (!isEmailConfigured()) {
+    return res.status(503).json({ error: 'Email is not configured on the server, so the pay-date email cannot be sent.' });
+  }
+
+  const projectLabel = bill.project_address || bill.project_job_name || null;
+  try {
+    await sendContractorInvoiceReceivedEmail({
+      vendorName,
+      vendorEmail,
+      amount: bill.total_amt,
+      payDate: bill.due_date,
+      receivedDate: bill.txn_date,
+      invoiceNumber: bill.doc_number,
+      projectLabel,
+    });
+  } catch (err) {
+    const sendError = String(err?.message || err).slice(0, 500);
+    db.prepare(`
+      UPDATE quickbooks_bills
+      SET vendor_receipt_notify_status = 'failed',
+          vendor_receipt_notify_attempts = COALESCE(vendor_receipt_notify_attempts, 0) + 1,
+          vendor_receipt_notified_email = ?,
+          vendor_receipt_notify_error = ?,
+          updated_at = datetime('now')
+      WHERE qbo_id = ?
+    `).run(vendorEmail, sendError, bill.qbo_id);
+    console.error(`[QBO] Manual pay-date email failed for bill ${bill.qbo_id} (${vendorEmail}):`, sendError);
+    return res.status(502).json({ error: `The pay-date email failed to send: ${sendError}` });
+  }
+
+  db.prepare(`
+    UPDATE quickbooks_bills
+    SET vendor_receipt_notify_status = 'sent',
+        vendor_receipt_notified_at = datetime('now'),
+        vendor_receipt_notified_email = ?,
+        vendor_receipt_notify_error = NULL,
+        updated_at = datetime('now')
+    WHERE qbo_id = ?
+  `).run(vendorEmail, bill.qbo_id);
+
+  const amountLabel = `$${Number(bill.total_amt || 0).toFixed(2)}`;
+  logActivity({
+    userId: req.user.id,
+    projectId: bill.project_id || null,
+    action: 'quickbooks_invoice_received',
+    entityType: 'quickbooks_bill',
+    entityId: bill.qbo_id,
+    details: {
+      title: `${vendorName} • ${amountLabel} • expected pay ${bill.due_date} • pay-date email sent manually`,
+      vendor_name: vendorName,
+      vendor_email: vendorEmail,
+      total_amt: bill.total_amt,
+      txn_date: bill.txn_date,
+      due_date: bill.due_date,
+      doc_number: bill.doc_number,
+      project_label: projectLabel,
+      contractor_email_status: 'sent',
+      sent_manually: true,
+    },
+  });
+
+  res.json(getQuickBooksBillRow(db, bill.qbo_id));
+});
+
+router.put('/bills/:qboId/mark-paid-from-queue', authorize(...QUICKBOOKS_ADMIN_ROLES), async (req, res) => {
   const db = getDb();
   const bill = getQuickBooksBillRow(db, req.params.qboId);
   if (!bill) return res.status(404).json({ error: 'QuickBooks bill not found.' });
@@ -2747,49 +3194,80 @@ router.put('/bills/:qboId/mark-paid-from-queue', authorize(...QUICKBOOKS_ADMIN_R
     return res.status(409).json({ error: 'Only bills in the Friday payment queue can be marked paid from BuildTrack.' });
   }
 
-  const markPaid = db.transaction(() => {
+  const connection = getActiveConnection(db);
+  if (!connection) return res.status(503).json({ error: 'QuickBooks is not connected.' });
+
+  let qboBill;
+  try {
+    const payload = await qboRequest(
+      db,
+      connection,
+      `/v3/company/${encodeURIComponent(connection.realm_id)}/bill/${encodeURIComponent(bill.qbo_id)}`
+    );
+    qboBill = payload?.Bill;
+  } catch (err) {
+    const missingInQuickBooks = err.statusCode === 400 && /object not found|not found/i.test(String(err.message || ''));
+    if (!missingInQuickBooks) {
+      console.error('[QBO] Paid verification failed:', err);
+      return res.status(err.statusCode || 502).json({ error: 'Could not verify this bill in QuickBooks. Try again.' });
+    }
+
     db.prepare(`
       UPDATE quickbooks_bills
       SET payment_approval_status = ?,
-          payment_approved_at = COALESCE(payment_approved_at, datetime('now')),
-          payment_approved_by = COALESCE(payment_approved_by, ?),
+          payment_approved_at = NULL,
+          payment_approved_by = NULL,
           payment_run_date = NULL,
           payment_approval_notified_at = NULL,
           payment_approval_notified_by = NULL,
           updated_at = datetime('now')
       WHERE qbo_id = ?
-    `).run(PAYMENT_APPROVAL_PAID_STATUS, req.user.id, bill.qbo_id);
+    `).run(PAYMENT_APPROVAL_DELETED_STATUS, bill.qbo_id);
+    logActivity({
+      userId: req.user.id,
+      projectId: bill.project_id || undefined,
+      action: 'quickbooks_bill_missing_during_paid_verification',
+      entityType: 'quickbooks_bill',
+      entityId: bill.qbo_id,
+      details: { vendor_name: bill.vendor_name, prior_balance: bill.balance, attachments_preserved: true },
+    });
+    return res.status(410).json({
+      error: 'This bill no longer exists in QuickBooks and was removed from the active BuildTrack queue. Its audit record and PDF were preserved.',
+      code: 'QUICKBOOKS_BILL_MISSING',
+    });
+  }
 
-    if (bill.matched_invoice_id) {
-      db.prepare(`
-        UPDATE invoices
-        SET status = 'paid',
-            quickbooks_status = COALESCE(NULLIF(quickbooks_status, ''), 'synced'),
-            quickbooks_bill_id = COALESCE(NULLIF(quickbooks_bill_id, ''), ?),
-            quickbooks_last_seen_at = datetime('now'),
-            updated_at = datetime('now')
-        WHERE id = ?
-      `).run(bill.qbo_id, bill.matched_invoice_id);
-    }
-  });
+  if (!qboBill?.Id) {
+    return res.status(502).json({ error: 'QuickBooks returned an invalid bill response. No BuildTrack status was changed.' });
+  }
 
-  markPaid();
+  // Refresh this one row from QBO before making the decision. The PAID action
+  // is verification-only: it never creates a payment or forces a local paid
+  // flag when QuickBooks still carries a balance.
+  upsertBillsAndPayments(db, connection, [qboBill], []);
+  const refreshed = getQuickBooksBillRow(db, bill.qbo_id);
+  if (refreshed.payment_status !== 'paid' && Number(refreshed.balance || 0) > 0) {
+    return res.status(409).json({
+      error: `QuickBooks still shows $${normalizeMoney(refreshed.balance).toFixed(2)} due. Record the payment in QuickBooks, then verify again.`,
+      code: 'QUICKBOOKS_BALANCE_REMAINS',
+      bill: refreshed,
+    });
+  }
 
-  const updated = getQuickBooksBillRow(db, bill.qbo_id);
   logActivity({
     userId: req.user.id,
-    projectId: updated.project_id || undefined,
-    action: 'quickbooks_bill_marked_paid_from_queue',
+    projectId: refreshed.project_id || undefined,
+    action: 'quickbooks_bill_payment_verified',
     entityType: 'quickbooks_bill',
-    entityId: updated.qbo_id,
+    entityId: refreshed.qbo_id,
     details: {
-      vendor_name: updated.vendor_name,
-      balance: updated.balance,
-      matched_invoice_id: updated.matched_invoice_id,
-      qbo_payment_status: updated.payment_status,
+      vendor_name: refreshed.vendor_name,
+      qbo_balance: refreshed.balance,
+      qbo_payment_status: refreshed.payment_status,
+      matched_invoice_id: refreshed.matched_invoice_id,
     },
   });
-  res.json(updated);
+  res.json(refreshed);
 });
 
 router.post('/payment-queue/notify', authorize(...QUICKBOOKS_ADMIN_ROLES), async (req, res) => {
@@ -2900,5 +3378,49 @@ router.startQuickBooksPaymentQueueScheduler = startQuickBooksPaymentQueueSchedul
 router.sendScheduledPaymentQueueEmail = sendScheduledPaymentQueueEmail;
 router.syncQuickBooksBills = syncQuickBooksBills;
 router.syncQuickBooksBillPdfs = syncQuickBooksBillPdfs;
+router.__test = {
+  missingQuickBooksBillIds,
+  paymentStatusForBill,
+  reconcileMissingQuickBooksBills,
+  shouldRestoreDeletedQuickBooksBill,
+};
 
 module.exports = router;
+
+// ── Finance Tracker service exports (2026-08-03) ─────────────────────────────
+// Finance Tracker consumes QBO through THIS module only — one Intuit client,
+// one token-refresh path. These back /api/service/finance-tracker/*.
+const FT_TXN_ENTITIES = ['Purchase', 'Deposit', 'JournalEntry', 'Invoice', 'Payment', 'Transfer', 'VendorCredit', 'CreditMemo'];
+
+function ftGetConnection(db) {
+  const connection = db.prepare("SELECT * FROM quickbooks_connections WHERE id = 'primary' AND is_active = 1").get();
+  if (!connection) {
+    const err = new Error('QuickBooks is not connected.');
+    err.statusCode = 503;
+    throw err;
+  }
+  return connection;
+}
+
+router.financeTrackerTransactionsSince = async function financeTrackerTransactionsSince(sinceIso) {
+  const db = getDb();
+  const connection = ftGetConnection(db);
+  const out = {};
+  for (const entity of FT_TXN_ENTITIES) {
+    const payload = await qboQuery(db, connection, `SELECT * FROM ${entity} WHERE Metadata.LastUpdatedTime >= '${sinceIso}' STARTPOSITION 1 MAXRESULTS 1000`);
+    out[entity] = (payload && payload.QueryResponse && payload.QueryResponse[entity]) || [];
+  }
+  return out;
+};
+
+router.financeTrackerBalanceSheetByClass = async function financeTrackerBalanceSheetByClass() {
+  const db = getDb();
+  const connection = ftGetConnection(db);
+  return qboRequest(db, connection, `/v3/company/${encodeURIComponent(connection.realm_id)}/reports/BalanceSheet?summarize_column_by=Classes&accounting_method=Accrual`);
+};
+
+router.financeTrackerProfitAndLossByClass = async function financeTrackerProfitAndLossByClass(startDate, endDate) {
+  const db = getDb();
+  const connection = ftGetConnection(db);
+  return qboRequest(db, connection, `/v3/company/${encodeURIComponent(connection.realm_id)}/reports/ProfitAndLoss?summarize_column_by=Classes&accounting_method=Accrual&start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`);
+};

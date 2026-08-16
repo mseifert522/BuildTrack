@@ -5,8 +5,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
 const { getClientIp } = require('../utils/requestIp');
 const {
-  DESKTOP_SESSION_IDLE_TIMEOUT_MINUTES,
-  MOBILE_SESSION_MAX_AGE_HOURS,
+  SESSION_IDLE_TIMEOUT_MINUTES,
   SESSION_ARCHIVE_AFTER_DAYS,
   applySessionRetentionPolicy,
 } = require('../utils/sessionPolicy');
@@ -335,8 +334,10 @@ router.get('/sessions', (req, res) => {
     counts.recent_sessions = sessions.filter(row => ['online', 'recently_active'].includes(row.security_status)).length;
     counts.active_session_display_limit = activeLimit;
     counts.archive_display_limit = archiveLimit;
-    counts.desktop_idle_timeout_minutes = DESKTOP_SESSION_IDLE_TIMEOUT_MINUTES;
-    counts.mobile_session_max_age_hours = MOBILE_SESSION_MAX_AGE_HOURS;
+    counts.session_idle_timeout_minutes = SESSION_IDLE_TIMEOUT_MINUTES;
+    counts.desktop_idle_timeout_minutes = SESSION_IDLE_TIMEOUT_MINUTES;
+    counts.mobile_session_idle_timeout_minutes = SESSION_IDLE_TIMEOUT_MINUTES;
+    counts.mobile_session_max_age_hours = SESSION_IDLE_TIMEOUT_MINUTES / 60;
     counts.session_archive_after_days = SESSION_ARCHIVE_AFTER_DAYS;
     counts.cleanup = cleanup;
 

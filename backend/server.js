@@ -27,6 +27,8 @@ const vendorQuoteRequestRoutes = require('./src/routes/vendorQuoteRequests');
 const agentBridgeRoutes = require('./src/routes/agentBridge');
 const securityRoutes = require('./src/routes/security');
 const quickBooksRoutes = require('./src/routes/quickbooks');
+const humanResourcesRoutes = require('./src/routes/humanResources');
+const financeTrackerRoutes = require('./src/routes/financeTracker');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -152,6 +154,8 @@ app.use('/api/agent-bridge', agentBridgeRoutes);
 app.use('/api/quote-analytics', quoteAnalyticsRoutes.analyticsRouter);
 app.use('/api/security', securityRoutes);
 app.use('/api/quickbooks', quickBooksRoutes);
+app.use('/api/human-resources', humanResourcesRoutes);
+app.use('/api/service/finance-tracker', financeTrackerRoutes);
 app.use('/api/projects/:projectId/quotes', quoteAnalyticsRoutes.projectQuotesRouter);
 app.use('/api/invoice-agent', (_req, res) => {
   res.status(404).json({ error: 'Endpoint removed' });

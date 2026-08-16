@@ -11,7 +11,7 @@ import { useForm } from 'react-hook-form';
 import { format } from 'date-fns';
 import GooglePlacesInput from '../components/GooglePlacesInput';
 import CurrencyInput from '../components/CurrencyInput';
-import { formatEasternDate, formatEasternDateTime } from '../lib/time';
+import { formatDateOnly, formatEasternDate, formatEasternDateTime } from '../lib/time';
 import AddToCalendarButton from '../components/AddToCalendarButton';
 import { fileDropHandlers } from '../lib/fileDrop';
 import {
@@ -8496,6 +8496,8 @@ type ProjectInvoiceRow = {
   contractor_id?: string | null;
   contractor_name?: string | null;
   contractor_email?: string | null;
+  contractor_receipt_status?: string | null;
+  contractor_receipt_notified_at?: string | null;
   total?: number | string | null;
   balance?: number | string | null;
   status?: string | null;
@@ -8717,7 +8719,15 @@ function InvoicesTab({ projectId, user, project }: { projectId: string; user: an
                     <p className="truncate text-sm font-bold text-slate-100">{invoice.contractor_name || 'Unknown contractor'}</p>
                     {invoice.contractor_email && <p className="mt-0.5 truncate text-xs font-semibold text-slate-400">{invoice.contractor_email}</p>}
                   </div>
-                  <p className="text-sm font-bold text-slate-200">{invoiceDate ? formatEasternDate(invoiceDate, { month: 'short', day: 'numeric', year: 'numeric' }) : 'No date'}</p>
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-slate-200">{invoiceDate ? formatEasternDate(invoiceDate, { month: 'short', day: 'numeric', year: 'numeric' }) : 'No date'}</p>
+                    {isQuickBooksInvoice && invoice.due_date && status !== 'paid' && (
+                      <p className="mt-0.5 text-xs font-bold text-emerald-200">Pay {formatDateOnly(invoice.due_date, { month: 'short', day: 'numeric', year: 'numeric' })}</p>
+                    )}
+                    {isQuickBooksInvoice && invoice.contractor_receipt_status === 'sent' && (
+                      <p className="mt-0.5 text-[10px] font-semibold text-slate-400">Contractor emailed pay date</p>
+                    )}
+                  </div>
                   <div>
                     <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-black capitalize ${statusClass}`}>
                       {statusLabel}

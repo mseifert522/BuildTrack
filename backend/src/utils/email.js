@@ -1,8 +1,14 @@
 const nodemailer = require('nodemailer');
+const fs = require('fs');
+const path = require('path');
 const PDFDocument = require('pdfkit');
 
+function isEmailConfigured() {
+  return Boolean(process.env.SMTP_USER && process.env.SMTP_PASS && process.env.SMTP_PASS !== 'REPLACE_WITH_RESEND_API_KEY');
+}
+
 function createTransporter() {
-  if (!process.env.SMTP_USER || !process.env.SMTP_PASS || process.env.SMTP_PASS === 'REPLACE_WITH_RESEND_API_KEY') {
+  if (!isEmailConfigured()) {
     return {
       sendMail: async (opts) => {
         console.log('[EMAIL MOCK] Would send email:');
@@ -22,6 +28,9 @@ function createTransporter() {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
     },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 30000,
   });
 }
 
@@ -34,13 +43,52 @@ const BRAND = {
   quoteInbox: process.env.QUOTE_REQUEST_VISIBLE_TO || process.env.COMPANY_EMAIL || process.env.SMTP_USER || 'info@newurbandev.com',
 };
 
+function brandedFrom() {
+  const configured = String(process.env.EMAIL_FROM || '').trim();
+  if (configured && !/buildtrack/i.test(configured)) return configured;
+  return 'New Urban Development <info@newurbandev.com>';
+}
+
+function logoCid() {
+  return 'nud-logo';
+}
+
+function logoAttachment() {
+  const candidates = [
+    process.env.EMAIL_LOGO_PATH,
+    '/app/frontend/dist/nud-logo.jpg',
+    path.join(__dirname, '..', '..', 'frontend', 'dist', 'nud-logo.jpg'),
+    path.join(__dirname, '..', '..', 'frontend', 'public', 'nud-logo.jpg'),
+  ].filter(Boolean);
+  const file = candidates.find((candidate) => {
+    try { return fs.existsSync(candidate); } catch (_) { return false; }
+  });
+  if (!file) return null;
+  return {
+    filename: 'nud-logo.jpg',
+    path: file,
+    cid: logoCid(),
+    contentType: 'image/jpeg',
+  };
+}
+
+function sendBrandedMail(transporter, opts = {}) {
+  const logo = logoAttachment();
+  const attachments = Array.isArray(opts.attachments) ? [...opts.attachments] : [];
+  if (logo) attachments.push(logo);
+  return transporter.sendMail({
+    ...opts,
+    from: opts.from && !/buildtrack/i.test(String(opts.from)) ? opts.from : brandedFrom(),
+    replyTo: opts.replyTo || 'info@newurbandev.com',
+    attachments,
+  });
+}
+
 function emailWrapper(content) {
   return `
     <div style="font-family: 'Helvetica Neue', Arial, sans-serif; max-width: 560px; margin: 0 auto; background: #ffffff;">
-      <div style="background: linear-gradient(135deg, #0D1117, #181D25); padding: 32px 24px; text-align: center; border-radius: 12px 12px 0 0;">
-        <img src="${BRAND.logoUrl}" alt="${BRAND.name}" width="88" style="display:block; width:88px; max-width:88px; height:auto; margin:0 auto 14px; border-radius:10px;" />
-        <h1 style="color: white; font-size: 22px; font-weight: 800; margin: 0;">${BRAND.name}</h1>
-        <p style="color: ${BRAND.color}; font-size: 12px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; margin: 6px 0 0;">BuildTrack Platform</p>
+      <div style="background: #0D1117; padding: 28px 24px 22px; text-align: center; border-radius: 12px 12px 0 0;">
+        <img src="cid:${logoCid()}" alt="New Urban Development" width="132" style="display:block; width:132px; max-width:132px; height:auto; margin:0 auto; border:0;" />
       </div>
       <div style="padding: 32px 24px; border: 1px solid #E5E7EB; border-top: none; border-radius: 0 0 12px 12px;">
         ${content}
@@ -227,8 +275,8 @@ async function sendContractorSubmissionPdfEmail({ contractorName, contactName, c
     </p>
   `);
 
-  await transporter.sendMail({
-    from: process.env.EMAIL_FROM || `BuildTrack <noreply@newurbandev.com>`,
+  await sendBrandedMail(transporter, {
+    from: process.env.EMAIL_FROM || brandedFrom(),
     to: operationsEmail,
     subject: `Contractor setup submitted - ${displayName}`,
     html,
@@ -276,8 +324,8 @@ async function sendInviteEmail({ name, email, setupUrl, role, invitedBy, pin, is
     </p>
   `);
 
-  await transporter.sendMail({
-    from: process.env.EMAIL_FROM || `BuildTrack <noreply@newurbandev.com>`,
+  await sendBrandedMail(transporter, {
+    from: process.env.EMAIL_FROM || brandedFrom(),
     to: email,
     subject: isReinvite ? `Your BuildTrack welcome link` : `You're invited to BuildTrack - ${BRAND.name}`,
     html,
@@ -309,8 +357,8 @@ async function sendContractorPinEmail({ name, email, pin }) {
     </p>
   `);
 
-  await transporter.sendMail({
-    from: process.env.EMAIL_FROM || `BuildTrack <noreply@newurbandev.com>`,
+  await sendBrandedMail(transporter, {
+    from: process.env.EMAIL_FROM || brandedFrom(),
     to: email,
     subject: `Your BuildTrack User PIN Number`,
     html,
@@ -333,8 +381,8 @@ async function sendPasswordResetEmail({ name, email, resetUrl }) {
     </p>
   `);
 
-  await transporter.sendMail({
-    from: process.env.EMAIL_FROM || `BuildTrack <noreply@newurbandev.com>`,
+  await sendBrandedMail(transporter, {
+    from: process.env.EMAIL_FROM || brandedFrom(),
     to: email,
     subject: `Password Reset — BuildTrack`,
     html,
@@ -359,8 +407,8 @@ async function send2FACodeEmail({ name, email, code }) {
     </p>
   `);
 
-  await transporter.sendMail({
-    from: process.env.EMAIL_FROM || `BuildTrack <noreply@newurbandev.com>`,
+  await sendBrandedMail(transporter, {
+    from: process.env.EMAIL_FROM || brandedFrom(),
     to: email,
     subject: `${code} — Your BuildTrack Verification Code`,
     html,
@@ -414,8 +462,8 @@ async function sendContractorSetupEmail({ contractorName, contactName, email, se
     </p>
   `);
 
-  await transporter.sendMail({
-    from: process.env.EMAIL_FROM || `BuildTrack <noreply@newurbandev.com>`,
+  await sendBrandedMail(transporter, {
+    from: process.env.EMAIL_FROM || brandedFrom(),
     to: email,
     subject: `Welcome to New Urban Development - secure contractor setup`,
     html,
@@ -449,8 +497,8 @@ async function sendContractorSetupCodeEmail({ name, email, code }) {
     </p>
   `);
 
-  await transporter.sendMail({
-    from: process.env.EMAIL_FROM || `BuildTrack <noreply@newurbandev.com>`,
+  await sendBrandedMail(transporter, {
+    from: process.env.EMAIL_FROM || brandedFrom(),
     to: email,
     subject: `Your New Urban contractor setup code: ${code}`,
     html,
@@ -487,7 +535,7 @@ async function sendInvoiceEmail({ invoice, project, contractor, pdfBuffer }) {
     contentType: 'application/pdf',
   }] : [];
 
-  await transporter.sendMail({
+  await sendBrandedMail(transporter, {
     from: process.env.EMAIL_FROM || 'noreply@newurbandev.com',
     to: invoiceEmail,
     subject,
@@ -496,7 +544,7 @@ async function sendInvoiceEmail({ invoice, project, contractor, pdfBuffer }) {
   });
 
   if (contractor.email) {
-    await transporter.sendMail({
+    await sendBrandedMail(transporter, {
       from: process.env.EMAIL_FROM || 'noreply@newurbandev.com',
       to: contractor.email,
       subject: `[Your Copy] ${subject}`,
@@ -565,8 +613,8 @@ async function sendApprovedPayNotificationEmail({ approvedInvoices, approvedInvo
     </a>
   `);
 
-  await transporter.sendMail({
-    from: process.env.EMAIL_FROM || `BuildTrack <noreply@newurbandev.com>`,
+  await sendBrandedMail(transporter, {
+    from: process.env.EMAIL_FROM || brandedFrom(),
     to: operationsEmail,
     subject: `BuildTrack approved invoices ready to pay - $${total.toFixed(2)}`,
     html,
@@ -617,8 +665,8 @@ async function sendCalendarReminderEmail({ recipients, subject, message, event, 
     </p>
   `);
 
-  await transporter.sendMail({
-    from: process.env.CALENDAR_REMINDER_EMAIL_FROM || `BuildTrack Calendar <info@newurbandev.com>`,
+  await sendBrandedMail(transporter, {
+    from: process.env.CALENDAR_REMINDER_EMAIL_FROM || 'New Urban Development <info@newurbandev.com>',
     to: recipientList.join(', '),
     subject: subject || `BuildTrack reminder: ${eventTitle}`,
     html,
@@ -725,8 +773,8 @@ async function sendVendorQuoteRequestEmail({ vendorName, vendorEmail, project, r
     </p>
   `);
 
-  await transporter.sendMail({
-    from: process.env.EMAIL_FROM || `BuildTrack <noreply@newurbandev.com>`,
+  await sendBrandedMail(transporter, {
+    from: process.env.EMAIL_FROM || brandedFrom(),
     to: BRAND.quoteInbox,
     bcc: vendorEmail,
     replyTo: process.env.EMAIL_REPLY_TO || 'info@newurbandev.com',
@@ -735,9 +783,83 @@ async function sendVendorQuoteRequestEmail({ vendorName, vendorEmail, project, r
   });
 }
 
+function formatPayDate(value) {
+  if (!value) return null;
+  const parsed = new Date(`${String(value).slice(0, 10)}T12:00:00Z`);
+  if (!Number.isFinite(parsed.getTime())) return String(value);
+  return parsed.toLocaleDateString('en-US', {
+    timeZone: 'UTC',
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+async function sendContractorInvoiceReceivedEmail({
+  vendorName,
+  vendorEmail,
+  amount,
+  payDate,
+  receivedDate,
+  invoiceNumber,
+  projectLabel,
+}) {
+  if (!vendorEmail) throw new Error('Missing vendor email');
+  if (!payDate) throw new Error('Missing pay date');
+  const transporter = createTransporter();
+  const questionsEmail = 'info@newurbandev.com';
+  const amountLabel = `$${Number(amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const payDateLabel = formatPayDate(payDate);
+  const receivedDateLabel = formatPayDate(receivedDate);
+  const displayName = String(vendorName || '').trim();
+
+  const html = emailWrapper(`
+    <h2 style="color:#111827; font-size:20px; font-weight:800; margin:0 0 8px;">We've received your invoice</h2>
+    <p style="color:#6B7280; font-size:14px; line-height:1.6; margin:0 0 18px;">
+      ${displayName ? `Hi ${escapeHtml(displayName)},` : 'Hello,'}<br /><br />
+      We've received your invoice for <strong style="color:#111827;">${escapeHtml(amountLabel)}</strong> and it has been entered into our payment system.
+    </p>
+    <div style="background:#ECFDF5; border:1px solid #A7F3D0; border-radius:12px; padding:16px; margin-bottom:18px;">
+      <p style="font-size:12px; color:#047857; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin:0 0 6px;">You will be paid on</p>
+      <p style="font-size:22px; color:#065F46; font-weight:900; margin:0;">${escapeHtml(payDateLabel)}</p>
+    </div>
+    <div style="background:#F9FAFB; border:1px solid #E5E7EB; border-radius:12px; padding:16px; margin-bottom:18px;">
+      <p style="font-size:12px; color:#374151; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin:0 0 8px;">Invoice details</p>
+      ${invoiceNumber ? `<p style="font-size:13px; color:#374151; margin:0 0 8px;"><strong>Invoice number:</strong> ${escapeHtml(invoiceNumber)}</p>` : ''}
+      <p style="font-size:13px; color:#374151; margin:0 0 8px;"><strong>Amount:</strong> ${escapeHtml(amountLabel)}</p>
+      ${receivedDateLabel ? `<p style="font-size:13px; color:#374151; margin:0 0 8px;"><strong>Invoice date:</strong> ${escapeHtml(receivedDateLabel)}</p>` : ''}
+      <p style="font-size:13px; color:#374151; margin:0 0 8px;"><strong>Scheduled payment date:</strong> ${escapeHtml(payDateLabel)}</p>
+      ${projectLabel ? `<p style="font-size:13px; color:#374151; margin:0;"><strong>Property:</strong> ${escapeHtml(projectLabel)}</p>` : ''}
+    </div>
+    <div style="background:#FFFBEB; border:1px solid #FDE68A; border-radius:12px; padding:16px; margin-bottom:4px;">
+      <p style="font-size:12px; color:#92400E; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin:0 0 8px;">Questions?</p>
+      <p style="font-size:13px; color:#374151; line-height:1.6; margin:0 0 8px;">
+        If you have any questions about your payment or our contractor payment process, reply or email
+        <a href="mailto:${escapeHtml(questionsEmail)}" style="color:#065F46; font-weight:700;">${escapeHtml(questionsEmail)}</a>.
+        This is the fastest way to get an answer.
+      </p>
+      <p style="font-size:13px; color:#374151; line-height:1.6; margin:0;">
+        <strong>Please do not text or call Mike Seifert or Heather about invoices or payments.</strong>
+        After an invoice is received, all payment inquiries are handled through email only.
+      </p>
+    </div>
+  `);
+
+  await sendBrandedMail(transporter, {
+    from: process.env.EMAIL_FROM || brandedFrom(),
+    to: vendorEmail,
+    replyTo: questionsEmail,
+    subject: `Invoice received - payment scheduled for ${payDateLabel}${invoiceNumber ? ` (Invoice ${invoiceNumber})` : ''}`,
+    html,
+  });
+}
+
 module.exports = {
+  isEmailConfigured,
   sendInvoiceEmail,
   sendApprovedPayNotificationEmail,
+  sendContractorInvoiceReceivedEmail,
   sendCalendarReminderEmail,
   sendVendorQuoteRequestEmail,
   sendInviteEmail,

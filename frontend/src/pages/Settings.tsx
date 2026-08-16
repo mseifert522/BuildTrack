@@ -3,6 +3,7 @@ import { useAuthStore } from '../store/authStore';
 import api from '../lib/api';
 import { PageHeader } from '../components/ui';
 import Avatar from '../components/Avatar';
+import VoiceTextarea from '../components/VoiceTextarea';
 import { Bot, Camera, Copy, Key, Power, RefreshCw, Shield, Trash2, User } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
@@ -322,7 +323,7 @@ export default function Settings() {
               </div>
               <div>
                 <label className="mb-1 block text-xs font-black uppercase tracking-wide text-gray-500">Notes</label>
-                <input value={agentForm.notes} onChange={event => setAgentForm(current => ({ ...current, notes: event.target.value }))} placeholder="Telegram construction commands" className="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <VoiceTextarea name="agent_notes" value={agentForm.notes} onChange={event => setAgentForm(current => ({ ...current, notes: event.target.value }))} rows={2} placeholder="Telegram construction commands" className="w-full resize-none rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
             </div>
             <div className="mt-4">

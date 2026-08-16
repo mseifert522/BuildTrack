@@ -2005,7 +2005,7 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
       </div>
       )}
 
-      <div className={`mx-auto ${calendarOnly ? 'max-w-none p-0' : 'max-w-[1720px] space-y-5 px-4 py-4 md:px-6'}`}>
+      <div className={`mx-auto ${calendarOnly ? 'max-w-none p-0' : 'max-w-[1720px] space-y-4 px-4 py-3 md:px-6'}`}>
         {/* Operations schedule */}
         {canAccessOperationsCalendar && (
         calendarOnly ? (

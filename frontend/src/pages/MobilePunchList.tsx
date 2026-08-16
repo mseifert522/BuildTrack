@@ -19,6 +19,7 @@ import { mobilePath } from '../lib/appUrls';
 import { fileDropHandlers } from '../lib/fileDrop';
 import { notifyMobileDataChanged } from '../lib/mobileEvents';
 import PhotoMarkupModal from '../components/PhotoMarkupModal';
+import VoiceTextarea from '../components/VoiceTextarea';
 import { photoDisplaySrc } from '../lib/photoMarkup';
 import { getProgressMediaKind } from '../lib/progressMedia';
 
@@ -515,7 +516,7 @@ export default function MobilePunchList() {
 
                   <label>
                     Details
-                    <textarea
+                    <VoiceTextarea
                       value={draft.description}
                       onChange={event => updateDraft(draft.id, { description: event.target.value })}
                       placeholder="Room, condition, notes for the contractor"

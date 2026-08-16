@@ -4,8 +4,8 @@ const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/schema');
 const { getClientIp } = require('../utils/requestIp');
 const {
-  DESKTOP_SESSION_IDLE_TIMEOUT_MINUTES,
-  DESKTOP_SESSION_IDLE_TIMEOUT_MS,
+  SESSION_IDLE_TIMEOUT_MINUTES,
+  SESSION_IDLE_TIMEOUT_MS,
   parseSqliteDateTime,
   revokeSession,
   sessionExpiryPolicy,
@@ -24,6 +24,12 @@ const UPPER_MANAGEMENT_ROLES = ['super_admin', 'operations_manager'];
 const USER_MANAGE_ROLES = ['super_admin', 'operations_manager'];
 // In-memory JWT blacklist for instant lockout
 const tokenBlacklist = new Set();
+const CLIENT_ACTIVITY_GRACE_MS = 2 * 60 * 1000;
+const PASSIVE_SESSION_PATHS = new Set([
+  '/api/auth/heartbeat',
+  '/api/auth/refresh',
+  '/api/auth/me',
+]);
 
 function blacklistToken(token) {
   tokenBlacklist.add(token);
@@ -87,10 +93,28 @@ function isTokenRevokedForUser(decoded, user) {
   return decoded.iat * 1000 <= revokedAt;
 }
 
-function isLegacyDesktopTokenExpired(decoded, user) {
-  if (user?.role === 'contractor' || decoded?.st === 'mobile_app') return false;
+function isLegacyTokenExpired(decoded) {
   if (!decoded?.iat) return false;
-  return decoded.iat * 1000 + DESKTOP_SESSION_IDLE_TIMEOUT_MS <= Date.now();
+  return decoded.iat * 1000 + SESSION_IDLE_TIMEOUT_MS <= Date.now();
+}
+
+function hasRecentClientActivity(req, nowMs = Date.now()) {
+  const rawValue = Array.isArray(req.headers['x-buildtrack-last-activity'])
+    ? req.headers['x-buildtrack-last-activity'][0]
+    : req.headers['x-buildtrack-last-activity'];
+  if (rawValue === undefined || rawValue === null || rawValue === '') return null;
+
+  const activityMs = Number(rawValue);
+  if (!Number.isFinite(activityMs)) return false;
+  return activityMs <= nowMs + 60 * 1000 && activityMs >= nowMs - CLIENT_ACTIVITY_GRACE_MS;
+}
+
+function requestRepresentsUserActivity(req) {
+  const clientActivity = hasRecentClientActivity(req);
+  if (clientActivity !== null) return clientActivity;
+
+  const path = String(req.originalUrl || req.url || '').split('?')[0];
+  return !PASSIVE_SESSION_PATHS.has(path);
 }
 
 function touchSession(db, sessionId, userId, req) {
@@ -106,6 +130,9 @@ function touchSession(db, sessionId, userId, req) {
   if (expiry) {
     revokeSession(db, sessionId, userId, expiry.reason);
     return { ...session, revoked_at: true, expired_by_timeout: true, expiry_message: expiry.message };
+  }
+  if (!requestRepresentsUserActivity(req)) {
+    return { ...session, activity_touched: false };
   }
 
   const currentIp = getClientIp(req);
@@ -126,9 +153,15 @@ function touchSession(db, sessionId, userId, req) {
         END
     WHERE id = ?
   `).run(currentIp, currentIp, currentIp, currentIp, sessionId);
+  db.prepare(`
+    UPDATE users
+    SET last_seen_at = datetime('now'),
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(userId);
 
   recordSessionIpChange(db, userId, sessionId, session.session_type, previousCurrentIp, currentIp, req);
-  return session;
+  return { ...session, activity_touched: true };
 }
 
 function authenticateApiKey(req, key) {
@@ -192,15 +225,15 @@ function authenticate(req, res, next) {
       session = touchSession(db, decoded.sid, user.id, req);
       if (session?.expired_by_timeout) {
         tokenBlacklist.add(token);
-        return res.status(401).json({ error: session.expiry_message || `Desktop session expired after ${DESKTOP_SESSION_IDLE_TIMEOUT_MINUTES} minutes of inactivity. Please log in again.` });
+        return res.status(401).json({ error: session.expiry_message || `Session expired after ${SESSION_IDLE_TIMEOUT_MINUTES} minutes of inactivity. Please log in again.` });
       }
       if (!session || session.revoked_at) {
         tokenBlacklist.add(token);
         return res.status(401).json({ error: 'Session terminated by security. Please log in again.' });
       }
-    } else if (isLegacyDesktopTokenExpired(decoded, user)) {
+    } else if (isLegacyTokenExpired(decoded)) {
       tokenBlacklist.add(token);
-      return res.status(401).json({ error: `Desktop session expired after ${DESKTOP_SESSION_IDLE_TIMEOUT_MINUTES} minutes of inactivity. Please log in again.` });
+      return res.status(401).json({ error: `Session expired after ${SESSION_IDLE_TIMEOUT_MINUTES} minutes of inactivity. Please log in again.` });
     }
     req.user = user;
     req.token = token;
@@ -209,6 +242,7 @@ function authenticate(req, res, next) {
       session_id: decoded.sid || null,
       session_type: session?.session_type || decoded.st || null,
       issued_at: decoded.iat || null,
+      activity_touched: session?.activity_touched === true,
     };
     next();
   } catch (err) {

@@ -136,8 +136,7 @@ interface SecuritySessionCounts {
   recent_sessions: number;
   active_session_display_limit: number;
   archive_display_limit: number;
-  desktop_idle_timeout_minutes: number;
-  mobile_session_max_age_hours: number;
+  session_idle_timeout_minutes: number;
   session_archive_after_days: number;
 }
 
@@ -356,8 +355,7 @@ export default function Security() {
     recent_sessions: 0,
     active_session_display_limit: 10,
     archive_display_limit: 40,
-    desktop_idle_timeout_minutes: 70,
-    mobile_session_max_age_hours: 48,
+    session_idle_timeout_minutes: 120,
     session_archive_after_days: 14,
   });
   const [loading, setLoading] = useState(true);
@@ -491,8 +489,7 @@ export default function Security() {
         recent_sessions: Number(sessionsRes.data?.counts?.recent_sessions || 0),
         active_session_display_limit: Number(sessionsRes.data?.counts?.active_session_display_limit || 10),
         archive_display_limit: Number(sessionsRes.data?.counts?.archive_display_limit || 40),
-        desktop_idle_timeout_minutes: Number(sessionsRes.data?.counts?.desktop_idle_timeout_minutes || 70),
-        mobile_session_max_age_hours: Number(sessionsRes.data?.counts?.mobile_session_max_age_hours || 48),
+        session_idle_timeout_minutes: Number(sessionsRes.data?.counts?.session_idle_timeout_minutes || 120),
         session_archive_after_days: Number(sessionsRes.data?.counts?.session_archive_after_days || 14),
       });
       setEvents(Array.isArray(eventsRes.data?.events) ? eventsRes.data.events : []);
@@ -741,7 +738,7 @@ export default function Security() {
 
       <CollapsibleSecuritySection
         title="Last 10 Logged-In Users & Sessions"
-        description={`Desktop sessions are automatically logged out after ${securitySessionCounts.desktop_idle_timeout_minutes} minutes idle. Mobile sessions remain active up to ${securitySessionCounts.mobile_session_max_age_hours} hours.`}
+        description={`Every user stays signed in while active and is automatically logged out only after ${securitySessionCounts.session_idle_timeout_minutes / 60} hours with no activity.`}
         badge={(
           <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-bold text-gray-600">
             Showing {filteredSessionRows.length} of {counts.signedIn} active session{counts.signedIn === 1 ? '' : 's'}
@@ -786,7 +783,7 @@ export default function Security() {
         </div>
 
         <div className="border-b border-amber-100 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-900">
-          Stale desktop sessions are removed from this list after {securitySessionCounts.desktop_idle_timeout_minutes} minutes with no activity. Mobile app sessions are not affected by the desktop idle rule and are automatically logged out after {securitySessionCounts.mobile_session_max_age_hours} hours.
+          Desktop, mobile, and contractor sessions remain active while the user is working. An individual session is logged out only after {securitySessionCounts.session_idle_timeout_minutes / 60} hours with no keyboard, pointer, touch, or form activity.
         </div>
 
         <div className="overflow-x-auto">
@@ -880,9 +877,7 @@ export default function Security() {
                       <p className="text-xs text-gray-500">{formatDateTime(lastSeen)}</p>
                           <p className="mt-1 text-xs text-gray-400">Issued {formatDateTime(session.issued_at)}</p>
                           <p className="mt-1 text-[11px] font-semibold text-gray-500">
-                            {session.client_type === 'mobile_app'
-                              ? `Mobile auto logout after ${securitySessionCounts.mobile_session_max_age_hours} hours`
-                              : `Desktop idle logout after ${securitySessionCounts.desktop_idle_timeout_minutes} minutes`}
+                            Auto logout after {securitySessionCounts.session_idle_timeout_minutes / 60} hours idle
                           </p>
                     </td>
                     <td className="px-4 py-3 text-right">

@@ -88,3 +88,7 @@ export const canAccessSettings = (role: string) =>
 /** Can access Security controls */
 export const canAccessSecurity = (role: string) =>
   ['super_admin', 'operations_manager'].includes(role);
+
+/** Can access the management-only Human Resources workspace */
+export const canAccessHumanResources = (role: string) =>
+  ['super_admin', 'operations_manager', 'project_manager'].includes(role);

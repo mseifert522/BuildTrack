@@ -2760,9 +2760,9 @@ textarea,
 
   .bt-desktop-shell > .bt-sidebar-frame {
     width: 100% !important;
-    height: 56px !important;
-    min-height: 56px !important;
-    max-height: 56px !important;
+    height: 48px !important;
+    min-height: 48px !important;
+    max-height: 48px !important;
     flex-direction: row !important;
     border-right: 0 !important;
     border-bottom: 1px solid #416c90 !important;
@@ -2770,18 +2770,24 @@ textarea,
 
   .bt-desktop-shell > .bt-sidebar-frame > div {
     width: 100%;
-    height: 56px;
+    height: 48px;
     flex-direction: row !important;
     align-items: stretch;
   }
 
   .bt-desktop-shell > .bt-sidebar-frame > div > div:first-child {
-    width: 208px;
-    height: 56px !important;
-    flex: 0 0 208px;
-    padding-inline: 18px !important;
+    width: 192px;
+    height: 48px !important;
+    flex: 0 0 192px;
+    padding-inline: 12px !important;
     border-right: 1px solid #416c90 !important;
     border-bottom: 0 !important;
+  }
+
+  .bt-desktop-shell > .bt-sidebar-frame > div > div:first-child div:has(> img[alt="BuildTrack"]) {
+    width: 34px !important;
+    height: 34px !important;
+    flex: 0 0 34px !important;
   }
 
   .bt-desktop-shell > .bt-sidebar-frame > div > div:first-child > button,
@@ -2794,7 +2800,7 @@ textarea,
     min-width: 0;
     align-items: center;
     gap: 4px;
-    padding: 8px 16px !important;
+    padding: 5px 12px !important;
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: none;
@@ -2806,11 +2812,11 @@ textarea,
 
   .bt-desktop-shell .bt-sidebar-nav-item {
     width: auto;
-    min-height: 38px !important;
+    min-height: 34px !important;
     flex: 0 0 auto;
-    gap: 8px !important;
+    gap: 6px !important;
     margin: 0 !important;
-    padding: 8px 12px !important;
+    padding: 6px 10px !important;
   }
 
   .bt-desktop-shell .bt-sidebar-nav-label {
@@ -2820,12 +2826,39 @@ textarea,
   }
 
   .bt-desktop-shell > .bt-sidebar-frame .bt-sidebar-nav-item .bt-sidebar-nav-icon {
-    width: 18px !important;
-    height: 18px !important;
+    width: 16px !important;
+    height: 16px !important;
   }
 
   .bt-desktop-shell .bt-sidebar-nav-dot {
     margin-left: 2px;
+  }
+
+  .bt-desktop-shell .bt-desktop-topbar {
+    height: 46px !important;
+    min-height: 46px !important;
+    padding-inline: 16px !important;
+  }
+
+  .bt-desktop-shell .bt-desktop-topbar input {
+    height: 34px !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+  }
+
+  .bt-desktop-shell .bt-topbar-action {
+    display: inline-flex !important;
+    width: 34px !important;
+    height: 34px !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 7px !important;
+  }
+
+  .bt-desktop-shell .bt-profile-chip {
+    height: 36px !important;
+    gap: 6px !important;
+    padding-inline: 8px !important;
   }
 
   .bt-desktop-shell:has(.bt-dashboard-page) {
@@ -2833,12 +2866,50 @@ textarea,
   }
 
   .bt-desktop-shell:has(.bt-dashboard-page) .bt-desktop-topbar {
-    position: absolute !important;
-    inset: 56px 0 auto 0 !important;
-    height: 118px !important;
-    padding-inline: 24px !important;
-    border-bottom: 0 !important;
-    background: transparent !important;
+    position: relative !important;
+    inset: auto !important;
+    height: 46px !important;
+    padding-inline: 16px !important;
+    border-bottom: 1px solid #416c90 !important;
+    background: var(--bt-dashboard-navy-texture) !important;
+  }
+
+  .bt-desktop-shell .bt-dashboard-page .bt-dashboard-hero {
+    padding: 8px 24px !important;
+  }
+
+  .bt-desktop-shell .bt-dashboard-page .bt-dashboard-hero-content {
+    gap: 0 !important;
+  }
+
+  .bt-desktop-shell .bt-dashboard-page .bt-dashboard-hero-content > div {
+    display: flex !important;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 14px;
+  }
+
+  .bt-desktop-shell .bt-dashboard-page .bt-dashboard-hero-content > div > div:first-child {
+    margin-bottom: 0 !important;
+  }
+
+  .bt-desktop-shell .bt-dashboard-page .bt-dashboard-hero-kicker {
+    padding: 3px 8px !important;
+    font-size: 9px !important;
+    line-height: 1.2 !important;
+  }
+
+  .bt-desktop-shell .bt-dashboard-page .bt-dashboard-hero h1 {
+    font-size: 18px !important;
+    line-height: 1.25 !important;
+    white-space: nowrap;
+  }
+
+  .bt-desktop-shell .bt-dashboard-page .bt-dashboard-hero p {
+    margin-top: 0 !important;
+    font-size: 12px !important;
+    line-height: 1.25 !important;
+    white-space: nowrap;
   }
 
   .bt-desktop-shell .bt-desktop-topbar .bt-profile-chip > div > p:first-child {
@@ -3380,4 +3451,51 @@ textarea,
   .bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module {
     border-radius: 4px !important;
   }
+}
+
+/* Human Resources candidate rows must stay dark during mouse, keyboard, and touch interaction. */
+.bt-desktop-shell.bt-desktop-shell .bt-hr-candidate-row {
+  -webkit-tap-highlight-color: transparent;
+  background: #111315 !important;
+  color: #f0e8dd !important;
+}
+
+.bt-desktop-shell.bt-desktop-shell .bt-hr-candidate-row:nth-child(even) {
+  background: #0d0f11 !important;
+}
+
+.bt-desktop-shell.bt-desktop-shell .bt-hr-candidate-row > td {
+  background: transparent !important;
+}
+
+.bt-desktop-shell.bt-desktop-shell .bt-hr-candidate-row:hover,
+.bt-desktop-shell.bt-desktop-shell .bt-hr-candidate-row:focus,
+.bt-desktop-shell.bt-desktop-shell .bt-hr-candidate-row:focus-within,
+.bt-desktop-shell.bt-desktop-shell .bt-hr-candidate-row:active {
+  background: #243241 !important;
+  box-shadow: inset 3px 0 0 #e78b4a, inset 0 0 0 1px #47617a !important;
+}
+
+.bt-desktop-shell.bt-desktop-shell .bt-hr-candidate-row:hover .text-slate-950,
+.bt-desktop-shell.bt-desktop-shell .bt-hr-candidate-row:hover .text-slate-900,
+.bt-desktop-shell.bt-desktop-shell .bt-hr-candidate-row:hover .text-slate-800,
+.bt-desktop-shell.bt-desktop-shell .bt-hr-candidate-row:focus .text-slate-950,
+.bt-desktop-shell.bt-desktop-shell .bt-hr-candidate-row:focus .text-slate-900,
+.bt-desktop-shell.bt-desktop-shell .bt-hr-candidate-row:focus .text-slate-800,
+.bt-desktop-shell.bt-desktop-shell .bt-hr-candidate-row:active .text-slate-950,
+.bt-desktop-shell.bt-desktop-shell .bt-hr-candidate-row:active .text-slate-900,
+.bt-desktop-shell.bt-desktop-shell .bt-hr-candidate-row:active .text-slate-800 {
+  color: #ffffff !important;
+}
+
+.bt-desktop-shell.bt-desktop-shell .bt-hr-candidate-row:hover .text-slate-700,
+.bt-desktop-shell.bt-desktop-shell .bt-hr-candidate-row:hover .text-slate-600,
+.bt-desktop-shell.bt-desktop-shell .bt-hr-candidate-row:hover .text-slate-500,
+.bt-desktop-shell.bt-desktop-shell .bt-hr-candidate-row:focus .text-slate-700,
+.bt-desktop-shell.bt-desktop-shell .bt-hr-candidate-row:focus .text-slate-600,
+.bt-desktop-shell.bt-desktop-shell .bt-hr-candidate-row:focus .text-slate-500,
+.bt-desktop-shell.bt-desktop-shell .bt-hr-candidate-row:active .text-slate-700,
+.bt-desktop-shell.bt-desktop-shell .bt-hr-candidate-row:active .text-slate-600,
+.bt-desktop-shell.bt-desktop-shell .bt-hr-candidate-row:active .text-slate-500 {
+  color: #d8e2ec !important;
 }

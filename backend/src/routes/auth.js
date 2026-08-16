@@ -10,16 +10,14 @@ const { sendPasswordResetEmail, send2FACodeEmail, sendContractorPinEmail } = req
 const { ensureContractorMobileAccountByEmail, normalizeEmail } = require('../utils/contractorAccess');
 const { getClientIp } = require('../utils/requestIp');
 const {
-  DESKTOP_SESSION_IDLE_TIMEOUT_MINUTES,
-  MOBILE_SESSION_MAX_AGE_HOURS,
+  SESSION_IDLE_TIMEOUT_MINUTES,
 } = require('../utils/sessionPolicy');
 
 const router = express.Router();
 const MANAGEMENT_ROLES = ['super_admin', 'operations_manager', 'project_manager'];
 const TRUSTED_DEVICE_DAYS = 60;
 const MOBILE_QUICK_ACCESS_DAYS = 7;
-const DESKTOP_SESSION_EXPIRES_IN = `${DESKTOP_SESSION_IDLE_TIMEOUT_MINUTES}m`;
-const MOBILE_SESSION_EXPIRES_IN = `${MOBILE_SESSION_MAX_AGE_HOURS}h`;
+const SESSION_EXPIRES_IN = `${SESSION_IDLE_TIMEOUT_MINUTES}m`;
 const CONTRACTOR_EMAIL_LOGIN_MESSAGE = 'If that contractor email is on file, BuildTrack will send login instructions.';
 const USER_PIN_RECOVERY_MESSAGE = 'If that BuildTrack user email is on file, BuildTrack will send the PIN number.';
 const MOBILE_APP_HOSTS = new Set(
@@ -158,7 +156,7 @@ function publicUser(user) {
 
 function sessionExpiryFor(sessionType, overrideExpiresIn = null) {
   if (overrideExpiresIn) return overrideExpiresIn;
-  return sessionType === 'mobile_app' ? MOBILE_SESSION_EXPIRES_IN : DESKTOP_SESSION_EXPIRES_IN;
+  return SESSION_EXPIRES_IN;
 }
 
 function createSessionToken(user, sessionId = null, sessionType = null, expiresIn = null) {
@@ -207,8 +205,9 @@ function issueSession(db, user, details, req = null, sessionType = null) {
     user: publicUser(user),
     session_id: session.id,
     session_type: session.sessionType,
-    desktop_session_expires_in_minutes: session.sessionType === 'desktop' ? DESKTOP_SESSION_IDLE_TIMEOUT_MINUTES : null,
-    mobile_session_expires_in_hours: session.sessionType === 'mobile_app' ? MOBILE_SESSION_MAX_AGE_HOURS : null,
+    session_idle_timeout_minutes: SESSION_IDLE_TIMEOUT_MINUTES,
+    desktop_session_expires_in_minutes: session.sessionType === 'desktop' ? SESSION_IDLE_TIMEOUT_MINUTES : null,
+    mobile_session_idle_timeout_minutes: session.sessionType === 'mobile_app' ? SESSION_IDLE_TIMEOUT_MINUTES : null,
   };
 }
 
@@ -752,10 +751,12 @@ router.post('/refresh', authenticate, (req, res) => {
     let sessionId = req.auth?.session_id || null;
     let sessionType = req.auth?.session_type || null;
     let sessionRow = null;
+    let createdSession = false;
     if (!sessionId) {
       const session = createAuthSession(db, req.user, req, { refresh_from_legacy_token: true });
       sessionId = session.id;
       sessionType = session.sessionType;
+      createdSession = true;
     } else {
       sessionRow = db.prepare(`
         SELECT session_type, issued_at, last_seen_at, created_at
@@ -766,13 +767,16 @@ router.post('/refresh', authenticate, (req, res) => {
       sessionType = sessionRow?.session_type || sessionType || inferSessionType(req.user, req);
     }
 
-    markUserOnline(db, req.user.id, false, sessionId);
+    if (createdSession) {
+      markUserOnline(db, req.user.id, false, sessionId);
+    }
     res.json({
       token: createSessionToken(req.user, sessionId, sessionType),
       user: publicUser(req.user),
       session_type: sessionType,
-      desktop_session_expires_in_minutes: sessionType === 'desktop' ? DESKTOP_SESSION_IDLE_TIMEOUT_MINUTES : null,
-      mobile_session_expires_in_hours: sessionType === 'mobile_app' ? MOBILE_SESSION_MAX_AGE_HOURS : null,
+      session_idle_timeout_minutes: SESSION_IDLE_TIMEOUT_MINUTES,
+      desktop_session_expires_in_minutes: sessionType === 'desktop' ? SESSION_IDLE_TIMEOUT_MINUTES : null,
+      mobile_session_idle_timeout_minutes: sessionType === 'mobile_app' ? SESSION_IDLE_TIMEOUT_MINUTES : null,
     });
   } catch (err) {
     console.error('Token refresh error:', err);
@@ -783,9 +787,11 @@ router.post('/refresh', authenticate, (req, res) => {
 // POST /api/auth/heartbeat - update live presence while the app is open
 router.post('/heartbeat', authenticate, (req, res) => {
   try {
-    const db = getDb();
-    markUserOnline(db, req.user.id, false, req.auth?.session_id || null);
-    res.json({ ok: true, last_seen_at: new Date().toISOString() });
+    res.json({
+      ok: true,
+      activity_recorded: req.auth?.activity_touched === true,
+      last_seen_at: new Date().toISOString(),
+    });
   } catch (err) {
     console.error('Heartbeat error:', err);
     res.status(500).json({ error: 'Failed to update presence' });

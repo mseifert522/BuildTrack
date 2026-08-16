@@ -6,8 +6,9 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node tests/agentBridge.test.js && node tests/quoteAnalytics.test.js",
+    "test": "node tests/agentBridge.test.js && node tests/quoteAnalytics.test.js && node tests/hrResumeIntake.test.js",
     "test:agent-bridge": "node tests/agentBridge.test.js",
+    "test:hr-resume-intake": "node tests/hrResumeIntake.test.js",
     "test:quotes": "node tests/quoteAnalytics.test.js"
   },
   "keywords": [],
@@ -27,6 +28,7 @@
     "multer": "^2.1.1",
     "negotiator": "^1.0.0",
     "nodemailer": "^8.0.4",
+    "pdf-lib": "^1.17.1",
     "pdfkit": "^0.18.0",
     "sharp": "^0.35.1",
     "uuid": "^13.0.0"
