@@ -95,8 +95,11 @@
 }
 
 .bt-qbo-mirror-section .bt-qbo-invoice-filter-panel select,
-.bt-qbo-mirror-section .bt-qbo-invoice-filter-panel input {
+.bt-qbo-mirror-section .bt-qbo-invoice-filter-panel input,
+.bt-qbo-mirror-section .bt-qbo-invoice-filter-panel option {
   background: #f8fafc !important;
+  color: #0f172a !important;
+  color-scheme: light;
   box-shadow: none !important;
 }
 
