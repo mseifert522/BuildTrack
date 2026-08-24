@@ -1951,8 +1951,8 @@ export default function ProjectDetail() {
                       .filter(photoId => notePhotos.some((p: any) => p.id === photoId));
 
                     return (
-                      <div className="bt-project-note-media-panel mt-2 rounded-lg border border-cyan-300/25 bg-slate-950/70 p-2 shadow-inner">
-                        <div className="bt-project-note-media-grid grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
+                      <div className="bt-project-note-media-panel mt-2 w-fit max-w-full rounded-lg border border-cyan-300/25 bg-slate-950/70 p-2 shadow-inner">
+                        <div className="bt-project-note-media-grid flex flex-wrap gap-2">
                           {notePhotos.map((photo: any) => {
                             const src = progressPhotoSrc(noteProjectId, photo);
                             const mediaKind = getProgressMediaKind(photo);
@@ -1972,11 +1972,11 @@ export default function ProjectDetail() {
                             const photoDeletable = canDeleteNotePhoto(photo);
                             const photoSelected = (selectedNotePhotos[note.id] || []).includes(photo.id);
                             return (
-                              <div key={mediaKey || attachmentName} className="relative">
+                              <div key={mediaKey || attachmentName} className="relative h-28 w-28 sm:h-32 sm:w-32">
                                 <button
                                   type="button"
                                   data-no-image-lightbox="true"
-                                  className={`bt-project-note-media-tile group relative block h-full w-full aspect-square overflow-hidden rounded-lg border bg-white text-left shadow-sm transition hover:border-cyan-200 hover:shadow-cyan-900/30 focus:outline-none focus:ring-2 focus:ring-cyan-300 ${photoSelected ? 'border-red-400 ring-2 ring-red-400/70' : 'border-slate-300'}`}
+                                  className={`bt-project-note-media-tile group relative block h-full w-full overflow-hidden rounded-lg border bg-white text-left shadow-sm transition hover:border-cyan-200 hover:shadow-cyan-900/30 focus:outline-none focus:ring-2 focus:ring-cyan-300 ${photoSelected ? 'border-red-400 ring-2 ring-red-400/70' : 'border-slate-300'}`}
                                   onClick={openNoteMedia}
                                   aria-label={
                                     canPreviewInProject
@@ -2020,37 +2020,23 @@ export default function ProjectDetail() {
                           <p className="bt-project-note-media-label text-sm font-bold text-cyan-100/85">
                             {noteLightboxItems.length || notePhotos.length} photo{(noteLightboxItems.length || notePhotos.length) === 1 ? '' : 's'} attached to this note
                           </p>
-                          <div className="flex flex-shrink-0 items-center gap-2">
-                            {selectedHere.length > 0 && (
-                              <button
-                                type="button"
-                                onClick={() => deleteSelectedNotePhotos(note.id, selectedHere)}
-                                disabled={deletingNotePhotosFor === note.id}
-                                className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-red-400/60 bg-red-500/15 px-2.5 py-1 text-xs font-black text-red-200 transition-colors hover:bg-red-500/30 hover:text-white disabled:cursor-wait disabled:opacity-70"
-                              >
-                                {deletingNotePhotosFor === note.id ? (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                ) : (
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                )}
-                                {deletingNotePhotosFor === note.id
-                                  ? 'Deleting...'
-                                  : `Delete ${selectedHere.length} selected`}
-                              </button>
-                            )}
-                            {canDeleteProjectNotes && (
-                              <button
-                                type="button"
-                                onClick={() => deleteProjectNote(note.id)}
-                                disabled={deletingNoteId === note.id}
-                                className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-red-300/45 bg-red-500/15 px-2.5 py-1 text-xs font-black text-red-100 transition-colors hover:border-red-200 hover:bg-red-500/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-                                title="Delete this note (attached photos stay in the project photo history)"
-                              >
+                          {selectedHere.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => deleteSelectedNotePhotos(note.id, selectedHere)}
+                              disabled={deletingNotePhotosFor === note.id}
+                              className="inline-flex min-h-8 flex-shrink-0 items-center gap-1.5 rounded-lg border border-red-400/60 bg-red-500/15 px-2.5 py-1 text-xs font-black text-red-200 transition-colors hover:bg-red-500/30 hover:text-white disabled:cursor-wait disabled:opacity-70"
+                            >
+                              {deletingNotePhotosFor === note.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
                                 <Trash2 className="h-3.5 w-3.5" />
-                                {deletingNoteId === note.id ? 'Deleting...' : 'Delete Note'}
-                              </button>
-                            )}
-                          </div>
+                              )}
+                              {deletingNotePhotosFor === note.id
+                                ? 'Deleting...'
+                                : `Delete ${selectedHere.length} selected`}
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
@@ -2103,21 +2089,17 @@ export default function ProjectDetail() {
                     : attachingNoteId === note.id ? 'Attaching...' : 'Attach photos'}
                 </button>
               )}
-              {/* Notes with photos get Delete Note beside the attached-photos
-                  label; text-only notes need it here or it would be lost. */}
-              {canDeleteProjectNotes && editingNoteId !== note.id && getNotePhotos(note).length === 0 && (
-                <div className="mt-2 flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => deleteProjectNote(note.id)}
-                    disabled={deletingNoteId === note.id}
-                    className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-red-300/45 bg-red-500/15 px-2.5 py-1 text-xs font-black text-red-100 transition-colors hover:border-red-200 hover:bg-red-500/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-                    title="Delete this note"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    {deletingNoteId === note.id ? 'Deleting...' : 'Delete Note'}
-                  </button>
-                </div>
+              {canDeleteProjectNotes && editingNoteId !== note.id && (
+                <button
+                  type="button"
+                  onClick={() => deleteProjectNote(note.id)}
+                  disabled={deletingNoteId === note.id}
+                  className="mt-2 ml-3 inline-flex min-h-8 items-center gap-1 rounded-lg px-1.5 text-xs font-bold text-red-300 transition hover:text-red-100 hover:underline disabled:cursor-wait disabled:opacity-60"
+                  title="Delete this note (attached photos stay in the project photo history)"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  {deletingNoteId === note.id ? 'Deleting...' : 'Delete Note'}
+                </button>
               )}
             </div>
           </div>
@@ -8548,44 +8530,6 @@ function PhotosTab({ projectId, project, user }: { projectId: string; project: a
         </div>
       </div>
 
-      {selectedPhotos.length > 0 && (
-        <div className="sticky top-2 z-40 flex flex-wrap items-center justify-center gap-2 rounded-xl border border-cyan-300/50 bg-slate-950/95 px-3 py-3 shadow-xl shadow-slate-950/50 backdrop-blur">
-          <span className="text-sm font-black text-cyan-100">
-            {selectedPhotos.length} photo{selectedPhotos.length === 1 ? '' : 's'} checked
-          </span>
-          <button
-            type="button"
-            onClick={() => setNotePhoto(selectedPhotos[0])}
-            disabled={selectedPhotos.length !== 1 || Boolean(deletingPhotoId)}
-            title={selectedPhotos.length === 1 ? 'Edit this photo’s description' : 'Check exactly one photo to edit its description'}
-            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-amber-400 bg-amber-500 px-4 text-sm font-black text-slate-950 shadow-sm transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:border-amber-200 disabled:bg-amber-200 disabled:text-amber-700"
-          >
-            <MessageSquare className="h-4 w-4" />
-            Edit Description
-          </button>
-          <button
-            type="button"
-            onClick={() => void deleteSelectedProgressPhotos()}
-            disabled={!selectedDeletePhotos.length || Boolean(deletingPhotoId)}
-            title={selectedDeletePhotos.length
-              ? 'Delete the checked photos'
-              : 'None of the checked photos can be deleted by you'}
-            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-red-400 bg-red-600 px-4 text-sm font-black text-white shadow-lg shadow-red-950/30 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:border-red-300 disabled:bg-red-300 disabled:text-red-950"
-          >
-            <Trash2 className="h-4 w-4" />
-            {deletingPhotoId ? 'Deleting...' : `Delete${selectedDeletePhotos.length ? ` (${selectedDeletePhotos.length})` : ''}`}
-          </button>
-          <button
-            type="button"
-            onClick={clearPhotoSelection}
-            disabled={Boolean(deletingPhotoId)}
-            className="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-black text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Clear
-          </button>
-        </div>
-      )}
-
       {loading ? <Loading /> : (
         <div className="space-y-5">
           {groupedPhotos.map(group => (
@@ -8653,6 +8597,40 @@ function PhotosTab({ projectId, project, user }: { projectId: string; project: a
                           aria-label={`Select ${photo.original_name || 'photo'}`}
                         />
                       </label>
+                      {isSelected && (
+                        <div className="absolute bottom-2 right-2 z-30 flex flex-col items-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={event => {
+                              event.stopPropagation();
+                              setNotePhoto(photo);
+                            }}
+                            disabled={Boolean(deletingPhotoId)}
+                            className="inline-flex min-h-8 items-center gap-1 rounded-lg border border-amber-300 bg-amber-500 px-2.5 text-[11px] font-black text-slate-950 shadow-md transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
+                            aria-label={`Edit description for ${photo.original_name || 'photo'}`}
+                          >
+                            <MessageSquare className="h-3.5 w-3.5" />
+                            {noteText ? 'Edit Description' : 'Add Description'}
+                          </button>
+                          {selectedDeletePhotos.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={event => {
+                                event.stopPropagation();
+                                void deleteSelectedProgressPhotos();
+                              }}
+                              disabled={Boolean(deletingPhotoId)}
+                              className="inline-flex min-h-8 items-center gap-1 rounded-lg border border-red-400 bg-red-600 px-2.5 text-[11px] font-black text-white shadow-md transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+                              aria-label="Delete the checked photos"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              {deletingPhotoId
+                                ? 'Deleting...'
+                                : selectedDeletePhotos.length > 1 ? `Delete (${selectedDeletePhotos.length})` : 'Delete'}
+                            </button>
+                          )}
+                        </div>
+                      )}
                       {hasPhotoAssignmentTargets && (
                         <button
                           type="button"

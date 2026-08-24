@@ -505,11 +505,16 @@ body {
   left: 0;
 }
 
-img,
-video,
-picture {
-  max-width: 100%;
-  height: auto;
+/* Layered so Tailwind sizing utilities (h-full, aspect-*, object-cover) win:
+   unlayered, this reset silently overrode h-full on every img/video and left
+   landscape videos rendering as a short strip inside square tiles. */
+@layer base {
+  img,
+  video,
+  picture {
+    max-width: 100%;
+    height: auto;
+  }
 }
 
 button,
