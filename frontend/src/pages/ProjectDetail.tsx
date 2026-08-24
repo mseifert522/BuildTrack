@@ -6919,37 +6919,49 @@ function PunchListTab({
       </div>
 
       {loading ? <Loading /> : (
-        <div className="space-y-2">
+        <div className="mx-auto w-full max-w-3xl space-y-1.5">
           {items.map(item => {
             const itemAiMeta = aiAgentMeta(item);
+            const isChecked = expandedItem === item.id;
             return (
-            <div key={item.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              <div className="p-4 flex items-start gap-3">
+            <div key={item.id} className={`overflow-hidden rounded-xl border bg-white transition ${isChecked ? 'border-cyan-400 ring-2 ring-cyan-300/70' : 'border-gray-200'}`}>
+              <div
+                className="flex cursor-pointer items-center gap-2.5 px-3 py-2"
+                onClick={() => setExpandedItem(isChecked ? null : item.id)}
+              >
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 flex-shrink-0 cursor-pointer accent-cyan-500"
+                  checked={isChecked}
+                  onChange={() => setExpandedItem(isChecked ? null : item.id)}
+                  onClick={e => e.stopPropagation()}
+                  aria-label={`Select ${item.title} to update it`}
+                  title="Check this item to update its status or photos"
+                />
                 <button
                   disabled={!isActive}
-                  onClick={() => updateStatus(item.id, item.status === 'completed' ? 'not_started' : 'completed')}
-                  className={`w-5 h-5 rounded-full border-2 flex-shrink-0 mt-0.5 transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${item.status === 'completed' ? 'bg-green-500 border-green-500' : 'border-gray-300 hover:border-green-400'}`}
+                  onClick={e => { e.stopPropagation(); updateStatus(item.id, item.status === 'completed' ? 'not_started' : 'completed'); }}
+                  title={isActive ? (item.status === 'completed' ? 'Mark as not started' : 'Mark as completed') : 'Activate the punch list first'}
+                  className={`h-5 w-5 flex-shrink-0 rounded-full border-2 transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${item.status === 'completed' ? 'border-green-500 bg-green-500' : 'border-gray-300 hover:border-green-400'}`}
                 >
-                  {item.status === 'completed' && <svg className="w-full h-full text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                  {item.status === 'completed' && <svg className="h-full w-full text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                 </button>
-                <div className="flex-1 min-w-0" onClick={() => setExpandedItem(expandedItem === item.id ? null : item.id)}>
-                  <div className="flex items-start justify-between gap-2">
-                    <p className={`text-sm font-medium ${item.status === 'completed' ? 'line-through text-gray-400' : 'text-gray-900'}`}>{item.title}</p>
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${priorityColors[item.priority]}`}>{item.priority}</span>
-                  </div>
-                  {item.description && <p className="text-xs text-gray-500 mt-0.5 truncate">{item.description}</p>}
-                  <div className="flex flex-wrap items-center gap-2 mt-1.5">
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColors[item.status]}`}>{item.status.replace(/_/g, ' ')}</span>
-                    {itemAiMeta && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-xs font-black text-violet-700" title={itemAiMeta.rawTranscript || undefined}>
-                        <Bot className="h-3 w-3" /> AI Agent: {itemAiMeta.agentName}
-                      </span>
-                    )}
-                    {item.assigned_to_name && <span className="text-xs text-gray-500">→ {item.assigned_to_name}</span>}
-                    {item.due_date && <span className="text-xs text-gray-400">{format(new Date(item.due_date), 'MMM d')}</span>}
-                    {item.photo_count > 0 && <span className="text-xs text-blue-500">{item.photo_count} photos</span>}
-                  </div>
+                <div className="min-w-0 flex-1">
+                  <p className={`truncate text-sm font-semibold ${item.status === 'completed' ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
+                    {item.title}
+                    {item.description && <span className="ml-2 font-normal text-xs text-gray-400">{item.description}</span>}
+                  </p>
+                  {(itemAiMeta || item.assigned_to_name || item.due_date || item.photo_count > 0) && (
+                    <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-gray-500">
+                      {itemAiMeta && <span className="inline-flex items-center gap-1 font-black text-violet-600"><Bot className="h-3 w-3" /> AI: {itemAiMeta.agentName}</span>}
+                      {item.assigned_to_name && <span>→ {item.assigned_to_name}</span>}
+                      {item.due_date && <span>{format(new Date(item.due_date), 'MMM d')}</span>}
+                      {item.photo_count > 0 && <span className="text-blue-500">{item.photo_count} photo{item.photo_count === 1 ? '' : 's'}</span>}
+                    </p>
+                  )}
                 </div>
+                <span className={`flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${statusColors[item.status]}`}>{item.status.replace(/_/g, ' ')}</span>
+                <span className={`flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${priorityColors[item.priority]}`}>{item.priority}</span>
                 {canDelete && (
                   <button
                     type="button"
@@ -6962,24 +6974,14 @@ function PunchListTab({
                   </button>
                 )}
               </div>
-              {expandedItem === item.id && (
-                <div className="px-4 pb-4 border-t border-gray-100 pt-3">
-                  {item.description && (
-                    <div className="mb-3 rounded-lg bg-gray-50 p-3">
-                      <p className="text-xs font-bold uppercase tracking-wide text-gray-400 mb-1">Description</p>
-                      <p className="text-sm text-gray-700 whitespace-pre-wrap">{item.description}</p>
-                    </div>
-                  )}
-                  {itemAiMeta && (
-                    <div className="mb-3 rounded-lg border border-violet-100 bg-violet-50 p-3">
-                      <p className="text-xs font-black uppercase tracking-wide text-violet-700">Created by AI Agent: {itemAiMeta.agentName}</p>
-                      <p className="mt-1 text-xs font-semibold text-violet-700">Source: {itemAiMeta.source}{itemAiMeta.requestId ? ` | Request: ${itemAiMeta.requestId}` : ''}</p>
-                      {itemAiMeta.rawTranscript && <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-violet-900">{itemAiMeta.rawTranscript}</p>}
-                    </div>
-                  )}
+              {isChecked && (
+                <div className="border-t border-cyan-200 bg-cyan-50/70 px-3 pb-3 pt-2.5">
+                  <p className="mb-1.5 text-[10px] font-black uppercase tracking-wide text-cyan-700">Update “{item.title}”</p>
+                  {item.description && <p className="mb-2 whitespace-pre-wrap text-xs leading-5 text-gray-600">{item.description}</p>}
+                  {itemAiMeta?.rawTranscript && <p className="mb-2 whitespace-pre-wrap rounded-lg border border-violet-100 bg-violet-50 p-2 text-xs leading-5 text-violet-900">{itemAiMeta.rawTranscript}</p>}
                   <div className="flex gap-2 flex-wrap">
                     {['not_started', 'in_progress', 'waiting_materials', 'needs_review', 'completed'].map(s => (
-                      <button key={s} disabled={!isActive} onClick={() => updateStatus(item.id, s)} className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${item.status === s ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{s.replace(/_/g, ' ')}</button>
+                      <button key={s} disabled={!isActive} onClick={() => updateStatus(item.id, s)} className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${item.status === s ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'}`}>{s.replace(/_/g, ' ')}</button>
                     ))}
                     <label
                       className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-blue-700 bg-blue-50 border border-blue-100 cursor-pointer hover:bg-blue-100 transition-colors"
