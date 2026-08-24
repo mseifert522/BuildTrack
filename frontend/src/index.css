@@ -3235,18 +3235,26 @@ textarea,
   color: #8499ae !important;
 }
 
-/* Dashboard: rich navy operations workspace */
+/* Dashboard: navy operations workspace with clear surface hierarchy.
+   Three levels so areas separate without extra lines:
+   page (darkest) < panels (lighter slate) < headers; content wells sit
+   darker INSIDE panels. Each section keeps a 2px accent identity:
+   blue = notes/ops, green = payment queue, gold = calendar. */
 .bt-desktop-shell:has(.bt-dashboard-page) {
-  --bt-dashboard-border: #345b78;
-  --bt-dashboard-border-strong: #4d7ea2;
+  --bt-dashboard-border: #2b4761;
+  --bt-dashboard-border-strong: #47708f;
   --bt-dashboard-text: #edf5fb;
   --bt-dashboard-text-soft: #a9bfd0;
   --bt-dashboard-accent: #3d8fc5;
+  --bt-dashboard-page-bg: #0a1522;
+  --bt-dashboard-panel-bg: #182a3c;
+  --bt-dashboard-panel-header-bg: #21374c;
+  --bt-dashboard-well-bg: #0f2130;
 }
 
 .bt-desktop-shell:has(.bt-dashboard-page) main,
 .bt-desktop-shell .bt-dashboard-page {
-  background: linear-gradient(135deg, #061522 0%, #0b2940 52%, #071a2a 100%) !important;
+  background: var(--bt-dashboard-page-bg) !important;
   color: var(--bt-dashboard-text) !important;
 }
 
@@ -3255,7 +3263,7 @@ textarea,
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-payment-queue-reminder,
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module {
   border-color: var(--bt-dashboard-border) !important;
-  background: #0b2236 !important;
+  background: var(--bt-dashboard-panel-bg) !important;
 }
 
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-ops-header,
@@ -3264,7 +3272,24 @@ textarea,
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__controls,
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__agenda {
   border-color: var(--bt-dashboard-border) !important;
-  background: #102e48 !important;
+  background: var(--bt-dashboard-panel-header-bg) !important;
+}
+
+/* Per-section accent toplines + kickers */
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-payment-queue-reminder__topline {
+  background: #34b380 !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__topline {
+  background: #d9a126 !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-payment-queue-reminder__kicker {
+  color: #6fe0b1 !important;
+}
+
+.bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__kicker {
+  color: #f4ca66 !important;
 }
 
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-ops-header h2,
@@ -3274,22 +3299,20 @@ textarea,
   color: #f4f8fc !important;
 }
 
-.bt-desktop-shell .bt-dashboard-page .bt-section-kicker,
-.bt-desktop-shell .bt-dashboard-page .bt-dashboard-payment-queue-reminder__kicker,
-.bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__kicker {
+.bt-desktop-shell .bt-dashboard-page .bt-section-kicker {
   color: #79c4f3 !important;
 }
 
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-payment-queue-reminder__body,
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-payment-queue-reminder__amount {
-  border-color: var(--bt-dashboard-border) !important;
-  background: #081b2b !important;
+  border-color: transparent !important;
+  background: var(--bt-dashboard-well-bg) !important;
   color: #dceaf4 !important;
 }
 
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-payment-queue-reminder:hover {
   border-color: var(--bt-dashboard-border-strong) !important;
-  background: #0d2940 !important;
+  background: #1d3247 !important;
 }
 
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-payment-queue-reminder__amount strong {
@@ -3299,8 +3322,8 @@ textarea,
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__controls button,
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__open,
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__grid button {
-  border-color: #396483 !important;
-  background: #091f32 !important;
+  border-color: #3a5872 !important;
+  background: var(--bt-dashboard-well-bg) !important;
   color: #e8f1f7 !important;
 }
 
@@ -3308,30 +3331,30 @@ textarea,
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__open:hover,
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__grid button:hover {
   border-color: #5b8eaf !important;
-  background: #143a57 !important;
+  background: #1c3852 !important;
 }
 
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__grid button.is-today,
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__grid button.is-selected {
-  border-color: #68b7e8 !important;
-  background: #2f7fae !important;
-  color: #ffffff !important;
+  border-color: #d9a126 !important;
+  background: #d9a126 !important;
+  color: #10202e !important;
 }
 
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-mini-calendar-module__agenda-item {
-  border-color: #345b78 !important;
-  background: #0a2032 !important;
+  border-color: transparent !important;
+  background: var(--bt-dashboard-well-bg) !important;
   color: #dceaf4 !important;
 }
 
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-note-row {
   border: none !important;
-  background: rgba(255, 255, 255, 0.045) !important;
+  background: var(--bt-dashboard-well-bg) !important;
   color: #eef6fb !important;
 }
 
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-note-row:hover {
-  background: rgba(255, 255, 255, 0.08) !important;
+  background: #16314a !important;
 }
 
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-note-summary {
