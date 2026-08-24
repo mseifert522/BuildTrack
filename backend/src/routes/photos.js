@@ -429,9 +429,9 @@ const storage = multer.diskStorage({
   },
 });
 
-const fileFilter = (req, file, cb) => {
-  const ext = path.extname(file.originalname).toLowerCase();
-  const mime = String(file.mimetype || '').toLowerCase();
+function isAllowedMediaFile(originalname, mimetype) {
+  const ext = path.extname(String(originalname || '')).toLowerCase();
+  const mime = String(mimetype || '').toLowerCase();
   const hasAllowedMediaExtension = IMAGE_EXTENSIONS.has(ext) || VIDEO_EXTENSIONS.has(ext);
   const isImage = IMAGE_EXTENSIONS.has(ext) || mime.startsWith('image/') || mime === 'image/heic' || mime === 'image/heif';
   const isVideo = VIDEO_EXTENSIONS.has(ext)
@@ -440,7 +440,11 @@ const fileFilter = (req, file, cb) => {
     || mime === 'application/quicktime'
     || mime === 'application/x-mpegurl'
     || (mime === 'application/octet-stream' && hasAllowedMediaExtension);
-  if (isImage || isVideo) cb(null, true);
+  return isImage || isVideo;
+}
+
+const fileFilter = (req, file, cb) => {
+  if (isAllowedMediaFile(file.originalname, file.mimetype)) cb(null, true);
   else cb(new Error('Only image or video files are allowed'));
 };
 
@@ -717,7 +721,9 @@ router.get('/progress', (req, res) => {
 });
 
 // POST /api/projects/:projectId/photos - upload project media
-router.post('/', uploadProjectPhotos, async (req, res) => {
+// Extracted to a named handler so the chunked-upload complete endpoint can
+// reuse the exact same validation/insert/logging path for reassembled files.
+async function handleProjectMediaUpload(req, res) {
   try {
     if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No files uploaded' });
     const db = getDb();
@@ -992,6 +998,318 @@ router.post('/', uploadProjectPhotos, async (req, res) => {
     cleanupUploadedFiles(req.files);
     console.error(err);
     res.status(500).json({ error: 'Upload failed' });
+  }
+}
+
+router.post('/', uploadProjectPhotos, handleProjectMediaUpload);
+
+// --- Chunked media upload (any-size videos) -----------------------------------
+// Cloudflare fronts the public hostnames and rejects request bodies over
+// ~100MB, so a large video can never arrive as one multipart POST. The client
+// slices big files into pieces that each fit through the proxy; the pieces are
+// written under uploads/chunk-tmp/{uploadId}/ and reassembled on complete,
+// then flow through handleProjectMediaUpload exactly like a direct upload.
+const CHUNK_UPLOAD_TMP_DIR = 'chunk-tmp';
+const CHUNK_MAX_CHUNK_BYTES = 32 * 1024 * 1024;
+const CHUNK_MAX_TOTAL_CHUNKS = 4000;
+const CHUNK_SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const CHUNK_MAX_SESSIONS_PER_USER = 10;
+const CHUNK_MAX_SESSIONS_TOTAL = 50;
+const configuredChunkedMaxMb = Number.parseInt(process.env.CHUNKED_MEDIA_MAX_MB || '8192', 10);
+const CHUNKED_MEDIA_MAX_BYTES = (Number.isFinite(configuredChunkedMaxMb) ? configuredChunkedMaxMb : 8192) * 1024 * 1024;
+
+function chunkTmpRoot() {
+  return path.join(uploadRoot(), CHUNK_UPLOAD_TMP_DIR);
+}
+
+function chunkSessionDir(uploadId) {
+  return path.join(chunkTmpRoot(), uploadId);
+}
+
+function chunkPartPath(uploadId, index) {
+  return path.join(chunkSessionDir(uploadId), `chunk-${String(index).padStart(6, '0')}.part`);
+}
+
+function chunkManifestPath(uploadId) {
+  return path.join(chunkSessionDir(uploadId), 'manifest.json');
+}
+
+// uploadId must be a UUID we generated — this also blocks path traversal.
+function loadChunkSession(req) {
+  const uploadId = String(req.params.uploadId || '');
+  if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(uploadId)) return null;
+  const manifestPath = chunkManifestPath(uploadId);
+  try {
+    if (!fs.existsSync(manifestPath)) return null;
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    if (manifest.uploadId !== uploadId) return null;
+    if (manifest.userId !== req.user.id) return null;
+    if (manifest.projectId !== String(req.params.projectId)) return null;
+    return manifest;
+  } catch {
+    return null;
+  }
+}
+
+function sweepStaleChunkSessions() {
+  const root = chunkTmpRoot();
+  try {
+    if (!fs.existsSync(root)) return;
+    for (const entry of fs.readdirSync(root)) {
+      const dir = path.join(root, entry);
+      try {
+        const stat = fs.statSync(dir);
+        if (Date.now() - stat.mtimeMs > CHUNK_SESSION_MAX_AGE_MS) {
+          fs.rmSync(dir, { recursive: true, force: true });
+        }
+      } catch { /* best-effort per entry */ }
+    }
+  } catch (err) {
+    console.warn('Chunked upload sweep failed:', err.message || err);
+  }
+}
+
+// Abandoned sessions must not depend on someone calling /init again.
+setInterval(sweepStaleChunkSessions, 60 * 60 * 1000).unref();
+
+// Count open (unconsumed) sessions so one user can't fill the disk with
+// abandoned chunk-tmp data. Cheap: the caps keep the dir listing tiny.
+function countOpenChunkSessions(userId) {
+  const root = chunkTmpRoot();
+  let total = 0;
+  let mine = 0;
+  try {
+    if (!fs.existsSync(root)) return { total, mine };
+    for (const entry of fs.readdirSync(root)) {
+      const manifestPath = path.join(root, entry, 'manifest.json');
+      try {
+        if (!fs.existsSync(manifestPath)) continue;
+        total += 1;
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+        if (manifest.userId === userId) mine += 1;
+      } catch { /* skip unreadable entries */ }
+    }
+  } catch { /* treat as empty */ }
+  return { total, mine };
+}
+
+// POST /api/projects/:projectId/photos/chunked/init - start a chunked upload session
+router.post('/chunked/init', (req, res) => {
+  try {
+    sweepStaleChunkSessions();
+    const fileName = String(req.body?.file_name || '').trim().slice(0, 255);
+    const mimeType = String(req.body?.mime_type || '').trim().toLowerCase().slice(0, 120);
+    const fileSize = Number(req.body?.file_size);
+    const chunkSize = Number(req.body?.chunk_size);
+    const totalChunks = Number(req.body?.total_chunks);
+    const fields = req.body?.fields && typeof req.body.fields === 'object' && !Array.isArray(req.body.fields)
+      ? req.body.fields
+      : {};
+
+    if (!fileName) return res.status(400).json({ error: 'File name is required' });
+    if (!isAllowedMediaFile(fileName, mimeType)) return res.status(400).json({ error: 'Only image or video files are allowed' });
+    if (!Number.isFinite(fileSize) || fileSize <= 0) return res.status(400).json({ error: 'File size is required' });
+    if (fileSize > CHUNKED_MEDIA_MAX_BYTES) {
+      return res.status(413).json({ error: `Each file must be ${configuredChunkedMaxMb}MB or less` });
+    }
+    if (!Number.isInteger(chunkSize) || chunkSize <= 0 || chunkSize > CHUNK_MAX_CHUNK_BYTES) {
+      return res.status(400).json({ error: 'Invalid chunk size' });
+    }
+    if (!Number.isInteger(totalChunks) || totalChunks <= 0 || totalChunks > CHUNK_MAX_TOTAL_CHUNKS) {
+      return res.status(400).json({ error: 'Invalid chunk count' });
+    }
+    if (Math.ceil(fileSize / chunkSize) !== totalChunks) {
+      return res.status(400).json({ error: 'Chunk count does not match the file size' });
+    }
+    if (JSON.stringify(fields).length > 100000) {
+      return res.status(400).json({ error: 'Upload metadata is too large' });
+    }
+
+    const openSessions = countOpenChunkSessions(req.user.id);
+    if (openSessions.mine >= CHUNK_MAX_SESSIONS_PER_USER || openSessions.total >= CHUNK_MAX_SESSIONS_TOTAL) {
+      return res.status(429).json({ error: 'Too many uploads in progress. Finish or cancel the current ones first.' });
+    }
+
+    const uploadId = uuidv4();
+    fs.mkdirSync(chunkSessionDir(uploadId), { recursive: true });
+    const manifest = {
+      uploadId,
+      projectId: String(req.params.projectId),
+      userId: req.user.id,
+      fileName,
+      fileSize,
+      mimeType,
+      chunkSize,
+      totalChunks,
+      fields,
+      createdAt: new Date().toISOString(),
+    };
+    fs.writeFileSync(chunkManifestPath(uploadId), JSON.stringify(manifest));
+    res.status(201).json({ upload_id: uploadId, chunk_size: chunkSize, total_chunks: totalChunks });
+  } catch (err) {
+    console.error('Failed to start chunked upload:', err);
+    res.status(500).json({ error: 'Failed to start the upload' });
+  }
+});
+
+// PUT /api/projects/:projectId/photos/chunked/:uploadId/:chunkIndex - receive one piece
+const receiveChunkBody = express.raw({ type: 'application/octet-stream', limit: CHUNK_MAX_CHUNK_BYTES + 1024 * 1024 });
+router.put('/chunked/:uploadId/:chunkIndex', receiveChunkBody, (req, res) => {
+  try {
+    const manifest = loadChunkSession(req);
+    if (!manifest) return res.status(404).json({ error: 'Upload session not found or expired. Start the upload again.' });
+    const index = Number(req.params.chunkIndex);
+    if (!Number.isInteger(index) || index < 0 || index >= manifest.totalChunks) {
+      return res.status(400).json({ error: 'Invalid chunk index' });
+    }
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      return res.status(400).json({ error: 'Chunk data is required (send application/octet-stream)' });
+    }
+    const expectedSize = index === manifest.totalChunks - 1
+      ? manifest.fileSize - manifest.chunkSize * (manifest.totalChunks - 1)
+      : manifest.chunkSize;
+    if (req.body.length !== expectedSize) {
+      return res.status(400).json({ error: `Chunk ${index} has the wrong size` });
+    }
+
+    const finalPath = chunkPartPath(manifest.uploadId, index);
+    const writingPath = `${finalPath}.writing`;
+    fs.writeFileSync(writingPath, req.body);
+    fs.renameSync(writingPath, finalPath);
+
+    // Keep the session dir's mtime fresh so long uploads never hit the stale sweep.
+    const now = new Date();
+    try { fs.utimesSync(chunkSessionDir(manifest.uploadId), now, now); } catch { /* best-effort */ }
+
+    res.json({ received: index });
+  } catch (err) {
+    console.error('Failed to store upload chunk:', err);
+    res.status(500).json({ error: 'Failed to store this piece of the upload' });
+  }
+});
+
+// POST /api/projects/:projectId/photos/chunked/:uploadId/complete - reassemble and insert
+router.post('/chunked/:uploadId/complete', async (req, res) => {
+  const manifest = loadChunkSession(req);
+  if (!manifest) return res.status(404).json({ error: 'Upload session not found or expired. Start the upload again.' });
+  const sessionDir = chunkSessionDir(manifest.uploadId);
+
+  try {
+    let totalBytes = 0;
+    const parts = [];
+    for (let index = 0; index < manifest.totalChunks; index += 1) {
+      const partPath = chunkPartPath(manifest.uploadId, index);
+      if (!fs.existsSync(partPath)) {
+        return res.status(409).json({ error: `Upload incomplete: piece ${index + 1} of ${manifest.totalChunks} is missing`, missing_chunk: index });
+      }
+      totalBytes += fs.statSync(partPath).size;
+      parts.push(partPath);
+    }
+    if (totalBytes !== manifest.fileSize) {
+      return res.status(409).json({ error: 'Uploaded data does not match the original file size' });
+    }
+
+    // Consume the manifest atomically so a duplicate complete call cannot
+    // assemble (and insert) the same file twice. On failure it is restored so
+    // the client can retry complete without re-uploading every piece.
+    const manifestPath = chunkManifestPath(manifest.uploadId);
+    try {
+      fs.renameSync(manifestPath, `${manifestPath}.consumed`);
+    } catch {
+      return res.status(409).json({ error: 'This upload is already being finished' });
+    }
+    const restoreSession = () => {
+      try { fs.renameSync(`${manifestPath}.consumed`, manifestPath); } catch { /* best-effort */ }
+    };
+
+    // Assemble into the exact storage layout the multer path uses. The name
+    // carries a slice of the uploadId so it can never collide with a multer
+    // filename (or another chunked file) sharing the batch dir and stamp.
+    req.body = { ...(manifest.fields || {}) };
+    const batch = getBatchContext(req);
+    const rawExt = path.extname(manifest.fileName).toLowerCase();
+    const ext = /^\.[a-z0-9]{1,10}$/.test(rawExt) ? rawExt : '.bin';
+    const destDir = path.join(uploadRoot(), req.params.projectId, 'photos', batch.year, batch.month, batch.batchId);
+    fs.mkdirSync(destDir, { recursive: true });
+    const requestedSequence = Number.parseInt(req.body?.batch_sequence, 10);
+    const sequence = Number.isFinite(requestedSequence) && requestedSequence > 0 ? requestedSequence : 1;
+    const projectSegment = sanitizePathSegment(req.params.projectId, 'project');
+    const userSegment = sanitizePathSegment(req.user?.id || 'user', 'user');
+    const assembledName = `BuildTrack_Project-${projectSegment}_User-${userSegment}_${batch.stamp}_Sequence-${String(sequence).padStart(3, '0')}-${manifest.uploadId.slice(0, 8)}${ext}`;
+    const assembledPath = path.join(destDir, assembledName);
+
+    try {
+      await new Promise((resolve, reject) => {
+        const output = fs.createWriteStream(assembledPath, { flags: 'wx' });
+        let currentInput = null;
+        const fail = err => {
+          try { if (currentInput) currentInput.destroy(); } catch { /* best-effort */ }
+          try { output.destroy(); } catch { /* best-effort */ }
+          reject(err);
+        };
+        output.on('error', fail);
+        const pipePart = partIndex => {
+          if (partIndex >= parts.length) {
+            output.end(() => resolve());
+            return;
+          }
+          const input = fs.createReadStream(parts[partIndex]);
+          currentInput = input;
+          input.on('error', fail);
+          input.on('end', () => pipePart(partIndex + 1));
+          input.pipe(output, { end: false });
+        };
+        pipePart(0);
+      });
+    } catch (assembleErr) {
+      try { if (fs.existsSync(assembledPath)) fs.unlinkSync(assembledPath); } catch { /* best-effort */ }
+      restoreSession();
+      throw assembleErr;
+    }
+
+    // Hand off to the standard upload pipeline with a multer-shaped file.
+    req.files = [{
+      fieldname: 'photos',
+      originalname: manifest.fileName,
+      mimetype: manifest.mimeType || 'application/octet-stream',
+      size: totalBytes,
+      destination: destDir,
+      filename: assembledName,
+      path: assembledPath,
+    }];
+    await handleProjectMediaUpload(req, res);
+
+    if (res.statusCode >= 400) {
+      // The standard pipeline rejected (and already cleaned the assembled
+      // file); keep the pieces so the client can retry complete.
+      restoreSession();
+    } else {
+      fs.rmSync(sessionDir, { recursive: true, force: true });
+    }
+  } catch (err) {
+    console.error('Chunked upload completion failed:', err);
+    // Whatever failed after the manifest was consumed: put it back so the
+    // client can retry complete instead of re-uploading everything. No-ops
+    // if the manifest was never consumed or the session dir is gone.
+    try {
+      const manifestPath = chunkManifestPath(manifest.uploadId);
+      if (!fs.existsSync(manifestPath) && fs.existsSync(`${manifestPath}.consumed`)) {
+        fs.renameSync(`${manifestPath}.consumed`, manifestPath);
+      }
+    } catch { /* best-effort */ }
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to finish the upload. Press retry — the uploaded pieces are still saved.' });
+  }
+});
+
+// DELETE /api/projects/:projectId/photos/chunked/:uploadId - abort and clean up
+router.delete('/chunked/:uploadId', (req, res) => {
+  try {
+    const manifest = loadChunkSession(req);
+    if (manifest) fs.rmSync(chunkSessionDir(manifest.uploadId), { recursive: true, force: true });
+    res.json({ message: 'Upload canceled' });
+  } catch (err) {
+    console.error('Failed to cancel chunked upload:', err);
+    res.status(500).json({ error: 'Failed to cancel the upload' });
   }
 });
 

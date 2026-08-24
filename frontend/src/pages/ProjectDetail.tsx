@@ -23,6 +23,7 @@ import {
   type ProgressCaptureSource,
 } from '../lib/progressUpload';
 import { getProgressMediaKind, isVideoMedia } from '../lib/progressMedia';
+import { MAX_MEDIA_FILE_MB, uploadProjectMedia } from '../lib/projectMediaUpload';
 import PhotoMarkupModal from '../components/PhotoMarkupModal';
 
 type Tab = 'overview' | 'details' | 'progress-history' | 'construction-plan' | 'project-timeline' | 'quotes' | 'punch-list' | 'photos' | 'invoices' | 'notes' | 'team' | 'texts';
@@ -129,6 +130,8 @@ type NoteAttachmentProgress = {
   total: number;
   percent: number;
   fileName?: string;
+  loadedBytes?: number;
+  totalBytes?: number;
 };
 const PROJECT_BUDGET_ROLES = new Set(['super_admin', 'operations_manager', 'project_manager']);
 const PROJECT_CALENDAR_ROLES = new Set(['super_admin', 'operations_manager', 'project_manager']);
@@ -163,14 +166,18 @@ function noteAttachmentProgressLabel(progress: NoteAttachmentProgress) {
       : 'Preparing...';
   }
   const percent = Math.max(0, Math.min(100, Math.round(progress.percent || 0)));
+  // For big files (long videos) show the actual bytes moved, not just percent.
+  const bytesLabel = progress.totalBytes && progress.totalBytes > 25 * 1024 * 1024
+    ? ` — ${formatNoteFileSize(Math.min(progress.loadedBytes || 0, progress.totalBytes))} of ${formatNoteFileSize(progress.totalBytes)}`
+    : '';
   return progress.total > 1
-    ? `Uploading ${progress.current}/${progress.total} ${percent}%`
-    : `Uploading ${percent}%`;
+    ? `Uploading ${progress.current}/${progress.total} ${percent}%${bytesLabel}`
+    : `Uploading ${percent}%${bytesLabel}`;
 }
 
-// Cloudflare fronts buildtrack.newurbandev.com and rejects request bodies over ~100MB,
-// so oversized videos must be caught client-side before a long doomed upload.
-const MAX_NOTE_UPLOAD_FILE_MB = 95;
+// Files over ~45MB are automatically sent in Cloudflare-safe pieces (see
+// lib/projectMediaUpload), so the only per-file ceiling left is the server's.
+const MAX_NOTE_UPLOAD_FILE_MB = MAX_MEDIA_FILE_MB;
 
 function noteMediaSummary(files: File[]) {
   const videos = files.filter(file => isVideoMedia(file)).length;
@@ -848,6 +855,8 @@ export default function ProjectDetail() {
   const [editingNoteType, setEditingNoteType] = useState('general');
   const [editingNoteVisibility, setEditingNoteVisibility] = useState<'private' | 'public'>('private');
   const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
+  const [selectedNotePhotos, setSelectedNotePhotos] = useState<Record<string, string[]>>({});
+  const [deletingNotePhotosFor, setDeletingNotePhotosFor] = useState<string | null>(null);
   const [uploadingMainPhoto, setUploadingMainPhoto] = useState(false);
   const [activatingPunchList, setActivatingPunchList] = useState(false);
   const [editAddress, setEditAddress] = useState('');
@@ -862,6 +871,9 @@ export default function ProjectDetail() {
   const noteMediaInputRef = useRef<HTMLInputElement>(null);
   const noteCameraInputRef = useRef<HTMLInputElement>(null);
   const mainPhotoHeaderInputRef = useRef<HTMLInputElement>(null);
+  // When a note was created but its attachments failed to upload, a retry
+  // must attach to THAT note instead of creating a duplicate.
+  const noteRetryTargetRef = useRef<string | null>(null);
   const listeningNote = noteDictationStatus !== 'idle';
 
   // If a dragged file misses a drop zone, the browser's default is to navigate away
@@ -1098,8 +1110,8 @@ export default function ProjectDetail() {
         percent: Math.round((index / total) * 100),
         fileName: originalFile.name,
       });
-      await api.post(`/projects/${id}/photos?type=progress`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+      await uploadProjectMedia(id!, formData, {
+        query: '?type=progress',
         onUploadProgress: event => {
           const totalBytes = event.total || uploadFile.size || 0;
           const ratio = totalBytes ? Math.min(event.loaded / totalBytes, 1) : 0;
@@ -1109,6 +1121,8 @@ export default function ProjectDetail() {
             total,
             percent: Math.min(99, Math.round(((index + ratio) / total) * 100)),
             fileName: originalFile.name,
+            loadedBytes: event.loaded,
+            totalBytes,
           });
         },
       });
@@ -1211,30 +1225,38 @@ export default function ProjectDetail() {
     if (files.length) {
       setNoteSubmitProgress({ phase: 'preparing', current: 1, total: files.length, percent: 0, fileName: files[0]?.name });
     }
-    let noteCreated = false;
+    let targetNoteId: string | null = null;
     const lastProgress: { value: NoteAttachmentProgress | null } = { value: null };
     try {
-      const noteRes = await api.post(`/projects/${id}/notes`, { note: noteText, note_type: noteType, visibility: noteVisibility });
-      noteCreated = true;
-      if (files.length) {
-        await uploadProgressPicturesToNote(noteRes.data.id, files, notePhotoSource, progress => {
+      // A retry after a partial failure attaches to the note that already
+      // exists — unless the user typed new text, which means a new note.
+      if (noteRetryTargetRef.current && !trimmed && files.length) {
+        targetNoteId = noteRetryTargetRef.current;
+      } else {
+        const noteRes = await api.post(`/projects/${id}/notes`, { note: noteText, note_type: noteType, visibility: noteVisibility });
+        targetNoteId = noteRes.data.id;
+      }
+      if (files.length && targetNoteId) {
+        await uploadProgressPicturesToNote(targetNoteId, files, notePhotoSource, progress => {
           lastProgress.value = progress;
           setNoteSubmitProgress(progress);
         });
       }
       toast.success(files.length ? `Note saved — ${noteMediaSummary(files)} uploaded` : 'Note saved');
+      noteRetryTargetRef.current = null;
       setNewNote('');
       setNotePhotoFiles([]);
       setNotePhotoSource('desktop');
       loadNotes();
     } catch (err: any) {
       const detail = err?.response?.data?.error;
-      if (noteCreated && files.length) {
+      if (targetNoteId && files.length) {
         // The note exists but the media upload died partway. Keep only the files that
         // did NOT finish so pressing Submit Note again retries without duplicating.
         const failedIndex = Math.max(0, (lastProgress.value?.current || 1) - 1);
         const remaining = files.slice(failedIndex);
         const uploadedCount = files.length - remaining.length;
+        noteRetryTargetRef.current = targetNoteId;
         setNewNote('');
         setNotePhotoFiles(remaining);
         toast.error(
@@ -1477,6 +1499,51 @@ export default function ProjectDetail() {
     }
   };
 
+  // A note photo can be deleted by its uploader (one-time correction, flagged
+  // by the API) or by upper management on someone else's upload — mirrors the
+  // backend rules on DELETE /photos/:id.
+  const canDeleteNotePhoto = (photo: any) => {
+    if (photo?.can_delete_correction) return true;
+    return Boolean(user && ['super_admin', 'operations_manager'].includes(user.role) && photo?.uploaded_by !== user.id);
+  };
+
+  const toggleNotePhotoSelection = (noteId: string, photoId: string) => {
+    setSelectedNotePhotos(current => {
+      const existing = current[noteId] || [];
+      const next = existing.includes(photoId)
+        ? existing.filter(id => id !== photoId)
+        : [...existing, photoId];
+      return { ...current, [noteId]: next };
+    });
+  };
+
+  const deleteSelectedNotePhotos = async (noteId: string, photoIds: string[]) => {
+    if (!photoIds.length || deletingNotePhotosFor) return;
+    const confirmed = window.confirm(
+      `Delete ${photoIds.length} selected photo${photoIds.length === 1 ? '' : 's'}/video${photoIds.length === 1 ? '' : 's'} from this note? ` +
+      'They are also removed from the project photo history. Photos you uploaded yourself can only be deleted once as a correction.'
+    );
+    if (!confirmed) return;
+    setDeletingNotePhotosFor(noteId);
+    const failures: string[] = [];
+    try {
+      for (const photoId of photoIds) {
+        try {
+          await api.delete(`/projects/${id}/photos/${photoId}`);
+        } catch (err: any) {
+          failures.push(err?.response?.data?.error || 'Delete failed');
+        }
+      }
+      const deletedCount = photoIds.length - failures.length;
+      if (deletedCount) toast.success(`${deletedCount} photo${deletedCount === 1 ? '' : 's'} deleted`);
+      if (failures.length) toast.error(failures[0], { duration: 8000 });
+      setSelectedNotePhotos(current => ({ ...current, [noteId]: [] }));
+      await loadNotes();
+    } finally {
+      setDeletingNotePhotosFor(null);
+    }
+  };
+
   const noteComposerDropHandlers = (() => {
     const base = fileDropHandlers(files => {
       setNoteComposerDragActive(false);
@@ -1562,21 +1629,6 @@ export default function ProjectDetail() {
             : 'Done - Submit Note'}
         </button>
         <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-        <select value={noteType} onChange={e => setNoteType(e.target.value)} className="min-h-[46px] w-full rounded-lg border border-slate-400 bg-white px-3 py-2 text-base font-bold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-auto">
-          <option value="general">General</option>
-          <option value="office">Office</option>
-          <option value="field">Field</option>
-        </select>
-        <label className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-lg border border-slate-400 bg-white px-3 py-2 text-base font-bold text-slate-700 shadow-sm">
-          <input
-            type="checkbox"
-            checked={noteVisibility === 'public'}
-            onChange={e => setNoteVisibility(e.target.checked ? 'public' : 'private')}
-            style={{ accentColor: '#2563EB' }}
-          />
-          <span className="text-center leading-tight sm:hidden">Public</span>
-          <span className="hidden sm:inline">Public to contractors</span>
-        </label>
         <input
           ref={noteMediaInputRef}
           type="file"
@@ -1903,6 +1955,10 @@ export default function ProjectDetail() {
 
                     const noteProjectId = String(note.project_id || id || '');
                     const noteLightboxItems = buildProgressLightboxItems(noteProjectId, notePhotos);
+                    // Selections can go stale when notes reload — only ids
+                    // still present on the note count or get deleted.
+                    const selectedHere = (selectedNotePhotos[note.id] || [])
+                      .filter(photoId => notePhotos.some((p: any) => p.id === photoId));
 
                     return (
                       <div className="bt-project-note-media-panel mt-2 rounded-lg border border-cyan-300/25 bg-slate-950/70 p-2 shadow-inner">
@@ -1923,39 +1979,75 @@ export default function ProjectDetail() {
                               if (canPreviewInProject) setNoteLightbox({ items: noteLightboxItems, index: lightboxIndex });
                             };
 
+                            const photoDeletable = canDeleteNotePhoto(photo);
+                            const photoSelected = (selectedNotePhotos[note.id] || []).includes(photo.id);
                             return (
-                              <button
-                                type="button"
-                                key={mediaKey || attachmentName}
-                                data-no-image-lightbox="true"
-                                className="bt-project-note-media-tile group relative aspect-square overflow-hidden rounded-lg border border-slate-300 bg-white text-left shadow-sm transition hover:border-cyan-200 hover:shadow-cyan-900/30 focus:outline-none focus:ring-2 focus:ring-cyan-300"
-                                onClick={openNoteMedia}
-                                aria-label={
-                                  canPreviewInProject
-                                    ? `Open note photo ${lightboxIndex + 1} of ${noteLightboxItems.length}`
-                                    : `Open note attachment ${attachmentName}`
-                                }
-                              >
-                                {isVideo ? (
-                                  <>
-                                    <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
-                                    <PlayCircle className="absolute inset-0 m-auto h-7 w-7 text-white drop-shadow" />
-                                  </>
-                                ) : mediaKind === 'image' ? (
-                                  <img src={src} alt={attachmentName} className="h-full w-full object-cover transition duration-200 group-hover:scale-[1.02]" loading="lazy" />
-                                ) : (
-                                  <UnsupportedProgressMediaTile name={attachmentName} />
+                              <div key={mediaKey || attachmentName} className="relative">
+                                <button
+                                  type="button"
+                                  data-no-image-lightbox="true"
+                                  className={`bt-project-note-media-tile group relative block h-full w-full aspect-square overflow-hidden rounded-lg border bg-white text-left shadow-sm transition hover:border-cyan-200 hover:shadow-cyan-900/30 focus:outline-none focus:ring-2 focus:ring-cyan-300 ${photoSelected ? 'border-red-400 ring-2 ring-red-400/70' : 'border-slate-300'}`}
+                                  onClick={openNoteMedia}
+                                  aria-label={
+                                    canPreviewInProject
+                                      ? `Open note photo ${lightboxIndex + 1} of ${noteLightboxItems.length}`
+                                      : `Open note attachment ${attachmentName}`
+                                  }
+                                >
+                                  {isVideo ? (
+                                    <>
+                                      <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+                                      <PlayCircle className="absolute inset-0 m-auto h-7 w-7 text-white drop-shadow" />
+                                    </>
+                                  ) : mediaKind === 'image' ? (
+                                    <img src={src} alt={attachmentName} className="h-full w-full object-cover transition duration-200 group-hover:scale-[1.02]" loading="lazy" />
+                                  ) : (
+                                    <UnsupportedProgressMediaTile name={attachmentName} />
+                                  )}
+                                  <div className="absolute bottom-1 left-1 rounded-full bg-black/65 px-1.5 py-0.5 text-[10px] font-black text-white">
+                                    {formatEasternDateTime(photo.taken_at || photo.created_at, { hour: 'numeric', minute: '2-digit' })}
+                                  </div>
+                                </button>
+                                {photoDeletable && (
+                                  <label
+                                    className="absolute left-1 top-1 z-10 flex h-6 w-6 cursor-pointer items-center justify-center rounded-md border border-white/60 bg-black/60 shadow-sm transition-colors hover:bg-black/80"
+                                    title="Select to delete"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      className="h-3.5 w-3.5 cursor-pointer accent-red-500"
+                                      checked={photoSelected}
+                                      onChange={() => toggleNotePhotoSelection(note.id, photo.id)}
+                                      aria-label={`Select ${attachmentName} for deletion`}
+                                    />
+                                  </label>
                                 )}
-                                <div className="absolute bottom-1 left-1 rounded-full bg-black/65 px-1.5 py-0.5 text-[10px] font-black text-white">
-                                  {formatEasternDateTime(photo.taken_at || photo.created_at, { hour: 'numeric', minute: '2-digit' })}
-                                </div>
-                              </button>
+                              </div>
                             );
                           })}
                         </div>
-                        <p className="bt-project-note-media-label px-1 pt-2 text-sm font-bold text-cyan-100/85">
-                          {noteLightboxItems.length || notePhotos.length} photo{(noteLightboxItems.length || notePhotos.length) === 1 ? '' : 's'} attached to this note
-                        </p>
+                        <div className="flex flex-wrap items-center justify-between gap-2 px-1 pt-2">
+                          <p className="bt-project-note-media-label text-sm font-bold text-cyan-100/85">
+                            {noteLightboxItems.length || notePhotos.length} photo{(noteLightboxItems.length || notePhotos.length) === 1 ? '' : 's'} attached to this note
+                          </p>
+                          {selectedHere.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => deleteSelectedNotePhotos(note.id, selectedHere)}
+                              disabled={deletingNotePhotosFor === note.id}
+                              className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-red-400/60 bg-red-500/15 px-2.5 py-1 text-xs font-black text-red-200 transition-colors hover:bg-red-500/30 hover:text-white disabled:cursor-wait disabled:opacity-70"
+                            >
+                              {deletingNotePhotosFor === note.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-3.5 w-3.5" />
+                              )}
+                              {deletingNotePhotosFor === note.id
+                                ? 'Deleting...'
+                                : `Delete ${selectedHere.length} selected`}
+                            </button>
+                          )}
+                        </div>
                       </div>
                     );
                   })()}
@@ -4665,7 +4757,7 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
       uploadFiles.forEach(file => formData.append('photos', file));
       formData.append('construction_plan_item_id', itemId);
       formData.append('caption', 'Scope execution photo');
-      await api.post(`/projects/${projectId}/photos`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      await uploadProjectMedia(projectId, formData);
       await loadScopes();
     } catch {
       toast.error('Failed to upload execution photo');
@@ -5983,7 +6075,7 @@ function ConstructionPlanBoard({ projectId, canManage }: { projectId: string; ca
       uploadFiles.forEach(file => formData.append('photos', file));
       formData.append('construction_plan_item_id', itemId);
       formData.append('caption', 'Construction plan photo');
-      await api.post(`/projects/${projectId}/photos`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      await uploadProjectMedia(projectId, formData);
       load();
     } catch {
       toast.error('Failed to upload construction plan photo');
@@ -6425,9 +6517,7 @@ function ConstructionPlanTab({ projectId, canManage }: { projectId: string; canM
       uploadFiles.forEach(file => formData.append('photos', file));
       formData.append('construction_plan_item_id', itemId);
       formData.append('caption', 'Construction plan photo');
-      await api.post(`/projects/${projectId}/photos`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      await uploadProjectMedia(projectId, formData);
       load();
     } catch {
       toast.error('Failed to upload construction plan photo');
@@ -6743,9 +6833,7 @@ function PunchListTab({
       uploadFiles.forEach(file => formData.append('photos', file));
       formData.append('punch_list_item_id', itemId);
       formData.append('caption', 'Punch list item photo');
-      await api.post(`/projects/${projectId}/photos`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      await uploadProjectMedia(projectId, formData);
       toast.success(`${uploadFiles.length} punch list photo${uploadFiles.length === 1 ? '' : 's'} uploaded`);
       load();
     } catch {

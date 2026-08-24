@@ -34,6 +34,7 @@ import {
   type ProgressCaptureSource,
 } from '../lib/progressUpload';
 import { MOBILE_DATA_CHANGED_EVENT, notifyMobileDataChanged } from '../lib/mobileEvents';
+import { uploadProjectMedia } from '../lib/projectMediaUpload';
 import VoiceTextarea from '../components/VoiceTextarea';
 import PhotoMarkupModal from '../components/PhotoMarkupModal';
 
@@ -691,8 +692,8 @@ export default function MobilePhotos() {
       });
       formData.append('photos', preparedFile, preparedFile.name);
 
-      const response = await api.post(`/projects/${item.projectId}/photos?type=${uploadType}`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+      const response = await uploadProjectMedia(item.projectId, formData, {
+        query: `?type=${uploadType}`,
         onUploadProgress: event => {
           if (!event.total) return;
           const percent = Math.min(98, Math.round((event.loaded / event.total) * 100));

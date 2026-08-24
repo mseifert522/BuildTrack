@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
 import { fileDropHandlers } from '../lib/fileDrop';
 import { appendProgressUploadAudit, PROGRESS_MEDIA_ACCEPT } from '../lib/progressUpload';
 import { getProgressMediaKind } from '../lib/progressMedia';
+import { uploadProjectMedia } from '../lib/projectMediaUpload';
 import VoiceTextarea from '../components/VoiceTextarea';
 import PhotoMarkupModal from '../components/PhotoMarkupModal';
 
@@ -232,9 +233,7 @@ export default function Photos() {
       formData.append('photo_contexts', JSON.stringify(contexts));
       await appendProgressUploadAudit(formData, uploadFiles, uploadFiles.map(() => 'desktop'), { projectId: selectedProject });
 
-      await api.post(`/projects/${selectedProject}/photos?type=${uploadType}`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      await uploadProjectMedia(selectedProject, formData, { query: `?type=${uploadType}` });
       toast.success(`${uploadFiles.length} ${photoView === 'scope' ? 'scope' : 'project'} item${uploadFiles.length === 1 ? '' : 's'} uploaded`);
       setCaption('');
       await load();

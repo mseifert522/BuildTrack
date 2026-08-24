@@ -14,7 +14,8 @@ function activePhotoSql(alias = 'ph') {
   return `COALESCE(${alias}.upload_status, 'uploaded') != 'correction_deleted' AND ${alias}.correction_deleted_at IS NULL`;
 }
 
-const SELF_CORRECTION_DELETE_PHOTO_TYPES = new Set(['progress', 'note', 'construction_plan']);
+// Must stay aligned with photos.js — the DELETE /photos/:id authority.
+const SELF_CORRECTION_DELETE_PHOTO_TYPES = new Set(['progress', 'scope', 'note', 'construction_plan']);
 
 function canUseCorrectionDelete(photo, user) {
   if (!photo || !user) return false;

@@ -97,7 +97,9 @@ app.use(express.json({
 }));
 app.use(express.urlencoded({ extended: true, limit: bodyLimit }));
 
-// Serve uploaded files
+// Serve uploaded files. In-flight chunked-upload pieces live under
+// uploads/chunk-tmp and must never be publicly fetchable.
+app.use('/uploads/chunk-tmp', (req, res) => res.status(404).json({ error: 'Not found' }));
 app.use('/uploads', express.static(path.resolve(uploadsPath), {
   setHeaders: (res, filePath) => {
     if (filePath.includes(`${path.sep}avatars${path.sep}`)) {

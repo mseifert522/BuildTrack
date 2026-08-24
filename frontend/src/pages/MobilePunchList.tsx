@@ -22,6 +22,7 @@ import PhotoMarkupModal from '../components/PhotoMarkupModal';
 import VoiceTextarea from '../components/VoiceTextarea';
 import { photoDisplaySrc } from '../lib/photoMarkup';
 import { getProgressMediaKind } from '../lib/progressMedia';
+import { uploadProjectMedia } from '../lib/projectMediaUpload';
 
 interface PunchItem {
   id: string;
@@ -238,9 +239,7 @@ export default function MobilePunchList() {
           formData.append('client_project_id', id);
           formData.append('punch_list_item_id', String(createdId));
           formData.append('caption', `Punch list: ${draft.title}`);
-          await api.post(`/projects/${id}/photos`, formData, {
-            headers: { 'Content-Type': 'multipart/form-data' },
-          });
+          await uploadProjectMedia(id, formData);
           photoCount += draft.photos.length;
         }
       }
@@ -321,9 +320,7 @@ export default function MobilePunchList() {
       formData.append('punch_list_item_id', photoItemId);
       if (uploadCaption.trim()) formData.append('caption', uploadCaption.trim());
 
-      await api.post(`/projects/${id}/photos`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      await uploadProjectMedia(id, formData);
 
       const res = await api.get(`/projects/${id}/photos?punch_list_item_id=${photoItemId}`);
       setItemPhotos(Array.isArray(res.data) ? res.data : []);

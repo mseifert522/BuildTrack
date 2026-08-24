@@ -59,8 +59,13 @@ async function convertHeicFileToJpeg(sourcePath, preferredTargetPath) {
   return { targetPath, size: stat.size };
 }
 
+// heic-convert loads the entire file into memory; past this size conversion
+// would OOM the container, so the original HEIC is stored untouched instead.
+const HEIC_CONVERT_MAX_BYTES = 80 * 1024 * 1024;
+
 async function convertHeicUploadToJpeg(file) {
   if (!file?.path || !isHeicMedia(file)) return file;
+  if (Number(file.size) > HEIC_CONVERT_MAX_BYTES) return file;
 
   const originalPath = file.path;
   const nextFilename = replaceExtension(file.filename || path.basename(originalPath), '.jpg');

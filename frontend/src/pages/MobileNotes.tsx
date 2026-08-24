@@ -13,6 +13,7 @@ import { fileDropHandlers } from '../lib/fileDrop';
 import { mobilePath } from '../lib/appUrls';
 import { appendProgressUploadAudit, PROGRESS_MEDIA_ACCEPT } from '../lib/progressUpload';
 import { notifyMobileDataChanged } from '../lib/mobileEvents';
+import { uploadProjectMedia } from '../lib/projectMediaUpload';
 import Avatar from '../components/Avatar';
 import VoiceTextarea from '../components/VoiceTextarea';
 
@@ -260,9 +261,7 @@ export default function MobileNotes() {
     formData.append('photo_type', 'progress');
     formData.append('caption', 'Progress pictures attached to project note');
     await appendProgressUploadAudit(formData, files, files.map(() => 'library'), { projectId });
-    await api.post(`/projects/${projectId}/photos?type=progress`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
+    await uploadProjectMedia(projectId, formData, { query: '?type=progress' });
   }, [projectId]);
 
   const refreshNotes = useCallback(async () => {

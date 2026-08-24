@@ -7,10 +7,11 @@ import { fileDropHandlers } from '../lib/fileDrop';
 import { formatEasternDateTime, formatEasternRelative } from '../lib/time';
 import { isSupportedProgressMediaFile, PROGRESS_MEDIA_ACCEPT } from '../lib/progressUpload';
 import { isVideoMedia } from '../lib/progressMedia';
+import { MAX_MEDIA_FILE_MB, uploadProjectMedia } from '../lib/projectMediaUpload';
 import VoiceTextarea from '../components/VoiceTextarea';
 
-// Cloudflare fronts this domain and rejects request bodies over ~100MB.
-const MAX_UPLOAD_FILE_MB = 95;
+// Big files are sent in Cloudflare-safe pieces automatically (lib/projectMediaUpload).
+const MAX_UPLOAD_FILE_MB = MAX_MEDIA_FILE_MB;
 
 type Tab = 'plan' | 'notes' | 'photos' | 'punch';
 
@@ -28,6 +29,9 @@ export default function ContractorProjectDetail() {
   const [noteFiles, setNoteFiles] = useState<File[]>([]);
   const [noteUploadPercent, setNoteUploadPercent] = useState<number | null>(null);
   const noteFileInputRef = useRef<HTMLInputElement>(null);
+  // After a partial failure (note saved, upload died) a retry attaches to the
+  // existing note instead of creating a duplicate.
+  const noteRetryTargetRef = useRef<string | null>(null);
 
   // Photos state
   const [photos, setPhotos] = useState<any[]>([]);
@@ -105,14 +109,20 @@ export default function ContractorProjectDetail() {
     if (!newNote.trim() && !noteFiles.length) return;
     const files = noteFiles;
     setAddingNote(true);
+    let targetNoteId: string | null = null;
     try {
-      const noteText = newNote.trim() || `${files.length} photo${files.length === 1 ? '' : 's'} update`;
-      const res = await api.post(`/projects/${id}/notes`, { note: noteText, note_type: 'field' });
-      if (files.length) {
+      if (noteRetryTargetRef.current && !newNote.trim() && files.length) {
+        targetNoteId = noteRetryTargetRef.current;
+      } else {
+        const noteText = newNote.trim() || `${files.length} photo${files.length === 1 ? '' : 's'} update`;
+        const res = await api.post(`/projects/${id}/notes`, { note: noteText, note_type: 'field' });
+        targetNoteId = res.data.id;
+      }
+      if (files.length && targetNoteId) {
         setNoteUploadPercent(0);
         const formData = new FormData();
         files.forEach(f => formData.append('photos', f));
-        formData.append('note_id', res.data.id);
+        formData.append('note_id', targetNoteId);
         formData.append('capture_project_id', id || '');
         formData.append('client_project_id', id || '');
         formData.append('photo_type', 'progress');
@@ -120,19 +130,35 @@ export default function ContractorProjectDetail() {
         formData.append('taken_at_values', JSON.stringify(
           files.map(file => new Date(file.lastModified || Date.now()).toISOString())
         ));
-        await api.post(`/projects/${id}/photos?type=progress`, formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
+        await uploadProjectMedia(id!, formData, {
+          query: '?type=progress',
           onUploadProgress: event => {
             const total = event.total || files.reduce((sum, f) => sum + f.size, 0) || 1;
             setNoteUploadPercent(Math.min(99, Math.round((event.loaded / total) * 100)));
           },
         });
       }
+      noteRetryTargetRef.current = null;
       setNewNote('');
       setNoteFiles([]);
       loadNotes();
       toast.success(files.length ? `Note added — ${files.length} file${files.length === 1 ? '' : 's'} uploaded` : 'Note added');
-    } catch { toast.error('Failed to add note'); }
+    } catch (err: any) {
+      if (targetNoteId && files.length) {
+        // Note exists; keep files selected and retry against the same note.
+        noteRetryTargetRef.current = targetNoteId;
+        const uploadedCount = Number(err?.partialUpload?.uploaded || 0);
+        if (uploadedCount > 0) setNoteFiles(current => current.slice(uploadedCount));
+        setNewNote('');
+        loadNotes();
+        toast.error(
+          `Note saved${uploadedCount ? ` with ${uploadedCount} of ${files.length} files` : ''}, but the upload stopped. Your remaining files are still attached — press Add Note to retry.`,
+          { duration: 9000 }
+        );
+      } else {
+        toast.error(err?.response?.data?.error || 'Failed to add note');
+      }
+    }
     finally { setAddingNote(false); setNoteUploadPercent(null); }
   };
 
@@ -149,7 +175,7 @@ export default function ContractorProjectDetail() {
       formData.append('taken_at_values', JSON.stringify(
         uploadFiles.map(file => new Date(file.lastModified || Date.now()).toISOString())
       ));
-      await api.post(`/projects/${id}/photos?type=progress`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      await uploadProjectMedia(id!, formData, { query: '?type=progress' });
       loadPhotos();
       toast.success(`${uploadFiles.length} progress photo${uploadFiles.length > 1 ? 's' : ''} uploaded`);
     } catch { toast.error('Failed to upload'); }
