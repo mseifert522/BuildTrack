@@ -243,6 +243,14 @@ function getRecognitionTranscript(results: any) {
   return [...finalParts, ...interimParts].join(' ').trim();
 }
 
+// Mirrors the backend rule on DELETE /photos/:id: the uploader may delete
+// their own photo once as a correction, and upper management may delete
+// anyone ELSE's photo outright.
+function canDeleteProjectPhoto(photo: any, user: any) {
+  if (photo?.can_delete_correction) return true;
+  return Boolean(user && ['super_admin', 'operations_manager'].includes(user.role) && photo?.uploaded_by !== user.id);
+}
+
 const PROJECT_STATUS_OPTIONS = [
   { value: 'not_started', label: 'Not Started' },
   { value: 'active_rehab', label: 'Active Rehabs' },
@@ -1499,13 +1507,7 @@ export default function ProjectDetail() {
     }
   };
 
-  // A note photo can be deleted by its uploader (one-time correction, flagged
-  // by the API) or by upper management on someone else's upload — mirrors the
-  // backend rules on DELETE /photos/:id.
-  const canDeleteNotePhoto = (photo: any) => {
-    if (photo?.can_delete_correction) return true;
-    return Boolean(user && ['super_admin', 'operations_manager'].includes(user.role) && photo?.uploaded_by !== user.id);
-  };
+  const canDeleteNotePhoto = (photo: any) => canDeleteProjectPhoto(photo, user);
 
   const toggleNotePhotoSelection = (noteId: string, photoId: string) => {
     setSelectedNotePhotos(current => {
@@ -7149,6 +7151,7 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<ProgressLightboxState | null>(null);
   const [deletingPhotoId, setDeletingPhotoId] = useState('');
+  const { user } = useAuthStore();
 
   const load = async () => {
     try {
@@ -7168,7 +7171,7 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
 
   const deleteProgressPhotos = async (selectedPhotos: any[]) => {
     if (deletingPhotoId) return;
-    const eligiblePhotos = selectedPhotos.filter(photo => photo?.can_delete_correction);
+    const eligiblePhotos = selectedPhotos.filter(photo => canDeleteProjectPhoto(photo, user));
     if (!eligiblePhotos.length) {
       toast.error('Select at least one eligible progress picture to delete.');
       return;
@@ -7517,16 +7520,17 @@ function ProgressMediaGrid({
   const [deleteMode, setDeleteMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [notePhoto, setNotePhoto] = useState<any | null>(null);
+  const { user } = useAuthStore();
   if (!photos.length) return null;
   const visiblePhotos = photos.slice(0, maxItems);
   const hiddenCount = photos.length - visiblePhotos.length;
   const lightboxItems = buildProgressLightboxItems(projectId, visiblePhotos);
-  const selectablePhotos = visiblePhotos.filter(photo => photo.can_delete_correction);
+  const selectablePhotos = visiblePhotos.filter(photo => canDeleteProjectPhoto(photo, user));
   const selectedPhotos = selectablePhotos.filter(photo => selectedIds.has(progressPhotoKey(photo)));
   const deleting = Boolean(deletingPhotoId);
 
   const toggleSelection = (photo: any) => {
-    if (!photo.can_delete_correction || deleting) return;
+    if (!canDeleteProjectPhoto(photo, user) || deleting) return;
     const key = progressPhotoKey(photo);
     setSelectedIds(current => {
       const next = new Set(current);
@@ -8288,12 +8292,11 @@ function PhotosTab({ projectId, project, user }: { projectId: string; project: a
   const [photoAssignTargetType, setPhotoAssignTargetType] = useState<PhotoBucketAssignmentTargetType>('project_scope');
   const [assigningScopes, setAssigningScopes] = useState(false);
   const [deletingPhotoId, setDeletingPhotoId] = useState('');
-  const [deleteMode, setDeleteMode] = useState(false);
   const [selectedDeleteIds, setSelectedDeleteIds] = useState<Set<string>>(new Set());
   const groupedPhotos = groupMediaByDay(photos);
   const projectLabel = projectPhotoRecordLabel(project, projectId);
   const lightboxItems = useMemo(() => buildProgressLightboxItems(projectId, photos), [projectId, photos]);
-  const deletablePhotos = useMemo(() => photos.filter(photo => photo.can_delete_correction), [photos]);
+  const deletablePhotos = useMemo(() => photos.filter(photo => canDeleteProjectPhoto(photo, user)), [photos, user]);
   const selectedDeletePhotos = useMemo(
     () => deletablePhotos.filter(photo => selectedDeleteIds.has(progressPhotoKey(photo))),
     [deletablePhotos, selectedDeleteIds]
@@ -8391,7 +8394,6 @@ function PhotosTab({ projectId, project, user }: { projectId: string; project: a
     setScopeAssignIds(new Set());
     setPhotoAssignTargetType('project_scope');
     setSelectedDeleteIds(new Set());
-    setDeleteMode(false);
     setLoading(true);
   }, [projectId]);
 
@@ -8464,13 +8466,10 @@ function PhotosTab({ projectId, project, user }: { projectId: string; project: a
   const scopeAssignPreviewSrc = scopeAssignPhoto ? progressPhotoSrc(projectId, scopeAssignPhoto) : '';
   const scopeAssignPreviewKind = scopeAssignPhoto ? getProgressMediaKind(scopeAssignPhoto) : 'image';
 
-  const closeDeleteMode = () => {
-    setDeleteMode(false);
-    setSelectedDeleteIds(new Set());
-  };
+  const clearPhotoSelection = () => setSelectedDeleteIds(new Set());
 
-  const toggleDeleteSelection = (photo: any) => {
-    if (!photo.can_delete_correction || deletingPhotoId) return;
+  const togglePhotoSelection = (photo: any) => {
+    if (deletingPhotoId) return;
     const key = progressPhotoKey(photo);
     setSelectedDeleteIds(current => {
       const next = new Set(current);
@@ -8482,7 +8481,10 @@ function PhotosTab({ projectId, project, user }: { projectId: string; project: a
 
   const deleteSelectedProgressPhotos = async () => {
     if (!selectedDeletePhotos.length || deletingPhotoId) return;
-    const confirmed = window.confirm(`Delete ${selectedDeletePhotos.length} selected photo${selectedDeletePhotos.length === 1 ? '' : 's'}? This removes them from this project and locks correction for the selected upload record${selectedDeletePhotos.length === 1 ? '' : 's'}.`);
+    const confirmed = window.confirm(
+      `Delete ${selectedDeletePhotos.length} selected photo${selectedDeletePhotos.length === 1 ? '' : 's'} from the project photo history? ` +
+      'Photos you uploaded yourself can only be deleted once as a correction.'
+    );
     if (!confirmed) return;
     setDeletingPhotoId('__batch__');
     try {
@@ -8493,7 +8495,7 @@ function PhotosTab({ projectId, project, user }: { projectId: string; project: a
       const failed = results.length - deleted;
       if (deleted) toast.success(`${deleted} photo${deleted === 1 ? '' : 's'} removed.`);
       if (failed) toast.error(`${failed} photo${failed === 1 ? '' : 's'} could not be deleted.`);
-      closeDeleteMode();
+      clearPhotoSelection();
       await load();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to delete selected photos');
@@ -8501,6 +8503,11 @@ function PhotosTab({ projectId, project, user }: { projectId: string; project: a
       setDeletingPhotoId('');
     }
   };
+
+  const selectedPhotos = useMemo(
+    () => photos.filter(photo => selectedDeleteIds.has(progressPhotoKey(photo))),
+    [photos, selectedDeleteIds]
+  );
 
   return (
     <div className="bt-photos-tab space-y-4">
@@ -8541,39 +8548,41 @@ function PhotosTab({ projectId, project, user }: { projectId: string; project: a
         </div>
       </div>
 
-      {deletablePhotos.length > 0 && (
-        <div className="flex flex-wrap items-center justify-center gap-2 rounded-xl border border-red-500/40 bg-red-950/25 px-3 py-3 shadow-inner">
-          {!deleteMode ? (
-            <button
-              type="button"
-              onClick={() => setDeleteMode(true)}
-              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-red-400 bg-red-600 px-4 text-sm font-black text-white shadow-lg shadow-red-950/30 transition hover:border-red-300 hover:bg-red-500 focus:outline-none focus:ring-2 focus:ring-red-300"
-            >
-              <Trash2 className="h-4 w-4" />
-              Delete pictures
-            </button>
-          ) : (
-            <>
-              <span className="text-sm font-black text-red-100">Select pictures to delete</span>
-              <button
-                type="button"
-                onClick={() => void deleteSelectedProgressPhotos()}
-                disabled={!selectedDeletePhotos.length || Boolean(deletingPhotoId)}
-                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-red-400 bg-red-600 px-4 text-sm font-black text-white shadow-lg shadow-red-950/30 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:border-red-300 disabled:bg-red-300 disabled:text-red-950"
-              >
-                <Trash2 className="h-4 w-4" />
-                {deletingPhotoId ? 'Deleting...' : `Delete selected${selectedDeletePhotos.length ? ` (${selectedDeletePhotos.length})` : ''}`}
-              </button>
-              <button
-                type="button"
-                onClick={closeDeleteMode}
-                disabled={Boolean(deletingPhotoId)}
-                className="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-black text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Cancel
-              </button>
-            </>
-          )}
+      {selectedPhotos.length > 0 && (
+        <div className="sticky top-2 z-40 flex flex-wrap items-center justify-center gap-2 rounded-xl border border-cyan-300/50 bg-slate-950/95 px-3 py-3 shadow-xl shadow-slate-950/50 backdrop-blur">
+          <span className="text-sm font-black text-cyan-100">
+            {selectedPhotos.length} photo{selectedPhotos.length === 1 ? '' : 's'} checked
+          </span>
+          <button
+            type="button"
+            onClick={() => setNotePhoto(selectedPhotos[0])}
+            disabled={selectedPhotos.length !== 1 || Boolean(deletingPhotoId)}
+            title={selectedPhotos.length === 1 ? 'Edit this photo’s description' : 'Check exactly one photo to edit its description'}
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-amber-400 bg-amber-500 px-4 text-sm font-black text-slate-950 shadow-sm transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:border-amber-200 disabled:bg-amber-200 disabled:text-amber-700"
+          >
+            <MessageSquare className="h-4 w-4" />
+            Edit Description
+          </button>
+          <button
+            type="button"
+            onClick={() => void deleteSelectedProgressPhotos()}
+            disabled={!selectedDeletePhotos.length || Boolean(deletingPhotoId)}
+            title={selectedDeletePhotos.length
+              ? 'Delete the checked photos'
+              : 'None of the checked photos can be deleted by you'}
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-red-400 bg-red-600 px-4 text-sm font-black text-white shadow-lg shadow-red-950/30 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:border-red-300 disabled:bg-red-300 disabled:text-red-950"
+          >
+            <Trash2 className="h-4 w-4" />
+            {deletingPhotoId ? 'Deleting...' : `Delete${selectedDeletePhotos.length ? ` (${selectedDeletePhotos.length})` : ''}`}
+          </button>
+          <button
+            type="button"
+            onClick={clearPhotoSelection}
+            disabled={Boolean(deletingPhotoId)}
+            className="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-black text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Clear
+          </button>
         </div>
       )}
 
@@ -8606,27 +8615,18 @@ function PhotosTab({ projectId, project, user }: { projectId: string; project: a
                       key={key}
                       role="button"
                       tabIndex={0}
-                      className={`relative group aspect-square cursor-pointer overflow-hidden rounded-xl border bg-gray-100 transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-lg ${deleteMode && photo.can_delete_correction ? 'ring-2 ring-red-200' : 'border-transparent'} ${isSelected ? 'border-red-500 ring-4 ring-red-300' : ''} ${deleteMode && !photo.can_delete_correction ? 'cursor-not-allowed opacity-60' : ''}`}
+                      className={`relative group aspect-square cursor-pointer overflow-hidden rounded-xl border bg-gray-100 transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-lg ${isSelected ? 'border-cyan-400 ring-4 ring-cyan-300/80' : 'border-transparent'}`}
                       onClick={() => {
-                        if (deleteMode) {
-                          toggleDeleteSelection(photo);
-                          return;
-                        }
                         if (mediaKind === 'file') window.open(src, '_blank', 'noopener,noreferrer');
                         else if (lightboxIndex >= 0) setLightbox({ items: lightboxItems, index: lightboxIndex });
                       }}
                       onKeyDown={event => {
                         if (event.key !== 'Enter' && event.key !== ' ') return;
                         event.preventDefault();
-                        if (deleteMode) {
-                          toggleDeleteSelection(photo);
-                          return;
-                        }
                         if (mediaKind === 'file') window.open(src, '_blank', 'noopener,noreferrer');
                         else if (lightboxIndex >= 0) setLightbox({ items: lightboxItems, index: lightboxIndex });
                       }}
-                      aria-label={deleteMode ? `Select ${photo.original_name || 'photo'} for deletion` : `Open ${photo.original_name || 'photo'}`}
-                      aria-pressed={deleteMode ? isSelected : undefined}
+                      aria-label={`Open ${photo.original_name || 'photo'}`}
                     >
                       {isVideo ? (
                         <>
@@ -8638,58 +8638,42 @@ function PhotosTab({ projectId, project, user }: { projectId: string; project: a
                       ) : (
                           <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
                       )}
-                      {noteText && (
+                      {/* Check a photo first — the Edit Description / Delete
+                          action bar pops up above the grid once one is checked. */}
+                      <label
+                        className="absolute right-2 top-2 z-30 flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-white/70 bg-black/60 shadow-sm transition-colors hover:bg-black/80"
+                        onClick={event => event.stopPropagation()}
+                        title="Check this photo to edit its description or delete it"
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 cursor-pointer accent-cyan-400"
+                          checked={isSelected}
+                          onChange={() => togglePhotoSelection(photo)}
+                          aria-label={`Select ${photo.original_name || 'photo'}`}
+                        />
+                      </label>
+                      {hasPhotoAssignmentTargets && (
                         <button
                           type="button"
                           onClick={event => {
                             event.stopPropagation();
-                            setNotePhoto(photo);
+                            openScopeAssignment(photo);
                           }}
-                          className={`absolute left-2 ${!deleteMode && hasPhotoAssignmentTargets ? 'top-11' : 'top-2'} z-30 inline-flex min-h-8 items-center gap-1 rounded-lg bg-amber-500 px-2 text-[10px] font-black text-slate-950 shadow-sm transition hover:bg-amber-400`}
-                          aria-label={`Edit description for ${photo.original_name || 'photo'}`}
+                          className="absolute left-2 top-2 z-20 inline-flex min-h-8 items-center justify-center gap-1 rounded-lg border border-white/70 bg-blue-700/90 px-2 text-[11px] font-black text-white shadow-sm transition hover:border-blue-200 hover:bg-blue-600"
+                          aria-label={`Assign ${photo.original_name || 'photo'} to project records`}
                         >
-                          <MessageSquare className="h-3 w-3" />
-                          Edit Description
+                          <ClipboardList className="h-3.5 w-3.5" />
+                          {assignedScopes.length ? `${assignedScopes.length} scope${assignedScopes.length === 1 ? '' : 's'}` : 'Assign'}
                         </button>
                       )}
-                      {deleteMode && (
-                        <div className={`absolute right-2 top-2 z-0 inline-flex h-8 w-8 items-center justify-center rounded-lg border text-xs font-black shadow-sm ${isSelected ? 'border-red-500 bg-red-600 text-white' : photo.can_delete_correction ? 'border-white/80 bg-black/60 text-white' : 'border-slate-400 bg-slate-700 text-slate-300'}`}>
-                          {isSelected ? <Check className="h-4 w-4" /> : photo.can_delete_correction ? '' : 'X'}
-                        </div>
+                      {noteText && (
+                        <span className={`pointer-events-none absolute left-2 ${hasPhotoAssignmentTargets ? 'top-11' : 'top-2'} z-20 inline-flex items-center gap-1 rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-black text-slate-950 shadow-sm`}>
+                          <MessageSquare className="h-3 w-3" />
+                          Description
+                        </span>
                       )}
-                      {!deleteMode && (
-                        <>
-                        {hasPhotoAssignmentTargets && (
-                          <button
-                            type="button"
-                            onClick={event => {
-                              event.stopPropagation();
-                              openScopeAssignment(photo);
-                            }}
-                            className="absolute left-2 top-2 z-20 inline-flex min-h-8 items-center justify-center gap-1 rounded-lg border border-white/70 bg-blue-700/90 px-2 text-[11px] font-black text-white shadow-sm transition hover:border-blue-200 hover:bg-blue-600"
-                            aria-label={`Assign ${photo.original_name || 'photo'} to project records`}
-                          >
-                            <ClipboardList className="h-3.5 w-3.5" />
-                            {assignedScopes.length ? `${assignedScopes.length} scope${assignedScopes.length === 1 ? '' : 's'}` : 'Assign'}
-                          </button>
-                        )}
-                        {!noteText && (
-                          <button
-                            type="button"
-                            onClick={event => {
-                              event.stopPropagation();
-                              setNotePhoto(photo);
-                            }}
-                            className="absolute right-2 top-2 z-30 inline-flex min-h-8 items-center justify-center gap-1 rounded-lg border border-white/70 bg-black/65 px-2 text-[11px] font-black text-white shadow-sm transition hover:border-amber-300 hover:text-amber-200"
-                            aria-label={`Add description for ${photo.original_name || 'photo'}`}
-                          >
-                            <MessageSquare className="h-3.5 w-3.5" />
-                            Add Description
-                          </button>
-                        )}
-                        </>
-                      )}
-                      {!deleteMode && mediaKind !== 'file' && (
+                      {mediaKind !== 'file' && (
                         <div className="absolute inset-x-0 top-0 z-0 bg-gradient-to-b from-black/45 to-transparent px-2 py-1.5 text-[10px] font-black uppercase tracking-wide text-white opacity-0 transition-opacity group-hover:opacity-100">
                           Click to expand
                         </div>

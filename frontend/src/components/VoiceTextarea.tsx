@@ -9,6 +9,16 @@ type VoiceTextareaProps = TextareaHTMLAttributes<HTMLTextAreaElement> & {
   stopSignal?: number | string | boolean;
 };
 
+// Force sentence capitalization while typing: the first letter of the text,
+// and any letter after a sentence ender (. ! ?) or a new line, is upper-cased.
+// Case changes never alter length, so the caret position stays valid.
+function capitalizeSentences(value: string) {
+  return value.replace(
+    /(^\s*|[.!?]["')\]]?\s+|\n\s*)([a-z])/g,
+    (_match, prefix: string, letter: string) => `${prefix}${letter.toUpperCase()}`
+  );
+}
+
 function appendDictationText(base: string, spokenText: string) {
   const cleanSpoken = spokenText.replace(/\s+/g, ' ').trim();
   if (!cleanSpoken) return base;
@@ -44,6 +54,9 @@ const VoiceTextarea = forwardRef<HTMLTextAreaElement, VoiceTextareaProps>(functi
     stopSignal,
     onBlur,
     onFocus,
+    onChange,
+    spellCheck = true,
+    autoCapitalize = 'sentences',
     ...props
   },
   forwardedRef
@@ -173,6 +186,23 @@ const VoiceTextarea = forwardRef<HTMLTextAreaElement, VoiceTextareaProps>(functi
         {...props}
         ref={textareaRef}
         disabled={disabled}
+        spellCheck={spellCheck}
+        autoCapitalize={autoCapitalize}
+        autoCorrect="on"
+        onChange={event => {
+          const target = event.target;
+          const original = target.value;
+          const transformed = capitalizeSentences(original);
+          if (transformed !== original) {
+            const selectionStart = target.selectionStart;
+            const selectionEnd = target.selectionEnd;
+            target.value = transformed;
+            try {
+              target.setSelectionRange(selectionStart, selectionEnd);
+            } catch { /* element may not be focusable right now */ }
+          }
+          onChange?.(event);
+        }}
         onBlur={event => {
           onBlur?.(event);
         }}
