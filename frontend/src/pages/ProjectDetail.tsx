@@ -2588,29 +2588,21 @@ function ProjectContractorAssignmentPanel({
   const saveAssignments = async () => {
     setSaving(true);
     try {
-      const updates = contractors
-        .map(contractor => {
-          const currentlyConnected = isConnectedToProject(contractor);
-          const shouldConnect = selectedIds.has(contractor.id);
-          if (currentlyConnected === shouldConnect) return null;
-          const nextProjectIds = contractorProjectIds(contractor);
-          if (shouldConnect) nextProjectIds.add(projectId);
-          else nextProjectIds.delete(projectId);
-          return api.put(`/users/contractors/${contractor.id}/projects`, { project_ids: Array.from(nextProjectIds) });
-        })
-        .filter(Boolean);
-
-      if (updates.length) {
-        const results = await Promise.allSettled(updates);
-        const failed = results.filter(result => result.status === 'rejected').length;
-        if (failed) throw new Error(`${failed} contractor assignment update${failed === 1 ? '' : 's'} failed`);
-      }
-
-      toast.success('Contractor assignments updated');
+      // One atomic call sets this project's full contractor list — all checked
+      // contractors save together (no partial saves, no per-contractor races).
+      const res = await api.put(`/projects/${projectId}/contractors`, {
+        contractor_ids: Array.from(selectedIds),
+      });
+      const savedCount = Array.isArray(res.data?.contractors) ? res.data.contractors.length : selectedIds.size;
+      toast.success(`${savedCount} contractor${savedCount === 1 ? '' : 's'} assigned to this project`);
       setShowAssign(false);
       await loadContractors();
     } catch (err: any) {
-      toast.error(err?.message || 'Failed to update contractor assignments');
+      toast.error(err?.response?.data?.error || 'Failed to update contractor assignments', { duration: 8000 });
+      // Refresh the directory but keep the user's checks so they can retry.
+      const keepSelection = new Set(selectedIds);
+      await loadContractors();
+      setSelectedIds(keepSelection);
     } finally {
       setSaving(false);
     }

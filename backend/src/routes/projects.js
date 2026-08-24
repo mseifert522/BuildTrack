@@ -10,6 +10,7 @@ const { logActivity } = require('../utils/audit');
 const { logDataAccess } = require('../utils/dataAccessAudit');
 const { getNoteDeletePermission, getNoteEditPermission } = require('../utils/projectNotes');
 const { recordWorkItemEvent } = require('../utils/workItemEvents');
+const { syncContractorProjectAssignments } = require('../utils/contractorAccess');
 
 const router = express.Router();
 router.use(authenticate);
@@ -1707,6 +1708,80 @@ router.delete('/:id/assign/:userId', authorizeUpperManagement, (req, res) => {
   db.prepare('DELETE FROM project_assignments WHERE project_id = ? AND user_id = ?').run(req.params.id, req.params.userId);
   logActivity({ userId: req.user.id, projectId: req.params.id, action: 'user_unassigned', entityType: 'project', entityId: req.params.id });
   res.json({ message: 'User removed from project' });
+});
+
+// PUT /api/projects/:id/contractors - atomically set THIS project's contractor
+// list in one call. Replaces the old per-contractor full-list PUT fan-out from
+// the Assign Contractors modal, which could partially fail (one contractor
+// saved, another not) and could clobber a contractor's OTHER project links
+// when the browser's directory data was stale.
+router.put('/:id/contractors', authorizeUpperManagement, authorizeProjectAccess, (req, res) => {
+  try {
+    const db = getDb();
+    const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const rawIds = Array.isArray(req.body?.contractor_ids) ? req.body.contractor_ids : [];
+    const contractorIds = Array.from(new Set(rawIds.map(id => String(id || '').trim()).filter(Boolean)));
+    if (contractorIds.length > 300) return res.status(400).json({ error: 'Too many contractors selected' });
+
+    if (contractorIds.length > 0) {
+      const placeholders = contractorIds.map(() => '?').join(',');
+      const found = db.prepare(`SELECT id FROM contractor_profiles WHERE id IN (${placeholders})`).all(...contractorIds);
+      if (found.length !== contractorIds.length) {
+        return res.status(400).json({ error: 'One or more selected contractors are invalid' });
+      }
+    }
+
+    const currentRows = db.prepare('SELECT contractor_id FROM contractor_project_links WHERE project_id = ?').all(req.params.id);
+    const currentIds = new Set(currentRows.map(row => row.contractor_id));
+    const nextIds = new Set(contractorIds);
+    const toAdd = contractorIds.filter(id => !currentIds.has(id));
+    const toRemove = Array.from(currentIds).filter(id => !nextIds.has(id));
+
+    const applyLinks = db.transaction(() => {
+      if (toRemove.length) {
+        const placeholders = toRemove.map(() => '?').join(',');
+        db.prepare(`DELETE FROM contractor_project_links WHERE project_id = ? AND contractor_id IN (${placeholders})`)
+          .run(req.params.id, ...toRemove);
+      }
+      const insert = db.prepare(`
+        INSERT INTO contractor_project_links (id, contractor_id, project_id, created_by, created_at)
+        VALUES (?, ?, ?, ?, datetime('now'))
+      `);
+      for (const contractorId of toAdd) {
+        insert.run(uuidv4(), contractorId, req.params.id, req.user.id);
+      }
+    });
+    applyLinks();
+
+    // Mirror every affected contractor's mobile account assignments from the
+    // (now updated) link rows — the same sync the per-contractor endpoint uses.
+    const affected = [...toAdd, ...toRemove];
+    for (const contractorId of affected) {
+      const profile = db.prepare('SELECT linked_user_id FROM contractor_profiles WHERE id = ?').get(contractorId);
+      if (profile?.linked_user_id) {
+        syncContractorProjectAssignments(db, contractorId, profile.linked_user_id, req.user.id, { mirror: true });
+      }
+    }
+
+    logActivity({
+      userId: req.user.id,
+      projectId: req.params.id,
+      action: 'project_contractors_updated',
+      entityType: 'project',
+      entityId: req.params.id,
+      details: { assigned_count: contractorIds.length, added: toAdd.length, removed: toRemove.length },
+    });
+
+    const contractors = contractorIds.length
+      ? db.prepare(`SELECT id, vendor_name, contact_name, phone, email FROM contractor_profiles WHERE id IN (${contractorIds.map(() => '?').join(',')}) ORDER BY vendor_name`).all(...contractorIds)
+      : [];
+    res.json({ contractors, added: toAdd.length, removed: toRemove.length, message: 'Project contractors updated' });
+  } catch (err) {
+    console.error('Failed to update project contractors:', err);
+    res.status(500).json({ error: 'Failed to update project contractors' });
+  }
 });
 
 // GET /api/projects/:id/activity - activity log for project
