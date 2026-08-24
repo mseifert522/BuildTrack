@@ -5,7 +5,7 @@ const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 
 const { getDb } = require('../db/schema');
-const { authenticate, authorize, UPPER_MANAGEMENT_ROLES } = require('../middleware/auth');
+const { authenticate, authorize, blockProjectManagerMutation, UPPER_MANAGEMENT_ROLES } = require('../middleware/auth');
 const {
   anthropicStatus,
   clearManagedAnthropicKey,
@@ -34,6 +34,9 @@ const ALLOWED_FILE_EXTENSIONS = new Set(['.pdf', '.doc', '.docx', '.png', '.jpg'
 const MAX_RESUME_BATCH_FILES = 20;
 
 router.use(authenticate, authorize(...HR_ROLES));
+// Project managers may VIEW everything in HR but never change records —
+// the standing rule the rest of the app enforces via blockProjectManagerMutation.
+router.use((req, res, next) => (req.method === 'GET' ? next() : blockProjectManagerMutation(req, res, next)));
 
 function text(value, maxLength = 500) {
   const normalized = String(value ?? '').trim();

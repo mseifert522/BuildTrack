@@ -85,9 +85,10 @@ export const isAdminRole = (role: string) =>
 export const canAccessSettings = (role: string) =>
   ['super_admin', 'operations_manager'].includes(role);
 
-/** Can access Security controls */
+/** Can access Security controls (project managers view-only; the backend
+ * blocks them from every logout/mutation action) */
 export const canAccessSecurity = (role: string) =>
-  ['super_admin', 'operations_manager'].includes(role);
+  ['super_admin', 'operations_manager', 'project_manager'].includes(role);
 
 /** Can access the management-only Human Resources workspace */
 export const canAccessHumanResources = (role: string) =>

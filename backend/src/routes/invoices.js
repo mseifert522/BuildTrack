@@ -63,7 +63,7 @@ function canMutateOwnInvoice(invoice, user) {
   return isUpperManagement(user) || invoice.contractor_id === user.id;
 }
 
-const QUICKBOOKS_PROJECT_INVOICE_ROLES = ['super_admin', 'operations_manager'];
+const QUICKBOOKS_PROJECT_INVOICE_ROLES = ['super_admin', 'operations_manager', 'project_manager'];
 const QUICKBOOKS_PAYMENT_APPROVAL_DEFAULT_STATUS = 'not_approved';
 const QUICKBOOKS_PAYMENT_APPROVAL_STATUS = 'approved_for_payment';
 const QUICKBOOKS_PAYMENT_APPROVAL_PAID_STATUS = 'paid_from_buildtrack';

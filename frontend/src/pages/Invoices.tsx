@@ -846,6 +846,9 @@ export default function Invoices() {
   const [notifyingPaymentQueue, setNotifyingPaymentQueue] = useState(false);
   const canReadQuickBooksStatus = isAdminRole(user?.role || '');
   const canManageQuickBooks = Boolean(user?.role && QUICKBOOKS_PANEL_ROLES.includes(user.role));
+  // Project managers can VIEW the invoice center; every mutation stays behind
+  // canManageQuickBooks (and the backend enforces the same split).
+  const canViewQuickBooks = isAdminRole(user?.role || '');
 
   const load = async () => {
     setLoading(true);
@@ -854,10 +857,10 @@ export default function Invoices() {
         api.get('/projects'),
         api.get('/invoices'),
         canReadQuickBooksStatus ? api.get('/quickbooks/status').catch(() => ({ data: null })) : Promise.resolve({ data: null }),
-        canManageQuickBooks
+        canViewQuickBooks
           ? api.get(QUICKBOOKS_BILLS_PATH).catch(() => ({ data: [] }))
           : Promise.resolve({ data: [] }),
-        canManageQuickBooks
+        canViewQuickBooks
           ? api.get('/users/contractors/directory').catch(() => ({ data: { contractors: [] } }))
           : Promise.resolve({ data: { contractors: [] } }),
       ]);
@@ -998,7 +1001,7 @@ export default function Invoices() {
         const [invoiceRes, qboStatusRes, qboBillsRes] = await Promise.all([
           api.get('/invoices'),
           canReadQuickBooksStatus ? api.get('/quickbooks/status').catch(() => ({ data: null })) : Promise.resolve({ data: null }),
-          canManageQuickBooks
+          canViewQuickBooks
             ? api.get(QUICKBOOKS_BILLS_PATH).catch(() => ({ data: [] }))
             : Promise.resolve({ data: [] }),
         ]);
@@ -1010,7 +1013,7 @@ export default function Invoices() {
       }
     }, 60_000);
     return () => window.clearInterval(interval);
-  }, [canManageQuickBooks, canReadQuickBooksStatus]);
+  }, [canViewQuickBooks, canReadQuickBooksStatus]);
 
   useEffect(() => {
     if (!attachmentPreview) {
@@ -1389,7 +1392,7 @@ export default function Invoices() {
   };
   const canApproveForPayment = (invoice?: Invoice | null) => Boolean(
     invoice
-    && isAdminRole(user?.role || '')
+    && canManageQuickBooks
     && invoice.status !== 'approved'
     && invoice.status !== 'paid'
     && invoice.quickbooks_payment_status !== 'paid'
@@ -1507,7 +1510,7 @@ export default function Invoices() {
   };
 
   const canApproveQuickBooksBill = (bill: QuickBooksBill, invoice?: Invoice | null) => {
-    if (!isAdminRole(user?.role || '')) return false;
+    if (!canManageQuickBooks) return false;
     if (isQuickBooksBillPaid(bill)) return false;
     if (isQuickBooksBillBuildTrackPaid(bill)) return false;
     if (bill.payment_approval_status === QUICKBOOKS_APPROVED_FOR_PAYMENT_STATUS) return false;
@@ -1837,6 +1840,14 @@ export default function Invoices() {
       );
     }
 
+    if (!canManageQuickBooks) {
+      return (
+        <div className="bt-qbo-pdf-control needs-pdf">
+          <small>No PDF attached yet</small>
+        </div>
+      );
+    }
+
     return (
       <div
         className={`bt-qbo-pdf-control needs-pdf ${dragging ? 'is-dragging' : ''} ${busy ? 'is-uploading' : ''}`}
@@ -1885,7 +1896,7 @@ export default function Invoices() {
             <span data-stage="paid"><strong>3</strong> Paid in Full</span>
           </div>
         </header>
-        {canManageQuickBooks && (
+        {canViewQuickBooks && (
           <section className={`bt-invoice-section bt-qbo-mirror-section ${quickBooksInvoiceFilterInUse ? 'is-filter-results' : ''}`}>
             <div className="bt-qbo-filter-row mx-4 mt-2 flex flex-wrap items-center gap-2">
               <div className="bt-qbo-status-filter-pills">
@@ -2125,7 +2136,7 @@ export default function Invoices() {
                         const needsReview = hasPaymentMismatch || (!projectMatched && !isPaid && !isBuildTrackPaid);
                         const canDeleteOpenBill = canDeleteQuickBooksOpenBill(bill);
                         const isWaitingForApproval = !isPaid && !isBuildTrackPaid && !isApprovedForPay;
-                        const payDateButton = isWaitingForApproval ? (
+                        const payDateButton = isWaitingForApproval && canManageQuickBooks ? (
                           <button
                             type="button"
                             onClick={() => sendQuickBooksPayDateEmail(bill)}
@@ -2359,15 +2370,17 @@ export default function Invoices() {
                   <p className="text-sm text-gray-500">Approved invoices show here with the next biweekly Friday pay run. After recording payment in QuickBooks, verify it here.</p>
                 </div>
                 <div className="bt-approved-pay-actions">
-                  <button
-                    type="button"
-                    onClick={notifyApprovedPaymentQueue}
-                    disabled={!approvedPaymentQueue.length || notifyingPaymentQueue}
-                    className="bt-approved-pay-notify-button"
-                  >
-                    <Mail className="h-4 w-4" />
-                    {notifyingPaymentQueue ? 'Emailing...' : 'Done Approving - Email Management'}
-                  </button>
+                  {canManageQuickBooks && (
+                    <button
+                      type="button"
+                      onClick={notifyApprovedPaymentQueue}
+                      disabled={!approvedPaymentQueue.length || notifyingPaymentQueue}
+                      className="bt-approved-pay-notify-button"
+                    >
+                      <Mail className="h-4 w-4" />
+                      {notifyingPaymentQueue ? 'Emailing...' : 'Done Approving - Email Management'}
+                    </button>
+                  )}
                   <div className="bt-approved-pay-total">
                     <span>Total balance due</span>
                     <strong>{money(approvedPaymentTotal)}</strong>
@@ -2400,24 +2413,26 @@ export default function Invoices() {
                             : 'Management email not sent yet'}
                         </p>
                       </div>
-                      <div className="bt-approved-pay-card-bottom">
-                        <button
-                          type="button"
-                          className="bt-approved-pay-paid-button"
-                          onClick={() => markQuickBooksBillPaidFromQueue(bill)}
-                          disabled={markingQboPaidId === bill.qbo_id}
-                        >
-                          <CheckCircle2 className="h-4 w-4" />
-                          {markingQboPaidId === bill.qbo_id ? 'Checking QBO...' : 'Verify QBO Paid'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => removeQuickBooksBillFromPay(bill)}
-                          disabled={removingQboBillId === bill.qbo_id}
-                        >
-                          {removingQboBillId === bill.qbo_id ? 'Removing...' : 'Remove from queue'}
-                        </button>
-                      </div>
+                      {canManageQuickBooks && (
+                        <div className="bt-approved-pay-card-bottom">
+                          <button
+                            type="button"
+                            className="bt-approved-pay-paid-button"
+                            onClick={() => markQuickBooksBillPaidFromQueue(bill)}
+                            disabled={markingQboPaidId === bill.qbo_id}
+                          >
+                            <CheckCircle2 className="h-4 w-4" />
+                            {markingQboPaidId === bill.qbo_id ? 'Checking QBO...' : 'Verify QBO Paid'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeQuickBooksBillFromPay(bill)}
+                            disabled={removingQboBillId === bill.qbo_id}
+                          >
+                            {removingQboBillId === bill.qbo_id ? 'Removing...' : 'Remove from queue'}
+                          </button>
+                        </div>
+                      )}
                     </article>
                     );
                   })}

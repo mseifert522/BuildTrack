@@ -13,7 +13,9 @@ const {
 const router = express.Router();
 
 router.use(authenticate);
-router.use(authorize('super_admin', 'operations_manager'));
+// Project managers get READ access to the security overview; every mutation
+// route below carries its own upper-management guard.
+router.use(authorize('super_admin', 'operations_manager', 'project_manager'));
 
 function nowIso() {
   return new Date().toISOString();
@@ -461,7 +463,7 @@ router.get('/data-access', (req, res) => {
   }
 });
 
-router.post('/logout-all', (req, res) => {
+router.post('/logout-all', authorize('super_admin', 'operations_manager'), (req, res) => {
   try {
     const db = getDb();
     const revokedAt = nowIso();
@@ -487,7 +489,7 @@ router.post('/logout-all', (req, res) => {
   }
 });
 
-router.post('/sessions/:sessionId/logout', (req, res) => {
+router.post('/sessions/:sessionId/logout', authorize('super_admin', 'operations_manager'), (req, res) => {
   try {
     const db = getDb();
     const target = db.prepare(`
@@ -553,7 +555,7 @@ router.post('/sessions/:sessionId/logout', (req, res) => {
   }
 });
 
-router.post('/users/:userId/logout', (req, res) => {
+router.post('/users/:userId/logout', authorize('super_admin', 'operations_manager'), (req, res) => {
   try {
     const db = getDb();
     const target = db.prepare('SELECT id, name, email FROM users WHERE id = ? AND is_active = 1').get(req.params.userId);

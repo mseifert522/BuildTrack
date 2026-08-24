@@ -370,6 +370,9 @@ export default function Security() {
   const [securityReason, setSecurityReason] = useState('');
   const { user: currentUser, logout } = useAuthStore();
   const navigate = useNavigate();
+  // Project managers get a read-only Security view; every logout action is
+  // hidden here and blocked server-side.
+  const canManageSecurity = ['super_admin', 'operations_manager'].includes(currentUser?.role || '');
 
   const usersById = useMemo(() => new Map(users.map(row => [row.id, row])), [users]);
 
@@ -612,15 +615,17 @@ export default function Security() {
               <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
               Refresh
             </button>
-            <button
-              type="button"
-              onClick={requestLogoutAll}
-              disabled={globalLogoutLoading}
-              className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-600 px-3.5 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-red-700 disabled:opacity-60"
-            >
-              <ShieldAlert className="w-4 h-4" />
-              {globalLogoutLoading ? 'Logging out...' : 'Log Out All Users'}
-            </button>
+            {canManageSecurity && (
+              <button
+                type="button"
+                onClick={requestLogoutAll}
+                disabled={globalLogoutLoading}
+                className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-600 px-3.5 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-red-700 disabled:opacity-60"
+              >
+                <ShieldAlert className="w-4 h-4" />
+                {globalLogoutLoading ? 'Logging out...' : 'Log Out All Users'}
+              </button>
+            )}
           </div>
         }
       />
@@ -881,26 +886,28 @@ export default function Security() {
                           </p>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <div className="flex flex-col items-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => requestLogoutSession(row, session)}
-                          disabled={sessionLogoutId === session.id}
-                          className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100 disabled:opacity-60"
-                        >
-                          <LogOut className="h-4 w-4" />
-                          {sessionLogoutId === session.id ? 'Logging out...' : 'Log Session Out'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => requestLogoutUser(row)}
-                          disabled={userLogoutId === row.id}
-                          className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
-                        >
-                          <UserX className="h-4 w-4" />
-                          {userLogoutId === row.id ? 'Logging out...' : 'Log User Out'}
-                        </button>
-                      </div>
+                      {canManageSecurity && (
+                        <div className="flex flex-col items-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => requestLogoutSession(row, session)}
+                            disabled={sessionLogoutId === session.id}
+                            className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100 disabled:opacity-60"
+                          >
+                            <LogOut className="h-4 w-4" />
+                            {sessionLogoutId === session.id ? 'Logging out...' : 'Log Session Out'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => requestLogoutUser(row)}
+                            disabled={userLogoutId === row.id}
+                            className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                          >
+                            <UserX className="h-4 w-4" />
+                            {userLogoutId === row.id ? 'Logging out...' : 'Log User Out'}
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 );
@@ -927,15 +934,17 @@ export default function Security() {
                     <p className="truncate text-xs text-gray-500">{row.email}</p>
                     <p className="mt-1 text-xs text-gray-500">Trusted devices: {row.trusted_device_count} - One-touch: {row.quick_access_count}</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => requestLogoutUser(row)}
-                    disabled={userLogoutId === row.id}
-                    className="inline-flex flex-shrink-0 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100 disabled:opacity-60"
-                  >
-                    <UserX className="h-4 w-4" />
-                    Clear Access
-                  </button>
+                  {canManageSecurity && (
+                    <button
+                      type="button"
+                      onClick={() => requestLogoutUser(row)}
+                      disabled={userLogoutId === row.id}
+                      className="inline-flex flex-shrink-0 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100 disabled:opacity-60"
+                    >
+                      <UserX className="h-4 w-4" />
+                      Clear Access
+                    </button>
+                  )}
                 </div>
               ))}
             </div>

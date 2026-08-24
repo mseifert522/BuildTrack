@@ -2866,7 +2866,7 @@ router.post('/bills/:qboId/attachments', authorize(...QUICKBOOKS_ADMIN_ROLES), q
   }
 });
 
-router.get('/bills/:qboId/attachments/:attachmentId', authorize(...QUICKBOOKS_ADMIN_ROLES), (req, res) => {
+router.get('/bills/:qboId/attachments/:attachmentId', authorize(...QUICKBOOKS_ADMIN_ROLES, 'project_manager'), (req, res) => {
   try {
     const db = getDb();
     const qboId = String(req.params.qboId || '').trim();
@@ -2916,7 +2916,9 @@ router.get('/bills/:qboId/attachments/:attachmentId', authorize(...QUICKBOOKS_AD
   }
 });
 
-router.get('/bills', authorize(...QUICKBOOKS_ADMIN_ROLES), (req, res) => {
+// Read-only for project managers too — every bill mutation route keeps
+// QUICKBOOKS_ADMIN_ROLES.
+router.get('/bills', authorize(...QUICKBOOKS_ADMIN_ROLES, 'project_manager'), (req, res) => {
   const db = getDb();
   const status = String(req.query.status || '').toLowerCase();
   const unmatchedOnly = String(req.query.unmatched || '') === '1';
