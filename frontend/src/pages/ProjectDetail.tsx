@@ -1902,18 +1902,6 @@ export default function ProjectDetail() {
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <span className={`text-sm px-2.5 py-0.5 rounded-full border font-black ${note.note_type === 'field' ? 'border-emerald-300/40 bg-emerald-500/15 text-emerald-100' : note.note_type === 'office' ? 'border-blue-300/40 bg-blue-500/15 text-blue-100' : 'border-slate-500 bg-slate-800 text-slate-200'}`}>{note.note_type}</span>
-                  {canDeleteProjectNotes && (
-                    <button
-                      type="button"
-                      onClick={() => deleteProjectNote(note.id)}
-                      disabled={deletingNoteId === note.id}
-                      className="inline-flex items-center gap-1 rounded-full border border-red-300/45 bg-red-500/15 px-2.5 py-0.5 text-sm font-black text-red-100 transition hover:border-red-200 hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-60"
-                      title="Delete note"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                      {deletingNoteId === note.id ? 'Deleting' : 'Delete'}
-                    </button>
-                  )}
                 </div>
               </div>
               {editingNoteId === note.id ? (
@@ -2030,23 +2018,37 @@ export default function ProjectDetail() {
                           <p className="bt-project-note-media-label text-sm font-bold text-cyan-100/85">
                             {noteLightboxItems.length || notePhotos.length} photo{(noteLightboxItems.length || notePhotos.length) === 1 ? '' : 's'} attached to this note
                           </p>
-                          {selectedHere.length > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => deleteSelectedNotePhotos(note.id, selectedHere)}
-                              disabled={deletingNotePhotosFor === note.id}
-                              className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-red-400/60 bg-red-500/15 px-2.5 py-1 text-xs font-black text-red-200 transition-colors hover:bg-red-500/30 hover:text-white disabled:cursor-wait disabled:opacity-70"
-                            >
-                              {deletingNotePhotosFor === note.id ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
+                          <div className="flex flex-shrink-0 items-center gap-2">
+                            {selectedHere.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => deleteSelectedNotePhotos(note.id, selectedHere)}
+                                disabled={deletingNotePhotosFor === note.id}
+                                className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-red-400/60 bg-red-500/15 px-2.5 py-1 text-xs font-black text-red-200 transition-colors hover:bg-red-500/30 hover:text-white disabled:cursor-wait disabled:opacity-70"
+                              >
+                                {deletingNotePhotosFor === note.id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                )}
+                                {deletingNotePhotosFor === note.id
+                                  ? 'Deleting...'
+                                  : `Delete ${selectedHere.length} selected`}
+                              </button>
+                            )}
+                            {canDeleteProjectNotes && (
+                              <button
+                                type="button"
+                                onClick={() => deleteProjectNote(note.id)}
+                                disabled={deletingNoteId === note.id}
+                                className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-red-300/45 bg-red-500/15 px-2.5 py-1 text-xs font-black text-red-100 transition-colors hover:border-red-200 hover:bg-red-500/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                title="Delete this note (attached photos stay in the project photo history)"
+                              >
                                 <Trash2 className="h-3.5 w-3.5" />
-                              )}
-                              {deletingNotePhotosFor === note.id
-                                ? 'Deleting...'
-                                : `Delete ${selectedHere.length} selected`}
-                            </button>
-                          )}
+                                {deletingNoteId === note.id ? 'Deleting...' : 'Delete Note'}
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     );
@@ -2098,6 +2100,22 @@ export default function ProjectDetail() {
                     ? noteAttachmentProgressLabel(attachProgress)
                     : attachingNoteId === note.id ? 'Attaching...' : 'Attach photos'}
                 </button>
+              )}
+              {/* Notes with photos get Delete Note beside the attached-photos
+                  label; text-only notes need it here or it would be lost. */}
+              {canDeleteProjectNotes && editingNoteId !== note.id && getNotePhotos(note).length === 0 && (
+                <div className="mt-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => deleteProjectNote(note.id)}
+                    disabled={deletingNoteId === note.id}
+                    className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-red-300/45 bg-red-500/15 px-2.5 py-1 text-xs font-black text-red-100 transition-colors hover:border-red-200 hover:bg-red-500/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                    title="Delete this note"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    {deletingNoteId === note.id ? 'Deleting...' : 'Delete Note'}
+                  </button>
+                </div>
               )}
             </div>
           </div>
