@@ -168,6 +168,29 @@ function noteAttachmentProgressLabel(progress: NoteAttachmentProgress) {
     : `Uploading ${percent}%`;
 }
 
+// Cloudflare fronts buildtrack.newurbandev.com and rejects request bodies over ~100MB,
+// so oversized videos must be caught client-side before a long doomed upload.
+const MAX_NOTE_UPLOAD_FILE_MB = 95;
+
+function noteMediaSummary(files: File[]) {
+  const videos = files.filter(file => isVideoMedia(file)).length;
+  const photos = files.length - videos;
+  const parts: string[] = [];
+  if (photos) parts.push(`${photos} photo${photos === 1 ? '' : 's'}`);
+  if (videos) parts.push(`${videos} video${videos === 1 ? '' : 's'}`);
+  return parts.join(' & ') || 'media';
+}
+
+function formatNoteFileSize(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '';
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+
+function dragEventHasFiles(event: DragEvent<HTMLElement>) {
+  return Array.from(event.dataTransfer?.types || []).includes('Files');
+}
+
 function appendDictationText(base: string, spokenText: string) {
   const cleanSpoken = spokenText.replace(/\s+/g, ' ').trim();
   if (!cleanSpoken) return base;
@@ -816,6 +839,9 @@ export default function ProjectDetail() {
   const [attachNoteId, setAttachNoteId] = useState<string | null>(null);
   const [attachingNoteId, setAttachingNoteId] = useState<string | null>(null);
   const [attachProgress, setAttachProgress] = useState<NoteAttachmentProgress | null>(null);
+  const [submittingNote, setSubmittingNote] = useState(false);
+  const [noteSubmitProgress, setNoteSubmitProgress] = useState<NoteAttachmentProgress | null>(null);
+  const [noteComposerDragActive, setNoteComposerDragActive] = useState(false);
   const [noteLightbox, setNoteLightbox] = useState<ProgressLightboxState | null>(null);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editingNoteText, setEditingNoteText] = useState('');
@@ -835,7 +861,22 @@ export default function ProjectDetail() {
   const attachExistingNoteInputRef = useRef<HTMLInputElement>(null);
   const noteMediaInputRef = useRef<HTMLInputElement>(null);
   const noteCameraInputRef = useRef<HTMLInputElement>(null);
+  const mainPhotoHeaderInputRef = useRef<HTMLInputElement>(null);
   const listeningNote = noteDictationStatus !== 'idle';
+
+  // If a dragged file misses a drop zone, the browser's default is to navigate away
+  // and display the file — losing the page (and any in-progress note). Block that.
+  useEffect(() => {
+    const preventWindowFileDrop = (event: globalThis.DragEvent) => {
+      if (Array.from(event.dataTransfer?.types || []).includes('Files')) event.preventDefault();
+    };
+    window.addEventListener('dragover', preventWindowFileDrop);
+    window.addEventListener('drop', preventWindowFileDrop);
+    return () => {
+      window.removeEventListener('dragover', preventWindowFileDrop);
+      window.removeEventListener('drop', preventWindowFileDrop);
+    };
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -1082,7 +1123,7 @@ export default function ProjectDetail() {
   };
 
   const attachProgressPicturesToExistingNote = async (files?: FileList | File[] | null, explicitNoteId?: string) => {
-    const selectedFiles = Array.from(files || []);
+    const selectedFiles = validateNoteUploadFiles(Array.from(files || []));
     const targetNoteId = explicitNoteId || attachNoteId;
     if (!targetNoteId || selectedFiles.length === 0) return;
     setAttachingNoteId(targetNoteId);
@@ -1120,19 +1161,94 @@ export default function ProjectDetail() {
     noteMediaInputRef.current?.click();
   };
 
-  const addNote = async () => {
-    if (!newNote.trim()) return;
-    try {
-      const noteRes = await api.post(`/projects/${id}/notes`, { note: newNote, note_type: noteType, visibility: noteVisibility });
-      if (notePhotoFiles.length) {
-        await uploadProgressPicturesToNote(noteRes.data.id, notePhotoFiles, notePhotoSource);
+  const validateNoteUploadFiles = (files: File[]) => {
+    const supported = files.filter(isSupportedProgressMediaFile);
+    const rejectedType = files.length - supported.length;
+    const withinSize = supported.filter(file => file.size <= MAX_NOTE_UPLOAD_FILE_MB * 1024 * 1024);
+    const oversized = supported.filter(file => file.size > MAX_NOTE_UPLOAD_FILE_MB * 1024 * 1024);
+    if (rejectedType > 0) {
+      toast.error(`${rejectedType} file${rejectedType === 1 ? ' is' : 's are'} not a supported photo or video type`);
+    }
+    if (oversized.length > 0) {
+      toast.error(
+        `"${oversized[0].name}" is ${formatNoteFileSize(oversized[0].size)} — files must be under ${MAX_NOTE_UPLOAD_FILE_MB}MB each. Trim or compress the video and try again.`,
+        { duration: 8000 }
+      );
+    }
+    return withinSize;
+  };
+
+  const addNoteMediaFiles = (files: File[], source: ProgressCaptureSource) => {
+    const withinSize = validateNoteUploadFiles(files);
+    if (!withinSize.length) return;
+    setNotePhotoSource(source);
+    setNotePhotoFiles(current => {
+      const merged = [...current];
+      for (const file of withinSize) {
+        const duplicate = merged.some(existing =>
+          existing.name === file.name && existing.size === file.size && existing.lastModified === file.lastModified);
+        if (!duplicate) merged.push(file);
       }
+      if (merged.length > MAX_PROGRESS_UPLOAD_BATCH_FILES) {
+        toast.error(`Up to ${MAX_PROGRESS_UPLOAD_BATCH_FILES} files can attach to one note`);
+        return merged.slice(0, MAX_PROGRESS_UPLOAD_BATCH_FILES);
+      }
+      return merged;
+    });
+  };
+
+  const removeNoteMediaFile = (index: number) => {
+    setNotePhotoFiles(current => current.filter((_, fileIndex) => fileIndex !== index));
+  };
+
+  const addNote = async () => {
+    if (submittingNote) return;
+    const files = notePhotoFiles;
+    const trimmed = newNote.trim();
+    if (!trimmed && !files.length) return;
+    const noteText = trimmed || `${noteMediaSummary(files)} update`;
+    setSubmittingNote(true);
+    if (files.length) {
+      setNoteSubmitProgress({ phase: 'preparing', current: 1, total: files.length, percent: 0, fileName: files[0]?.name });
+    }
+    let noteCreated = false;
+    const lastProgress: { value: NoteAttachmentProgress | null } = { value: null };
+    try {
+      const noteRes = await api.post(`/projects/${id}/notes`, { note: noteText, note_type: noteType, visibility: noteVisibility });
+      noteCreated = true;
+      if (files.length) {
+        await uploadProgressPicturesToNote(noteRes.data.id, files, notePhotoSource, progress => {
+          lastProgress.value = progress;
+          setNoteSubmitProgress(progress);
+        });
+      }
+      toast.success(files.length ? `Note saved — ${noteMediaSummary(files)} uploaded` : 'Note saved');
       setNewNote('');
       setNotePhotoFiles([]);
       setNotePhotoSource('desktop');
       loadNotes();
-    } catch (err) {
-      toast.error('Failed to add note');
+    } catch (err: any) {
+      const detail = err?.response?.data?.error;
+      if (noteCreated && files.length) {
+        // The note exists but the media upload died partway. Keep only the files that
+        // did NOT finish so pressing Submit Note again retries without duplicating.
+        const failedIndex = Math.max(0, (lastProgress.value?.current || 1) - 1);
+        const remaining = files.slice(failedIndex);
+        const uploadedCount = files.length - remaining.length;
+        setNewNote('');
+        setNotePhotoFiles(remaining);
+        toast.error(
+          `Note saved${uploadedCount ? ` with ${uploadedCount} of ${files.length} files` : ''}, but the upload stopped${detail ? `: ${detail}` : ''}. ` +
+          `The ${remaining.length} unsent file${remaining.length === 1 ? ' is' : 's are'} still attached below — press Submit Note to retry.`,
+          { duration: 10000 }
+        );
+        loadNotes();
+      } else {
+        toast.error(detail || 'Failed to add note');
+      }
+    } finally {
+      setSubmittingNote(false);
+      setNoteSubmitProgress(null);
     }
   };
 
@@ -1361,6 +1477,33 @@ export default function ProjectDetail() {
     }
   };
 
+  const noteComposerDropHandlers = (() => {
+    const base = fileDropHandlers(files => {
+      setNoteComposerDragActive(false);
+      addNoteMediaFiles(files, 'desktop');
+    }, { accept: PROGRESS_MEDIA_ACCEPT, multiple: true, disabled: submittingNote });
+    return {
+      onDragEnter: (event: DragEvent<HTMLDivElement>) => {
+        base.onDragEnter(event);
+        if (!submittingNote && dragEventHasFiles(event)) setNoteComposerDragActive(true);
+      },
+      onDragOver: (event: DragEvent<HTMLDivElement>) => {
+        base.onDragOver(event);
+        if (!submittingNote && dragEventHasFiles(event)) setNoteComposerDragActive(true);
+      },
+      onDragLeave: (event: DragEvent<HTMLDivElement>) => {
+        base.onDragLeave(event);
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setNoteComposerDragActive(false);
+      },
+      onDrop: (event: DragEvent<HTMLDivElement>) => {
+        base.onDrop(event);
+        setNoteComposerDragActive(false);
+      },
+    };
+  })();
+
+  const canSubmitNote = !submittingNote && Boolean(newNote.trim() || notePhotoFiles.length);
+
   const notesPanel = (compact = false, section: 'full' | 'list' | 'composer' = 'full') => (
     <div className="bt-project-notes-panel h-full rounded-xl border border-blue-400/45 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 p-3 shadow-[0_18px_44px_rgba(15,23,42,0.34)] ring-1 ring-cyan-300/10 sm:p-4">
       <input
@@ -1380,15 +1523,26 @@ export default function ProjectDetail() {
           <button
             type="button"
             onClick={addNote}
-            disabled={!newNote.trim()}
+            disabled={!canSubmitNote}
             className="inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 text-sm font-black text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500 sm:hidden"
           >
-            <Send className="h-3.5 w-3.5" />
-            Save
+            {submittingNote ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+            {submittingNote ? 'Saving...' : 'Save'}
           </button>
         </div>
       </div>
-      <div className="bt-project-note-composer mb-4 rounded-2xl border border-amber-300/35 bg-gradient-to-br from-slate-950 via-slate-900 to-amber-950 p-3 shadow-[0_14px_34px_rgba(245,158,11,0.14)]">
+      <div
+        {...noteComposerDropHandlers}
+        className="bt-project-note-composer relative mb-4 rounded-2xl border border-amber-300/35 bg-gradient-to-br from-slate-950 via-slate-900 to-amber-950 p-3 shadow-[0_14px_34px_rgba(245,158,11,0.14)]"
+      >
+        {noteComposerDragActive && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-2xl border-2 border-dashed border-cyan-300 bg-slate-950/85">
+            <span className="flex items-center gap-2 text-base font-black text-cyan-100">
+              <ImagePlus className="h-5 w-5" />
+              Drop photos &amp; videos to attach them to this note
+            </span>
+          </div>
+        )}
         <VoiceTextarea
           value={newNote}
           onChange={e => setNewNote(e.target.value)}
@@ -1399,11 +1553,13 @@ export default function ProjectDetail() {
         <button
           type="button"
           onClick={addNote}
-          disabled={!newNote.trim()}
+          disabled={!canSubmitNote}
           className="mb-3 inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-base font-black text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500 sm:hidden"
         >
-          <Send className="h-4 w-4" />
-          Done - Submit Note
+          {submittingNote ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          {submittingNote
+            ? (noteSubmitProgress ? noteAttachmentProgressLabel(noteSubmitProgress) : 'Saving...')
+            : 'Done - Submit Note'}
         </button>
         <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
         <select value={noteType} onChange={e => setNoteType(e.target.value)} className="min-h-[46px] w-full rounded-lg border border-slate-400 bg-white px-3 py-2 text-base font-bold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-auto">
@@ -1428,8 +1584,7 @@ export default function ProjectDetail() {
           multiple
           className="hidden"
           onChange={e => {
-            setNotePhotoSource('desktop');
-            setNotePhotoFiles(Array.from(e.target.files || []));
+            addNoteMediaFiles(Array.from(e.target.files || []), 'desktop');
             e.currentTarget.value = '';
           }}
         />
@@ -1441,25 +1596,25 @@ export default function ProjectDetail() {
           multiple
           className="hidden"
           onChange={e => {
-            setNotePhotoSource('device_camera');
-            setNotePhotoFiles(Array.from(e.target.files || []));
+            addNoteMediaFiles(Array.from(e.target.files || []), 'device_camera');
             e.currentTarget.value = '';
           }}
         />
         <button
           type="button"
           onClick={chooseNoteProgressPictures}
+          disabled={submittingNote}
+          title="Add photos or videos — click to browse, or drag files from your desktop and drop them anywhere on this note box"
           {...fileDropHandlers(files => {
-            setNotePhotoSource('desktop');
-            setNotePhotoFiles(files);
-          }, { accept: PROGRESS_MEDIA_ACCEPT, multiple: true })}
-          className="inline-flex min-h-[46px] cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-slate-400 bg-white px-3 py-2 text-base font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 sm:min-w-[150px]"
+            addNoteMediaFiles(files, 'desktop');
+          }, { accept: PROGRESS_MEDIA_ACCEPT, multiple: true, disabled: submittingNote })}
+          className="inline-flex min-h-[46px] cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-slate-400 bg-white px-3 py-2 text-base font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-[150px]"
         >
           <Camera className="w-4 h-4" />
-          {notePhotoFiles.length ? `${notePhotoFiles.length} ready` : (
+          {notePhotoFiles.length ? `${notePhotoFiles.length} selected` : (
             <>
               <span className="sm:hidden">Take Pictures</span>
-              <span className="hidden sm:inline">Photos</span>
+              <span className="hidden sm:inline">Upload Photos</span>
             </>
           )}
         </button>
@@ -1474,10 +1629,13 @@ export default function ProjectDetail() {
         <button
           type="button"
           onClick={addNote}
-          className="hidden min-h-[50px] w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-base font-black text-white shadow-sm transition-colors hover:bg-blue-700 sm:col-span-1 sm:inline-flex sm:flex-1 sm:py-2"
+          disabled={!canSubmitNote}
+          className="hidden min-h-[50px] w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-base font-black text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-400 disabled:text-slate-200 sm:col-span-1 sm:inline-flex sm:flex-1 sm:py-2"
         >
-          <Send className="h-4 w-4" />
-          Submit Note
+          {submittingNote ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          {submittingNote
+            ? (noteSubmitProgress ? noteAttachmentProgressLabel(noteSubmitProgress) : 'Saving...')
+            : 'Submit Note'}
         </button>
         </div>
       {showCalendarComposer && (
@@ -1610,10 +1768,67 @@ export default function ProjectDetail() {
           )}
         </div>
       )}
-      {notePhotoFiles.length > 0 && (
-        <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 shadow-sm">
-          <span className="text-xs font-semibold text-blue-700 truncate">{notePhotoFiles.length} progress picture{notePhotoFiles.length === 1 ? '' : 's'} will attach to this note</span>
-          <button type="button" onClick={() => { setNotePhotoFiles([]); setNotePhotoSource('desktop'); }} className="text-xs font-bold text-blue-700 hover:underline">Remove</button>
+      {submittingNote && noteSubmitProgress && (
+        <div className="mt-3 rounded-xl border border-cyan-300/45 bg-slate-950/85 p-3 shadow-inner">
+          <div className="flex items-center justify-between gap-3">
+            <span className="flex min-w-0 items-center gap-2 text-sm font-black text-cyan-100">
+              <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin" />
+              {noteAttachmentProgressLabel(noteSubmitProgress)}
+            </span>
+            {noteSubmitProgress.fileName && (
+              <span className="max-w-[45%] truncate text-xs font-bold text-cyan-200/80">{noteSubmitProgress.fileName}</span>
+            )}
+          </div>
+          <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-slate-800">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-blue-500 via-cyan-400 to-emerald-400 transition-all duration-300"
+              style={{ width: `${Math.max(3, Math.min(100, Math.round(noteSubmitProgress.percent || 0)))}%` }}
+            />
+          </div>
+          <div className="mt-1.5 flex items-center justify-between gap-3">
+            {noteSubmitProgress.total > 1 ? (
+              <span className="flex items-center gap-1 text-xs font-bold text-emerald-200">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                {Math.max(0, noteSubmitProgress.current - 1)} of {noteSubmitProgress.total} uploaded
+              </span>
+            ) : <span />}
+            <span className="text-[11px] font-semibold text-slate-300">Keep this page open until the upload finishes</span>
+          </div>
+        </div>
+      )}
+      {notePhotoFiles.length > 0 && !submittingNote && (
+        <div className="mt-3 rounded-xl border border-blue-300 bg-blue-50 px-3 py-2 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <span className="flex min-w-0 items-center gap-1.5 text-xs font-black text-blue-800">
+              <CheckCircle2 className="h-4 w-4 flex-shrink-0 text-emerald-600" />
+              <span className="truncate">{noteMediaSummary(notePhotoFiles)} ready — uploads when you press Submit Note</span>
+            </span>
+            <button type="button" onClick={() => { setNotePhotoFiles([]); setNotePhotoSource('desktop'); }} className="flex-shrink-0 text-xs font-bold text-blue-700 hover:underline">Remove all</button>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {notePhotoFiles.map((file, fileIndex) => (
+              <span
+                key={`${file.name}-${file.size}-${file.lastModified}`}
+                className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-blue-300 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700"
+              >
+                {isVideoMedia(file) ? (
+                  <PlayCircle className="h-3.5 w-3.5 flex-shrink-0 text-purple-600" />
+                ) : (
+                  <FileImage className="h-3.5 w-3.5 flex-shrink-0 text-blue-600" />
+                )}
+                <span className="max-w-[180px] truncate">{file.name}</span>
+                <span className="flex-shrink-0 text-slate-400">{formatNoteFileSize(file.size)}</span>
+                <button
+                  type="button"
+                  onClick={() => removeNoteMediaFile(fileIndex)}
+                  aria-label={`Remove ${file.name}`}
+                  className="flex-shrink-0 text-slate-400 transition-colors hover:text-red-600"
+                >
+                  <XCircle className="h-3.5 w-3.5" />
+                </button>
+              </span>
+            ))}
+          </div>
         </div>
       )}
       </div>
@@ -1821,13 +2036,60 @@ export default function ProjectDetail() {
             <button onClick={() => navigate('/projects')} className="flex-shrink-0 p-2 rounded-lg text-slate-300 hover:bg-white/5 hover:text-white transition-colors" aria-label="Back to projects">
               <ArrowLeft className="w-5 h-5" />
             </button>
-            <div className="h-16 w-20 overflow-hidden rounded-xl border border-white/10 flex items-center justify-center flex-shrink-0 shadow-[0_6px_18px_rgba(0,0,0,0.45)]" style={{ background: '#1c1f29' }}>
-              {project.main_photo_url ? (
-                <img src={project.main_photo_url} alt={project.address} className="h-full w-full object-cover" />
-              ) : (
-                <MapPin className="w-6 h-6 text-blue-400" />
-              )}
-            </div>
+            {canChangeStatus ? (
+              <>
+                <input
+                  ref={mainPhotoHeaderInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  disabled={uploadingMainPhoto}
+                  onChange={e => {
+                    const file = e.target.files?.[0];
+                    handleMainPhotoUpload(file);
+                    e.currentTarget.value = '';
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => mainPhotoHeaderInputRef.current?.click()}
+                  disabled={uploadingMainPhoto}
+                  title={project.main_photo_url ? 'Change the project house photo — click to browse or drop an image here' : 'Upload a project house photo — click to browse or drop an image here'}
+                  aria-label={project.main_photo_url ? 'Change project house photo' : 'Upload project house photo'}
+                  {...fileDropHandlers(files => handleMainPhotoUpload(files[0]), {
+                    accept: 'image/*',
+                    multiple: false,
+                    disabled: uploadingMainPhoto,
+                  })}
+                  className="group relative h-16 w-20 overflow-hidden rounded-xl border border-white/10 flex items-center justify-center flex-shrink-0 shadow-[0_6px_18px_rgba(0,0,0,0.45)] focus:outline-none focus:ring-2 focus:ring-cyan-300"
+                  style={{ background: '#1c1f29' }}
+                >
+                  {project.main_photo_url ? (
+                    <img src={project.main_photo_url} alt={project.address} className="h-full w-full object-cover" />
+                  ) : (
+                    <MapPin className="w-6 h-6 text-blue-400" />
+                  )}
+                  <span className={`absolute inset-0 flex flex-col items-center justify-center gap-0.5 bg-black/60 transition-opacity ${uploadingMainPhoto ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100'}`}>
+                    {uploadingMainPhoto ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-white" />
+                    ) : (
+                      <Camera className="h-4 w-4 text-white" />
+                    )}
+                    <span className="text-[9px] font-black uppercase tracking-wide text-white">
+                      {uploadingMainPhoto ? 'Saving' : project.main_photo_url ? 'Change' : 'Add photo'}
+                    </span>
+                  </span>
+                </button>
+              </>
+            ) : (
+              <div className="h-16 w-20 overflow-hidden rounded-xl border border-white/10 flex items-center justify-center flex-shrink-0 shadow-[0_6px_18px_rgba(0,0,0,0.45)]" style={{ background: '#1c1f29' }}>
+                {project.main_photo_url ? (
+                  <img src={project.main_photo_url} alt={project.address} className="h-full w-full object-cover" />
+                ) : (
+                  <MapPin className="w-6 h-6 text-blue-400" />
+                )}
+              </div>
+            )}
             <div className="flex-1 min-w-0">
               <h1 className="font-black text-white text-xl sm:text-2xl leading-tight truncate">{formatProjectAddressLabel(project.address)}</h1>
               <div className="mt-1.5 flex items-center gap-2 flex-wrap">

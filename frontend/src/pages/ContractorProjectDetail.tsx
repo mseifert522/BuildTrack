@@ -5,8 +5,12 @@ import api from '../lib/api';
 import toast from 'react-hot-toast';
 import { fileDropHandlers } from '../lib/fileDrop';
 import { formatEasternDateTime, formatEasternRelative } from '../lib/time';
-import { PROGRESS_MEDIA_ACCEPT } from '../lib/progressUpload';
+import { isSupportedProgressMediaFile, PROGRESS_MEDIA_ACCEPT } from '../lib/progressUpload';
+import { isVideoMedia } from '../lib/progressMedia';
 import VoiceTextarea from '../components/VoiceTextarea';
+
+// Cloudflare fronts this domain and rejects request bodies over ~100MB.
+const MAX_UPLOAD_FILE_MB = 95;
 
 type Tab = 'plan' | 'notes' | 'photos' | 'punch';
 
@@ -21,6 +25,9 @@ export default function ContractorProjectDetail() {
   const [notes, setNotes] = useState<any[]>([]);
   const [newNote, setNewNote] = useState('');
   const [addingNote, setAddingNote] = useState(false);
+  const [noteFiles, setNoteFiles] = useState<File[]>([]);
+  const [noteUploadPercent, setNoteUploadPercent] = useState<number | null>(null);
+  const noteFileInputRef = useRef<HTMLInputElement>(null);
 
   // Photos state
   const [photos, setPhotos] = useState<any[]>([]);
@@ -84,16 +91,49 @@ export default function ContractorProjectDetail() {
     } catch {}
   };
 
+  const addNoteFiles = (files: FileList | File[]) => {
+    const incoming = Array.from(files || []).filter(isSupportedProgressMediaFile);
+    const withinSize = incoming.filter(file => file.size <= MAX_UPLOAD_FILE_MB * 1024 * 1024);
+    if (withinSize.length < incoming.length) {
+      toast.error(`Files must be under ${MAX_UPLOAD_FILE_MB}MB each — trim or compress the video and try again`);
+    }
+    if (withinSize.length) setNoteFiles(current => [...current, ...withinSize]);
+  };
+
   const addNote = async () => {
-    if (!newNote.trim()) return;
+    if (addingNote) return;
+    if (!newNote.trim() && !noteFiles.length) return;
+    const files = noteFiles;
     setAddingNote(true);
     try {
-      await api.post(`/projects/${id}/notes`, { note: newNote, note_type: 'field' });
+      const noteText = newNote.trim() || `${files.length} photo${files.length === 1 ? '' : 's'} update`;
+      const res = await api.post(`/projects/${id}/notes`, { note: noteText, note_type: 'field' });
+      if (files.length) {
+        setNoteUploadPercent(0);
+        const formData = new FormData();
+        files.forEach(f => formData.append('photos', f));
+        formData.append('note_id', res.data.id);
+        formData.append('capture_project_id', id || '');
+        formData.append('client_project_id', id || '');
+        formData.append('photo_type', 'progress');
+        formData.append('caption', 'Photos attached to project note');
+        formData.append('taken_at_values', JSON.stringify(
+          files.map(file => new Date(file.lastModified || Date.now()).toISOString())
+        ));
+        await api.post(`/projects/${id}/photos?type=progress`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+          onUploadProgress: event => {
+            const total = event.total || files.reduce((sum, f) => sum + f.size, 0) || 1;
+            setNoteUploadPercent(Math.min(99, Math.round((event.loaded / total) * 100)));
+          },
+        });
+      }
       setNewNote('');
+      setNoteFiles([]);
       loadNotes();
-      toast.success('Note added');
+      toast.success(files.length ? `Note added — ${files.length} file${files.length === 1 ? '' : 's'} uploaded` : 'Note added');
     } catch { toast.error('Failed to add note'); }
-    finally { setAddingNote(false); }
+    finally { setAddingNote(false); setNoteUploadPercent(null); }
   };
 
   const uploadPhotos = async (files: FileList | File[]) => {
@@ -247,7 +287,18 @@ export default function ContractorProjectDetail() {
         {tab === 'notes' && (
           <div>
             {/* Add Note */}
-            <div style={{ background: 'white', borderRadius: 14, padding: 14, marginBottom: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+            <div
+              {...fileDropHandlers(addNoteFiles, { accept: PROGRESS_MEDIA_ACCEPT, disabled: addingNote, multiple: true })}
+              style={{ background: 'white', borderRadius: 14, padding: 14, marginBottom: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}
+            >
+              <input
+                ref={noteFileInputRef}
+                type="file"
+                accept={PROGRESS_MEDIA_ACCEPT}
+                multiple
+                style={{ display: 'none' }}
+                onChange={e => { if (e.target.files?.length) addNoteFiles(e.target.files); e.currentTarget.value = ''; }}
+              />
               <VoiceTextarea
                 value={newNote}
                 onChange={e => setNewNote(e.target.value)}
@@ -255,18 +306,49 @@ export default function ContractorProjectDetail() {
                 rows={3}
                 style={{ width: '100%', border: 'none', outline: 'none', fontSize: 14, color: '#111827', resize: 'none', background: 'transparent', boxSizing: 'border-box' }}
               />
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+              {noteFiles.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 8, padding: '6px 10px', borderRadius: 10, background: '#EFF6FF', border: '1px solid #BFDBFE' }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#1D4ED8' }}>
+                    {noteFiles.length} photo{noteFiles.length === 1 ? '' : 's'}/video{noteFiles.length === 1 ? '' : 's'} ready — uploads with this note
+                  </span>
+                  <button type="button" onClick={() => setNoteFiles([])} style={{ background: 'none', border: 'none', color: '#1D4ED8', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Remove</button>
+                </div>
+              )}
+              {addingNote && noteUploadPercent !== null && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 700, color: '#92400E', marginBottom: 4 }}>
+                    <span>Uploading {noteUploadPercent}%</span>
+                    <span>Keep this page open</span>
+                  </div>
+                  <div style={{ height: 8, borderRadius: 999, background: '#F3F4F6', overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${Math.max(3, noteUploadPercent)}%`, borderRadius: 999, background: '#D99D26', transition: 'width 0.3s' }} />
+                  </div>
+                </div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => noteFileInputRef.current?.click()}
+                  disabled={addingNote}
+                  style={{
+                    background: 'white', color: '#6B7280', border: '1px solid #D1D5DB', borderRadius: 10,
+                    padding: '8px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 6,
+                  }}
+                >
+                  <Camera size={14} /> {noteFiles.length ? `${noteFiles.length} selected` : 'Upload Photos'}
+                </button>
                 <button
                   onClick={addNote}
-                  disabled={addingNote || !newNote.trim()}
+                  disabled={addingNote || (!newNote.trim() && !noteFiles.length)}
                   style={{
-                    background: addingNote || !newNote.trim() ? '#E5C97A' : '#D99D26',
+                    background: addingNote || (!newNote.trim() && !noteFiles.length) ? '#E5C97A' : '#D99D26',
                     color: 'white', border: 'none', borderRadius: 10, padding: '8px 20px',
                     fontWeight: 700, fontSize: 13, cursor: 'pointer',
                     display: 'flex', alignItems: 'center', gap: 6,
                   }}
                 >
-                  <Send size={14} /> {addingNote ? 'Saving...' : 'Add Note'}
+                  <Send size={14} /> {addingNote ? (noteUploadPercent !== null ? `Uploading ${noteUploadPercent}%` : 'Saving...') : 'Add Note'}
                 </button>
               </div>
             </div>
@@ -284,6 +366,19 @@ export default function ContractorProjectDetail() {
                     <p style={{ fontSize: 11, color: '#9CA3AF', margin: 0 }}>{formatEasternRelative(n.created_at)}</p>
                   </div>
                   <p style={{ fontSize: 14, color: '#374151', margin: 0, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{n.note}</p>
+                  {Array.isArray(n.photos) && n.photos.length > 0 && (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginTop: 8 }}>
+                      {n.photos.map((p: any) => (
+                        <a key={p.id || p.filename} href={`/uploads/${id}/${p.filename}`} target="_blank" rel="noopener noreferrer" style={{ display: 'block', borderRadius: 10, overflow: 'hidden', aspectRatio: '1', background: '#E5E7EB' }}>
+                          {isVideoMedia(p) ? (
+                            <video src={`/uploads/${id}/${p.filename}`} muted playsInline preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            <img src={`/uploads/${id}/${p.filename}`} alt={p.original_name || ''} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          )}
+                        </a>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
