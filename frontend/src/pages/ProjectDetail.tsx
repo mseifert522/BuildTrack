@@ -2227,37 +2227,22 @@ export default function ProjectDetail() {
               <div className="lg:col-span-3">
                 {notesPanel(true, 'list')}
               </div>
-              <div className="lg:col-span-2 space-y-4">
-              {notesPanel(true, 'composer')}
+              <div className="lg:col-span-2">
+                {/* The note composer and calendar stay pinned beside the user
+                    while the notes list scrolls, so a new note never requires
+                    scrolling back to the top. */}
+                <div className="space-y-4 lg:sticky lg:top-36 lg:max-h-[calc(100vh-160px)] lg:overflow-y-auto lg:pr-1">
+                  {notesPanel(true, 'composer')}
 
-              {canSeeProjectCalendar && (
-                <ProjectMiniCalendarCard
-                  events={projectCalendarEvents}
-                  loading={loadingProjectCalendar}
-                  anchorDateKey={projectCalendarAnchorDateKey}
-                  onAnchorDateChange={setProjectCalendarAnchorDateKey}
-                />
-              )}
-
-              <RecentFieldPhotosCard
-                projectId={id!}
-                photos={Array.isArray(project.recent_photos) ? project.recent_photos : []}
-                onViewAll={() => setTab('photos')}
-                onPhotoNoteSaved={load}
-              />
-
-              <button id="construction-plan" type="button" onClick={() => setTab('construction-plan')} className="w-full bg-white rounded-xl border border-gray-200 p-4 text-left hover:border-blue-300 hover:bg-blue-50 transition-colors">
-                <h3 className="font-semibold text-gray-900 mb-2 text-sm">Scope of Work</h3>
-                <p className="text-sm text-gray-600">Open project scope sections by house area, plus the execution plan, materials, costs, and step photos.</p>
-              </button>
-              <button id="project-timeline" type="button" onClick={() => setTab('project-timeline')} className="w-full rounded-xl border border-blue-300/40 bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 p-4 text-left text-white shadow-[0_14px_36px_rgba(15,23,42,0.22)] transition-colors hover:border-cyan-300/70">
-                <h3 className="font-semibold text-white mb-2 text-sm">Project Timeline</h3>
-                <p className="text-sm font-semibold text-blue-100">View the rehab stages, task dates, material deliveries, and near-term lookahead for this house.</p>
-              </button>
-              <button id="quotes" type="button" onClick={() => setTab('quotes')} className="w-full bg-white rounded-xl border border-gray-200 p-4 text-left hover:border-blue-300 hover:bg-blue-50 transition-colors">
-                <h3 className="font-semibold text-gray-900 mb-2 text-sm">Quotes</h3>
-                <p className="text-sm text-gray-600">Store contractor quotes directly against this property.</p>
-              </button>
+                  {canSeeProjectCalendar && (
+                    <ProjectMiniCalendarCard
+                      events={projectCalendarEvents}
+                      loading={loadingProjectCalendar}
+                      anchorDateKey={projectCalendarAnchorDateKey}
+                      onAnchorDateChange={setProjectCalendarAnchorDateKey}
+                    />
+                  )}
+                </div>
               </div>
             </div>
 
