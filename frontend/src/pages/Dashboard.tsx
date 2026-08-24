@@ -1869,13 +1869,13 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
       >
         <div className="flex items-center gap-3.5">
           <div
-            className="flex h-11 w-11 items-center justify-center rounded-xl border shadow-[0_0_16px_rgba(59,130,246,0.16)]"
-            style={{ background: 'rgba(59,130,246,0.16)', borderColor: 'rgba(59,130,246,0.40)' }}
+            className="flex h-9 w-9 items-center justify-center rounded-lg"
+            style={{ background: 'rgba(59,130,246,0.14)' }}
           >
-            <Activity className="h-5 w-5" style={{ color: '#93c5fd' }} />
+            <Activity className="h-4.5 w-4.5" style={{ color: '#93c5fd' }} />
           </div>
           <div>
-            <h2 className="text-xl font-black text-white">Latest Field & Office Notes</h2>
+            <h2 className="text-lg font-semibold text-white">Latest Field & Office Notes</h2>
           </div>
         </div>
       </div>
@@ -1883,8 +1883,8 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
       {activityFeed.length === 0 ? (
         <div className="bt-dashboard-notes-flow relative flow-root p-4">
           {canReadOperationsCalendar ? renderDashboardCalendarStack() : null}
-          <div className="relative flex min-h-[132px] flex-col items-center justify-center rounded-xl border border-white/10 bg-slate-950/20 px-4 py-6">
-            <p className="text-sm font-bold text-white">No notes yet</p>
+          <div className="relative flex min-h-[132px] flex-col items-center justify-center rounded-xl bg-white/[0.03] px-4 py-6">
+            <p className="text-sm font-medium text-white">No notes yet</p>
             <p className="mt-1 text-xs text-slate-300">Recent field and office notes will appear here.</p>
           </div>
         </div>
@@ -1892,7 +1892,6 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
         <div className="bt-dashboard-notes-flow relative flow-root p-4">
           {canReadOperationsCalendar ? renderDashboardCalendarStack() : null}
           {activityFeed.map((item) => {
-            const activityStyle = getActivityTypeStyle(item);
             const summary = getActivitySummary(item);
             const projectTarget = item.project_id ? `/projects/${item.project_id}` : '';
             const projectLabel = item.project_address || item.project_job_name || '';
@@ -1907,48 +1906,33 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
                 onKeyDown={event => {
                   if (projectTarget && event.key === 'Enter') navigate(projectTarget);
                 }}
-                className={`bt-dashboard-note-row group relative mb-3 flex min-h-[92px] items-start gap-3 rounded-xl border border-white/10 p-3 transition-all hover:border-blue-400/55 sm:p-4 ${projectTarget ? 'cursor-pointer' : 'cursor-default'}`}
-                style={{
-                  background: 'linear-gradient(135deg, #161616 0%, #141414 58%, #121212 100%)',
-                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)',
-                }}
+                className={`bt-dashboard-note-row group relative mb-2 flex items-start gap-3 rounded-lg bg-white/[0.04] p-3 transition-colors hover:bg-white/[0.07] ${projectTarget ? 'cursor-pointer' : 'cursor-default'}`}
               >
-                <span
-                  className="absolute bottom-3 left-0 top-3 w-1.5 rounded-r-full"
-                  style={{ background: activityStyle.accent }}
-                />
-                <div className="relative flex-shrink-0 pl-1">
-                  <Avatar
-                    src={item.user_avatar_url}
-                    name={item.user_name}
-                    size={48}
-                    className="border-2"
-                    style={{ borderColor: 'rgba(255,255,255,0.14)' }}
-                  />
+                <div className="relative flex-shrink-0">
+                  <Avatar src={item.user_avatar_url} name={item.user_name} size={36} />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
-                    <span className="truncate text-base font-black text-white">{item.user_name}</span>
-                    <span className="text-xs font-semibold text-slate-300">
+                  <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                    <span className="truncate text-sm font-semibold text-white">{item.user_name}</span>
+                    <span className="text-xs font-normal text-slate-400">
                       {formatEasternDateTime(item.created_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                     </span>
                     {projectLabel && (
                       <span
-                        className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black text-blue-50 sm:max-w-[360px]"
-                        style={{ background: 'rgba(59, 130, 246, 0.14)', borderColor: 'rgba(59, 130, 246, 0.32)' }}
+                        className="inline-flex min-w-0 max-w-full items-center gap-1 text-xs font-normal text-blue-300 sm:max-w-[360px]"
                         title={projectLabel}
                       >
-                        <MapPin className="h-3.5 w-3.5 flex-shrink-0 text-blue-200" />
+                        <MapPin className="h-3 w-3 flex-shrink-0" />
                         <span className="truncate">{projectLabel}</span>
                       </span>
                     )}
                   </div>
-                  <p className="bt-dashboard-note-summary mt-2 whitespace-pre-wrap break-words rounded-lg border border-cyan-300/10 bg-slate-950/25 px-3 py-2 text-sm font-black leading-6 text-white shadow-inner sm:text-[15px]">
+                  <p className="bt-dashboard-note-summary mt-1 whitespace-pre-wrap break-words text-sm font-normal leading-6 text-slate-100">
                     {summary}
                   </p>
                 </div>
-                <div className="flex flex-shrink-0 flex-col items-end gap-2 text-right">
-                  <span className="rounded-full bg-blue-500/15 px-2.5 py-1 text-[11px] font-black text-blue-100 ring-1 ring-blue-300/25">
+                <div className="flex flex-shrink-0 flex-col items-end gap-1.5 text-right">
+                  <span className="text-[11px] font-normal text-slate-500">
                     {formatEasternRelative(item.created_at)}
                   </span>
                   {canDeleteProjectNotes && item.feed_type === 'note' && item.project_id ? (
@@ -1959,7 +1943,7 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
                         void deleteDashboardNote(item);
                       }}
                       disabled={deletingActivityNoteId === item.id}
-                      className="inline-flex items-center gap-1 rounded-md border border-red-300/40 bg-red-500/15 px-3 py-1.5 text-[11px] font-black uppercase tracking-wide text-red-100 transition hover:border-red-200 hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-red-300 transition hover:text-red-100 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
                       title="Delete note"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
