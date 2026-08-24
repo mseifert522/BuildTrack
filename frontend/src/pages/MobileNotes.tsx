@@ -81,13 +81,15 @@ function noteCreatedAtMs(note: Note) {
 }
 
 function canEditNote(note: Note, user?: { id?: string; role?: string } | null) {
-  if (!user || note.user_id !== user.id) return false;
+  if (!user) return false;
+  if (['super_admin', 'operations_manager'].includes(user.role || '')) return true;
   if (user.role === 'project_manager') return false;
+  if (note.user_id !== user.id) return false;
   if (user.role === 'contractor') {
     const createdAt = noteCreatedAtMs(note);
     return Boolean(createdAt && Date.now() - createdAt <= CONTRACTOR_NOTE_EDIT_WINDOW_MS);
   }
-  return Number(note.edit_count || 0) < 1;
+  return true;
 }
 
 function editWindowLabel(note: Note, user?: { role?: string } | null) {

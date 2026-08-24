@@ -45,10 +45,8 @@ function getNoteEditPermission(user, note) {
     return { allowed: true };
   }
 
-  if (!canOverride && Number(note?.edit_count || 0) >= 1) {
-    return { allowed: false, status: 403, error: 'This note has already been edited once' };
-  }
-
+  // Note owners may edit their notes without limit; every edit still stamps
+  // edited_at/edited_by and bumps edit_count for the audit trail.
   return { allowed: true };
 }
 

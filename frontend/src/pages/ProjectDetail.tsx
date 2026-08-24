@@ -1509,6 +1509,15 @@ export default function ProjectDetail() {
 
   const canDeleteNotePhoto = (photo: any) => canDeleteProjectPhoto(photo, user);
 
+  // Mirrors backend getNoteEditPermission (minus the removed one-edit limit):
+  // admins edit any note, project managers none, everyone else their own.
+  const canEditProjectNote = (note: any) => {
+    if (!user) return false;
+    if (['super_admin', 'operations_manager'].includes(user.role)) return true;
+    if (user.role === 'project_manager') return false;
+    return note.user_id === user.id;
+  };
+
   const toggleNotePhotoSelection = (noteId: string, photoId: string) => {
     setSelectedNotePhotos(current => {
       const existing = current[noteId] || [];
@@ -1574,7 +1583,7 @@ export default function ProjectDetail() {
   const canSubmitNote = !submittingNote && Boolean(newNote.trim() || notePhotoFiles.length);
 
   const notesPanel = (compact = false, section: 'full' | 'list' | 'composer' = 'full') => (
-    <div className="bt-project-notes-panel h-full rounded-xl border border-blue-400/45 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 p-3 shadow-[0_18px_44px_rgba(15,23,42,0.34)] ring-1 ring-cyan-300/10 sm:p-4">
+    <div className="bt-project-notes-panel h-full rounded-xl border border-white/10 bg-slate-950/40 p-3 sm:p-4">
       <input
         ref={attachExistingNoteInputRef}
         type="file"
@@ -1584,9 +1593,9 @@ export default function ProjectDetail() {
         onChange={event => attachProgressPicturesToExistingNote(event.target.files)}
       />
       {section !== 'list' && (<>
-      <div className="bt-project-notes-header mb-3 flex items-center justify-between gap-3 rounded-xl border border-cyan-300/25 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 px-3 py-2.5 shadow-[0_8px_22px_rgba(37,99,235,0.18)]">
+      <div className="bt-project-notes-header mb-3 flex items-center justify-between gap-3 px-1">
         <div className="min-w-0">
-          <h3 className="text-base font-black text-white sm:text-lg">Project Notes</h3>
+          <h3 className="text-base font-semibold text-white">Project Notes</h3>
         </div>
         <div className="flex flex-shrink-0 items-center gap-2">
           <button
@@ -1602,7 +1611,7 @@ export default function ProjectDetail() {
       </div>
       <div
         {...noteComposerDropHandlers}
-        className="bt-project-note-composer relative mb-4 rounded-2xl border border-amber-300/35 bg-gradient-to-br from-slate-950 via-slate-900 to-amber-950 p-3 shadow-[0_14px_34px_rgba(245,158,11,0.14)]"
+        className="bt-project-note-composer relative mb-4 rounded-xl border border-white/10 bg-slate-900/50 p-3"
       >
         {noteComposerDragActive && (
           <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-2xl border-2 border-dashed border-cyan-300 bg-slate-950/85">
@@ -1616,7 +1625,7 @@ export default function ProjectDetail() {
           value={newNote}
           onChange={e => setNewNote(e.target.value)}
           rows={compact ? 2 : 3}
-          className="mb-3 min-h-[178px] w-full resize-none rounded-xl border border-cyan-300/65 bg-[#07162F] px-4 py-3 text-lg font-bold leading-7 text-white caret-cyan-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_0_0_1px_rgba(37,99,235,0.20)] placeholder:text-slate-200/85 focus:border-cyan-200 focus:outline-none focus:ring-2 focus:ring-cyan-300/70 sm:min-h-[108px] sm:py-3 sm:text-base"
+          className="mb-3 min-h-[178px] w-full resize-none rounded-lg border border-white/15 bg-slate-950/70 px-4 py-3 text-base font-normal leading-6 text-white caret-cyan-200 placeholder:text-slate-400 focus:border-cyan-300/60 focus:outline-none focus:ring-1 focus:ring-cyan-300/40 sm:min-h-[108px] sm:py-3 sm:text-sm"
           placeholder="Add a note..."
         />
         <button
@@ -1890,21 +1899,19 @@ export default function ProjectDetail() {
       {section !== 'composer' && (
       <div className="bt-project-notes-list space-y-2">
         {notes.map(note => (
-          <div key={note.id} className={`bt-project-note-card bt-project-note-card-${note.note_type || 'general'} flex items-start gap-3 rounded-xl border border-white/12 bg-gradient-to-br from-slate-900 via-slate-950 to-blue-950 p-4 shadow-[0_14px_36px_rgba(15,23,42,0.32)]`}>
-            <Avatar src={note.user_avatar_url} name={note.user_name} size={36} />
+          <div key={note.id} className="bt-project-note-card flex items-start gap-3 rounded-lg bg-slate-900/50 p-4">
+            <Avatar src={note.user_avatar_url} name={note.user_name} size={32} />
             <div className="flex-1 min-w-0">
-              <div className="bt-project-note-meta-bar mb-2 flex items-start justify-between gap-3 pb-1.5">
+              <div className="bt-project-note-meta-bar mb-1.5 flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="text-base font-black text-white truncate">{note.user_name}</span>
-                    <span className="text-sm font-semibold text-blue-100/85">
-                      Inserted {formatEasternDateTime(note.created_at, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                    <span className="truncate text-sm font-semibold text-white">{note.user_name}</span>
+                    <span className="text-xs font-normal text-slate-400">
+                      {formatEasternDateTime(note.created_at, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}
                     </span>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <span className={`text-sm px-2.5 py-0.5 rounded-full border font-black ${note.note_type === 'field' ? 'border-emerald-300/40 bg-emerald-500/15 text-emerald-100' : note.note_type === 'office' ? 'border-blue-300/40 bg-blue-500/15 text-blue-100' : 'border-slate-500 bg-slate-800 text-slate-200'}`}>{note.note_type}</span>
-                </div>
+                <span className="flex-shrink-0 text-xs font-normal capitalize text-slate-500">{note.note_type}</span>
               </div>
               {editingNoteId === note.id ? (
                 <div className="space-y-2">
@@ -1935,10 +1942,7 @@ export default function ProjectDetail() {
                 </div>
               ) : (
                 <>
-                  <p className="bt-project-note-body rounded-lg bg-black/20 px-3 py-2.5 text-base font-semibold leading-7 text-slate-50 whitespace-pre-wrap sm:text-[17px]">{note.note}</p>
-                  <span className={`inline-flex mt-2 rounded-full border px-2.5 py-0.5 text-sm font-bold ${note.visibility === 'public' ? 'border-emerald-300/40 bg-emerald-500/15 text-emerald-100' : 'border-slate-500 bg-slate-800 text-slate-200'}`}>
-                    {note.visibility === 'public' ? 'Public to contractors' : 'Private management note'}
-                  </span>
+                  <p className="bt-project-note-body whitespace-pre-wrap text-sm font-normal leading-6 text-slate-100">{note.note}</p>
                   {(() => {
                     const notePhotos = getNotePhotos(note);
                     if (notePhotos.length === 0) return null;
@@ -1951,7 +1955,7 @@ export default function ProjectDetail() {
                       .filter(photoId => notePhotos.some((p: any) => p.id === photoId));
 
                     return (
-                      <div className="bt-project-note-media-panel mt-2 w-fit max-w-full rounded-lg border border-cyan-300/25 bg-slate-950/70 p-2 shadow-inner">
+                      <div className="bt-project-note-media-panel mt-2.5 w-fit max-w-full">
                         <div className="bt-project-note-media-grid flex flex-wrap gap-2">
                           {notePhotos.map((photo: any) => {
                             const src = progressPhotoSrc(noteProjectId, photo);
@@ -2016,9 +2020,9 @@ export default function ProjectDetail() {
                             );
                           })}
                         </div>
-                        <div className="flex flex-wrap items-center justify-between gap-2 px-1 pt-2">
-                          <p className="bt-project-note-media-label text-sm font-bold text-cyan-100/85">
-                            {noteLightboxItems.length || notePhotos.length} photo{(noteLightboxItems.length || notePhotos.length) === 1 ? '' : 's'} attached to this note
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1.5">
+                          <p className="bt-project-note-media-label text-xs font-normal text-slate-400">
+                            {noteLightboxItems.length || notePhotos.length} photo{(noteLightboxItems.length || notePhotos.length) === 1 ? '' : 's'} attached
                           </p>
                           {selectedHere.length > 0 && (
                             <button
@@ -2042,11 +2046,11 @@ export default function ProjectDetail() {
                     );
                   })()}
                   {note.edited_at && (
-                    <p className="text-sm text-slate-300 mt-2">Edited by {note.edited_by_name || note.user_name} on {formatEasternDateTime(note.edited_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} New York time</p>
+                    <p className="mt-1.5 text-xs font-normal text-slate-500">Edited by {note.edited_by_name || note.user_name} on {formatEasternDateTime(note.edited_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</p>
                   )}
                 </>
               )}
-              {note.user_id === user?.id && Number(note.edit_count || 0) < 1 && editingNoteId !== note.id && (
+              {canEditProjectNote(note) && editingNoteId !== note.id && (
                 <button
                   type="button"
                   onClick={() => {
@@ -2055,7 +2059,7 @@ export default function ProjectDetail() {
                     setEditingNoteType(note.note_type || 'general');
                     setEditingNoteVisibility(note.visibility === 'public' ? 'public' : 'private');
                   }}
-                  className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-blue-200 hover:text-white hover:underline"
+                  className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-blue-300 hover:text-white hover:underline"
                 >
                   <Edit2 className="w-3 h-3" />
                   Edit note
@@ -2077,7 +2081,7 @@ export default function ProjectDetail() {
                     disabled: attachingNoteId === note.id,
                     multiple: true,
                   })}
-                  className="mt-2 ml-3 inline-flex min-h-8 items-center gap-1 rounded-lg px-1.5 text-xs font-bold text-amber-200 transition hover:text-white hover:underline disabled:cursor-wait disabled:text-amber-100 disabled:opacity-90"
+                  className="mt-2 ml-3 inline-flex min-h-8 items-center gap-1 rounded-lg px-1.5 text-xs font-medium text-amber-300 transition hover:text-white hover:underline disabled:cursor-wait disabled:text-amber-100 disabled:opacity-90"
                 >
                   {attachingNoteId === note.id ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
@@ -2094,7 +2098,7 @@ export default function ProjectDetail() {
                   type="button"
                   onClick={() => deleteProjectNote(note.id)}
                   disabled={deletingNoteId === note.id}
-                  className="mt-2 ml-3 inline-flex min-h-8 items-center gap-1 rounded-lg px-1.5 text-xs font-bold text-red-300 transition hover:text-red-100 hover:underline disabled:cursor-wait disabled:opacity-60"
+                  className="mt-2 ml-3 inline-flex min-h-8 items-center gap-1 rounded-lg px-1.5 text-xs font-medium text-red-300 transition hover:text-red-100 hover:underline disabled:cursor-wait disabled:opacity-60"
                   title="Delete this note (attached photos stay in the project photo history)"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
