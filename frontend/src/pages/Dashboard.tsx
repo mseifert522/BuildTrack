@@ -1860,12 +1860,8 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
         background: 'linear-gradient(180deg, #141414, #111111)',
       }}
     >
-      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-400" />
       <div
-        className="bt-dashboard-notes-panel-header relative flex items-center justify-between gap-4 border-b border-white/10 px-5 py-4"
-        style={{
-          background: 'linear-gradient(90deg, rgba(59,130,246,0.12) 0%, rgba(99,102,241,0.06) 52%, rgba(255,255,255,0.02) 100%)',
-        }}
+        className="bt-dashboard-notes-panel-header relative flex items-center justify-between gap-4 px-5 py-4"
       >
         <div className="flex items-center gap-3.5">
           <div

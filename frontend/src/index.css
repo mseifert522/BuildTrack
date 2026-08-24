@@ -3053,30 +3053,30 @@ textarea,
   background: #ffffff !important;
 }
 
+/* Flat, quiet note rows — Mike wants no boxes-inside-boxes here. */
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-note-row {
-  border: 1px solid #b7c9d7 !important;
-  border-radius: 4px !important;
-  background: #ffffff !important;
+  border: none !important;
+  border-radius: 8px !important;
+  background: #f6f9fb !important;
   color: #17324a !important;
 }
 
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-note-row:hover {
-  border-color: #6e96b5 !important;
-  background: #f0f6fa !important;
+  background: #edf4f9 !important;
   transform: none !important;
 }
 
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-note-row button[title="Delete note"] {
-  border: 1px solid #c98282 !important;
-  border-radius: 4px !important;
-  background: #fff1f1 !important;
-  color: #8f2f2f !important;
+  border: none !important;
+  border-radius: 6px !important;
+  background: transparent !important;
+  color: #a03d3d !important;
 }
 
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-note-row button[title="Delete note"]:hover:not(:disabled) {
-  border-color: #a95858 !important;
-  background: #fbe1e1 !important;
+  background: transparent !important;
   color: #742323 !important;
+  text-decoration: underline;
   transform: none !important;
 }
 
@@ -3086,9 +3086,10 @@ textarea,
 }
 
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-note-summary {
-  border: 1px solid #c3d2de !important;
-  border-radius: 4px !important;
-  background: #eef4f8 !important;
+  border: none !important;
+  background: transparent !important;
+  padding: 0 !important;
+  box-shadow: none !important;
   color: #203a50 !important;
 }
 
@@ -3324,32 +3325,33 @@ textarea,
 }
 
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-note-row {
-  border-color: #345b78 !important;
-  background: #0a2032 !important;
+  border: none !important;
+  background: rgba(255, 255, 255, 0.045) !important;
   color: #eef6fb !important;
 }
 
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-note-row:hover {
-  border-color: #5482a2 !important;
-  background: #102c43 !important;
+  background: rgba(255, 255, 255, 0.08) !important;
 }
 
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-note-summary {
-  border-color: #335b77 !important;
-  background: #102d46 !important;
+  border: none !important;
+  background: transparent !important;
+  padding: 0 !important;
+  box-shadow: none !important;
   color: #dceaf4 !important;
 }
 
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-note-row button[title="Delete note"] {
-  border-color: #91525d !important;
-  background: #3b2029 !important;
-  color: #ffc1c8 !important;
+  border: none !important;
+  background: transparent !important;
+  color: #f2a6ae !important;
 }
 
 .bt-desktop-shell .bt-dashboard-page .bt-dashboard-note-row button[title="Delete note"]:hover:not(:disabled) {
-  border-color: #b76c78 !important;
-  background: #512731 !important;
-  color: #ffe1e4 !important;
+  background: transparent !important;
+  color: #ffd9dd !important;
+  text-decoration: underline;
 }
 
 .bt-desktop-shell .bt-dashboard-page .bt-calendar-filter-row button,
