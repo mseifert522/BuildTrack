@@ -855,6 +855,57 @@ async function sendContractorInvoiceReceivedEmail({
   });
 }
 
+async function sendQuoteApprovedEmail({
+  vendorName,
+  vendorEmail,
+  ccEmail,
+  quoteNumber,
+  approvedAmount,
+  projectLabel,
+}) {
+  if (!vendorEmail) throw new Error('Missing vendor email');
+  const transporter = createTransporter();
+  const questionsEmail = 'info@newurbandev.com';
+  const amountLabel = approvedAmount === null || approvedAmount === undefined || approvedAmount === ''
+    ? null
+    : `$${Number(approvedAmount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const displayName = String(vendorName || '').trim();
+
+  const html = emailWrapper(`
+    <h2 style="color:#111827; font-size:20px; font-weight:800; margin:0 0 8px;">Your quote has been approved</h2>
+    <p style="color:#6B7280; font-size:14px; line-height:1.6; margin:0 0 18px;">
+      ${displayName ? `Hi ${escapeHtml(displayName)},` : 'Hello,'}<br /><br />
+      Good news &mdash; your quote${quoteNumber ? ` <strong style="color:#111827;">${escapeHtml(quoteNumber)}</strong>` : ''}${amountLabel ? ` in the amount of <strong style="color:#111827;">${escapeHtml(amountLabel)}</strong>` : ''} has been approved by our office.
+    </p>
+    <div style="background:#ECFDF5; border:1px solid #A7F3D0; border-radius:12px; padding:16px; margin-bottom:18px;">
+      <p style="font-size:12px; color:#047857; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin:0 0 6px;">What happens next</p>
+      <p style="font-size:15px; color:#065F46; font-weight:700; line-height:1.5; margin:0;">A member of our office will be contacting you shortly to schedule the job and coordinate the details.</p>
+    </div>
+    <div style="background:#F9FAFB; border:1px solid #E5E7EB; border-radius:12px; padding:16px; margin-bottom:18px;">
+      <p style="font-size:12px; color:#374151; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin:0 0 8px;">Approval details</p>
+      ${quoteNumber ? `<p style="font-size:13px; color:#374151; margin:0 0 8px;"><strong>Quote number:</strong> ${escapeHtml(quoteNumber)}</p>` : ''}
+      ${amountLabel ? `<p style="font-size:13px; color:#374151; margin:0 0 8px;"><strong>Approved amount:</strong> ${escapeHtml(amountLabel)}</p>` : ''}
+      ${projectLabel ? `<p style="font-size:13px; color:#374151; margin:0;"><strong>Property:</strong> ${escapeHtml(projectLabel)}</p>` : ''}
+    </div>
+    <div style="background:#FFFBEB; border:1px solid #FDE68A; border-radius:12px; padding:16px; margin-bottom:4px;">
+      <p style="font-size:12px; color:#92400E; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin:0 0 8px;">Questions?</p>
+      <p style="font-size:13px; color:#374151; line-height:1.6; margin:0;">
+        No action is needed from you right now &mdash; our office will reach out to you. If you have any questions in the meantime, reply to this email or write to
+        <a href="mailto:${escapeHtml(questionsEmail)}" style="color:#065F46; font-weight:700;">${escapeHtml(questionsEmail)}</a>.
+      </p>
+    </div>
+  `);
+
+  await sendBrandedMail(transporter, {
+    from: process.env.EMAIL_FROM || brandedFrom(),
+    to: vendorEmail,
+    cc: ccEmail || undefined,
+    replyTo: questionsEmail,
+    subject: `Your quote has been approved${quoteNumber ? ` (${quoteNumber})` : ''}`,
+    html,
+  });
+}
+
 module.exports = {
   isEmailConfigured,
   sendInvoiceEmail,
@@ -869,4 +920,5 @@ module.exports = {
   sendContractorSetupEmail,
   sendContractorSetupCodeEmail,
   sendContractorSubmissionPdfEmail,
+  sendQuoteApprovedEmail,
 };

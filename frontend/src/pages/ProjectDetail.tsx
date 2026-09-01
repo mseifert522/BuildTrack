@@ -3,6 +3,10 @@ import { useParams, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore, canChangeProjectStatus, canManageProjects, isAdminRole } from '../store/authStore';
 import api from '../lib/api';
 import { Loading, StatusBadge, Modal, statusLabels } from '../components/ui';
+import {
+  QuoteApprovalEmailNoticeModal, noticeFromApproveResponse, approvalEmailToastSuffix,
+  type ApprovalEmailNotice,
+} from '../components/QuoteApprovalEmailNotice';
 import Avatar from '../components/Avatar';
 import VoiceTextarea from '../components/VoiceTextarea';
 import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, ClipboardList, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle, Send, Phone, Mail, Building2, AlertTriangle, Check, Paperclip, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, CalendarDays, Search, GripVertical, CheckCircle2, XCircle, Database, ListFilter, Bot, Receipt, Loader2 } from 'lucide-react';
@@ -9205,6 +9209,9 @@ function QuotesTab({ projectId, project }: { projectId: string; project: any }) 
   const [quoteFilter, setQuoteFilter] = useState<QuoteFilterKey>('review');
   const [expandedQuoteIds, setExpandedQuoteIds] = useState<Record<string, boolean>>({});
   const [updatingQuoteId, setUpdatingQuoteId] = useState<string | null>(null);
+  // Queue, not a single slot: two in-flight approvals could otherwise overwrite
+  // an unread "no email sent" dialog when their responses race.
+  const [approvalEmailNotices, setApprovalEmailNotices] = useState<ApprovalEmailNotice[]>([]);
 
   const load = async () => {
     try {
@@ -9428,10 +9435,14 @@ function QuotesTab({ projectId, project }: { projectId: string; project: any }) 
   const reviewQuote = async (quote: any, decision: 'approve' | 'deny') => {
     setUpdatingQuoteId(quote.id);
     try {
-      await api.post(`/projects/${projectId}/quotes/${quote.id}/${decision}`);
+      const res = await api.post(`/projects/${projectId}/quotes/${quote.id}/${decision}`);
       toast.success(decision === 'approve'
-        ? `${quote.quote_number} moved to Approved Quotes`
+        ? `${quote.quote_number} moved to Approved Quotes${approvalEmailToastSuffix(res.data?.vendor_notification)}`
         : `${quote.quote_number} moved to Quote Database`);
+      if (decision === 'approve') {
+        const notice = noticeFromApproveResponse(res.data, quote.quote_number);
+        if (notice) setApprovalEmailNotices(list => [...list, notice]);
+      }
       await load();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to update quote');
@@ -9759,6 +9770,8 @@ function QuotesTab({ projectId, project }: { projectId: string; project: any }) 
           )}
         </div>
       )}
+
+      <QuoteApprovalEmailNoticeModal notice={approvalEmailNotices[0] ?? null} onClose={() => setApprovalEmailNotices(list => list.slice(1))} />
     </div>
   );
 }

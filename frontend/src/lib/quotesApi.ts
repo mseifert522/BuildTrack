@@ -176,10 +176,20 @@ export async function fetchBidComparison(params: {
   return res.data as CompareResponse;
 }
 
+// Outcome of the automatic vendor approval email, reported truthfully by the server:
+// `sent` is true only when the email was actually handed to the mail server.
+export interface QuoteVendorNotification {
+  sent: boolean;
+  reason: 'sent' | 'no_email_on_file' | 'send_failed' | 'email_not_configured' | 'already_approved' | 'historical_quote';
+  email: string | null;
+  contractor: string;
+  cc: string;
+}
+
 export async function approveQuote(
   id: string,
   body: { final_approved_amount?: number; review_note?: string } = {}
-): Promise<any> {
+): Promise<{ quote: ContractorQuote; line_items: any[]; vendor_notification?: QuoteVendorNotification }> {
   const res = await api.post(`/quote-analytics/quotes/${id}/approve`, body);
   return res.data;
 }

@@ -5,6 +5,10 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader, Loading, Empty, Modal } from '../components/ui';
+import {
+  QuoteApprovalEmailNoticeModal, noticeFromApproveResponse, approvalEmailToastSuffix,
+  type ApprovalEmailNotice,
+} from '../components/QuoteApprovalEmailNotice';
 import VoiceTextarea from '../components/VoiceTextarea';
 import api from '../lib/api';
 import { useAuthStore } from '../store/authStore';
@@ -227,6 +231,9 @@ export default function Quotes() {
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Queue, not a single slot: two in-flight approvals could otherwise overwrite
+  // an unread "no email sent" dialog when their responses race.
+  const [approvalEmailNotices, setApprovalEmailNotices] = useState<ApprovalEmailNotice[]>([]);
 
   const [compare, setCompare] = useState<CompareResponse | null>(null);
   const [compareLoading, setCompareLoading] = useState(false);
@@ -451,8 +458,10 @@ export default function Quotes() {
   const handleApprove = async (quote: ContractorQuote) => {
     setBusyId(quote.id);
     try {
-      await approveQuote(quote.id, {});
-      toast.success(`Approved ${quote.quote_number}`);
+      const res = await approveQuote(quote.id, {});
+      toast.success(`Approved ${quote.quote_number}${approvalEmailToastSuffix(res?.vendor_notification)}`);
+      const notice = noticeFromApproveResponse(res, quote.quote_number);
+      if (notice) setApprovalEmailNotices(list => [...list, notice]);
       reloadAll();
     } catch (err: any) {
       toast.error(err?.response?.data?.error || 'Failed to approve quote');
@@ -679,6 +688,8 @@ export default function Quotes() {
           onSaved={() => { setShowAdd(false); setEditQuote(null); reloadAll(); }}
         />
       )}
+
+      <QuoteApprovalEmailNoticeModal notice={approvalEmailNotices[0] ?? null} onClose={() => setApprovalEmailNotices(list => list.slice(1))} />
     </div>
   );
 }

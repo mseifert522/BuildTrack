@@ -8,6 +8,8 @@ const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/schema');
 const { authenticate, authorizeProjectAccess, PROJECT_MANAGE_ROLES, UPPER_MANAGEMENT_ROLES } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
+const { isEmailConfigured, sendQuoteApprovedEmail } = require('../utils/email');
+const { normalizeEmail } = require('../utils/contractorAccess');
 
 const QUOTE_STATUSES = ['draft', 'submitted', 'approved', 'rejected', 'paid', 'completed', 'historical'];
 const QUOTE_FILTER_STATUSES = {
@@ -553,7 +555,73 @@ function updateQuote(req, res, forcedProjectId = null) {
   }
 }
 
-function updateQuoteReviewStatus(req, res, forcedProjectId = null, nextStatus) {
+// The vendor's "email on file" for a quote: the address captured on the quote itself,
+// else the live contractor profile (manual email, then the QBO-mirrored one), else the
+// linked contractor login account. Null when none holds a valid address.
+function resolveQuoteVendorEmail(db, quote) {
+  const direct = normalizeEmail(quote.contractor_email);
+  if (direct) return direct;
+  if (quote.contractor_profile_id) {
+    const profile = db.prepare('SELECT email, quickbooks_primary_email FROM contractor_profiles WHERE id = ?').get(quote.contractor_profile_id);
+    const fromProfile = normalizeEmail(profile?.email) || normalizeEmail(profile?.quickbooks_primary_email);
+    if (fromProfile) return fromProfile;
+  }
+  if (quote.contractor_id) {
+    const user = db.prepare('SELECT email FROM users WHERE id = ?').get(quote.contractor_id);
+    const fromUser = normalizeEmail(user?.email);
+    if (fromUser) return fromUser;
+  }
+  return null;
+}
+
+// Email the vendor that their quote was approved (cc the office). Never throws — the
+// approval has already committed; the returned object reports truthfully whether an
+// email actually went out so the UI can never claim a send that didn't happen.
+async function notifyVendorQuoteApproved(db, quote, previousStatus) {
+  const base = {
+    sent: false,
+    reason: null,
+    email: null,
+    contractor: quote.contractor_name || quote.contractor_company || 'This contractor',
+    cc: process.env.QUOTE_APPROVED_CC_EMAIL || 'info@newurbandev.com',
+  };
+  try {
+    // Re-approving an already-approved/paid/completed quote is a bookkeeping move,
+    // not a new award — don't email the vendor again.
+    if (['approved', 'paid', 'completed'].includes(String(previousStatus || '').toLowerCase())) {
+      return { ...base, reason: 'already_approved' };
+    }
+    // Historical quotes are an imported archive kept for market/pricing analysis;
+    // approving one must never email a vendor about a years-old job.
+    if (String(previousStatus || '').toLowerCase() === 'historical') {
+      return { ...base, reason: 'historical_quote' };
+    }
+    const vendorEmail = resolveQuoteVendorEmail(db, quote);
+    if (!vendorEmail) return { ...base, reason: 'no_email_on_file' };
+    if (!isEmailConfigured()) return { ...base, email: vendorEmail, reason: 'email_not_configured' };
+    const project = db.prepare('SELECT address, job_name FROM projects WHERE id = ?').get(quote.project_id);
+    try {
+      await sendQuoteApprovedEmail({
+        vendorName: quote.contractor_name || quote.contractor_company,
+        vendorEmail,
+        ccEmail: base.cc,
+        quoteNumber: quote.quote_number,
+        approvedAmount: quote.final_approved_amount ?? quote.total_quote_amount,
+        projectLabel: project?.address || project?.job_name || null,
+      });
+      return { ...base, sent: true, reason: 'sent', email: vendorEmail };
+    } catch (err) {
+      console.error('[QUOTE_ANALYTICS] vendor approval email failed:', err?.message || err);
+      return { ...base, email: vendorEmail, reason: 'send_failed' };
+    }
+  } catch (err) {
+    // The approval is already committed — never let notification plumbing 500 it.
+    console.error('[QUOTE_ANALYTICS] vendor approval notification error:', err?.message || err);
+    return { ...base, reason: 'send_failed' };
+  }
+}
+
+async function updateQuoteReviewStatus(req, res, forcedProjectId = null, nextStatus) {
   if (!['approved', 'rejected', 'submitted'].includes(nextStatus)) {
     return res.status(400).json({ error: 'Unsupported quote review action' });
   }
@@ -591,6 +659,12 @@ function updateQuoteReviewStatus(req, res, forcedProjectId = null, nextStatus) {
     })();
 
     clearSummaryCache();
+
+    // Approval notice to the vendor (awaited so the response reports the real outcome).
+    const vendorNotification = nextStatus === 'approved'
+      ? await notifyVendorQuoteApproved(db, updated.quote, previousStatus)
+      : null;
+
     logActivity({
       userId: req.user.id,
       projectId: quote.project_id,
@@ -602,9 +676,16 @@ function updateQuoteReviewStatus(req, res, forcedProjectId = null, nextStatus) {
         previous_status: previousStatus,
         new_status: nextStatus,
         review_note: reviewNote || null,
+        // Deliberately no raw address here: project activity is readable by
+        // contractor-role users assigned to the project.
+        ...(vendorNotification ? {
+          vendor_email_sent: vendorNotification.sent,
+          vendor_email_reason: vendorNotification.reason,
+        } : {}),
       },
     });
 
+    if (vendorNotification) updated.vendor_notification = vendorNotification;
     return res.json(updated);
   } catch (err) {
     console.error('[QUOTE_ANALYTICS] review status update failed:', err);
