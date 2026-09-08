@@ -9,7 +9,7 @@ import {
 } from '../components/QuoteApprovalEmailNotice';
 import Avatar from '../components/Avatar';
 import VoiceTextarea from '../components/VoiceTextarea';
-import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, ClipboardList, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle, Send, Phone, Mail, Building2, AlertTriangle, Check, Paperclip, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, CalendarDays, Search, GripVertical, CheckCircle2, XCircle, Database, ListFilter, Bot, Receipt, Loader2, ListPlus } from 'lucide-react';
+import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, ClipboardList, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle, Send, Phone, Mail, Building2, AlertTriangle, Check, Paperclip, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, CalendarDays, Search, GripVertical, CheckCircle2, XCircle, Database, ListFilter, Bot, Receipt, Loader2, ListPlus, Printer } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useForm } from 'react-hook-form';
 import { format } from 'date-fns';
@@ -6831,6 +6831,84 @@ function PunchListTab({
     setEditItem(item);
   };
 
+  // Print Punch List: a paper-friendly page (browser print -> paper or PDF) of
+  // the items currently shown, with check boxes, contractor, and photo thumbnails.
+  // The window opens synchronously on the click so pop-up blockers allow it.
+  const printPunchList = async () => {
+    if (!items.length) {
+      toast.error('Nothing to print');
+      return;
+    }
+    const win = window.open('', '_blank');
+    if (!win) {
+      toast.error('Allow pop-ups for BuildTrack to print the punch list');
+      return;
+    }
+    win.document.write('<!doctype html><title>Preparing punch list…</title><p style="font-family:sans-serif;color:#555">Preparing the punch list…</p>');
+    let projectLabel = '';
+    let jobName = '';
+    try {
+      const res = await api.get(`/projects/${projectId}`);
+      projectLabel = String(res.data?.address || res.data?.job_name || '');
+      jobName = res.data?.address && res.data?.job_name && res.data.job_name !== res.data.address ? String(res.data.job_name) : '';
+    } catch { /* print without the address */ }
+    const esc = (value: any) => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const origin = window.location.origin;
+    const filterLabels: Record<string, string> = { '': 'All items', not_started: 'Open items', in_progress: 'In progress', completed: 'Completed', urgent: 'Urgent' };
+    const openCount = items.filter(item => item.status !== 'completed').length;
+    const rows = items.map((item, index) => {
+      const photos = (Array.isArray(item.photos) ? item.photos : []).filter((photo: any) => getProgressMediaKind(photo) === 'image').slice(0, 4);
+      const done = item.status === 'completed';
+      return `<tr>
+        <td class="num">${index + 1}</td>
+        <td><span class="box${done ? ' checked' : ''}"></span><span class="${done ? 'done' : ''}"><strong>${esc(item.title)}</strong>${item.description ? `<div class="desc">${esc(item.description)}</div>` : ''}${item.notes ? `<div class="desc muted">${esc(item.notes)}</div>` : ''}</span></td>
+        <td class="pri pri-${esc(item.priority)}">${esc(item.priority)}</td>
+        <td>${esc(String(item.status || '').replace(/_/g, ' '))}</td>
+        <td>${item.due_date ? esc(format(new Date(item.due_date), 'MMM d, yyyy')) : ''}</td>
+        <td>${esc(item.assigned_contractor_name || item.assigned_to_name || '')}${item.last_sent_at ? `<div class="muted">sent ${esc(format(new Date(item.last_sent_at), 'MMM d'))}</div>` : ''}</td>
+        <td class="photos">${photos.map((photo: any) => `<img src="${esc(`${origin}${progressPhotoSrc(projectId, photo)}`)}" alt="" />`).join('')}${Number(item.photo_count || 0) > photos.length ? `<div class="muted">+${Number(item.photo_count) - photos.length} more</div>` : ''}</td>
+      </tr>`;
+    }).join('');
+    const html = `<!doctype html><html><head><meta charset="utf-8" /><title>Punch List — ${esc(projectLabel || 'Project')}</title>
+<style>
+  body{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;color:#111;margin:24px;font-size:12px;background:#fff}
+  h1{font-size:20px;margin:0 0 2px} .meta{color:#555;margin:0 0 14px}
+  .toolbar{position:fixed;top:12px;right:16px} .toolbar button{font:700 13px/1 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif;padding:9px 14px;border-radius:8px;border:1px solid #1d4ed8;background:#2563eb;color:#fff;cursor:pointer}
+  table{width:100%;border-collapse:collapse} th,td{border-bottom:1px solid #ddd;padding:7px 6px;vertical-align:top;text-align:left}
+  th{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#666} td.num{color:#888;width:22px}
+  .box{display:inline-block;width:12px;height:12px;border:1.5px solid #333;border-radius:2px;margin-right:7px;vertical-align:-1px} .box.checked{background:#333}
+  .done{color:#888;text-decoration:line-through} .desc{margin-top:2px;color:#444;white-space:pre-wrap} .muted{color:#888;font-size:11px}
+  .pri{text-transform:uppercase;font-weight:700;color:#555;font-size:11px} .pri-urgent{color:#b91c1c} .pri-high{color:#c2410c}
+  .photos{width:150px} .photos img{width:66px;height:50px;object-fit:cover;border-radius:4px;border:1px solid #ddd;margin:0 4px 4px 0}
+  .sig{margin-top:30px;color:#555;display:flex;gap:40px} .sig span{border-top:1px solid #333;padding-top:4px;min-width:220px}
+  @media print{body{margin:10mm} tr{page-break-inside:avoid} .toolbar{display:none}}
+</style></head><body>
+<div class="toolbar"><button type="button" onclick="window.print()">Print</button></div>
+<h1>Punch List — ${esc(projectLabel || 'Project')}</h1>
+<div class="meta">${jobName ? `${esc(jobName)} · ` : ''}${esc(filterLabels[filter] || 'All items')} · ${items.length} item${items.length === 1 ? '' : 's'} (${openCount} open) · Printed ${esc(format(new Date(), 'MMM d, yyyy h:mm a'))}${user?.name ? ` by ${esc(user.name)}` : ''}</div>
+<table><thead><tr><th></th><th>Item</th><th>Priority</th><th>Status</th><th>Due</th><th>Contractor</th><th>Photos</th></tr></thead><tbody>${rows}</tbody></table>
+<div class="sig"><span>Completed by</span><span>Date</span></div>
+</body></html>`;
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+    let printed = false;
+    const triggerPrint = () => {
+      if (printed) return;
+      printed = true;
+      try { win.focus(); win.print(); } catch { /* the Print button on the page still works */ }
+    };
+    const images = Array.from(win.document.images);
+    let pending = images.length;
+    const settle = () => { pending -= 1; if (pending <= 0) window.setTimeout(triggerPrint, 150); };
+    if (!images.length) window.setTimeout(triggerPrint, 150);
+    images.forEach(img => {
+      if (img.complete) settle();
+      else { img.addEventListener('load', settle); img.addEventListener('error', settle); }
+    });
+    window.setTimeout(triggerPrint, 5000);
+  };
+
   const onEditSave = async (data: any) => {
     if (!editItem) return;
     const title = String(data.title || '').trim();
@@ -7185,29 +7263,42 @@ function PunchListTab({
             </div>
             <p className="mt-2 text-sm font-semibold leading-6 text-slate-100">Punch list is the final 90% completion workflow. It stays separate from scope of work and only opens when management activates it.</p>
           </div>
-          {canSend && (
-            <button
-              type="button"
-              onClick={() => setShowSend(true)}
-              className="inline-flex min-h-11 flex-shrink-0 items-center justify-center gap-2 rounded-xl border border-amber-200/70 bg-gradient-to-br from-amber-300 to-amber-500 px-4 py-2.5 text-sm font-black text-amber-950 shadow-[0_10px_24px_rgba(245,158,11,0.25)] transition hover:from-amber-200 hover:to-amber-400"
-              title="Email the punch list to the contractors working on it"
-            >
-              <Send className="h-4 w-4" />
-              Email / Send Punch List
-            </button>
-          )}
-          {!isActive && (
-            <button
-              type="button"
-              onClick={onActivate}
-              disabled={!canActivate || activating}
-              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-amber-200/70 bg-gradient-to-br from-amber-300 to-amber-500 px-4 py-2.5 text-sm font-black text-slate-950 shadow-[0_10px_24px_rgba(245,158,11,0.25)] transition hover:from-amber-200 hover:to-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
-              title={canActivate ? 'Activate punch list for this project' : 'Only management can activate punch list'}
-            >
-              <ClipboardList className="h-4 w-4" />
-              {activating ? 'Activating...' : 'Activate Punch List'}
-            </button>
-          )}
+          <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
+            {canSend && (
+              <button
+                type="button"
+                onClick={() => setShowSend(true)}
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-amber-300/80 bg-amber-500/25 px-4 py-2.5 text-sm font-black text-amber-100 shadow-sm transition hover:bg-amber-500/40 hover:text-white"
+                title="Email the punch list to the contractors working on it"
+              >
+                <Send className="h-4 w-4" />
+                Email / Send Punch List
+              </button>
+            )}
+            {isActive && (
+              <button
+                type="button"
+                onClick={printPunchList}
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-400/60 bg-slate-950 px-4 py-2.5 text-sm font-black text-slate-100 shadow-sm transition hover:border-cyan-300 hover:text-cyan-50"
+                title="Open a printable punch list (print it or save as PDF)"
+              >
+                <Printer className="h-4 w-4" />
+                Print Punch List
+              </button>
+            )}
+            {!isActive && (
+              <button
+                type="button"
+                onClick={onActivate}
+                disabled={!canActivate || activating}
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-amber-300/80 bg-amber-500/25 px-4 py-2.5 text-sm font-black text-amber-100 shadow-sm transition hover:bg-amber-500/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                title={canActivate ? 'Activate punch list for this project' : 'Only management can activate punch list'}
+              >
+                <ClipboardList className="h-4 w-4" />
+                {activating ? 'Activating...' : 'Activate Punch List'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
