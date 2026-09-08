@@ -680,7 +680,17 @@ router.delete('/assignments/:assignmentId', (req, res) => {
     `).get(req.params.assignmentId, req.params.projectId);
     if (!assignment) return res.status(404).json({ error: 'Photo assignment not found' });
 
-    db.prepare('DELETE FROM photo_assignments WHERE id = ? AND project_id = ?').run(req.params.assignmentId, req.params.projectId);
+    db.transaction(() => {
+      db.prepare('DELETE FROM photo_assignments WHERE id = ? AND project_id = ?').run(req.params.assignmentId, req.params.projectId);
+      // A photo uploaded straight onto a punch item also carries the direct
+      // punch_list_item_id link; clear it too so "Remove" actually removes.
+      if (assignment.target_type === 'punch_list_item') {
+        db.prepare(`
+          UPDATE photos SET punch_list_item_id = NULL, updated_at = datetime('now')
+          WHERE id = ? AND project_id = ? AND punch_list_item_id = ?
+        `).run(assignment.photo_id, req.params.projectId, assignment.target_id);
+      }
+    })();
     logActivity({
       userId: req.user.id,
       projectId: req.params.projectId,

@@ -409,8 +409,10 @@ const REVIEW_ACTIONS = [
   'material_updated',
   'material_deleted',
   'punch_item_created',
+  'punch_items_bulk_created',
   'punch_item_updated',
   'punch_item_deleted',
+  'punch_photo_moved',
   'invoice_created',
   'invoice_submitted',
   'invoice_status_updated',
@@ -495,6 +497,14 @@ function summarizeActivity(row) {
       return `Updated punch list item${details.status ? ` to ${String(details.status).replace(/_/g, ' ')}` : ''}`;
     case 'punch_item_deleted':
       return 'Deleted a punch list item';
+    case 'punch_items_bulk_created': {
+      const count = Number(details.count || 0);
+      const titles = Array.isArray(details.titles) ? details.titles.filter(Boolean) : [];
+      const preview = titles.length ? `: ${titles.join(', ')}${count > titles.length ? ', …' : ''}` : '';
+      return `Added ${count || 'several'} punch list item${count === 1 ? '' : 's'} in bulk${preview}`;
+    }
+    case 'punch_photo_moved':
+      return `${details.moved ? 'Moved' : 'Attached'} a photo to punch list item${punchTitle ? `: ${punchTitle}` : ''}`;
     case 'invoice_created':
       return 'Created an invoice';
     case 'invoice_submitted':

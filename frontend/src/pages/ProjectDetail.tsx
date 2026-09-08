@@ -9,7 +9,7 @@ import {
 } from '../components/QuoteApprovalEmailNotice';
 import Avatar from '../components/Avatar';
 import VoiceTextarea from '../components/VoiceTextarea';
-import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, ClipboardList, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle, Send, Phone, Mail, Building2, AlertTriangle, Check, Paperclip, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, CalendarDays, Search, GripVertical, CheckCircle2, XCircle, Database, ListFilter, Bot, Receipt, Loader2 } from 'lucide-react';
+import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, ClipboardList, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle, Send, Phone, Mail, Building2, AlertTriangle, Check, Paperclip, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, CalendarDays, Search, GripVertical, CheckCircle2, XCircle, Database, ListFilter, Bot, Receipt, Loader2, ListPlus } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useForm } from 'react-hook-form';
 import { format } from 'date-fns';
@@ -29,6 +29,10 @@ import {
 import { getProgressMediaKind, isVideoMedia } from '../lib/progressMedia';
 import { MAX_MEDIA_FILE_MB, uploadProjectMedia } from '../lib/projectMediaUpload';
 import PhotoMarkupModal from '../components/PhotoMarkupModal';
+import PunchBulkAddModal from '../components/PunchBulkAddModal';
+
+// Drag payload for moving an already-attached photo between punch list items.
+const PUNCH_PHOTO_DRAG_MIME = 'application/x-bt-punch-photo';
 
 type Tab = 'overview' | 'details' | 'progress-history' | 'construction-plan' | 'project-timeline' | 'quotes' | 'punch-list' | 'photos' | 'invoices' | 'notes' | 'team' | 'texts';
 
@@ -6763,8 +6767,13 @@ function PunchListTab({
   const [uploadingItemPhoto, setUploadingItemPhoto] = useState<string | null>(null);
   const [punchPhotoPickerItem, setPunchPhotoPickerItem] = useState<any | null>(null);
   const [markupPhoto, setMarkupPhoto] = useState<any | null>(null);
+  const [showBulk, setShowBulk] = useState(false);
+  const [photoDropItemId, setPhotoDropItemId] = useState<string | null>(null);
   const { register, handleSubmit, reset, formState: { isSubmitting } } = useForm();
   const canDelete = Boolean(user && ['super_admin', 'operations_manager'].includes(user.role));
+  // Project managers may add field info but not change existing records; the
+  // move endpoint enforces the same rule server-side.
+  const canMovePhotos = isActive && Boolean(user) && user.role !== 'project_manager';
 
   const load = async () => {
     try {
@@ -6862,6 +6871,47 @@ function PunchListTab({
     }
   };
 
+  const movePhotoToItem = async (photoId: string, fromItemId: string | null, toItem: any) => {
+    if (!photoId || !toItem?.id || fromItemId === toItem.id) return;
+    try {
+      const res = await api.put(`/projects/${projectId}/punch-list/${toItem.id}/photos/${photoId}`, {});
+      const moved = Array.isArray(res.data?.moved_from) && res.data.moved_from.length > 0;
+      toast.success(`Photo ${moved ? 'moved' : 'attached'} to “${toItem.title}”`);
+      await load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to move photo');
+    }
+  };
+
+  const hasPunchPhotoDrag = (event: DragEvent<HTMLElement>) => Array.from(event.dataTransfer?.types || []).includes(PUNCH_PHOTO_DRAG_MIME);
+
+  // Every item row is a drop target for a photo dragged out of another item's
+  // "Attached photos" strip: the way to fix a bulk upload matched to the wrong line.
+  const punchPhotoDropHandlers = (item: any) => {
+    if (!canMovePhotos) return {};
+    return {
+      onDragOver: (event: DragEvent<HTMLDivElement>) => {
+        if (!hasPunchPhotoDrag(event)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+        if (photoDropItemId !== item.id) setPhotoDropItemId(item.id);
+      },
+      onDragLeave: (event: DragEvent<HTMLDivElement>) => {
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+        setPhotoDropItemId(current => (current === item.id ? null : current));
+      },
+      onDrop: (event: DragEvent<HTMLDivElement>) => {
+        if (!hasPunchPhotoDrag(event)) return;
+        event.preventDefault();
+        setPhotoDropItemId(null);
+        let payload: any = null;
+        try { payload = JSON.parse(event.dataTransfer.getData(PUNCH_PHOTO_DRAG_MIME)); } catch { payload = null; }
+        if (!payload?.photoId) return;
+        movePhotoToItem(String(payload.photoId), payload.fromItemId ? String(payload.fromItemId) : null, item);
+      },
+    };
+  };
+
   const priorityColors: Record<string, string> = { low: 'bg-slate-500/15 text-slate-200 border border-slate-400/30', medium: 'bg-sky-500/20 text-sky-200 border border-sky-400/40', high: 'bg-orange-500/20 text-orange-200 border border-orange-400/40', urgent: 'bg-red-500/20 text-red-200 border border-red-400/40' };
   const statusColors: Record<string, string> = { not_started: 'bg-slate-500/15 text-slate-200 border border-slate-400/30', in_progress: 'bg-sky-500/20 text-sky-200 border border-sky-400/40', waiting_materials: 'bg-orange-500/20 text-orange-200 border border-orange-400/40', needs_review: 'bg-fuchsia-500/20 text-fuchsia-200 border border-fuchsia-400/40', completed: 'bg-emerald-500/20 text-emerald-200 border border-emerald-400/40' };
 
@@ -6901,6 +6951,9 @@ function PunchListTab({
         <button disabled={!isActive} onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-blue-300/55 bg-blue-600 text-xs font-black text-white shadow-sm transition-colors flex-shrink-0 hover:bg-blue-500 disabled:cursor-not-allowed disabled:border-slate-600 disabled:bg-slate-900 disabled:text-slate-400" title={isActive ? 'Add punch list item' : 'Activate punch list before adding items'}>
           <Plus className="w-3.5 h-3.5" /> Add
         </button>
+        <button disabled={!isActive} onClick={() => setShowBulk(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-blue-300/55 bg-blue-600 text-xs font-black text-white shadow-sm transition-colors flex-shrink-0 hover:bg-blue-500 disabled:cursor-not-allowed disabled:border-slate-600 disabled:bg-slate-900 disabled:text-slate-400" title={isActive ? 'Add several punch list items at once and match pictures to them' : 'Activate punch list before adding items'}>
+          <ListPlus className="w-3.5 h-3.5" /> Bulk Add
+        </button>
       </div>
 
       {loading ? <Loading /> : (
@@ -6909,7 +6962,7 @@ function PunchListTab({
             const itemAiMeta = aiAgentMeta(item);
             const isChecked = expandedItem === item.id;
             return (
-            <div key={item.id} className={`overflow-hidden rounded-xl border bg-white transition ${isChecked ? 'border-cyan-400 ring-2 ring-cyan-300/70' : 'border-gray-200'}`}>
+            <div key={item.id} {...punchPhotoDropHandlers(item)} className={`overflow-hidden rounded-xl border bg-white transition ${photoDropItemId === item.id ? 'border-amber-400 ring-2 ring-amber-300/70' : isChecked ? 'border-cyan-400 ring-2 ring-cyan-300/70' : 'border-gray-200'}`}>
               <div
                 className="flex cursor-pointer items-center gap-2.5 px-3 py-2"
                 onClick={() => setExpandedItem(isChecked ? null : item.id)}
@@ -6960,7 +7013,7 @@ function PunchListTab({
                 )}
               </div>
               {isChecked && (
-                <div className="border-t border-cyan-200 bg-cyan-50/70 px-3 pb-3 pt-2.5">
+                <div className="border-t border-cyan-200 bg-sky-50 px-3 pb-3 pt-2.5">
                   <p className="mb-1.5 text-[10px] font-black uppercase tracking-wide text-cyan-700">Update “{item.title}”</p>
                   {item.description && <p className="mb-2 whitespace-pre-wrap text-xs leading-5 text-gray-600">{item.description}</p>}
                   {itemAiMeta?.rawTranscript && <p className="mb-2 whitespace-pre-wrap rounded-lg border border-violet-100 bg-violet-50 p-2 text-xs leading-5 text-violet-900">{itemAiMeta.rawTranscript}</p>}
@@ -6995,7 +7048,7 @@ function PunchListTab({
                       type="button"
                       disabled={!isActive}
                       onClick={() => setPunchPhotoPickerItem(item)}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-200 bg-cyan-50 px-2.5 py-1 text-xs font-bold text-cyan-700 transition-colors hover:bg-cyan-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-200 bg-sky-50 px-2.5 py-1 text-xs font-bold text-cyan-700 transition-colors hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Camera className="w-3.5 h-3.5" />
                       Use Bucket Photo
@@ -7004,7 +7057,10 @@ function PunchListTab({
                   {Array.isArray(item.photos) && item.photos.length > 0 && (
                     <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
                       <div className="mb-2 flex items-center justify-between gap-3">
-                        <p className="text-xs font-black uppercase tracking-wide text-slate-500">Attached photos</p>
+                        <p className="text-xs font-black uppercase tracking-wide text-slate-500">
+                          Attached photos
+                          {canMovePhotos && <span className="ml-2 font-semibold normal-case tracking-normal text-slate-400">drag a photo onto another item to move it</span>}
+                        </p>
                         <span className="rounded-full bg-white px-2 py-0.5 text-xs font-black text-slate-600">{item.photos.length}</span>
                       </div>
                       <div className="flex gap-2 overflow-x-auto pb-1">
@@ -7012,11 +7068,21 @@ function PunchListTab({
                           const mediaKind = getProgressMediaKind(photo);
                           const src = progressPhotoSrc(projectId, photo);
                           return (
-                            <div key={photo.assignment_id || photo.id} className="group relative h-20 w-24 flex-shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+                            <div
+                              key={photo.assignment_id || photo.id}
+                              draggable={canMovePhotos}
+                              onDragStart={event => {
+                                if (!canMovePhotos) return;
+                                event.dataTransfer.setData(PUNCH_PHOTO_DRAG_MIME, JSON.stringify({ photoId: photo.id, fromItemId: item.id }));
+                                event.dataTransfer.effectAllowed = 'move';
+                              }}
+                              title={canMovePhotos ? 'Drag onto another punch list item to move this photo' : undefined}
+                              className={`group relative h-20 w-24 flex-shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm ${canMovePhotos ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                            >
                               {mediaKind === 'video' ? (
                                 <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
                               ) : mediaKind === 'image' ? (
-                                <img src={src} alt={photo.original_name || 'Punch list photo'} className="h-full w-full object-cover" loading="lazy" />
+                                <img src={src} alt={photo.original_name || 'Punch list photo'} className="h-full w-full object-cover" loading="lazy" draggable={false} />
                               ) : (
                                 <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
                               )}
@@ -7101,6 +7167,12 @@ function PunchListTab({
         initialSelectedIds={[]}
         onClose={() => setPunchPhotoPickerItem(null)}
         onSave={savePunchPhotoPickerSelection}
+      />
+      <PunchBulkAddModal
+        projectId={projectId}
+        isOpen={showBulk && isActive}
+        onClose={() => setShowBulk(false)}
+        onSaved={load}
       />
       <PhotoMarkupModal
         open={Boolean(markupPhoto)}

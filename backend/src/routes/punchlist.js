@@ -12,6 +12,39 @@ function activePhotoSql(alias = 'ph') {
   return `COALESCE(${alias}.upload_status, 'uploaded') != 'correction_deleted' AND ${alias}.correction_deleted_at IS NULL`;
 }
 
+const PUNCH_STATUSES = new Set(['not_started', 'in_progress', 'waiting_materials', 'needs_review', 'completed']);
+const PUNCH_PRIORITIES = new Set(['low', 'medium', 'high', 'urgent']);
+const MAX_BULK_ITEMS = 200;
+
+function cleanText(value, max) {
+  const text = String(value ?? '').trim();
+  return text ? text.slice(0, max) : null;
+}
+
+function normalizeDueDate(value) {
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  return Number.isNaN(new Date(text).getTime()) ? null : text.slice(0, 40);
+}
+
+// One line of the Bulk Add form -> a validated punch list row (null = skip the line).
+function normalizeBulkRow(row, db) {
+  if (!row || typeof row !== 'object') return null;
+  const title = cleanText(row.title, 500);
+  if (!title) return null;
+  const assignedTo = cleanText(row.assigned_to, 120);
+  return {
+    client_key: cleanText(row.client_key, 120),
+    title,
+    description: cleanText(row.description, 4000),
+    status: PUNCH_STATUSES.has(row.status) ? row.status : 'not_started',
+    priority: PUNCH_PRIORITIES.has(row.priority) ? row.priority : 'medium',
+    assigned_to: assignedTo && db.prepare('SELECT id FROM users WHERE id = ?').get(assignedTo) ? assignedTo : null,
+    due_date: normalizeDueDate(row.due_date),
+    notes: cleanText(row.notes, 4000),
+  };
+}
+
 // GET /api/projects/:projectId/punch-list
 router.get('/', (req, res) => {
   const db = getDb();
@@ -116,6 +149,51 @@ router.post('/', (req, res) => {
   }
 });
 
+// POST /api/projects/:projectId/punch-list/bulk
+// Line-by-line insert from the desktop Bulk Add form: every row becomes its
+// own punch list item, written in ONE transaction so a bad line never leaves
+// half a list behind. Same role rules as the single-item POST above.
+router.post('/bulk', (req, res) => {
+  try {
+    const rawRows = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (rawRows.length > MAX_BULK_ITEMS) {
+      return res.status(400).json({ error: `Add up to ${MAX_BULK_ITEMS} punch list items at a time` });
+    }
+    const db = getDb();
+    const rows = rawRows.map(row => normalizeBulkRow(row, db)).filter(Boolean);
+    if (!rows.length) return res.status(400).json({ error: 'Add at least one punch list item with a title' });
+
+    const maxOrder = db.prepare('SELECT MAX(sort_order) as max FROM punch_list_items WHERE project_id = ?').get(req.params.projectId);
+    let nextOrder = Number(maxOrder?.max || 0);
+    const insert = db.prepare(`
+      INSERT INTO punch_list_items (id, project_id, title, description, status, priority, assigned_to, due_date, notes, sort_order, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const created = [];
+    db.transaction(() => {
+      for (const row of rows) {
+        const id = uuidv4();
+        nextOrder += 1;
+        insert.run(id, req.params.projectId, row.title, row.description, row.status, row.priority, row.assigned_to, row.due_date, row.notes, nextOrder, req.user.id);
+        created.push({ id, title: row.title, client_key: row.client_key, sort_order: nextOrder });
+      }
+    })();
+
+    logActivity({
+      userId: req.user.id,
+      projectId: req.params.projectId,
+      action: 'punch_items_bulk_created',
+      entityType: 'punch_list_item',
+      entityId: created[0].id,
+      details: { count: created.length, titles: created.slice(0, 5).map(item => item.title) },
+    });
+    res.status(201).json({ created: created.length, items: created });
+  } catch (err) {
+    console.error('Failed to bulk-create punch list items:', err);
+    res.status(500).json({ error: 'Failed to create punch list items' });
+  }
+});
+
 // PUT /api/projects/:projectId/punch-list/:id
 router.put('/:id', blockProjectManagerMutation, (req, res) => {
   try {
@@ -154,6 +232,73 @@ router.delete('/:id', authorizeUpperManagement, (req, res) => {
   db.prepare('DELETE FROM punch_list_items WHERE id = ? AND project_id = ?').run(req.params.id, req.params.projectId);
   logActivity({ userId: req.user.id, projectId: req.params.projectId, action: 'punch_item_deleted', entityType: 'punch_list_item', entityId: req.params.id });
   res.json({ message: 'Item deleted' });
+});
+
+// PUT /api/projects/:projectId/punch-list/:id/photos/:photoId
+// Attach a project photo to THIS punch item, moving it off any other punch
+// item it was matched to (a bulk upload dropped on the wrong line, or a photo
+// dragged between rows). The photo file and its bucket entry are untouched;
+// only the punch-item link changes. Same role rules as updating the item.
+router.put('/:id/photos/:photoId', blockProjectManagerMutation, (req, res) => {
+  try {
+    const db = getDb();
+    const projectId = req.params.projectId;
+    const item = db.prepare('SELECT id, title, assigned_to FROM punch_list_items WHERE id = ? AND project_id = ?').get(req.params.id, projectId);
+    if (!item) return res.status(404).json({ error: 'Punch list item not found' });
+
+    const photo = db.prepare(`
+      SELECT ph.id, ph.punch_list_item_id
+      FROM photos ph
+      WHERE ph.id = ? AND ph.project_id = ? AND ${activePhotoSql('ph')}
+    `).get(req.params.photoId, projectId);
+    if (!photo) return res.status(404).json({ error: 'Photo not found in this project' });
+
+    const previousLinks = db.prepare(`
+      SELECT target_id FROM photo_assignments
+      WHERE project_id = ? AND photo_id = ? AND target_type = 'punch_list_item' AND target_id != ?
+    `).all(projectId, photo.id, item.id).map(row => row.target_id);
+    if (photo.punch_list_item_id && photo.punch_list_item_id !== item.id) previousLinks.push(photo.punch_list_item_id);
+    const movedFrom = Array.from(new Set(previousLinks));
+
+    // Contractors may only touch items assigned to them: the destination AND
+    // every item the photo is being moved away from.
+    if (req.user.role === 'contractor') {
+      const touched = [item.id, ...movedFrom];
+      const placeholders = touched.map(() => '?').join(',');
+      const foreign = db.prepare(`
+        SELECT COUNT(*) as cnt FROM punch_list_items
+        WHERE id IN (${placeholders}) AND (assigned_to IS NULL OR assigned_to != ?)
+      `).get(...touched, req.user.id);
+      if (foreign.cnt > 0) return res.status(403).json({ error: 'You can only move photos between items assigned to you' });
+    }
+
+    db.transaction(() => {
+      db.prepare(`UPDATE photos SET punch_list_item_id = ?, updated_at = datetime('now') WHERE id = ? AND project_id = ?`).run(item.id, photo.id, projectId);
+      db.prepare(`DELETE FROM photo_assignments WHERE project_id = ? AND photo_id = ? AND target_type = 'punch_list_item' AND target_id != ?`).run(projectId, photo.id, item.id);
+      db.prepare(`
+        INSERT OR IGNORE INTO photo_assignments (id, project_id, photo_id, target_type, target_id, note, created_by)
+        VALUES (?, ?, ?, 'punch_list_item', ?, NULL, ?)
+      `).run(uuidv4(), projectId, photo.id, item.id, req.user.id);
+    })();
+
+    logActivity({
+      userId: req.user.id,
+      projectId,
+      action: 'punch_photo_moved',
+      entityType: 'punch_list_item',
+      entityId: item.id,
+      details: { photo_id: photo.id, title: item.title, moved_from: movedFrom, moved: movedFrom.length > 0 },
+    });
+    res.json({
+      message: movedFrom.length ? 'Photo moved' : 'Photo attached',
+      photo_id: photo.id,
+      punch_list_item_id: item.id,
+      moved_from: movedFrom,
+    });
+  } catch (err) {
+    console.error('Failed to move punch list photo:', err);
+    res.status(500).json({ error: 'Failed to move photo' });
+  }
 });
 
 // GET /api/projects/:projectId/punch-list/:id/comments
