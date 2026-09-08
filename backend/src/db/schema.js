@@ -2138,6 +2138,34 @@ function initializeSchema() {
   try { db.exec(`ALTER TABLE punch_list_items ADD COLUMN raw_transcript TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE punch_list_items ADD COLUMN agent_request_id TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_punch_list_agent_request ON punch_list_items(agent_request_id)`); } catch (_) { /* best-effort */ }
+  // Punch list -> contractors (2026-09-08): per-item vendor assignment, "sent"
+  // stamps, and a log of every punch list email that went out.
+  try { db.exec(`ALTER TABLE punch_list_items ADD COLUMN assigned_contractor_id TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE punch_list_items ADD COLUMN last_sent_at TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE punch_list_items ADD COLUMN last_sent_to TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_punch_list_assigned_contractor ON punch_list_items(assigned_contractor_id)`); } catch (_) { /* best-effort */ }
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS punch_list_sends (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        contractor_id TEXT,
+        contractor_name TEXT,
+        email TEXT,
+        cc_email TEXT,
+        item_count INTEGER NOT NULL DEFAULT 0,
+        item_ids_json TEXT,
+        message TEXT,
+        status TEXT NOT NULL DEFAULT 'sent',
+        error TEXT,
+        sent_by TEXT NOT NULL,
+        sent_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+        FOREIGN KEY (sent_by) REFERENCES users(id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_punch_list_sends_project ON punch_list_sends(project_id, sent_at);
+    `);
+  } catch (_) { /* best-effort */ }
   try {
     db.exec(`
       CREATE TABLE IF NOT EXISTS agent_bridge_agents (

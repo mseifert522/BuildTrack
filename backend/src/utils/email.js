@@ -906,8 +906,93 @@ async function sendQuoteApprovedEmail({
   });
 }
 
+// Email / Send Punch List: one contractor's punch list for one property.
+// `items` carry title/description/notes/priority/status/due_date and
+// photos[{ url }] (public /uploads links, at most a dozen per item).
+async function sendPunchListEmail({ contractorName, contactName, email, ccEmail, project, items, message, sentByName }) {
+  if (!email) throw new Error('Missing contractor email');
+  const transporter = createTransporter();
+  const questionsEmail = 'info@newurbandev.com';
+  const address = String(project?.address || project?.job_name || 'the property').trim();
+  const greetName = String(contactName || contractorName || '').trim();
+  const list = Array.isArray(items) ? items : [];
+  const priorityColor = { urgent: '#B91C1C', high: '#C2410C', medium: '#1D4ED8', low: '#6B7280' };
+  const formatDue = (value) => {
+    if (!value) return '';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  };
+
+  const rows = list.map((item, index) => {
+    const photos = Array.isArray(item.photos) ? item.photos.filter(photo => photo && photo.url) : [];
+    const meta = [
+      `<span style="color:${priorityColor[item.priority] || '#6B7280'}; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">${escapeHtml(item.priority || 'medium')}</span>`,
+      escapeHtml(String(item.status || 'not_started').replace(/_/g, ' ')),
+      item.due_date ? `due ${escapeHtml(formatDue(item.due_date))}` : '',
+      photos.length ? photos.map((photo, photoIndex) => `<a href="${escapeHtml(photo.url)}" style="color:#1D4ED8; font-weight:700;">photo ${photoIndex + 1}</a>`).join(', ') : '',
+    ].filter(Boolean).join(' &middot; ');
+    return `
+      <tr>
+        <td style="padding:10px 8px 10px 0; border-top:1px solid #E5E7EB; vertical-align:top; width:26px; font-size:13px; font-weight:800; color:#9CA3AF;">${index + 1}.</td>
+        <td style="padding:10px 0; border-top:1px solid #E5E7EB; vertical-align:top;">
+          <p style="margin:0; font-size:14px; font-weight:800; color:#111827;">${escapeHtml(item.title)}</p>
+          ${item.description ? `<p style="margin:4px 0 0; font-size:13px; color:#374151; line-height:1.5;">${escapeHtml(item.description)}</p>` : ''}
+          ${item.notes ? `<p style="margin:4px 0 0; font-size:12px; color:#6B7280; line-height:1.5;">${escapeHtml(item.notes)}</p>` : ''}
+          <p style="margin:6px 0 0; font-size:12px; color:#6B7280;">${meta}</p>
+        </td>
+      </tr>`;
+  }).join('');
+
+  const html = emailWrapper(`
+    <h2 style="color:#111827; font-size:20px; font-weight:800; margin:0 0 8px;">Punch list: ${escapeHtml(address)}</h2>
+    <p style="color:#6B7280; font-size:14px; line-height:1.6; margin:0 0 18px;">
+      ${greetName ? `Hi ${escapeHtml(greetName)},` : 'Hello,'}<br /><br />
+      Below ${list.length === 1 ? 'is the punch list item' : `are the ${list.length} punch list items`} we need you to complete at
+      <strong style="color:#111827;">${escapeHtml(address)}</strong>.${sentByName ? ` Sent by ${escapeHtml(sentByName)}.` : ''}
+    </p>
+    ${message ? `
+    <div style="background:#FFFBEB; border:1px solid #FDE68A; border-radius:12px; padding:14px 16px; margin-bottom:18px;">
+      <p style="font-size:12px; color:#92400E; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin:0 0 6px;">Note from our office</p>
+      <p style="font-size:14px; color:#374151; line-height:1.6; margin:0;">${escapeHtml(message).replace(/\r?\n/g, '<br />')}</p>
+    </div>` : ''}
+    <div style="background:#F9FAFB; border:1px solid #E5E7EB; border-radius:12px; padding:4px 16px 8px; margin-bottom:18px;">
+      <p style="font-size:12px; color:#374151; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin:12px 0 4px;">Punch list items (${list.length})</p>
+      <table style="width:100%; border-collapse:collapse;">${rows}</table>
+    </div>
+    <div style="background:#ECFDF5; border:1px solid #A7F3D0; border-radius:12px; padding:14px 16px; margin-bottom:4px;">
+      <p style="font-size:12px; color:#047857; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin:0 0 6px;">Questions?</p>
+      <p style="font-size:13px; color:#374151; line-height:1.6; margin:0;">
+        Reply to this email or write to <a href="mailto:${escapeHtml(questionsEmail)}" style="color:#065F46; font-weight:700;">${escapeHtml(questionsEmail)}</a>. Please let us know when the items are complete.
+      </p>
+    </div>
+  `);
+
+  const text = [
+    `Punch list: ${address}`,
+    '',
+    message ? `${message}\n` : '',
+    ...list.map((item, index) => {
+      const photos = Array.isArray(item.photos) ? item.photos.filter(photo => photo && photo.url) : [];
+      return `${index + 1}. ${item.title}${item.description ? ` - ${item.description}` : ''} [${item.priority || 'medium'}${item.due_date ? `, due ${formatDue(item.due_date)}` : ''}]${photos.length ? ` photos: ${photos.map(photo => photo.url).join(' ')}` : ''}`;
+    }),
+    '',
+    `Questions? ${questionsEmail}`,
+  ].join('\n');
+
+  await sendBrandedMail(transporter, {
+    from: process.env.EMAIL_FROM || brandedFrom(),
+    to: email,
+    cc: ccEmail || undefined,
+    replyTo: questionsEmail,
+    subject: `Punch list for ${address} (${list.length} item${list.length === 1 ? '' : 's'})`,
+    html,
+    text,
+  });
+}
+
 module.exports = {
   isEmailConfigured,
+  sendPunchListEmail,
   sendInvoiceEmail,
   sendApprovedPayNotificationEmail,
   sendContractorInvoiceReceivedEmail,

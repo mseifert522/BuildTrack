@@ -413,6 +413,9 @@ const REVIEW_ACTIONS = [
   'punch_item_updated',
   'punch_item_deleted',
   'punch_photo_moved',
+  'punch_photos_attached',
+  'punch_contractor_assigned',
+  'punch_list_sent',
   'invoice_created',
   'invoice_submitted',
   'invoice_status_updated',
@@ -505,6 +508,18 @@ function summarizeActivity(row) {
     }
     case 'punch_photo_moved':
       return `${details.moved ? 'Moved' : 'Attached'} a photo to punch list item${punchTitle ? `: ${punchTitle}` : ''}`;
+    case 'punch_photos_attached': {
+      const count = Number(details.count || 0);
+      return `Put ${count || 'several'} picture${count === 1 ? '' : 's'} on punch list item${punchTitle ? `: ${punchTitle}` : ''}`;
+    }
+    case 'punch_contractor_assigned': {
+      const count = Number(details.count || 0);
+      return `Assigned contractors on ${count || 'several'} punch list item${count === 1 ? '' : 's'}`;
+    }
+    case 'punch_list_sent': {
+      const count = Number(details.item_count || 0);
+      return `Emailed the punch list to ${details.contractor || 'a contractor'}${count ? ` (${count} item${count === 1 ? '' : 's'})` : ''}`;
+    }
     case 'invoice_created':
       return 'Created an invoice';
     case 'invoice_submitted':

@@ -17,7 +17,7 @@ import GooglePlacesInput from '../components/GooglePlacesInput';
 import CurrencyInput from '../components/CurrencyInput';
 import { formatDateOnly, formatEasternDate, formatEasternDateTime } from '../lib/time';
 import AddToCalendarButton from '../components/AddToCalendarButton';
-import { fileDropHandlers } from '../lib/fileDrop';
+import { droppedFiles, fileDropHandlers } from '../lib/fileDrop';
 import {
   appendProgressUploadAudit,
   isSupportedProgressMediaFile,
@@ -30,6 +30,7 @@ import { getProgressMediaKind, isVideoMedia } from '../lib/progressMedia';
 import { MAX_MEDIA_FILE_MB, uploadProjectMedia } from '../lib/projectMediaUpload';
 import PhotoMarkupModal from '../components/PhotoMarkupModal';
 import PunchBulkAddModal from '../components/PunchBulkAddModal';
+import PunchListSendModal from '../components/PunchListSendModal';
 
 // Drag payload for moving an already-attached photo between punch list items.
 const PUNCH_PHOTO_DRAG_MIME = 'application/x-bt-punch-photo';
@@ -2136,7 +2137,7 @@ export default function ProjectDetail() {
   return (
     <div className="min-h-full">
       {/* Header */}
-      <div className="sticky top-0 z-50 isolate bg-white border-b border-gray-200 shadow-sm">
+      <div data-project-sticky-header="true" className="sticky top-0 z-50 isolate bg-white border-b border-gray-200 shadow-sm">
         <div className="px-4 md:px-6 py-3">
           <div className="flex items-center gap-4 mb-3">
             <button onClick={() => navigate('/projects')} className="flex-shrink-0 p-2 rounded-lg text-slate-300 hover:bg-white/5 hover:text-white transition-colors" aria-label="Back to projects">
@@ -6774,6 +6775,125 @@ function PunchListTab({
   // Project managers may add field info but not change existing records; the
   // move endpoint enforces the same rule server-side.
   const canMovePhotos = isActive && Boolean(user) && user.role !== 'project_manager';
+  // Picture tray: a batch of pictures uploaded to the bucket, waiting to be
+  // matched to items by drag or check + "Put here".
+  const [trayPhotos, setTrayPhotos] = useState<any[]>([]);
+  const [traySelected, setTraySelected] = useState<Set<string>>(() => new Set());
+  const [trayUpload, setTrayUpload] = useState<{ done: number; total: number } | null>(null);
+  const [trayHidden, setTrayHidden] = useState(false);
+  const [attachingItemId, setAttachingItemId] = useState<string | null>(null);
+  const trayFileInputRef = useRef<HTMLInputElement>(null);
+  const trayStorageKey = `bt-punch-tray:${projectId}`;
+  // Contractors: per-item assignment (Edit modal) and Email / Send Punch List.
+  const [showSend, setShowSend] = useState(false);
+  const [editItem, setEditItem] = useState<any | null>(null);
+  const [contractorOptions, setContractorOptions] = useState<any[]>([]);
+  const [stickyOffset, setStickyOffset] = useState(0);
+  const editForm = useForm();
+  const canSend = isActive && Boolean(user) && ['super_admin', 'operations_manager', 'project_manager'].includes(user.role);
+  const canEditItems = isActive && Boolean(user) && user.role !== 'project_manager' && user.role !== 'contractor';
+
+  const loadContractorOptions = async () => {
+    if (!user || user.role === 'contractor') return;
+    try {
+      const res = await api.get(`/projects/${projectId}/punch-list/contractors`);
+      const linked = Array.isArray(res.data?.contractors) ? res.data.contractors : [];
+      const directory = Array.isArray(res.data?.directory) ? res.data.directory : [];
+      const seen = new Set(linked.map((contractor: any) => String(contractor.id)));
+      setContractorOptions([
+        ...linked.map((contractor: any) => ({ ...contractor, on_project: true })),
+        ...directory.filter((contractor: any) => !seen.has(String(contractor.id))),
+      ]);
+    } catch { /* the contractor select just stays empty */ }
+  };
+  useEffect(() => { loadContractorOptions(); }, [projectId]);
+
+  // The project header is sticky; anything else that sticks must sit below it.
+  useEffect(() => {
+    const header = document.querySelector<HTMLElement>('[data-project-sticky-header]');
+    if (!header) return;
+    const measure = () => setStickyOffset(Math.round(header.getBoundingClientRect().height));
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, []);
+
+  const openEdit = (item: any) => {
+    editForm.reset({
+      title: item.title || '',
+      description: item.description || '',
+      priority: item.priority || 'medium',
+      due_date: item.due_date ? String(item.due_date).slice(0, 10) : '',
+      notes: item.notes || '',
+      assigned_contractor_id: item.assigned_contractor_id || '',
+    });
+    setEditItem(item);
+  };
+
+  const onEditSave = async (data: any) => {
+    if (!editItem) return;
+    const title = String(data.title || '').trim();
+    if (!title) {
+      toast.error('Title is required');
+      return;
+    }
+    try {
+      await api.put(`/projects/${projectId}/punch-list/${editItem.id}`, {
+        title,
+        description: String(data.description || ''),
+        priority: data.priority || editItem.priority,
+        due_date: data.due_date || '',
+        notes: String(data.notes || ''),
+        assigned_contractor_id: data.assigned_contractor_id || null,
+      });
+      toast.success('Punch list item updated');
+      setEditItem(null);
+      await load();
+      await loadContractorOptions();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to update item');
+    }
+  };
+
+  // A picture dropped anywhere else on the page would make the browser
+  // navigate to the file and lose the tab; swallow drops the cards did not take.
+  useEffect(() => {
+    const guard = (event: globalThis.DragEvent) => {
+      if (event.defaultPrevented) return;
+      if (!Array.from(event.dataTransfer?.types || []).includes('Files')) return;
+      event.preventDefault();
+      if (event.type === 'dragover' && event.dataTransfer) event.dataTransfer.dropEffect = 'none';
+    };
+    window.addEventListener('dragover', guard);
+    window.addEventListener('drop', guard);
+    return () => {
+      window.removeEventListener('dragover', guard);
+      window.removeEventListener('drop', guard);
+    };
+  }, []);
+
+  // Unmatched tray pictures are already saved in the bucket, so the tray can
+  // pick them back up after a reload.
+  useEffect(() => {
+    let ids: string[] = [];
+    try { ids = JSON.parse(localStorage.getItem(trayStorageKey) || '[]'); } catch { ids = []; }
+    if (!Array.isArray(ids) || !ids.length) return;
+    let cancelled = false;
+    api.get(`/projects/${projectId}/photos`)
+      .then(res => {
+        if (cancelled) return;
+        const wanted = new Set(ids.map(String));
+        const still = (Array.isArray(res.data) ? res.data : []).filter((photo: any) => wanted.has(String(photo.id)) && !photo.punch_list_item_id);
+        setTrayPhotos(still);
+        try {
+          if (still.length) localStorage.setItem(trayStorageKey, JSON.stringify(still.map((photo: any) => String(photo.id))));
+          else localStorage.removeItem(trayStorageKey);
+        } catch { /* ignore */ }
+      })
+      .catch(() => { /* the tray simply starts empty */ });
+    return () => { cancelled = true; };
+  }, [projectId]);
 
   const load = async () => {
     try {
@@ -6871,29 +6991,133 @@ function PunchListTab({
     }
   };
 
-  const movePhotoToItem = async (photoId: string, fromItemId: string | null, toItem: any) => {
-    if (!photoId || !toItem?.id || fromItemId === toItem.id) return;
+  // ---- pictures: tray + card drops ---------------------------------------
+  const persistTray = (photos: any[]) => {
     try {
-      const res = await api.put(`/projects/${projectId}/punch-list/${toItem.id}/photos/${photoId}`, {});
-      const moved = Array.isArray(res.data?.moved_from) && res.data.moved_from.length > 0;
-      toast.success(`Photo ${moved ? 'moved' : 'attached'} to “${toItem.title}”`);
-      await load();
+      if (photos.length) localStorage.setItem(trayStorageKey, JSON.stringify(photos.map(photo => String(photo.id))));
+      else localStorage.removeItem(trayStorageKey);
+    } catch { /* storage unavailable: the tray is session-only then */ }
+  };
+
+  const isPictureFile = (file: File) => String(file.type || '').toLowerCase().startsWith('image/') || /\.(heic|heif|dng|tiff?)$/i.test(String(file.name || ''));
+
+  // Upload a batch straight to the project bucket; the pictures then wait in
+  // the tray to be matched. Nothing is lost if the user never matches them.
+  const uploadToTray = async (files?: FileList | File[] | null) => {
+    const pictures = Array.from(files || []).filter(isPictureFile);
+    if (!pictures.length) {
+      toast.error('Pictures only');
+      return;
+    }
+    setTrayHidden(false);
+    setTrayUpload({ done: 0, total: pictures.length });
+    let added: any[] = [];
+    try {
+      for (let start = 0; start < pictures.length; start += 100) {
+        const slice = pictures.slice(start, start + 100);
+        const formData = new FormData();
+        slice.forEach(file => formData.append('photos', file));
+        formData.append('capture_project_id', projectId);
+        formData.append('client_project_id', projectId);
+        formData.append('caption', 'Punch list picture (not yet matched to an item)');
+        const res = await uploadProjectMedia(projectId, formData);
+        added = [...added, ...(Array.isArray(res.data?.photos) ? res.data.photos : [])];
+        setTrayUpload({ done: Math.min(pictures.length, start + slice.length), total: pictures.length });
+      }
+      toast.success(`${added.length} picture${added.length === 1 ? '' : 's'} ready — drag each onto its item`);
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Failed to move photo');
+      toast.error(err.response?.data?.error || 'Picture upload failed');
+    } finally {
+      if (added.length) {
+        const known = new Set(trayPhotos.map(photo => String(photo.id)));
+        const next = [...trayPhotos, ...added.filter(photo => !known.has(String(photo.id)))];
+        setTrayPhotos(next);
+        persistTray(next);
+      }
+      setTrayUpload(null);
     }
   };
 
-  const hasPunchPhotoDrag = (event: DragEvent<HTMLElement>) => Array.from(event.dataTransfer?.types || []).includes(PUNCH_PHOTO_DRAG_MIME);
+  // Put tray pictures (or a photo dragged off another card) on this item.
+  const putPhotosOnItem = async (photoIds: string[], fromItemId: string | null, item: any) => {
+    const ids = Array.from(new Set(photoIds.map(String).filter(Boolean)));
+    if (!ids.length || !item?.id || fromItemId === item.id) return;
+    setAttachingItemId(item.id);
+    try {
+      const res = await api.post(`/projects/${projectId}/punch-list/${item.id}/photos`, { photo_ids: ids });
+      const attached = Number(res.data?.attached ?? ids.length);
+      const moved = Number(res.data?.moved || 0);
+      const done = new Set(ids);
+      const next = trayPhotos.filter(photo => !done.has(String(photo.id)));
+      setTrayPhotos(next);
+      persistTray(next);
+      setTraySelected(new Set());
+      toast.success(`${attached} picture${attached === 1 ? '' : 's'} ${moved ? 'moved' : 'put'} on “${item.title}”`);
+      await load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to put pictures on this item');
+    } finally {
+      setAttachingItemId(null);
+    }
+  };
 
-  // Every item row is a drop target for a photo dragged out of another item's
-  // "Attached photos" strip: the way to fix a bulk upload matched to the wrong line.
+  // Drag a wrong photo off an item and drop it in the tray: it is detached
+  // (still in the bucket) and waits there to be matched again.
+  const returnPhotosToTray = async (payload: any) => {
+    const photos: any[] = Array.isArray(payload?.photos) ? payload.photos : [];
+    const detachable = photos.filter(photo => photo?.assignment_id);
+    if (!detachable.length) {
+      toast.error('This photo cannot be detached from its item');
+      return;
+    }
+    try {
+      for (const photo of detachable) {
+        await api.delete(`/projects/${projectId}/photos/assignments/${photo.assignment_id}`);
+      }
+      const known = new Set(trayPhotos.map(photo => String(photo.id)));
+      const next = [...trayPhotos, ...detachable.filter(photo => !known.has(String(photo.id)))];
+      setTrayPhotos(next);
+      persistTray(next);
+      setTrayHidden(false);
+      toast.success(`${detachable.length} picture${detachable.length === 1 ? '' : 's'} back in the tray`);
+      await load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to detach picture');
+    }
+  };
+
+  const toggleTraySelected = (photoId: string) => {
+    setTraySelected(prev => {
+      const next = new Set(prev);
+      if (next.has(photoId)) next.delete(photoId);
+      else next.add(photoId);
+      return next;
+    });
+  };
+
+  const startTrayDrag = (photo: any) => (event: DragEvent<HTMLDivElement>) => {
+    const ids = traySelected.has(String(photo.id)) ? Array.from(traySelected) : [String(photo.id)];
+    event.dataTransfer.setData(PUNCH_PHOTO_DRAG_MIME, JSON.stringify({ photoIds: ids, fromItemId: null }));
+    event.dataTransfer.effectAllowed = 'move';
+  };
+
+  const hasPunchPhotoDrag = (event: DragEvent<HTMLElement>) => Array.from(event.dataTransfer?.types || []).includes(PUNCH_PHOTO_DRAG_MIME);
+  const hasFileDrag = (event: DragEvent<HTMLElement>) => Array.from(event.dataTransfer?.types || []).includes('Files');
+  const readPunchPhotoPayload = (event: DragEvent<HTMLElement>) => {
+    try { return JSON.parse(event.dataTransfer.getData(PUNCH_PHOTO_DRAG_MIME)); } catch { return null; }
+  };
+
+  // Every item card accepts (a) pictures dragged from the tray or out of another
+  // item's "Attached photos" strip and (b) image files dropped straight from
+  // the desktop, which upload onto that item.
   const punchPhotoDropHandlers = (item: any) => {
-    if (!canMovePhotos) return {};
+    const accepts = (event: DragEvent<HTMLElement>) => (canMovePhotos && hasPunchPhotoDrag(event)) || (isActive && hasFileDrag(event));
     return {
       onDragOver: (event: DragEvent<HTMLDivElement>) => {
-        if (!hasPunchPhotoDrag(event)) return;
+        if (!accepts(event)) return;
         event.preventDefault();
-        event.dataTransfer.dropEffect = 'move';
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = hasPunchPhotoDrag(event) ? 'move' : 'copy';
         if (photoDropItemId !== item.id) setPhotoDropItemId(item.id);
       },
       onDragLeave: (event: DragEvent<HTMLDivElement>) => {
@@ -6901,15 +7125,49 @@ function PunchListTab({
         setPhotoDropItemId(current => (current === item.id ? null : current));
       },
       onDrop: (event: DragEvent<HTMLDivElement>) => {
-        if (!hasPunchPhotoDrag(event)) return;
+        if (!accepts(event)) return;
         event.preventDefault();
+        event.stopPropagation();
         setPhotoDropItemId(null);
-        let payload: any = null;
-        try { payload = JSON.parse(event.dataTransfer.getData(PUNCH_PHOTO_DRAG_MIME)); } catch { payload = null; }
-        if (!payload?.photoId) return;
-        movePhotoToItem(String(payload.photoId), payload.fromItemId ? String(payload.fromItemId) : null, item);
+        if (hasPunchPhotoDrag(event)) {
+          const payload = readPunchPhotoPayload(event);
+          const ids: string[] = Array.isArray(payload?.photoIds) ? payload.photoIds.map(String) : [];
+          putPhotosOnItem(ids, payload?.fromItemId ? String(payload.fromItemId) : null, item);
+          return;
+        }
+        const files = droppedFiles(event, { accept: 'image/*', multiple: true });
+        if (files.length) uploadItemPhoto(item.id, files);
+        else toast.error('Pictures only');
       },
     };
+  };
+
+  // The tray takes desktop files (upload to the bucket) and photos dragged off
+  // a card (detach back into the tray).
+  const trayDropHandlers = {
+    onDragOver: (event: DragEvent<HTMLElement>) => {
+      if (!hasFileDrag(event) && !(canMovePhotos && hasPunchPhotoDrag(event))) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = hasPunchPhotoDrag(event) ? 'move' : 'copy';
+      if (photoDropItemId !== 'tray') setPhotoDropItemId('tray');
+    },
+    onDragLeave: (event: DragEvent<HTMLElement>) => {
+      if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+      setPhotoDropItemId(current => (current === 'tray' ? null : current));
+    },
+    onDrop: (event: DragEvent<HTMLElement>) => {
+      if (!hasFileDrag(event) && !(canMovePhotos && hasPunchPhotoDrag(event))) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setPhotoDropItemId(null);
+      if (hasPunchPhotoDrag(event)) {
+        const payload = readPunchPhotoPayload(event);
+        if (payload?.fromItemId) returnPhotosToTray(payload);
+        return;
+      }
+      uploadToTray(droppedFiles(event, { accept: 'image/*', multiple: true }));
+    },
   };
 
   const priorityColors: Record<string, string> = { low: 'bg-slate-500/15 text-slate-200 border border-slate-400/30', medium: 'bg-sky-500/20 text-sky-200 border border-sky-400/40', high: 'bg-orange-500/20 text-orange-200 border border-orange-400/40', urgent: 'bg-red-500/20 text-red-200 border border-red-400/40' };
@@ -6927,6 +7185,17 @@ function PunchListTab({
             </div>
             <p className="mt-2 text-sm font-semibold leading-6 text-slate-100">Punch list is the final 90% completion workflow. It stays separate from scope of work and only opens when management activates it.</p>
           </div>
+          {canSend && (
+            <button
+              type="button"
+              onClick={() => setShowSend(true)}
+              className="inline-flex min-h-11 flex-shrink-0 items-center justify-center gap-2 rounded-xl border border-amber-200/70 bg-gradient-to-br from-amber-300 to-amber-500 px-4 py-2.5 text-sm font-black text-amber-950 shadow-[0_10px_24px_rgba(245,158,11,0.25)] transition hover:from-amber-200 hover:to-amber-400"
+              title="Email the punch list to the contractors working on it"
+            >
+              <Send className="h-4 w-4" />
+              Email / Send Punch List
+            </button>
+          )}
           {!isActive && (
             <button
               type="button"
@@ -6954,7 +7223,117 @@ function PunchListTab({
         <button disabled={!isActive} onClick={() => setShowBulk(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-blue-300/55 bg-blue-600 text-xs font-black text-white shadow-sm transition-colors flex-shrink-0 hover:bg-blue-500 disabled:cursor-not-allowed disabled:border-slate-600 disabled:bg-slate-900 disabled:text-slate-400" title={isActive ? 'Add several punch list items at once and match pictures to them' : 'Activate punch list before adding items'}>
           <ListPlus className="w-3.5 h-3.5" /> Bulk Add
         </button>
+        {canMovePhotos && (
+          <button
+            type="button"
+            {...trayDropHandlers}
+            onClick={() => trayFileInputRef.current?.click()}
+            disabled={Boolean(trayUpload)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-black shadow-sm transition-colors flex-shrink-0 disabled:cursor-not-allowed disabled:opacity-60 ${photoDropItemId === 'tray' ? 'border-amber-300 bg-amber-400 text-amber-950 ring-2 ring-amber-300/70' : 'border-amber-300/60 bg-amber-500/20 text-amber-200 hover:bg-amber-500/35'}`}
+            title="Drop pictures here (or click to browse). They upload to the Photos Bucket, then you drag each one onto its item."
+          >
+            <ImagePlus className="w-3.5 h-3.5" /> {trayUpload ? `Uploading ${trayUpload.done}/${trayUpload.total}` : photoDropItemId === 'tray' ? 'Drop to upload' : 'Add Pictures'}
+          </button>
+        )}
+        {canMovePhotos && trayHidden && (
+          <button type="button" onClick={() => setTrayHidden(false)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-300/60 bg-slate-950 text-xs font-black text-amber-200 flex-shrink-0">
+            {trayPhotos.length ? `${trayPhotos.length} to match · Show` : 'Show picture tray'}
+          </button>
+        )}
+        <input
+          id="bt-punch-tray-input"
+          ref={trayFileInputRef}
+          type="file"
+          accept="image/*,.heic,.heif"
+          multiple
+          className="hidden"
+          onChange={e => { uploadToTray(e.target.files); e.currentTarget.value = ''; }}
+        />
       </div>
+
+      {canMovePhotos && !trayHidden && (
+        <div
+          {...trayDropHandlers}
+          data-punch-tray="true"
+          style={{ top: stickyOffset + 8 }}
+          className={`sticky z-10 rounded-2xl border-2 border-dashed p-3 shadow-[0_18px_44px_rgba(2,6,23,0.45)] transition ${photoDropItemId === 'tray' ? 'border-amber-400 bg-amber-950/70' : 'border-slate-600 bg-slate-950'}`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-xs font-black uppercase tracking-wide text-slate-300">Pictures to match · {trayPhotos.length}</p>
+              <p className="text-[11px] text-slate-400">
+                {trayUpload
+                  ? `Uploading ${trayUpload.done} of ${trayUpload.total}…`
+                  : traySelected.size > 0
+                    ? `${traySelected.size} checked — press “Put here” on an item, or drag`
+                    : trayPhotos.length > 0
+                      ? 'Drag a picture onto its item, or check pictures and press “Put here” on the item. They are already saved in the Photos Bucket.'
+                      : 'Drop pictures anywhere in this box to upload them, then drag each one onto its item. Dropping straight onto an item card works too.'}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {traySelected.size > 0 && (
+                <button type="button" onClick={() => setTraySelected(new Set())} className="text-xs font-bold text-slate-300 underline">Clear checks</button>
+              )}
+              <button type="button" onClick={() => trayFileInputRef.current?.click()} disabled={Boolean(trayUpload)} className="rounded-lg border border-blue-300/55 bg-blue-600 px-2.5 py-1 text-xs font-black text-white hover:bg-blue-500 disabled:opacity-60">
+                + More pictures
+              </button>
+              <button
+                type="button"
+                onClick={() => { setTrayPhotos([]); persistTray([]); setTraySelected(new Set()); }}
+                disabled={Boolean(trayUpload)}
+                title="Empty the tray. The pictures stay in the Photos Bucket."
+                className="rounded-lg border border-slate-600 bg-slate-900 px-2.5 py-1 text-xs font-black text-slate-200 hover:border-slate-400 disabled:opacity-60"
+              >
+                Empty tray
+              </button>
+              <button type="button" onClick={() => setTrayHidden(true)} className="rounded-lg border border-slate-600 bg-slate-900 px-2.5 py-1 text-xs font-black text-slate-200 hover:border-slate-400">
+                Hide
+              </button>
+            </div>
+          </div>
+          {trayPhotos.length === 0 && !trayUpload && (
+            <div className={`mt-2 flex items-center justify-center gap-2 rounded-xl border border-dashed px-3 py-5 text-sm font-bold ${photoDropItemId === 'tray' ? 'border-amber-300 text-amber-100' : 'border-slate-700 text-slate-400'}`}>
+              <ImagePlus className="h-5 w-5 flex-shrink-0 text-amber-300" aria-hidden="true" />
+              {photoDropItemId === 'tray' ? 'Drop to upload' : 'Drop pictures here'}
+            </div>
+          )}
+          {trayPhotos.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {trayPhotos.map(photo => {
+                const photoId = String(photo.id);
+                const selected = traySelected.has(photoId);
+                const kind = getProgressMediaKind(photo);
+                return (
+                  <div
+                    key={photoId}
+                    data-tray-tile={photoId}
+                    role="checkbox"
+                    aria-checked={selected}
+                    aria-label={`${photo.original_name || 'Picture'}${selected ? ' (checked)' : ''}`}
+                    tabIndex={0}
+                    draggable={canMovePhotos}
+                    onDragStart={startTrayDrag(photo)}
+                    onClick={() => toggleTraySelected(photoId)}
+                    onKeyDown={e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggleTraySelected(photoId); } }}
+                    title={`${photo.original_name || 'Picture'} — drag onto an item, or click to check it`}
+                    className={`group relative h-16 w-16 flex-shrink-0 cursor-grab overflow-hidden rounded-lg border bg-slate-900 outline-none transition active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-blue-400 ${selected ? 'border-amber-400 ring-2 ring-amber-300' : 'border-slate-700'}`}
+                  >
+                    {kind === 'image' ? (
+                      <img src={progressPhotoSrc(projectId, photo)} alt="" className="h-full w-full object-cover" loading="lazy" draggable={false} />
+                    ) : (
+                      <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
+                    )}
+                    <span aria-hidden="true" className={`absolute left-1 top-1 inline-flex h-4 w-4 items-center justify-center rounded border transition ${selected ? 'border-amber-400 bg-amber-500 text-white' : 'border-white/70 bg-black/50 text-white opacity-0 group-hover:opacity-100'}`}>
+                      {selected ? <Check className="h-3 w-3" /> : null}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {loading ? <Loading /> : (
         <div className="mx-auto w-full max-w-3xl space-y-1.5">
@@ -6962,7 +7341,7 @@ function PunchListTab({
             const itemAiMeta = aiAgentMeta(item);
             const isChecked = expandedItem === item.id;
             return (
-            <div key={item.id} {...punchPhotoDropHandlers(item)} className={`overflow-hidden rounded-xl border bg-white transition ${photoDropItemId === item.id ? 'border-amber-400 ring-2 ring-amber-300/70' : isChecked ? 'border-cyan-400 ring-2 ring-cyan-300/70' : 'border-gray-200'}`}>
+            <div key={item.id} data-punch-item={item.id} {...punchPhotoDropHandlers(item)} className={`overflow-hidden rounded-xl border bg-white transition ${photoDropItemId === item.id ? 'border-amber-400 ring-2 ring-amber-300/70' : isChecked ? 'border-cyan-400 ring-2 ring-cyan-300/70' : 'border-gray-200'}`}>
               <div
                 className="flex cursor-pointer items-center gap-2.5 px-3 py-2"
                 onClick={() => setExpandedItem(isChecked ? null : item.id)}
@@ -6989,9 +7368,11 @@ function PunchListTab({
                     {item.title}
                     {item.description && <span className="ml-2 font-normal text-xs text-gray-400">{item.description}</span>}
                   </p>
-                  {(itemAiMeta || item.assigned_to_name || item.due_date || item.photo_count > 0) && (
+                  {(itemAiMeta || item.assigned_to_name || item.assigned_contractor_name || item.last_sent_at || item.due_date || item.photo_count > 0) && (
                     <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-gray-500">
                       {itemAiMeta && <span className="inline-flex items-center gap-1 font-black text-violet-600"><Bot className="h-3 w-3" /> AI: {itemAiMeta.agentName}</span>}
+                      {item.assigned_contractor_name && <span className="font-bold text-amber-500">→ {item.assigned_contractor_name}</span>}
+                      {item.last_sent_at && <span className="text-emerald-500">sent {format(new Date(item.last_sent_at), 'MMM d')}{item.last_sent_to ? ` to ${item.last_sent_to}` : ''}</span>}
                       {item.assigned_to_name && <span>→ {item.assigned_to_name}</span>}
                       {item.due_date && <span>{format(new Date(item.due_date), 'MMM d')}</span>}
                       {item.photo_count > 0 && <span className="text-blue-500">{item.photo_count} photo{item.photo_count === 1 ? '' : 's'}</span>}
@@ -7000,6 +7381,45 @@ function PunchListTab({
                 </div>
                 <span className={`flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${statusColors[item.status]}`}>{item.status.replace(/_/g, ' ')}</span>
                 <span className={`flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${priorityColors[item.priority]}`}>{item.priority}</span>
+                {canMovePhotos && traySelected.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); putPhotosOnItem(Array.from(traySelected), null, item); }}
+                    disabled={attachingItemId === item.id}
+                    className="flex-shrink-0 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-black text-amber-700 transition-colors hover:bg-amber-100 disabled:opacity-60"
+                  >
+                    {attachingItemId === item.id ? 'Putting…' : `Put ${traySelected.size} here`}
+                  </button>
+                )}
+                {canEditItems && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); openEdit(item); }}
+                    title="Edit punch list item"
+                    aria-label={`Edit ${item.title}`}
+                    className="flex-shrink-0 rounded-lg border border-slate-500/40 bg-slate-500/15 p-1.5 text-slate-200 transition-colors hover:bg-slate-500/30"
+                  >
+                    <Edit2 className="h-4 w-4" />
+                  </button>
+                )}
+                {isActive && (
+                  <label
+                    onClick={(e) => e.stopPropagation()}
+                    title="Add pictures to this item (or drop them anywhere on this row)"
+                    className={`flex-shrink-0 cursor-pointer rounded-lg border border-blue-300/40 bg-blue-500/15 p-1.5 text-blue-200 transition-colors hover:bg-blue-500/30 ${uploadingItemPhoto === item.id ? 'opacity-60' : ''}`}
+                  >
+                    <input
+                      type="file"
+                      accept="image/*,.heic,.heif"
+                      multiple
+                      className="hidden"
+                      disabled={uploadingItemPhoto === item.id}
+                      onChange={e => { uploadItemPhoto(item.id, e.target.files); e.currentTarget.value = ''; }}
+                    />
+                    {uploadingItemPhoto === item.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+                    <span className="sr-only">Add pictures to {item.title}</span>
+                  </label>
+                )}
                 {canDelete && (
                   <button
                     type="button"
@@ -7073,7 +7493,11 @@ function PunchListTab({
                               draggable={canMovePhotos}
                               onDragStart={event => {
                                 if (!canMovePhotos) return;
-                                event.dataTransfer.setData(PUNCH_PHOTO_DRAG_MIME, JSON.stringify({ photoId: photo.id, fromItemId: item.id }));
+                                event.dataTransfer.setData(PUNCH_PHOTO_DRAG_MIME, JSON.stringify({
+                                  photoIds: [String(photo.id)],
+                                  fromItemId: item.id,
+                                  photos: [{ id: photo.id, filename: photo.filename, original_name: photo.original_name, mime_type: photo.mime_type, markup_path: photo.markup_path, assignment_id: photo.assignment_id }],
+                                }));
                                 event.dataTransfer.effectAllowed = 'move';
                               }}
                               title={canMovePhotos ? 'Drag onto another punch list item to move this photo' : undefined}
@@ -7174,6 +7598,63 @@ function PunchListTab({
         onClose={() => setShowBulk(false)}
         onSaved={load}
       />
+      <PunchListSendModal
+        projectId={projectId}
+        isOpen={showSend && canSend}
+        onClose={() => setShowSend(false)}
+        onSent={async () => { await load(); await loadContractorOptions(); }}
+      />
+      <Modal isOpen={Boolean(editItem)} onClose={() => setEditItem(null)} title="Edit Punch List Item">
+        <form onSubmit={editForm.handleSubmit(onEditSave)} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
+            <input {...editForm.register('title', { required: true })} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 bg-white text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Task title" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+            <textarea {...editForm.register('description')} rows={3} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 bg-white text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" placeholder="Describe the work, issue, location, or materials needed..." />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
+              <select {...editForm.register('priority')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Due Date</label>
+              <input type="date" {...editForm.register('due_date')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 bg-white text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Contractor</label>
+            <select {...editForm.register('assigned_contractor_id')} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+              <option value="">Unassigned</option>
+              {contractorOptions.filter(contractor => contractor.on_project).map(contractor => (
+                <option key={contractor.id} value={contractor.id}>{contractor.vendor_name || contractor.contact_name}</option>
+              ))}
+              {contractorOptions.some(contractor => !contractor.on_project) && (
+                <optgroup label="Directory">
+                  {contractorOptions.filter(contractor => !contractor.on_project).map(contractor => (
+                    <option key={contractor.id} value={contractor.id}>{contractor.vendor_name || contractor.contact_name}</option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+            <VoiceTextarea {...editForm.register('notes')} rows={2} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 bg-white text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+          </div>
+          <div className="flex gap-3">
+            <button type="button" onClick={() => setEditItem(null)} className="flex-1 py-2.5 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50">Cancel</button>
+            <button type="submit" disabled={editForm.formState.isSubmitting} className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">Save Changes</button>
+          </div>
+        </form>
+      </Modal>
       <PhotoMarkupModal
         open={Boolean(markupPhoto)}
         projectId={projectId}
