@@ -22,6 +22,11 @@ let Database = null;
 for (const p of ['/app/backend/node_modules/better-sqlite3', 'better-sqlite3']) {
   try { Database = require(p); break; } catch (_) {}
 }
+if (Database) {
+  // The native addon loads on first open; node_modules built for another Node ABI (e.g. the
+  // image's Node 20 modules run by a host Node 22) must fall back to the fake, not fail every test.
+  try { new Database(':memory:').close(); } catch (_) { Database = null; }
+}
 
 function makeDb() {
   if (Database) {
