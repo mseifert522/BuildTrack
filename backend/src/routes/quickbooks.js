@@ -3456,3 +3456,131 @@ router.financeTrackerProfitAndLossByClass = async function financeTrackerProfitA
   const connection = ftGetConnection(db);
   return qboRequest(db, connection, `/v3/company/${encodeURIComponent(connection.realm_id)}/reports/ProfitAndLoss?summarize_column_by=Classes&accounting_method=Accrual&start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`);
 };
+
+// ── Card activity (2026-09-16) ───────────────────────────────────────────────
+// Backs Finance Tracker's Capital page card panel. Reproduces the one-off
+// 2026-08-01 load exactly (verified against all 1,087 charge rows, 181 payments
+// and 6 payoffs it wrote): charges are card purchase lines by class (refunds
+// negative) plus journal-entry credits to a card; paydowns are journal-entry
+// debits and checks written against a card. This file has no Transfer or
+// CreditCardPayment entities touching cards, so neither is read.
+
+// A payoff is a month-end balance at or below zero after a month-end balance
+// above this — smaller zero-crossings are timing noise, not a paid-off card.
+const CARD_PAYOFF_MIN_PRIOR_BALANCE = 1000;
+
+function buildCardActivity({ accounts, purchases, journals }) {
+  const r2 = (n) => Math.round(n * 100) / 100;
+  const cards = new Map(
+    (accounts || []).filter((a) => a.AccountType === 'Credit Card').map((a) => [String(a.Id), a.Name])
+  );
+  const cardName = (ref) => (ref && cards.has(String(ref.value)) ? cards.get(String(ref.value)) : null);
+  const charges = new Map();
+  const payments = new Map();
+  const movements = new Map(); // card -> month -> net change (charges positive)
+
+  const move = (card, date, amount) => {
+    const month = date.slice(0, 7);
+    if (!movements.has(card)) movements.set(card, new Map());
+    const byMonth = movements.get(card);
+    byMonth.set(month, (byMonth.get(month) || 0) + amount);
+  };
+  const addCharge = (card, date, label, amount) => {
+    const key = `${card} ${date.slice(0, 7)} ${label}`;
+    const row = charges.get(key) || { card, month: date.slice(0, 7), label, amount: 0 };
+    row.amount += amount;
+    charges.set(key, row);
+    move(card, date, amount);
+  };
+  const addPayment = (card, ref, date, label, amount) => {
+    const key = `${card} ${ref}`;
+    const row = payments.get(key) || { card, ref, date, label, amount: 0 };
+    row.amount += amount;
+    payments.set(key, row);
+    move(card, date, -amount);
+  };
+
+  for (const p of purchases || []) {
+    const date = String(p.TxnDate || '');
+    if (!date) continue;
+    const lines = (p.Line || []).filter((l) => l.DetailType !== 'SubTotalLineDetail');
+    const card = cardName(p.AccountRef);
+    if (card) {
+      const sign = p.Credit ? -1 : 1;
+      for (const l of lines) {
+        const detail = l.AccountBasedExpenseLineDetail || l.ItemBasedExpenseLineDetail || {};
+        addCharge(card, date, detail.ClassRef?.name || 'Unclassed', sign * Number(l.Amount || 0));
+      }
+      continue;
+    }
+    // A bank purchase whose expense line is a card account pays that card down. These are
+    // written from the operating account (QuickBooks types most of them Cash) and have
+    // always been shown as checks.
+    for (const l of lines) {
+      const paid = cardName(l.AccountBasedExpenseLineDetail?.AccountRef);
+      if (!paid) continue;
+      addPayment(paid, `P${p.Id}`, date, `check — ${p.AccountRef?.name || '?'}`, Number(l.Amount || 0));
+    }
+  }
+
+  for (const j of journals || []) {
+    const date = String(j.TxnDate || '');
+    if (!date) continue;
+    for (const l of j.Line || []) {
+      const detail = l.JournalEntryLineDetail;
+      const card = cardName(detail?.AccountRef);
+      if (!card) continue;
+      if (detail.PostingType === 'Credit') addCharge(card, date, 'Journal adjustment', Number(l.Amount || 0));
+      else addPayment(card, `J${j.Id}`, date, 'journal — journal entry', Number(l.Amount || 0));
+    }
+  }
+
+  const payoffs = [];
+  for (const [card, byMonth] of movements) {
+    let balance = 0;
+    let prior = 0;
+    for (const [month, change] of [...byMonth.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+      balance = r2(balance + change);
+      if (balance <= 0.004 && prior > CARD_PAYOFF_MIN_PRIOR_BALANCE) payoffs.push({ card, month });
+      prior = balance;
+    }
+  }
+
+  return {
+    charges: [...charges.values()]
+      .map((row) => ({ ...row, amount: r2(row.amount) }))
+      .filter((row) => Math.abs(row.amount) >= 0.005),
+    payments: [...payments.values()].map((row) => ({ ...row, amount: r2(row.amount) })),
+    payoffs,
+  };
+}
+
+// Every record of an entity. The count comes first so a short read is an error
+// rather than a silently truncated ledger.
+async function ftQueryAll(db, connection, entity) {
+  const counted = await qboQuery(db, connection, `SELECT COUNT(*) FROM ${entity}`);
+  const total = Number(counted?.QueryResponse?.totalCount || 0);
+  const rows = new Map();
+  for (let start = 1; start <= total; start += 1000) {
+    const payload = await qboQuery(db, connection, `SELECT * FROM ${entity} STARTPOSITION ${start} MAXRESULTS 1000`);
+    for (const row of payload?.QueryResponse?.[entity] || []) rows.set(row.Id, row);
+  }
+  if (rows.size < total) {
+    const err = new Error(`QuickBooks returned ${rows.size} of ${total} ${entity} records.`);
+    err.statusCode = 502;
+    throw err;
+  }
+  return [...rows.values()];
+}
+
+router.financeTrackerCardActivity = async function financeTrackerCardActivity() {
+  const db = getDb();
+  const connection = ftGetConnection(db);
+  const accounts = await ftQueryAll(db, connection, 'Account');
+  const purchases = await ftQueryAll(db, connection, 'Purchase');
+  const journals = await ftQueryAll(db, connection, 'JournalEntry');
+  return {
+    ...buildCardActivity({ accounts, purchases, journals }),
+    counts: { accounts: accounts.length, purchases: purchases.length, journals: journals.length },
+  };
+};

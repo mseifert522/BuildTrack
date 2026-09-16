@@ -124,4 +124,16 @@ router.get('/profit-and-loss-by-class', async (req, res) => {
   }
 });
 
+// Card charges by class and month, paydowns and payoff months — drives the card
+// activity panel on Finance Tracker's Capital page. Rebuilt from every purchase
+// and journal entry on each call, so Finance Tracker pulls it hourly.
+router.get('/card-activity', async (_req, res) => {
+  try {
+    const activity = await quickBooksRoutes.financeTrackerCardActivity();
+    res.json({ ...activity, exportedAt: new Date().toISOString() });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message || 'Failed to export card activity.' });
+  }
+});
+
 module.exports = router;
