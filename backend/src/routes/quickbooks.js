@@ -38,6 +38,7 @@ let activeSyncPromise = null;
 let activeBillPdfSyncPromise = null;
 let paymentQueueSchedulerStarted = false;
 let paymentQueueSchedulerRunning = false;
+const qboTokenRefreshInFlight = new Map();
 
 function qboEnvironment() {
   return String(process.env.QBO_ENVIRONMENT || process.env.QUICKBOOKS_ENVIRONMENT || 'production').toLowerCase() === 'sandbox'
@@ -695,33 +696,62 @@ async function tokenRequest(params) {
   return payload;
 }
 
+function readStoredConnectionTokens(db, connection) {
+  return db.prepare(`
+    SELECT access_token_encrypted, refresh_token_encrypted, access_token_expires_at, scope
+    FROM quickbooks_connections
+    WHERE id = ?
+  `).get(connection.id);
+}
+
+// Decides from the STORED row, never the caller's copy. Sync passes and the Finance Tracker
+// service endpoints load the connection once and make many requests with it; once any of them
+// refreshes, that copy is stale, and a second refresh with its superseded refresh token fails
+// with "Incorrect or invalid refresh token" after Intuit rotates it. Concurrent callers in this
+// process share one in-flight refresh. The caller's object is updated with the current tokens.
 async function refreshAccessToken(db, connection) {
-  const existingExpiry = connection.access_token_expires_at ? new Date(connection.access_token_expires_at).getTime() : 0;
-  if (connection.access_token_encrypted && existingExpiry > Date.now() + 60000) {
-    return decryptSecret(connection.access_token_encrypted);
+  const stored = readStoredConnectionTokens(db, connection) || connection;
+  Object.assign(connection, stored);
+  const existingExpiry = stored.access_token_expires_at ? new Date(stored.access_token_expires_at).getTime() : 0;
+  if (stored.access_token_encrypted && existingExpiry > Date.now() + 60000) {
+    return decryptSecret(stored.access_token_encrypted);
   }
 
-  const token = await tokenRequest({
-    grant_type: 'refresh_token',
-    refresh_token: decryptSecret(connection.refresh_token_encrypted),
-  });
-  const nextRefresh = token.refresh_token || decryptSecret(connection.refresh_token_encrypted);
-  db.prepare(`
-    UPDATE quickbooks_connections
-    SET access_token_encrypted = ?,
-        refresh_token_encrypted = ?,
-        access_token_expires_at = ?,
-        scope = COALESCE(?, scope),
-        updated_at = datetime('now')
-    WHERE id = ?
-  `).run(
-    encryptSecret(token.access_token),
-    encryptSecret(nextRefresh),
-    addSeconds(token.expires_in || 3600),
-    token.scope || null,
-    connection.id
-  );
-  return token.access_token;
+  // No await between reading the row and claiming the slot, so a second caller either sees the
+  // refreshed row or joins this refresh.
+  let refresh = qboTokenRefreshInFlight.get(connection.id);
+  if (!refresh) {
+    refresh = (async () => {
+      const token = await tokenRequest({
+        grant_type: 'refresh_token',
+        refresh_token: decryptSecret(stored.refresh_token_encrypted),
+      });
+      const nextRefresh = token.refresh_token || decryptSecret(stored.refresh_token_encrypted);
+      db.prepare(`
+        UPDATE quickbooks_connections
+        SET access_token_encrypted = ?,
+            refresh_token_encrypted = ?,
+            access_token_expires_at = ?,
+            scope = COALESCE(?, scope),
+            updated_at = datetime('now')
+        WHERE id = ?
+      `).run(
+        encryptSecret(token.access_token),
+        encryptSecret(nextRefresh),
+        addSeconds(token.expires_in || 3600),
+        token.scope || null,
+        connection.id
+      );
+      return token.access_token;
+    })().finally(() => {
+      qboTokenRefreshInFlight.delete(connection.id);
+    });
+    qboTokenRefreshInFlight.set(connection.id, refresh);
+  }
+
+  const accessToken = await refresh;
+  Object.assign(connection, readStoredConnectionTokens(db, connection) || {});
+  return accessToken;
 }
 
 async function qboRequest(db, connection, path) {
