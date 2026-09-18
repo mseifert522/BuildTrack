@@ -30,6 +30,7 @@ import { Loading, Modal } from '../components/ui';
 import Avatar from '../components/Avatar';
 import { useAuthStore } from '../store/authStore';
 import { formatEasternDate, formatEasternDateTime, parseBuildTrackTimestamp } from '../lib/time';
+import { compareByQboActivity, formatQboDate, isQboActive, mergeQboActivity, qboActivityLine, type QboActivityFields } from '../lib/vendorActivity';
 import VoiceTextarea from '../components/VoiceTextarea';
 
 interface ContractorInvoice {
@@ -67,7 +68,7 @@ interface QuickBooksVendorInfo {
   synced_at?: string | null;
 }
 
-interface ContractorRow {
+interface ContractorRow extends QboActivityFields {
   id: string;
   name: string;
   vendor_name?: string;
@@ -339,7 +340,11 @@ const directoryRowScore = (contractor: ContractorRow) => [
   + (contractor.project_addresses?.length || 0)
   + Number(Boolean(contractor.total_paid))
   + Number(Boolean(contractor.invoice_count))
-  + Number(Boolean(contractor.note_count));
+  + Number(Boolean(contractor.note_count))
+  // The QuickBooks-linked twin of a duplicate pair should be the primary, and
+  // among linked twins the one being paid.
+  + Number(Boolean(contractor.quickbooks_vendor_id))
+  + Number(isQboActive(contractor));
 
 const newerInvoice = (a?: ContractorInvoice | null, b?: ContractorInvoice | null) =>
   dateValue(b?.updated_at || b?.created_at) > dateValue(a?.updated_at || a?.created_at) ? b : a;
@@ -380,6 +385,9 @@ const mergeDirectoryRows = (current: ContractorRow, incoming: ContractorRow): Co
     note_count: Math.max(Number(current.note_count || 0), Number(incoming.note_count || 0)),
     last_paid_invoice: newerInvoice(current.last_paid_invoice, incoming.last_paid_invoice),
     last_invoice: newerInvoice(current.last_invoice, incoming.last_invoice),
+    // Explicit, or the {...secondary, ...primary} spread would let a duplicate
+    // row without the QuickBooks link silently drop the payment activity.
+    ...mergeQboActivity(current, incoming),
   };
 };
 
@@ -486,7 +494,14 @@ export default function Contractors() {
   const [categories, setCategories] = useState<string[]>(fallbackCategories);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const query = searchParams.get('search') || '';
-  const [sortMode, setSortMode] = useState<'name_asc' | 'name_desc' | 'date_newest' | 'date_oldest'>('name_asc');
+  // One notion of "is the user searching" for the view filter, the count copy
+  // and the empty state, so a whitespace-only search cannot split them.
+  const hasQuery = Boolean(query.trim());
+  // Mike's default: the vendors we are actively paying (through QuickBooks, in
+  // the last 6 months), most recently paid first. Everyone else is one click
+  // away under "All vendors", and a search always covers everyone.
+  const [sortMode, setSortMode] = useState<'most_active' | 'name_asc' | 'name_desc' | 'date_newest' | 'date_oldest'>('most_active');
+  const [vendorView, setVendorView] = useState<'active' | 'all'>('active');
   const [expandedContractorId, setExpandedContractorId] = useState<string | null>(null);
   const [contractorNotes, setContractorNotes] = useState<Record<string, ContractorNote[]>>({});
   const [noteInputs, setNoteInputs] = useState<Record<string, string>>({});
@@ -1019,11 +1034,18 @@ export default function Contractors() {
         if (!haystack.includes(q) && (!normalizedQ || !normalizeDirectoryValue(haystack).includes(normalizedQ))) return false;
       }
 
+      // "Most active" view: only vendors paid through QuickBooks in the last
+      // 6 months. A search suspends the view so anyone is findable.
+      if (!hasQuery && vendorView === 'active' && !isQboActive(contractor)) return false;
+
       return true;
     });
 
     const sorted = [...rows];
     switch (sortMode) {
+      case 'most_active':
+        sorted.sort(compareByQboActivity);
+        break;
       case 'name_asc':
         sorted.sort((a, b) => a.name.localeCompare(b.name));
         break;
@@ -1047,7 +1069,7 @@ export default function Contractors() {
         break;
     }
     return sorted;
-  }, [combinedDirectoryRows, query, sortMode]);
+  }, [combinedDirectoryRows, query, hasQuery, sortMode, vendorView]);
 
   // Keep the multi-select selection scoped to what is currently visible, so a
   // search/filter change can never leave hidden rows silently selected for deletion.
@@ -1113,9 +1135,14 @@ export default function Contractors() {
     return `${project.address} ${project.job_name}`.toLowerCase().includes(q);
   });
 
+  // Resolve from the deduped rows first so the details modal shows the same
+  // merged QuickBooks activity as the list; a duplicate pair's twin can carry
+  // none of it on its own.
   const selectedContractor = useMemo(
-    () => contractors.find(contractor => contractor.id === selectedContractorId) || null,
-    [contractors, selectedContractorId]
+    () => combinedDirectoryRows.find(contractor => contractor.id === selectedContractorId)
+      || contractors.find(contractor => contractor.id === selectedContractorId)
+      || null,
+    [combinedDirectoryRows, contractors, selectedContractorId]
   );
 
   const scrollTo1099Information = (contractorId: string, delay = 120) => {
@@ -1232,7 +1259,20 @@ export default function Contractors() {
         ) : filteredContractors.length === 0 ? (
           <div className="rounded-2xl p-12 text-center" style={{ background: 'white', boxShadow: '0 2px 16px rgba(0,0,0,0.07)' }}>
             <Users className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-            <p className="text-sm font-bold text-gray-500">No contractor or supplier records match this search</p>
+            <p className="text-sm font-bold text-gray-500">
+              {!hasQuery && vendorView === 'active'
+                ? 'No vendors paid through QuickBooks in the last 6 months'
+                : 'No contractor or supplier records match this search'}
+            </p>
+            {!hasQuery && vendorView === 'active' && (
+              <button
+                type="button"
+                onClick={() => setVendorView('all')}
+                className="mt-4 inline-flex min-h-10 items-center justify-center rounded-lg bg-slate-950 px-4 text-sm font-black text-white hover:bg-slate-800"
+              >
+                Show all vendors
+              </button>
+            )}
           </div>
         ) : (
           <div className="bt-table-wrap bt-directory-list p-2">
@@ -1244,12 +1284,41 @@ export default function Contractors() {
                 onChange={(e) => setSortMode(e.target.value as typeof sortMode)}
                 className="min-h-9 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-gray-900 shadow-sm outline-none focus:border-blue-400"
               >
+                <option value="most_active">Most active - Last paid first</option>
                 <option value="name_asc">Name (A-Z)</option>
                 <option value="name_desc">Name (Z-A)</option>
                 <option value="date_newest">Date entered - Newest first</option>
                 <option value="date_oldest">Date entered - Oldest first</option>
               </select>
-              <span className="text-xs font-semibold text-slate-400">{filteredContractors.length} records</span>
+              {/* A search covers every vendor, so the view toggle is inert then
+                  and must not look like it is filtering. */}
+              <div className={`inline-flex rounded-lg border border-slate-300 bg-white p-0.5 shadow-sm ${hasQuery ? 'opacity-50' : ''}`} role="group" aria-label="Vendor view" title={hasQuery ? 'Search covers all vendors' : undefined}>
+                <button
+                  type="button"
+                  onClick={() => setVendorView('active')}
+                  disabled={hasQuery}
+                  className={`rounded-md px-2.5 py-1 text-xs font-black transition disabled:cursor-default ${!hasQuery && vendorView === 'active' ? 'bg-slate-950 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+                  title="Vendors paid through QuickBooks in the last 6 months"
+                >
+                  Most active
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setVendorView('all')}
+                  disabled={hasQuery}
+                  className={`rounded-md px-2.5 py-1 text-xs font-black transition disabled:cursor-default ${!hasQuery && vendorView === 'all' ? 'bg-slate-950 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+                  title="Every contractor and supplier record"
+                >
+                  All vendors
+                </button>
+              </div>
+              <span className="text-xs font-semibold text-slate-400">
+                {hasQuery
+                  ? `${filteredContractors.length} matching records (search covers all vendors)`
+                  : vendorView === 'active'
+                    ? `${filteredContractors.length} paid in the last 6 months`
+                    : `${filteredContractors.length} records`}
+              </span>
             </div>
             {canDeleteContractors && (
               <div className="bt-directory-bulkbar mb-2 flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5">
@@ -1355,6 +1424,11 @@ export default function Contractors() {
                           <p className="mt-1 text-xs font-semibold text-gray-500">{recordLabel}</p>
                           {qboVendor?.id ? (
                             <p className="mt-1 truncate text-[11px] font-black text-emerald-700">QuickBooks vendor linked</p>
+                          ) : null}
+                          {qboActivityLine(contractor) ? (
+                            <p className={`mt-1 truncate text-[11px] font-black ${isQboActive(contractor) ? 'text-emerald-700' : 'text-slate-500'}`}>
+                              {qboActivityLine(contractor)}{contractor.qbo_match_kind === 'name' ? ' · matched by name' : ''}
+                            </p>
                           ) : null}
                         </div>
                       </div>
@@ -1764,19 +1838,33 @@ export default function Contractors() {
                           <p className="text-xs font-black uppercase tracking-wide text-gray-500">Payment History</p>
                         </div>
                         <div className="space-y-2">
+                          {/* QuickBooks payments first; BuildTrack-native invoices only as a
+                              fallback, so one "Last paid" is ever shown. */}
                           <div>
-                            <p className="text-xs text-gray-400">Last job paid</p>
-                            <p className="text-sm font-black text-gray-900">{lastPaid ? money(lastPaid.total) : 'No paid job'}</p>
-                            {lastPaid && <p className="text-xs text-gray-500 truncate">{lastPaid.address}</p>}
+                            <p className="text-xs text-gray-400">Last payment</p>
+                            <p className="text-sm font-black text-gray-900">
+                              {contractor.qbo_last_paid_amount != null
+                                ? money(contractor.qbo_last_paid_amount)
+                                : lastPaid ? money(lastPaid.total) : 'No payments on file'}
+                            </p>
+                            {contractor.qbo_last_paid_at
+                              ? <p className="text-xs text-gray-500 truncate">QuickBooks bill payment</p>
+                              : lastPaid && <p className="text-xs text-gray-500 truncate">{lastPaid.address}</p>}
                           </div>
                           <div className="flex items-center justify-between gap-3">
                             <div>
                               <p className="text-xs text-gray-400">Last paid date</p>
-                              <p className="text-xs font-bold text-gray-700">{formatDate(lastPaid?.updated_at)}</p>
+                              <p className="text-xs font-bold text-gray-700">
+                                {contractor.qbo_last_paid_at ? formatQboDate(contractor.qbo_last_paid_at) : formatDate(lastPaid?.updated_at)}
+                              </p>
                             </div>
                             <div className="text-right">
-                              <p className="text-xs text-gray-400">Total paid</p>
-                              <p className="text-xs font-black text-gray-900">{money(contractor.total_paid)}</p>
+                              <p className="text-xs text-gray-400">Paid in the last 6 months</p>
+                              <p className="text-xs font-black text-gray-900">
+                                {Number(contractor.qbo_paid_count_6mo || 0) > 0
+                                  ? `${contractor.qbo_paid_count_6mo} payment${Number(contractor.qbo_paid_count_6mo) === 1 ? '' : 's'} · ${money(contractor.qbo_paid_total_6mo)}`
+                                  : 'None'}
+                              </p>
                             </div>
                           </div>
                           <div className="rounded-lg bg-white border border-slate-200 p-2">
@@ -2289,11 +2377,14 @@ export default function Contractors() {
                     <h3 className="text-sm font-black text-gray-900">Payment And Invoice Summary</h3>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
-                    {detailLine('Total paid', money(contractor.total_paid))}
+                    {detailLine('Paid in the last 6 months', Number(contractor.qbo_paid_count_6mo || 0) > 0
+                      ? `${contractor.qbo_paid_count_6mo} payment${Number(contractor.qbo_paid_count_6mo) === 1 ? '' : 's'} · ${money(contractor.qbo_paid_total_6mo)}`
+                      : 'None')}
                     {detailLine('Invoice count', contractor.invoice_count)}
-                    {detailLine('Last paid amount', lastPaid ? money(lastPaid.total) : null)}
-                    {detailLine('Last paid date', formatDate(lastPaid?.updated_at))}
-                    {detailLine('Last paid project', lastPaid?.address)}
+                    {detailLine('Last paid amount', contractor.qbo_last_paid_amount != null ? money(contractor.qbo_last_paid_amount) : (lastPaid ? money(lastPaid.total) : null))}
+                    {detailLine('Last paid date', contractor.qbo_last_paid_at ? formatQboDate(contractor.qbo_last_paid_at) : formatDate(lastPaid?.updated_at))}
+                    {/* Only meaningful when the amount/date above came from that same native invoice. */}
+                    {detailLine('Last paid project', contractor.qbo_last_paid_amount == null ? lastPaid?.address : 'QuickBooks bill payment')}
                     {detailLine('Last invoice number', lastInvoice?.invoice_number)}
                     {detailLine('Last invoice status', lastInvoice?.status)}
                     {detailLine('Last invoice date', formatDate(lastInvoice?.updated_at || lastInvoice?.created_at))}

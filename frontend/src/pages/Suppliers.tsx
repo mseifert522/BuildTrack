@@ -5,8 +5,9 @@ import toast from 'react-hot-toast';
 import api from '../lib/api';
 import { Loading, Modal } from '../components/ui';
 import { formatEasternDateTime } from '../lib/time';
+import { compareByQboActivity, formatMoney, formatQboDate, isQboActive, qboActivityLine, type QboActivityFields } from '../lib/vendorActivity';
 
-interface Supplier {
+interface Supplier extends QboActivityFields {
   id: string;
   name: string;
   category: string;
@@ -110,6 +111,9 @@ function supplierPhone(supplier: Supplier) {
 export default function Suppliers() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [query, setQuery] = useState('');
+  // Mike's default: suppliers paid through QuickBooks in the last 6 months,
+  // most recently paid first. "All suppliers" shows everyone in the same order.
+  const [view, setView] = useState<'active' | 'all'>('active');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [expandedSupplierId, setExpandedSupplierId] = useState<string | null>(null);
@@ -142,8 +146,11 @@ export default function Suppliers() {
 
   const filteredSuppliers = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return suppliers;
-    return suppliers.filter(supplier => [
+    // The API already emits most-active order; re-sorting here keeps a supplier
+    // saved mid-session (prepended to the list) in the right place too.
+    const sorted = [...suppliers].sort(compareByQboActivity);
+    if (!q) return view === 'active' ? sorted.filter(isQboActive) : sorted;
+    return sorted.filter(supplier => [
       supplier.name,
       supplier.contact,
       supplier.email,
@@ -153,7 +160,7 @@ export default function Suppliers() {
       supplier.billing_address,
       supplier.account_number,
     ].filter(Boolean).join(' ').toLowerCase().includes(q));
-  }, [suppliers, query]);
+  }, [suppliers, query, view]);
 
   const closeSupplierModal = () => {
     setShowAddSupplier(false);
@@ -219,9 +226,14 @@ export default function Suppliers() {
           const withoutExisting = current.filter(item => item.id !== supplier.id);
           return editingSupplier ? [supplier, ...withoutExisting] : [supplier, ...current];
         });
+        // A saved supplier that has not been paid through QuickBooks would be
+        // hidden by the "Most active" view the moment it is saved. Show it.
+        if (!isQboActive(supplier) && view === 'active') setView('all');
         setExpandedSupplierId(supplier.id);
       }
-      toast.success(editingSupplier ? 'Supplier updated' : 'Supplier added');
+      toast.success(editingSupplier
+        ? 'Supplier updated'
+        : supplier && !isQboActive(supplier) ? 'Supplier added - shown under All suppliers' : 'Supplier added');
       closeSupplierModal();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to save supplier');
@@ -239,7 +251,9 @@ export default function Suppliers() {
           <div className="bt-directory-title-block">
             <p className="bt-directory-kicker">Materials and vendor directory</p>
             <h1 className="text-2xl font-black tracking-tight">Suppliers</h1>
-            <p className="mt-1 text-sm font-semibold">{filteredSuppliers.length} active supplier records</p>
+            <p className="mt-1 text-sm font-semibold">
+              {filteredSuppliers.length} {query.trim() ? 'matching supplier records' : view === 'active' ? 'suppliers paid in the last 6 months' : 'supplier records'}
+            </p>
           </div>
           <div className="bt-directory-actions flex w-full flex-col gap-2 sm:flex-row md:w-auto">
             <div className="inline-flex rounded-2xl border border-slate-300 bg-white p-1 shadow-sm">
@@ -265,6 +279,28 @@ export default function Suppliers() {
                 className="w-full bg-transparent text-sm font-semibold text-gray-900 outline-none placeholder:text-gray-400"
               />
             </div>
+            {/* A search covers every supplier, so the toggle is inert then and
+                must not look like it is filtering. */}
+            <div className={`inline-flex rounded-2xl border border-slate-300 bg-white p-1 shadow-sm ${query.trim() ? 'opacity-50' : ''}`} role="group" aria-label="Supplier view" title={query.trim() ? 'Search covers all suppliers' : undefined}>
+              <button
+                type="button"
+                onClick={() => setView('active')}
+                disabled={Boolean(query.trim())}
+                className={`rounded-xl px-3 py-2 text-sm font-black transition disabled:cursor-default ${!query.trim() && view === 'active' ? 'bg-slate-950 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950'}`}
+                title="Suppliers paid through QuickBooks in the last 6 months"
+              >
+                Most active
+              </button>
+              <button
+                type="button"
+                onClick={() => setView('all')}
+                disabled={Boolean(query.trim())}
+                className={`rounded-xl px-3 py-2 text-sm font-black transition disabled:cursor-default ${!query.trim() && view === 'all' ? 'bg-slate-950 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950'}`}
+                title="Every supplier record"
+              >
+                All suppliers
+              </button>
+            </div>
             <button
               type="button"
               onClick={openAddSupplier}
@@ -285,7 +321,18 @@ export default function Suppliers() {
             <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gray-100">
               <Truck className="h-7 w-7 text-gray-300" />
             </div>
-            <p className="font-bold text-gray-700">No suppliers found</p>
+            <p className="font-bold text-gray-700">
+              {!query.trim() && view === 'active' ? 'No suppliers paid through QuickBooks in the last 6 months' : 'No suppliers found'}
+            </p>
+            {!query.trim() && view === 'active' && (
+              <button
+                type="button"
+                onClick={() => setView('all')}
+                className="mt-4 inline-flex min-h-10 items-center justify-center rounded-xl bg-slate-950 px-4 text-sm font-black text-white transition hover:bg-slate-800"
+              >
+                Show all suppliers
+              </button>
+            )}
           </div>
         ) : (
           <div className="bt-table-wrap bt-directory-list p-2">
@@ -324,6 +371,11 @@ export default function Suppliers() {
                         <div className="min-w-0">
                           <h2 className="truncate text-sm font-black text-gray-950">{supplier.name}</h2>
                           <p className="mt-1 text-xs font-semibold text-gray-500">{supplier.account_number ? `Acct ${supplier.account_number}` : 'Supplier record'}</p>
+                          {qboActivityLine(supplier) ? (
+                            <p className={`mt-1 truncate text-[11px] font-black ${isQboActive(supplier) ? 'text-emerald-700' : 'text-slate-500'}`}>
+                              {qboActivityLine(supplier)}{supplier.qbo_match_kind === 'name' ? ' · matched by name' : ''}
+                            </p>
+                          ) : null}
                         </div>
                       </div>
 
@@ -387,6 +439,16 @@ export default function Suppliers() {
                               <p className="text-xs font-semibold text-slate-500">
                                 Updated {supplier.updated_at ? formatEasternDateTime(supplier.updated_at, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'not recorded'} ET
                               </p>
+                              <p className="text-xs font-semibold text-slate-500">
+                                {supplier.qbo_last_paid_at
+                                  ? `Last paid ${formatQboDate(supplier.qbo_last_paid_at)}${supplier.qbo_last_paid_amount != null ? ` · ${formatMoney(supplier.qbo_last_paid_amount)}` : ''} (QuickBooks)`
+                                  : 'No QuickBooks payments on file'}
+                              </p>
+                              {Number(supplier.qbo_paid_count_6mo || 0) > 0 ? (
+                                <p className="text-xs font-semibold text-slate-500">
+                                  Paid in the last 6 months: {supplier.qbo_paid_count_6mo} payment{Number(supplier.qbo_paid_count_6mo) === 1 ? '' : 's'} · {formatMoney(supplier.qbo_paid_total_6mo)}
+                                </p>
+                              ) : null}
                             </div>
                           </div>
                           <button

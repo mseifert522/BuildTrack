@@ -2048,6 +2048,8 @@ function initializeSchema() {
   try { db.exec(`ALTER TABLE auth_sessions ADD COLUMN ip_address_updated_at TEXT`); } catch (_) { /* already exists */ }
   // Quote sections (2026-09-18): existing rows keep NULL = not sectioned.
   try { db.exec(`ALTER TABLE quote_line_items ADD COLUMN section_id TEXT REFERENCES quote_sections(id) ON DELETE SET NULL`); } catch (_) { /* already exists */ }
+  // Vendor activity ranking (directory + suppliers) aggregates payments per vendor.
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_quickbooks_bill_payments_vendor_txn ON quickbooks_bill_payments(vendor_id, txn_date)`); } catch (_) { /* table not created yet */ }
   try {
     db.exec(`
       UPDATE auth_sessions

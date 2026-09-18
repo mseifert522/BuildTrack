@@ -381,6 +381,104 @@ function categoryError(res, err) {
   return res.status(500).json({ error: 'Failed to save contractor category' });
 }
 
+// ── QuickBooks payment activity per contractor profile (2026-09-18, Mike) ────
+// "Most active" = paid through QuickBooks in the last six months. Source of
+// truth is quickbooks_bill_payments - one row per QBO BillPayment, so summing
+// rows can never double count (never go through bills: a payment linked to N
+// bills would count N times). A profile is attributed by exactly ONE key path:
+// its quickbooks_vendor_id when linked; otherwise a plain lower/trim vendor-name
+// match, restricted to vendors that no linked profile already owns, so the same
+// vendor can never rank twice. Shared by /contractors/directory and /suppliers
+// so the two pages cannot drift. The main SELECT must alias contractor_profiles
+// as `cp` and the query text must start with QBO_ACTIVITY_CTE.
+const QBO_ACTIVITY_CTE = `
+    WITH qbo_pay AS (
+      SELECT qbo_id, vendor_id, lower(trim(COALESCE(vendor_name, ''))) AS vendor_key, txn_date, total_amt
+      FROM quickbooks_bill_payments
+      WHERE txn_date IS NOT NULL AND total_amt > 0
+    ),
+    qbo_by_id AS (
+      SELECT vendor_id,
+             MAX(txn_date) AS last_paid_at,
+             SUM(CASE WHEN date(txn_date) >= date('now', '-6 months') THEN 1 ELSE 0 END) AS cnt6,
+             SUM(CASE WHEN date(txn_date) >= date('now', '-6 months') THEN total_amt ELSE 0 END) AS tot6
+      FROM qbo_pay
+      WHERE vendor_id IS NOT NULL AND vendor_id <> ''
+      GROUP BY vendor_id
+    ),
+    qbo_by_name AS (
+      SELECT vendor_key,
+             MAX(txn_date) AS last_paid_at,
+             SUM(CASE WHEN date(txn_date) >= date('now', '-6 months') THEN 1 ELSE 0 END) AS cnt6,
+             SUM(CASE WHEN date(txn_date) >= date('now', '-6 months') THEN total_amt ELSE 0 END) AS tot6
+      FROM qbo_pay p
+      WHERE vendor_key <> ''
+        AND NOT EXISTS (
+          SELECT 1 FROM contractor_profiles x
+          WHERE x.quickbooks_vendor_id = p.vendor_id
+             OR (x.quickbooks_vendor_id IS NOT NULL AND x.quickbooks_vendor_id <> ''
+                 AND lower(trim(COALESCE(x.vendor_name, ''))) = p.vendor_key)
+        )
+      GROUP BY vendor_key
+    )
+`;
+const QBO_ACTIVITY_COLUMNS = `
+      COALESCE(qbi.last_paid_at, qbn.last_paid_at) AS qbo_last_paid_at,
+      (SELECT p.total_amt
+       FROM quickbooks_bill_payments p
+       WHERE p.txn_date IS NOT NULL AND p.total_amt > 0
+         AND CASE
+           WHEN cp.quickbooks_vendor_id IS NOT NULL AND cp.quickbooks_vendor_id <> ''
+             THEN p.vendor_id = cp.quickbooks_vendor_id
+           ELSE qbn.vendor_key IS NOT NULL
+             AND lower(trim(COALESCE(p.vendor_name, ''))) = qbn.vendor_key
+             AND NOT EXISTS (
+               SELECT 1 FROM contractor_profiles x
+               WHERE x.quickbooks_vendor_id = p.vendor_id
+                  OR (x.quickbooks_vendor_id IS NOT NULL AND x.quickbooks_vendor_id <> ''
+                      AND lower(trim(COALESCE(x.vendor_name, ''))) = qbn.vendor_key)
+             )
+         END
+       ORDER BY p.txn_date DESC, p.qbo_id DESC
+       LIMIT 1) AS qbo_last_paid_amount,
+      COALESCE(qbi.cnt6, qbn.cnt6, 0) AS qbo_paid_count_6mo,
+      COALESCE(qbi.tot6, qbn.tot6, 0) AS qbo_paid_total_6mo,
+      CASE WHEN COALESCE(qbi.cnt6, qbn.cnt6, 0) > 0 THEN 1 ELSE 0 END AS qbo_active_6mo,
+      CASE WHEN qbi.vendor_id IS NOT NULL THEN 'vendor_id' WHEN qbn.vendor_key IS NOT NULL THEN 'name' END AS qbo_match_kind
+`;
+const QBO_ACTIVITY_JOINS = `
+    LEFT JOIN qbo_by_id qbi ON qbi.vendor_id = cp.quickbooks_vendor_id
+    LEFT JOIN qbo_by_name qbn ON (cp.quickbooks_vendor_id IS NULL OR cp.quickbooks_vendor_id = '')
+      AND qbn.vendor_key = lower(trim(COALESCE(cp.vendor_name, '')))
+`;
+// Most active first; the same rule the frontend comparator applies.
+const QBO_ACTIVITY_ORDER = `qbo_active_6mo DESC, COALESCE(qbo_last_paid_at, '') DESC, qbo_paid_count_6mo DESC`;
+
+// One profile row WITH its QuickBooks activity. The supplier save handlers
+// must return this shape - a bare SELECT * would come back with no qbo_*
+// columns, formatSupplierProfile would report "never paid", and the page
+// would drop an edited active supplier out of the default view.
+function selectSupplierWithActivity(db, id) {
+  return db.prepare(`${QBO_ACTIVITY_CTE}
+    SELECT cp.*,${QBO_ACTIVITY_COLUMNS}
+    FROM contractor_profiles cp${QBO_ACTIVITY_JOINS}
+    WHERE cp.id = ?
+  `).get(id);
+}
+
+function qboActivityFields(row) {
+  return {
+    qbo_last_paid_at: row.qbo_last_paid_at || null,
+    qbo_last_paid_amount: row.qbo_last_paid_amount === null || row.qbo_last_paid_amount === undefined
+      ? null
+      : Number(row.qbo_last_paid_amount),
+    qbo_paid_count_6mo: Number(row.qbo_paid_count_6mo || 0),
+    qbo_paid_total_6mo: Number(row.qbo_paid_total_6mo || 0),
+    qbo_active_6mo: Boolean(Number(row.qbo_active_6mo || 0)),
+    qbo_match_kind: row.qbo_match_kind || null,
+  };
+}
+
 function formatSupplierProfile(supplier) {
   const storedCategories = uniqueSupplierCategories(parseStoredContractorCategories(supplier));
   const categories = storedCategories.length ? storedCategories : inferSupplierCategoriesFromName(supplier.vendor_name);
@@ -398,6 +496,7 @@ function formatSupplierProfile(supplier) {
     supplier_marked_at: supplier.supplier_marked_at,
     created_at: supplier.created_at,
     updated_at: supplier.updated_at,
+    ...qboActivityFields(supplier),
   };
 }
 
@@ -553,24 +652,26 @@ router.post('/contractor-categories', authorize('super_admin', 'operations_manag
 // GET /api/users/suppliers - contractors temporarily marked for the Suppliers tab
 router.get('/suppliers', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
   const db = getDb();
-  const suppliers = db.prepare(`
+  // Most active first, then A-Z - the same rule Suppliers.tsx re-applies with
+  // compareByQboActivity, so the list never reorders after first paint.
+  const suppliers = db.prepare(`${QBO_ACTIVITY_CTE}
     SELECT
-      id,
-      vendor_name,
-      contact_name,
-      email,
-      phone,
-      billing_address,
-      account_number,
-      contractor_category,
-      contractor_secondary_category,
-      contractor_categories_json,
-      supplier_marked_at,
-      created_at,
-      updated_at
-    FROM contractor_profiles
-    WHERE COALESCE(is_supplier, 0) = 1
-    ORDER BY datetime(COALESCE(supplier_marked_at, created_at)) DESC, vendor_name
+      cp.id,
+      cp.vendor_name,
+      cp.contact_name,
+      cp.email,
+      cp.phone,
+      cp.billing_address,
+      cp.account_number,
+      cp.contractor_category,
+      cp.contractor_secondary_category,
+      cp.contractor_categories_json,
+      cp.supplier_marked_at,
+      cp.created_at,
+      cp.updated_at,${QBO_ACTIVITY_COLUMNS}
+    FROM contractor_profiles cp${QBO_ACTIVITY_JOINS}
+    WHERE COALESCE(cp.is_supplier, 0) = 1
+    ORDER BY ${QBO_ACTIVITY_ORDER}, cp.vendor_name
   `).all();
 
   const response = suppliers.map(formatSupplierProfile);
@@ -620,7 +721,7 @@ router.post('/suppliers', authorize('super_admin', 'operations_manager', 'projec
       details: { supplier_name: payload.name, supplier_categories: payload.categories },
     });
 
-    const supplier = payload.db.prepare('SELECT * FROM contractor_profiles WHERE id = ?').get(supplierId);
+    const supplier = selectSupplierWithActivity(payload.db, supplierId);
     res.status(201).json({ supplier: formatSupplierProfile(supplier), message: 'Supplier added' });
   } catch (err) {
     if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message });
@@ -673,7 +774,7 @@ router.put('/suppliers/:id', authorize('super_admin', 'operations_manager', 'pro
       details: { supplier_name: payload.name, supplier_categories: payload.categories },
     });
 
-    const supplier = payload.db.prepare('SELECT * FROM contractor_profiles WHERE id = ?').get(req.params.id);
+    const supplier = selectSupplierWithActivity(payload.db, req.params.id);
     res.json({ supplier: formatSupplierProfile(supplier), message: 'Supplier updated' });
   } catch (err) {
     if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message });
@@ -685,7 +786,7 @@ router.put('/suppliers/:id', authorize('super_admin', 'operations_manager', 'pro
 // GET /api/users/contractors/directory - contractor table with project and payment context
 router.get('/contractors/directory', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
   const db = getDb();
-  const contractors = db.prepare(`
+  const contractors = db.prepare(`${QBO_ACTIVITY_CTE}
     SELECT
       cp.id,
       cp.vendor_name,
@@ -795,10 +896,10 @@ router.get('/contractors/directory', authorize('super_admin', 'operations_manage
       (SELECT ccp.bank_name
        FROM contractor_compliance_profiles ccp
        WHERE ccp.contractor_id = cp.id
-       LIMIT 1) as bank_name
+       LIMIT 1) as bank_name,${QBO_ACTIVITY_COLUMNS}
     FROM contractor_profiles cp
     LEFT JOIN users u ON u.id = cp.linked_user_id
-    LEFT JOIN contractor_compliance_profiles ccp ON ccp.contractor_id = cp.id
+    LEFT JOIN contractor_compliance_profiles ccp ON ccp.contractor_id = cp.id${QBO_ACTIVITY_JOINS}
     WHERE COALESCE(u.is_active, 1) = 1
     ORDER BY datetime(cp.created_at) DESC, cp.vendor_name
   `).all();
@@ -925,6 +1026,7 @@ router.get('/contractors/directory', authorize('super_admin', 'operations_manage
       last_paid_invoice: paid,
       last_invoice: invoice,
       total_paid: Number(contractor.total_paid || 0),
+      ...qboActivityFields(contractor),
       latest_notes: notesByContractor.get(contractor.id) || [],
     };
   });
