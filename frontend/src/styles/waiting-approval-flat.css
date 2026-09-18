@@ -269,3 +269,79 @@
   font-weight: 800 !important;
   white-space: nowrap !important;
 }
+
+/* ── Bank-entry checklist on the Friday payment queue (2026-09-18, Mike) ──────
+   A personal tick per row for whoever keys payments into the bank. Ticked rows
+   get a yellow "Paid - entered in bank" banner so what is done and what is
+   not stands out at a glance. Purely visual: the invoice status is untouched. */
+.bt-approved-pay-card {
+  position: relative;
+}
+
+.bt-bank-entry-check {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 10px;
+  cursor: pointer;
+}
+
+.bt-bank-entry-check input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: #facc15;
+  cursor: pointer;
+}
+
+.bt-approved-pay-card.is-bank-entered {
+  outline: 2px solid #facc15 !important;
+  outline-offset: -2px;
+  background: rgba(250, 204, 21, 0.12) !important;
+}
+
+.bt-approved-pay-card.is-bank-entered .bt-approved-pay-card-top,
+.bt-approved-pay-card.is-bank-entered .bt-approved-pay-card-body {
+  opacity: 0.82;
+}
+
+.bt-approved-pay-card.is-bank-entered .bt-approved-pay-card-top {
+  padding-top: 24px;
+}
+
+.bt-bank-entered-banner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  padding: 3px 10px;
+  background: #facc15;
+  color: #1f2937;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  text-align: center;
+  border-radius: 10px 10px 0 0;
+  pointer-events: none;
+}
+
+.bt-approved-pay-total small {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fde68a;
+}
+
+.bt-approved-pay-total button {
+  margin-top: 2px;
+  padding: 0;
+  font-size: 10px;
+  font-weight: 800;
+  color: #fef3c7;
+  text-decoration: underline;
+  background: none !important;
+  border: none !important;
+  cursor: pointer;
+}

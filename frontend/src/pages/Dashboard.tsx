@@ -15,6 +15,19 @@ import { EASTERN_TIME_ZONE, formatEasternDate, formatEasternDateTime, formatEast
 import VoiceTextarea from '../components/VoiceTextarea';
 import AddToCalendarButton from '../components/AddToCalendarButton';
 
+// First plain line of a calendar description, for the tiny in-cell preview
+// Mike asked for ("driveway being paved Monday" right on the day). Skips the
+// "Category: x" / "Assignee: y" scaffolding and the "Notes:" header that
+// structured descriptions from the operations calendar carry.
+const calendarDescriptionSnippet = (description?: string | null, max = 56) => {
+  const line = String(description || '')
+    .split(/\r?\n/)
+    .map(part => part.trim())
+    .find(part => part && !/^notes:?$/i.test(part) && !/^(category|assignee|project|vendor|contact|location|type|priority|status)\s*:/i.test(part));
+  if (!line) return '';
+  return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line;
+};
+
 const calendarBadgeMonthFormatter = new Intl.DateTimeFormat('en-US', {
   timeZone: EASTERN_TIME_ZONE,
   month: 'short',
@@ -559,6 +572,12 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
   const [calendarStatusFilter, setCalendarStatusFilter] = useState('all');
   const [calendarReminderFilter, setCalendarReminderFilter] = useState('all');
   const [editingCalendarEvent, setEditingCalendarEvent] = useState<OperationsCalendarEvent | null>(null);
+  // Click-a-day quick add. Two composers because the mini calendar (sidebar)
+  // and the month view are separate mounts; each opens on its own day.
+  const [miniComposerOpen, setMiniComposerOpen] = useState(false);
+  const [miniComposerDate, setMiniComposerDate] = useState(formatLocalDateInput());
+  const [monthComposerOpen, setMonthComposerOpen] = useState(false);
+  const [monthComposerDate, setMonthComposerDate] = useState(formatLocalDateInput());
   const [calendarEditForm, setCalendarEditForm] = useState<CalendarEditForm>(blankCalendarEditForm);
   const [savingCalendarEdit, setSavingCalendarEdit] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -1198,6 +1217,11 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
           <span className="mt-0.5 block truncate text-[10px] font-bold text-slate-600">
             {formatCalendarDueTimeLabel(event.due_time)}
           </span>
+          {calendarDescriptionSnippet(event.description) ? (
+            <span className="mt-0.5 block truncate text-[9px] font-semibold leading-3 text-slate-500">
+              {calendarDescriptionSnippet(event.description)}
+            </span>
+          ) : null}
         </button>
         <button
           type="button"
@@ -1532,6 +1556,17 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
 
   const renderCalendarMonthView = () => (
     <div className="overflow-x-auto bg-slate-50">
+      <AddToCalendarButton
+        hideTrigger
+        open={monthComposerOpen}
+        onOpenChange={setMonthComposerOpen}
+        defaultDate={monthComposerDate}
+        sourceType="dashboard"
+        contextLabel={`Operations calendar - ${formatCalendarBadgeDate(monthComposerDate).label}`}
+        allowEmailReminder={canCreateCalendarReminders}
+        modalTitle="Add task or event"
+        onSaved={() => refreshCalendarEvents()}
+      />
       <div className="min-w-[820px] p-4">
         <div className="grid grid-cols-7 overflow-hidden rounded-t-2xl border border-b-0 border-slate-200 bg-slate-100">
           {calendarWeekdayLabels.map(dayLabel => (
@@ -1568,6 +1603,18 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
                         {dayEvents.length}
                       </span>
                     ) : null}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMonthComposerDate(day.key);
+                        setMonthComposerOpen(true);
+                      }}
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-slate-300 bg-white text-sm font-black leading-none text-slate-600 shadow-sm transition hover:border-blue-400 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      title={`Add a task on ${badgeDate.label}`}
+                      aria-label={`Add a task on ${badgeDate.label}`}
+                    >
+                      +
+                    </button>
                   </div>
                 </header>
                 <div className="space-y-1.5">
@@ -1795,9 +1842,23 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
             <button
               key={day.key}
               type="button"
-              onClick={() => setCalendarAnchorDateKey(day.key)}
+              onClick={() => {
+                // First click selects the day (agenda below); clicking the
+                // selected day again opens the quick-add for that date.
+                if (selected) {
+                  setMiniComposerDate(day.key);
+                  setMiniComposerOpen(true);
+                } else {
+                  setCalendarAnchorDateKey(day.key);
+                }
+              }}
+              onDoubleClick={() => {
+                setCalendarAnchorDateKey(day.key);
+                setMiniComposerDate(day.key);
+                setMiniComposerOpen(true);
+              }}
               className={`${day.isToday ? 'is-today' : ''} ${selected ? 'is-selected' : ''} ${day.isCurrentMonth ? '' : 'is-muted'}`}
-              title={`${day.label}${eventCount ? ` - ${eventCount} item${eventCount === 1 ? '' : 's'}` : ''}`}
+              title={`${day.label}${eventCount ? ` - ${eventCount} item${eventCount === 1 ? '' : 's'}` : ''} - click again to add a task`}
               aria-label={`${day.label}${eventCount ? `, ${eventCount} calendar item${eventCount === 1 ? '' : 's'}` : ''}`}
             >
               <span>{day.dayNumber}</span>
@@ -1810,6 +1871,18 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
         <div className="bt-dashboard-mini-calendar-module__agenda-title">
           <span>{formatCalendarBadgeDate(calendarAnchorDateKey).label}</span>
           <strong>{dashboardMiniSelectedDateEvents.length}</strong>
+          <button
+            type="button"
+            onClick={() => {
+              setMiniComposerDate(calendarAnchorDateKey);
+              setMiniComposerOpen(true);
+            }}
+            title={`Add a task on ${formatCalendarBadgeDate(calendarAnchorDateKey).label}`}
+            aria-label={`Add a task on ${formatCalendarBadgeDate(calendarAnchorDateKey).label}`}
+            style={{ marginLeft: 6, minWidth: 22, height: 22, borderRadius: 6, border: '1px solid rgba(255,255,255,0.18)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontSize: 14, fontWeight: 900, lineHeight: 1 }}
+          >
+            +
+          </button>
         </div>
         {dashboardMiniSelectedDateEvents.length ? (
           <div className="bt-dashboard-mini-calendar-module__agenda-list">
@@ -1819,15 +1892,20 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
                 <button
                   key={event.id}
                   type="button"
-                  onClick={() => openOperationsCalendarEvent(event)}
+                  onClick={() => openCalendarEntryEditor(event)}
                   className="bt-dashboard-mini-calendar-module__agenda-item"
-                  title={`Open in calendar: ${event.title || 'Untitled calendar item'}`}
-                  aria-label={`Open calendar item: ${event.title || 'Untitled calendar item'}`}
+                  title={`Edit: ${event.title || 'Untitled calendar item'}`}
+                  aria-label={`Edit calendar item: ${event.title || 'Untitled calendar item'}`}
                 >
                   <span className={tone.rail} />
                   <span>
                     <strong>{event.title || 'Untitled calendar item'}</strong>
                     <em>{formatCalendarDueTimeLabel(event.due_time)} - {getCalendarProjectLabel(event)}</em>
+                    {calendarDescriptionSnippet(event.description) ? (
+                      <small style={{ display: 'block', fontSize: 9, lineHeight: '11px', fontWeight: 600, opacity: 0.8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {calendarDescriptionSnippet(event.description)}
+                      </small>
+                    ) : null}
                   </span>
                 </button>
               );
@@ -1849,6 +1927,17 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
       >
         Open Calendar
       </button>
+      <AddToCalendarButton
+        hideTrigger
+        open={miniComposerOpen}
+        onOpenChange={setMiniComposerOpen}
+        defaultDate={miniComposerDate}
+        sourceType="dashboard"
+        contextLabel={`Company calendar - ${formatCalendarBadgeDate(miniComposerDate).label}`}
+        allowEmailReminder={canCreateCalendarReminders}
+        modalTitle="Add task or event"
+        onSaved={() => refreshCalendarEvents()}
+      />
     </aside>
   );
 

@@ -601,16 +601,34 @@ function buildProjectCalendarDays(anchorDateKey: string, events: ProjectCalendar
   });
 }
 
+// First plain line of a description for the tiny in-cell preview (Mike:
+// "driveway being paved Monday" should read right on the day). Skips the
+// "Category: x" / "Notes:" scaffolding structured descriptions carry.
+const calendarDescriptionSnippet = (description?: string | null, max = 48) => {
+  const line = String(description || '')
+    .split(/\r?\n/)
+    .map(part => part.trim())
+    .find(part => part && !/^notes:?$/i.test(part) && !/^(category|assignee|project|vendor|contact|location|type|priority|status)\s*:/i.test(part));
+  if (!line) return '';
+  return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line;
+};
+
 function ProjectMiniCalendarCard({
   events,
   loading,
   anchorDateKey,
   onAnchorDateChange,
+  onDayClick,
+  onEditEvent,
 }: {
   events: ProjectCalendarEvent[];
   loading: boolean;
   anchorDateKey: string;
   onAnchorDateChange: (dateKey: string) => void;
+  // Click an empty part of a day to add a task on that date.
+  onDayClick?: (dateKey: string) => void;
+  // "Edit" in the item modal hands the item to the page's composer.
+  onEditEvent?: (event: ProjectCalendarEvent) => void;
 }) {
   const anchorDate = parseProjectCalendarDateKey(anchorDateKey);
   const days = useMemo(() => buildProjectCalendarDays(anchorDateKey, events), [anchorDateKey, events]);
@@ -672,31 +690,58 @@ function ProjectMiniCalendarCard({
           {PROJECT_CALENDAR_WEEKDAYS.map(day => <div key={day}>{day}</div>)}
         </div>
         <div className="mt-1 grid grid-cols-7 gap-1">
-          {days.map(day => (
-            <div
-              key={day.key}
-              className={`min-h-[58px] rounded-lg border p-1.5 ${day.isToday ? 'border-amber-300 bg-amber-400/20 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.25)]' : 'border-white/10 bg-white/[0.045]'} ${day.isCurrentMonth ? 'text-white' : 'text-slate-500'}`}
-            >
-              <div className="flex items-center justify-between">
-                <span className={`text-xs font-black ${day.isToday ? 'text-amber-100' : ''}`}>{day.dayNumber}</span>
-                {day.events.length > 0 && <span className="rounded-full bg-cyan-300 px-1.5 text-[9px] font-black text-slate-950">{day.events.length}</span>}
+          {days.map(day => {
+            const dayLabel = format(day.date, 'MMM d');
+            const clickable = Boolean(onDayClick);
+            return (
+              <div
+                key={day.key}
+                role={clickable ? 'button' : undefined}
+                tabIndex={clickable ? 0 : undefined}
+                onClick={clickable ? () => onDayClick?.(day.key) : undefined}
+                onKeyDown={clickable ? keyEvent => {
+                  if (keyEvent.key === 'Enter' || keyEvent.key === ' ') {
+                    keyEvent.preventDefault();
+                    onDayClick?.(day.key);
+                  }
+                } : undefined}
+                title={clickable ? `Add a task on ${dayLabel}` : undefined}
+                aria-label={clickable ? `Add a task on ${dayLabel}` : undefined}
+                className={`min-h-[66px] rounded-lg border p-1.5 ${day.isToday ? 'border-amber-300 bg-amber-400/20 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.25)]' : 'border-white/10 bg-white/[0.045]'} ${day.isCurrentMonth ? 'text-white' : 'text-slate-500'} ${clickable ? 'cursor-pointer hover:border-cyan-200/60 hover:bg-white/[0.09] focus:outline-none focus:ring-2 focus:ring-cyan-300' : ''}`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className={`text-xs font-black ${day.isToday ? 'text-amber-100' : ''}`}>{day.dayNumber}</span>
+                  {day.events.length > 0 && <span className="rounded-full bg-cyan-300 px-1.5 text-[9px] font-black text-slate-950">{day.events.length}</span>}
+                </div>
+                <div className="mt-1 space-y-1">
+                  {day.events.slice(0, 2).map(event => {
+                    const snippet = calendarDescriptionSnippet(event.description);
+                    return (
+                      <button
+                        key={`${day.key}-${event.id}`}
+                        type="button"
+                        onClick={clickEvent => {
+                          // The cell behind us is the quick-add target; an
+                          // item click must not also open the composer.
+                          clickEvent.stopPropagation();
+                          setSelectedEvent(event);
+                        }}
+                        className={`block w-full cursor-pointer rounded border px-1 py-0.5 text-left text-[9px] font-black leading-tight hover:ring-1 hover:ring-cyan-100 focus:outline-none focus:ring-2 focus:ring-cyan-200 ${projectCalendarEventTone(event)}`}
+                        title={snippet ? `${event.title || 'Calendar item'} - ${snippet}` : (event.title || 'Calendar item')}
+                        aria-label={`View ${event.title || 'calendar item'} on ${projectCalendarEventDateLabel(event)}`}
+                      >
+                        <span className="block truncate">{event.title || 'Calendar item'}</span>
+                        {snippet ? <span className="block truncate text-[8px] font-semibold leading-tight opacity-80">{snippet}</span> : null}
+                      </button>
+                    );
+                  })}
+                  {day.events.length > 2 ? (
+                    <span className="block text-[8px] font-black text-cyan-200/80">+{day.events.length - 2} more</span>
+                  ) : null}
+                </div>
               </div>
-              <div className="mt-1 space-y-1">
-                {day.events.slice(0, 2).map(event => (
-                  <button
-                    key={`${day.key}-${event.id}`}
-                    type="button"
-                    onClick={() => setSelectedEvent(event)}
-                    className={`block w-full cursor-pointer truncate rounded border px-1 py-0.5 text-left text-[9px] font-black leading-tight hover:ring-1 hover:ring-cyan-100 focus:outline-none focus:ring-2 focus:ring-cyan-200 ${projectCalendarEventTone(event)}`}
-                    title={event.title || 'Calendar item'}
-                    aria-label={`View ${event.title || 'calendar item'} on ${projectCalendarEventDateLabel(event)}`}
-                  >
-                    {event.title || 'Calendar item'}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3">
@@ -782,7 +827,23 @@ function ProjectMiniCalendarCard({
               </div>
             )}
 
-            <div className="flex justify-end border-t border-slate-200 pt-4">
+            <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 pt-4">
+              {onEditEvent && selectedEvent.source !== 'construction_task' ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = selectedEvent;
+                    setSelectedEvent(null);
+                    onEditEvent(target);
+                  }}
+                  className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-amber-400 bg-amber-50 px-4 py-2 text-sm font-black text-amber-800 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                >
+                  <Edit2 className="h-4 w-4" />
+                  Edit
+                </button>
+              ) : selectedEvent.source === 'construction_task' ? (
+                <span className="mr-auto text-xs font-semibold text-slate-500">Timeline tasks are edited from the Timeline tab.</span>
+              ) : null}
               <button
                 type="button"
                 onClick={() => setSelectedEvent(null)}
@@ -854,6 +915,10 @@ export default function ProjectDetail() {
   const [calendarReminderDate, setCalendarReminderDate] = useState(formatLocalDateInput());
   const [calendarReminderTime, setCalendarReminderTime] = useState(defaultReminderTime());
   const [savingCalendarEvent, setSavingCalendarEvent] = useState(false);
+  // The same composer edits an existing item when this is set.
+  const [editingCalendarEventId, setEditingCalendarEventId] = useState<string | null>(null);
+  const [calendarTime, setCalendarTime] = useState('');
+  const [calendarStatus, setCalendarStatus] = useState('scheduled');
   const [projectCalendarAnchorDateKey, setProjectCalendarAnchorDateKey] = useState(formatLocalDateInput());
   const [projectCalendarEvents, setProjectCalendarEvents] = useState<ProjectCalendarEvent[]>([]);
   const [loadingProjectCalendar, setLoadingProjectCalendar] = useState(false);
@@ -1295,8 +1360,11 @@ export default function ProjectDetail() {
     const defaultTitle = newNote.trim()
       ? newNote.trim().replace(/\s+/g, ' ').slice(0, 120)
       : `Follow up: ${project?.job_name || project?.address || 'project'}`;
+    setEditingCalendarEventId(null);
     setCalendarTitle(defaultTitle);
     setCalendarDate(new Date().toISOString().slice(0, 10));
+    setCalendarTime('');
+    setCalendarStatus('scheduled');
     setCalendarReminderEnabled(false);
     setCalendarReminderRecipients('');
     setCalendarReminderMessage(newNote.trim() || defaultTitle);
@@ -1304,6 +1372,41 @@ export default function ProjectDetail() {
     setCalendarReminderDate(formatLocalDateInput());
     setCalendarReminderTime(defaultReminderTime());
     setShowCalendarComposer(true);
+  };
+
+  // Clicked a day on the project calendar: same composer, that date, blank
+  // title so the user types what the task is.
+  const openCalendarComposerForDate = (dateKey: string) => {
+    openCalendarComposer();
+    setCalendarTitle('');
+    setCalendarDetails('');
+    setCalendarDate(dateKey);
+  };
+
+  // Clicked "Edit" on a calendar item: load it into the composer and let Save
+  // PUT instead of POST.
+  const openCalendarEditor = (event: ProjectCalendarEvent) => {
+    setEditingCalendarEventId(event.id);
+    setCalendarTitle(event.title || '');
+    setCalendarDetails(event.description || '');
+    setCalendarDate(String(event.scheduled_for || formatLocalDateInput()).slice(0, 10));
+    setCalendarTime(event.due_time || '');
+    setCalendarEventType(event.event_type || 'task');
+    setCalendarPriority(event.priority || 'normal');
+    setCalendarStatus(event.status === 'cancelled' ? 'cancelled' : event.status === 'completed' ? 'completed' : 'scheduled');
+    setCalendarReminderEnabled(false);
+    setShowCalendarComposer(true);
+  };
+
+  const closeCalendarComposer = () => {
+    setShowCalendarComposer(false);
+    setEditingCalendarEventId(null);
+    setCalendarTitle('');
+    setCalendarDetails('');
+    setCalendarTime('');
+    setCalendarStatus('scheduled');
+    setCalendarPriority('normal');
+    setCalendarEventType('task');
   };
 
   const addCalendarEvent = async () => {
@@ -1324,6 +1427,28 @@ export default function ProjectDetail() {
       toast.error('Choose the reminder date and time');
       return;
     }
+    if (editingCalendarEventId) {
+      setSavingCalendarEvent(true);
+      try {
+        await api.put(`/calendar/events/${editingCalendarEventId}`, {
+          title: calendarTitle.trim(),
+          description: calendarDetails.trim() || null,
+          scheduled_for: calendarDate,
+          due_time: calendarTime || null,
+          event_type: calendarEventType,
+          priority: calendarPriority,
+          status: calendarStatus,
+        });
+        toast.success('Calendar item updated');
+        closeCalendarComposer();
+        await loadProjectCalendar();
+      } catch (err: any) {
+        toast.error(err.response?.data?.error || 'Failed to update calendar item');
+      } finally {
+        setSavingCalendarEvent(false);
+      }
+      return;
+    }
     setSavingCalendarEvent(true);
     try {
       const payload: any = {
@@ -1332,6 +1457,7 @@ export default function ProjectDetail() {
         description: calendarDetails.trim() || newNote.trim() || null,
         event_type: calendarEventType,
         scheduled_for: calendarDate,
+        due_time: calendarTime || null,
         priority: calendarPriority,
         source_type: 'project_note',
       };
@@ -1361,6 +1487,7 @@ export default function ProjectDetail() {
       setCalendarReminderEnabled(false);
       setCalendarReminderRecipients('');
       setCalendarReminderMessage('');
+      setCalendarTime('');
       await loadProjectCalendar();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to add calendar item');
@@ -1714,24 +1841,32 @@ export default function ProjectDetail() {
         <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 shadow-sm">
           <div className="mb-2 flex items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-black uppercase tracking-wide text-amber-800">Operations Calendar</p>
-              <p className="text-xs font-semibold text-amber-700">Schedule this project item for the dashboard calendar.</p>
+              <p className="text-xs font-black uppercase tracking-wide text-amber-800">{editingCalendarEventId ? 'Edit calendar item' : 'Operations Calendar'}</p>
+              <p className="text-xs font-semibold text-amber-700">{editingCalendarEventId ? 'Changes save to this project item and the dashboard calendar.' : 'Schedule this project item for the dashboard calendar.'}</p>
             </div>
-            <button type="button" onClick={() => setShowCalendarComposer(false)} className="rounded-lg px-2 py-1 text-xs font-black text-amber-800 hover:bg-amber-100">
+            <button type="button" onClick={closeCalendarComposer} className="rounded-lg px-2 py-1 text-xs font-black text-amber-800 hover:bg-amber-100">
               Close
             </button>
           </div>
-          <div className="grid gap-2 lg:grid-cols-[minmax(0,1.5fr)_150px_150px_130px_auto]">
+          <div className="grid gap-2 lg:grid-cols-[minmax(0,1.5fr)_150px_120px_140px_130px_auto]">
             <input
               value={calendarTitle}
               onChange={e => setCalendarTitle(e.target.value)}
               className="min-h-[42px] rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
-              placeholder="Calendar item title"
+              placeholder="What is happening? e.g. Driveway being paved"
+              autoFocus
             />
             <input
               type="date"
               value={calendarDate}
               onChange={e => setCalendarDate(e.target.value)}
+              className="min-h-[42px] rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+            />
+            <input
+              type="time"
+              value={calendarTime}
+              onChange={e => setCalendarTime(e.target.value)}
+              title="Time (optional)"
               className="min-h-[42px] rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
             />
             <select
@@ -1761,7 +1896,7 @@ export default function ProjectDetail() {
               className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-black text-white shadow-sm transition-colors hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-300"
             >
               <CalendarDays className="h-4 w-4" />
-              {savingCalendarEvent ? 'Saving' : 'Save'}
+              {savingCalendarEvent ? 'Saving' : editingCalendarEventId ? 'Save changes' : 'Save'}
             </button>
           </div>
           <textarea
@@ -1771,6 +1906,20 @@ export default function ProjectDetail() {
             className="mt-2 w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500"
             placeholder="Details of the task or event (optional) — what needs to be done, where, who, etc."
           />
+          {editingCalendarEventId && (
+            <label className="mt-2 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-amber-800">
+              Status
+              <select
+                value={calendarStatus}
+                onChange={e => setCalendarStatus(e.target.value)}
+                className="min-h-[36px] rounded-lg border border-amber-300 bg-white px-3 py-1 text-sm font-bold normal-case tracking-normal text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              >
+                <option value="scheduled">Scheduled</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </label>
+          )}
           {isAdminRole(user?.role || '') && (
             <div className="mt-3 rounded-xl border border-amber-300 bg-white p-3 shadow-sm">
               <label className="flex items-start gap-2 text-sm font-black text-amber-900">
@@ -2249,6 +2398,8 @@ export default function ProjectDetail() {
                       loading={loadingProjectCalendar}
                       anchorDateKey={projectCalendarAnchorDateKey}
                       onAnchorDateChange={setProjectCalendarAnchorDateKey}
+                      onDayClick={openCalendarComposerForDate}
+                      onEditEvent={openCalendarEditor}
                     />
                   )}
                 </div>

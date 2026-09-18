@@ -177,7 +177,7 @@ interface QuickBooksBillSplitLine {
 }
 
 type QuickBooksBillFilter = 'open' | 'friday_queue' | 'paid' | 'all';
-type QuickBooksInvoiceFilterMode = 'all' | 'project' | 'project_date_range' | 'project_vendor' | 'project_vendor_date_range' | 'project_specific_date' | 'vendor_only';
+type QuickBooksInvoiceFilterMode = 'all' | 'project' | 'project_date_range' | 'project_specific_date' | 'vendor_only';
 type QuickBooksInvoicePeriodMode = 'all_time' | 'year' | 'month' | 'day';
 type QuickBooksInvoiceSortKey = 'status' | 'vendor' | 'bill_date' | 'due_date' | 'bill_amount' | 'open_balance';
 type QuickBooksInvoiceSortDirection = 'asc' | 'desc';
@@ -457,18 +457,21 @@ const DEFAULT_QUICKBOOKS_AWAITING_APPROVAL_SORT: QuickBooksInvoiceSortState = {
   key: 'bill_date',
   direction: 'asc',
 };
+// Project is the anchor: pick one and every bill on it shows at once. Vendor /
+// supplier and the date pickers only NARROW that list when filled in - an empty
+// vendor means "all vendors on this project", not "not ready yet". The old
+// "Project + Vendor" modes existed only to reveal the vendor picker; it is now
+// available under every project mode, so they collapsed into these.
 const QUICKBOOKS_INVOICE_FILTER_OPTIONS: { value: QuickBooksInvoiceFilterMode; label: string }[] = [
   { value: 'all', label: 'No project filter' },
-  { value: 'project', label: 'Project only' },
-  { value: 'project_date_range', label: 'Project + date range' },
-  { value: 'project_vendor', label: 'Project + Vendor / Suppliers' },
-  { value: 'project_vendor_date_range', label: 'Project + Vendor / Suppliers + date range' },
+  { value: 'project', label: 'Project + Vendor / Suppliers' },
+  { value: 'project_date_range', label: 'Project + Vendor / Suppliers + date range' },
   { value: 'project_specific_date', label: 'Project + specific date' },
   { value: 'vendor_only', label: 'Vendor / Suppliers Only' },
 ];
-const QUICKBOOKS_FILTER_PROJECT_MODES = new Set<QuickBooksInvoiceFilterMode>(['project', 'project_date_range', 'project_vendor', 'project_vendor_date_range', 'project_specific_date']);
-const QUICKBOOKS_FILTER_VENDOR_MODES = new Set<QuickBooksInvoiceFilterMode>(['project_vendor', 'project_vendor_date_range', 'vendor_only']);
-const QUICKBOOKS_FILTER_DATE_RANGE_MODES = new Set<QuickBooksInvoiceFilterMode>(['project_date_range', 'project_vendor_date_range']);
+const QUICKBOOKS_FILTER_PROJECT_MODES = new Set<QuickBooksInvoiceFilterMode>(['project', 'project_date_range', 'project_specific_date']);
+const QUICKBOOKS_FILTER_VENDOR_MODES = new Set<QuickBooksInvoiceFilterMode>(['project', 'project_date_range', 'project_specific_date', 'vendor_only']);
+const QUICKBOOKS_FILTER_DATE_RANGE_MODES = new Set<QuickBooksInvoiceFilterMode>(['project_date_range']);
 const QUICKBOOKS_FILTER_EXACT_DATE_MODES = new Set<QuickBooksInvoiceFilterMode>(['project_specific_date']);
 const DEFAULT_QUICKBOOKS_INVOICE_YEAR = new Date().getFullYear();
 const DEFAULT_QUICKBOOKS_INVOICE_MONTH = quickBooksTodayDateValue().slice(0, 7);
@@ -767,20 +770,22 @@ const quickBooksBillMatchesInvoiceFilter = (
   vendorSupplierAliasMap?: Map<string, Set<string>>
 ) => {
   if (filter.mode === 'all') return true;
+  // Anchors gate; narrowers only apply once filled in.
   if (QUICKBOOKS_FILTER_PROJECT_MODES.has(filter.mode)) {
     if (!filter.projectId) return false;
     if (!quickBooksBillMatchesProject(bill, invoice, filter.projectId)) return false;
   }
   if (QUICKBOOKS_FILTER_VENDOR_MODES.has(filter.mode)) {
-    if (!filter.vendor) return false;
-    if (!quickBooksBillMatchesVendorSupplier(bill, filter.vendor, vendorSupplierAliasMap)) return false;
+    if (filter.vendor) {
+      if (!quickBooksBillMatchesVendorSupplier(bill, filter.vendor, vendorSupplierAliasMap)) return false;
+    } else if (filter.mode === 'vendor_only') {
+      return false; // nothing else anchors this mode
+    }
   }
-  if (QUICKBOOKS_FILTER_DATE_RANGE_MODES.has(filter.mode)) {
-    if (!filter.startDate && !filter.endDate) return false;
+  if (QUICKBOOKS_FILTER_DATE_RANGE_MODES.has(filter.mode) && (filter.startDate || filter.endDate)) {
     if (!quickBooksBillMatchesDateRange(bill, filter.startDate, filter.endDate)) return false;
   }
-  if (QUICKBOOKS_FILTER_EXACT_DATE_MODES.has(filter.mode)) {
-    if (!filter.exactDate) return false;
+  if (QUICKBOOKS_FILTER_EXACT_DATE_MODES.has(filter.mode) && filter.exactDate) {
     if (!quickBooksBillMatchesExactDate(bill, filter.exactDate)) return false;
   }
   return true;
@@ -1104,6 +1109,54 @@ export default function Invoices() {
     [quickBooksBills]
   );
   const approvedPaymentTotal = approvedPaymentQueue.reduce((sum, bill) => sum + Number(bill.balance || 0), 0);
+
+  // Bank-entry checklist (Mike, 2026-09-18). Whoever keys these payments into
+  // the bank ticks each row as they go so nothing is missed or paid twice. It
+  // is a personal scratch list: it never touches the bill's real status (that
+  // stays "Verify QBO Paid"), so it lives in this browser only, per user, and a
+  // tick falls away on its own once the bill leaves the queue.
+  const bankEntryStorageKey = `bt:bank-entry-checks:${user?.id || 'anon'}`;
+  const [bankEntryChecked, setBankEntryChecked] = useState<Record<string, string>>({});
+  const [bankEntryLoadedKey, setBankEntryLoadedKey] = useState('');
+  // Persist is declared BEFORE load on purpose: when the key changes (user id
+  // arrives after mount) this pass must not write the previous key's ticks
+  // under the new one; the guard skips it until load has caught up.
+  useEffect(() => {
+    if (bankEntryLoadedKey !== bankEntryStorageKey) return;
+    try { window.localStorage.setItem(bankEntryStorageKey, JSON.stringify(bankEntryChecked)); } catch { /* private mode / blocked storage */ }
+  }, [bankEntryChecked, bankEntryLoadedKey, bankEntryStorageKey]);
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(bankEntryStorageKey);
+      const parsed = raw ? JSON.parse(raw) : {};
+      setBankEntryChecked(parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {});
+    } catch {
+      setBankEntryChecked({});
+    }
+    setBankEntryLoadedKey(bankEntryStorageKey);
+  }, [bankEntryStorageKey]);
+  useEffect(() => {
+    // Prune ticks for bills no longer queued - but only once bills have loaded,
+    // or the empty first render would wipe the list.
+    if (!quickBooksBills.length) return;
+    const live = new Set(approvedPaymentQueue.map(bill => String(bill.qbo_id)));
+    const stale = Object.keys(bankEntryChecked).filter(id => !live.has(id));
+    if (!stale.length) return;
+    setBankEntryChecked(current => {
+      const next = { ...current };
+      stale.forEach(id => { delete next[id]; });
+      return next;
+    });
+  }, [approvedPaymentQueue, bankEntryChecked, quickBooksBills.length]);
+  const toggleBankEntryChecked = (qboId: string) => {
+    setBankEntryChecked(current => {
+      const next = { ...current };
+      if (next[qboId]) delete next[qboId];
+      else next[qboId] = new Date().toISOString();
+      return next;
+    });
+  };
+  const bankEntryCheckedCount = approvedPaymentQueue.filter(bill => bankEntryChecked[String(bill.qbo_id)]).length;
   const invoiceById = useMemo(() => new Map(invoices.map(invoice => [invoice.id, invoice])), [invoices]);
   const projectById = useMemo(() => new Map(projects.map(project => [project.id, project])), [projects]);
   const allQuickBooksBills = useMemo(() => sortQuickBooksBillsByBillDate(quickBooksBills), [quickBooksBills]);
@@ -1161,7 +1214,24 @@ export default function Invoices() {
     });
     quickBooksBills.forEach(bill => addOption(bill.vendor_name, [String(bill.vendor_name || '').trim()]));
 
-    return Array.from(options.values()).sort((a, b) => a.label.localeCompare(b.label));
+    // Mike: the vendors we are actively paying belong at the top of the list.
+    // Rank each vendor by its most recent QuickBooks payment; vendors never
+    // paid in the system follow, A-Z.
+    const lastPaidByVendor = new Map<string, number>();
+    quickBooksBills.forEach(bill => {
+      if (!isQuickBooksBillPaid(bill)) return;
+      const key = quickBooksFilterText(bill.vendor_name);
+      if (!key) return;
+      const paidAt = quickBooksDateRank(quickBooksPaidDateKey(bill));
+      if (paidAt > (lastPaidByVendor.get(key) || 0)) lastPaidByVendor.set(key, paidAt);
+    });
+    const lastPaidFor = (option: VendorSupplierFilterOption) => option.aliases.reduce(
+      (latest, alias) => Math.max(latest, lastPaidByVendor.get(quickBooksFilterText(alias)) || 0),
+      lastPaidByVendor.get(quickBooksFilterText(option.label)) || 0
+    );
+    return Array.from(options.values()).sort((a, b) => (
+      lastPaidFor(b) - lastPaidFor(a) || a.label.localeCompare(b.label)
+    ));
   }, [contractorSupplierDirectory, quickBooksBills]);
   const quickBooksVendorSupplierAliasMap = useMemo(() => {
     const aliasMap = new Map<string, Set<string>>();
@@ -1176,12 +1246,35 @@ export default function Invoices() {
   const quickBooksInvoiceFilterNeedsVendor = QUICKBOOKS_FILTER_VENDOR_MODES.has(quickBooksInvoiceFilter.mode);
   const quickBooksInvoiceFilterNeedsDateRange = QUICKBOOKS_FILTER_DATE_RANGE_MODES.has(quickBooksInvoiceFilter.mode);
   const quickBooksInvoiceFilterNeedsExactDate = QUICKBOOKS_FILTER_EXACT_DATE_MODES.has(quickBooksInvoiceFilter.mode);
+  // Ready as soon as the anchor is set: the project in project modes, the
+  // vendor in vendor-only mode. Everything else narrows and never blocks.
   const quickBooksInvoiceFilterReady = quickBooksInvoiceFilter.mode === 'all' || (
     (!quickBooksInvoiceFilterNeedsProject || Boolean(quickBooksInvoiceFilter.projectId))
-    && (!quickBooksInvoiceFilterNeedsVendor || Boolean(quickBooksInvoiceFilter.vendor))
-    && (!quickBooksInvoiceFilterNeedsDateRange || Boolean(quickBooksInvoiceFilter.startDate || quickBooksInvoiceFilter.endDate))
-    && (!quickBooksInvoiceFilterNeedsExactDate || Boolean(quickBooksInvoiceFilter.exactDate))
+    && (quickBooksInvoiceFilter.mode !== 'vendor_only' || Boolean(quickBooksInvoiceFilter.vendor))
   );
+  // With a project chosen, offer only vendors that actually have a bill on it
+  // in the current period - not the whole 400-vendor directory.
+  const quickBooksVendorOptionsForFilter = useMemo(() => {
+    if (!quickBooksInvoiceFilterNeedsProject || !quickBooksInvoiceFilter.projectId) return quickBooksVendorSupplierFilterOptions;
+    const projectVendorKeys = new Set<string>();
+    quickBooksPeriodMirrorRows.forEach(({ bill, invoice }) => {
+      if (!quickBooksBillMatchesProject(bill, invoice, quickBooksInvoiceFilter.projectId)) return;
+      const key = quickBooksFilterText(bill.vendor_name);
+      if (key) projectVendorKeys.add(key);
+    });
+    return quickBooksVendorSupplierFilterOptions.filter(option => {
+      const key = quickBooksFilterText(option.label);
+      if (projectVendorKeys.has(key)) return true;
+      const aliases = quickBooksVendorSupplierAliasMap.get(key);
+      return aliases ? Array.from(aliases).some(alias => projectVendorKeys.has(alias)) : false;
+    });
+  }, [
+    quickBooksInvoiceFilter.projectId,
+    quickBooksInvoiceFilterNeedsProject,
+    quickBooksPeriodMirrorRows,
+    quickBooksVendorSupplierAliasMap,
+    quickBooksVendorSupplierFilterOptions,
+  ]);
   const quickBooksInvoiceProjectFilterInUse = quickBooksInvoiceFilter.mode !== 'all';
   const quickBooksInvoicePeriodInUse = (
     quickBooksInvoicePeriod.mode !== DEFAULT_QUICKBOOKS_INVOICE_PERIOD.mode
@@ -1324,13 +1417,9 @@ export default function Invoices() {
     ? `${quickBooksInvoiceScopeRows.length} ${quickBooksInvoicePeriodLabel}`
     : quickBooksInvoiceFilterNeedsProject && !quickBooksInvoiceFilter.projectId
       ? 'Select project'
-      : quickBooksInvoiceFilterNeedsVendor && !quickBooksInvoiceFilter.vendor
+      : quickBooksInvoiceFilter.mode === 'vendor_only' && !quickBooksInvoiceFilter.vendor
         ? 'Select vendor / supplier'
-        : quickBooksInvoiceFilterNeedsDateRange && !quickBooksInvoiceFilter.startDate && !quickBooksInvoiceFilter.endDate
-          ? 'Select date range'
-          : quickBooksInvoiceFilterNeedsExactDate && !quickBooksInvoiceFilter.exactDate
-            ? 'Select bill date'
-            : `${quickBooksInvoiceScopeRows.length} ${quickBooksInvoiceFilterScope} invoice${quickBooksInvoiceScopeRows.length === 1 ? '' : 's'}`;
+        : `${quickBooksInvoiceScopeRows.length} ${quickBooksInvoiceFilterScope} invoice${quickBooksInvoiceScopeRows.length === 1 ? '' : 's'}`;
   const quickBooksTableCountLabel = quickBooksInvoiceFilterActive
     ? deferredQuickBooksBillFilter === 'open'
       ? `${quickBooksMirrorRows.length} Filtered Open`
@@ -1354,7 +1443,13 @@ export default function Invoices() {
     setQuickBooksInvoiceSort(null);
   };
   const updateQuickBooksInvoiceFilter = (patch: Partial<QuickBooksInvoiceFilterState>) => {
-    setQuickBooksInvoiceFilter(current => ({ ...current, ...patch }));
+    setQuickBooksInvoiceFilter(current => {
+      const next = { ...current, ...patch };
+      // A new project gets the full vendor list again; a vendor narrowing
+      // chosen for the previous project must not silently carry over.
+      if (patch.projectId !== undefined && patch.projectId !== current.projectId) next.vendor = '';
+      return next;
+    });
     // Project/vendor/date filters are investigative views. Show paid and open
     // results together so records do not disappear behind the prior status tab.
     if (patch.mode && patch.mode !== 'all') setQuickBooksBillFilter('all');
@@ -1984,8 +2079,10 @@ export default function Invoices() {
                       value={quickBooksInvoiceFilter.vendor}
                       onChange={event => updateQuickBooksInvoiceFilter({ vendor: event.target.value })}
                     >
-                      <option value="">Select vendor / supplier</option>
-                      {quickBooksVendorSupplierFilterOptions.map(option => (
+                      <option value="">
+                        {quickBooksInvoiceFilter.mode === 'vendor_only' ? 'Select vendor / supplier' : 'All vendors / suppliers'}
+                      </option>
+                      {quickBooksVendorOptionsForFilter.map(option => (
                         <option key={option.label} value={option.label}>{option.label}</option>
                       ))}
                     </select>
@@ -2096,7 +2193,9 @@ export default function Invoices() {
                 <Receipt className="mx-auto mb-3 h-8 w-8 text-blue-300" />
                 <p className="text-sm font-bold text-gray-600">
                   {quickBooksInvoiceFilter.mode !== 'all' && !quickBooksInvoiceFilterReady
-                    ? 'Select the required invoice filter fields to show paid and unpaid invoices.'
+                    ? quickBooksInvoiceFilter.mode === 'vendor_only'
+                      ? 'Select a vendor / supplier to show their paid and unpaid invoices.'
+                      : 'Select a project to show all of its paid and unpaid invoices.'
                     : quickBooksInvoiceFilterActive
                       ? `No paid or unpaid invoices match this ${quickBooksInvoiceFilterScope} filter right now.`
                       : `No ${selectedQuickBooksBillFilter.label.toLowerCase()} are showing right now.`}
@@ -2404,6 +2503,14 @@ export default function Invoices() {
                   <div className="bt-approved-pay-total">
                     <span>Total balance due</span>
                     <strong>{money(approvedPaymentTotal)}</strong>
+                    {bankEntryCheckedCount > 0 ? (
+                      <>
+                        <small>{bankEntryCheckedCount} of {approvedPaymentQueue.length} entered in bank</small>
+                        <button type="button" onClick={() => setBankEntryChecked({})} title="Clear your checklist ticks (does not change any invoice)">
+                          Clear ticks
+                        </button>
+                      </>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -2417,8 +2524,19 @@ export default function Invoices() {
                   {approvedPaymentQueue.map(bill => {
                     const invoice = bill.matched_invoice_id ? invoiceById.get(bill.matched_invoice_id) || null : null;
                     return (
-                    <article key={bill.qbo_id} className="bt-approved-pay-card">
+                    <article key={bill.qbo_id} className={`bt-approved-pay-card${bankEntryChecked[String(bill.qbo_id)] ? ' is-bank-entered' : ''}`}>
+                      {bankEntryChecked[String(bill.qbo_id)] ? (
+                        <div className="bt-bank-entered-banner" aria-hidden="true">Paid - entered in bank</div>
+                      ) : null}
                       <div className="bt-approved-pay-card-top">
+                        <label className="bt-bank-entry-check" title="Tick once you have entered this payment in the bank. This is your checklist only - it does not change the invoice.">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(bankEntryChecked[String(bill.qbo_id)])}
+                            onChange={() => toggleBankEntryChecked(String(bill.qbo_id))}
+                            aria-label={`Entered in bank: ${bill.vendor_name || 'vendor'} ${money(bill.balance || 0)}`}
+                          />
+                        </label>
                         <span>Approved</span>
                         <strong>{money(bill.balance || 0)}</strong>
                       </div>

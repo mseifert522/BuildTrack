@@ -1034,12 +1034,38 @@ function TimedDayColumn({
             <span className="ops-time-event__bar" style={{ backgroundColor: category.color }} />
             <span className="ops-time-event__title">{event.title}</span>
             <span className="ops-time-event__meta">{eventMetaLabel(event)}</span>
+            {calendarDescriptionSnippet(event.description) ? (
+              <span className="ops-time-event__meta" style={chipSnippetStyle}>{calendarDescriptionSnippet(event.description)}</span>
+            ) : null}
           </button>
         );
       })}
     </div>
   );
 }
+
+// First plain line of a description for the tiny in-chip preview. Structured
+// descriptions here carry "Category: x" / "Notes:" scaffolding; skip it so the
+// human sentence ("driveway being paved Monday") is what shows.
+const calendarDescriptionSnippet = (description?: string | null, max = 56) => {
+  const line = String(description || '')
+    .split(/\r?\n/)
+    .map(part => part.trim())
+    .find(part => part && !/^notes:?$/i.test(part) && !/^(category|assignee|project|vendor|contact|location|type|priority|status)\s*:/i.test(part));
+  if (!line) return '';
+  return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line;
+};
+
+const chipSnippetStyle = {
+  display: 'block',
+  fontSize: 9,
+  lineHeight: '11px',
+  fontWeight: 600,
+  opacity: 0.85,
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+} as const;
 
 function EventChip({
   event,
@@ -1068,6 +1094,9 @@ function EventChip({
     >
       {prefix && <span>{prefix}</span>}
       <strong>{event.title}</strong>
+      {!compact && calendarDescriptionSnippet(event.description) ? (
+        <small style={chipSnippetStyle}>{calendarDescriptionSnippet(event.description)}</small>
+      ) : null}
     </button>
   );
 }

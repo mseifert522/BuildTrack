@@ -1510,6 +1510,9 @@ function initializeSchema() {
     CREATE INDEX IF NOT EXISTS idx_activity_log_project_created
       ON activity_log(project_id, created_at);
 
+    CREATE INDEX IF NOT EXISTS idx_activity_log_created_at
+      ON activity_log(created_at);
+
     CREATE TABLE IF NOT EXISTS project_documents (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,

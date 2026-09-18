@@ -1,4 +1,4 @@
-import { type MouseEvent, useState } from 'react';
+import { type MouseEvent, useEffect, useState } from 'react';
 import { CalendarPlus, Mail, Plus } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../lib/api';
@@ -28,6 +28,12 @@ interface AddToCalendarButtonProps {
   icon?: 'calendar' | 'plus';
   allowEmailReminder?: boolean;
   onSaved?: () => void | Promise<void>;
+  // Controlled mode: a calendar day cell can open this composer for its own
+  // date without rendering the trigger button. Leave all three unset for the
+  // classic self-contained button.
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  hideTrigger?: boolean;
 }
 
 const todayInputValue = () => new Date().toISOString().slice(0, 10);
@@ -79,6 +85,9 @@ export default function AddToCalendarButton({
   icon = 'calendar',
   allowEmailReminder = false,
   onSaved,
+  open: controlledOpen,
+  onOpenChange,
+  hideTrigger = false,
 }: AddToCalendarButtonProps) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -111,16 +120,31 @@ export default function AddToCalendarButton({
     setReminderTime(defaultReminderTime());
   };
 
+  // A parent flipping `open` to true gets a fresh form seeded from the CURRENT
+  // defaults (the clicked day's date), exactly as the trigger button would.
+  useEffect(() => {
+    if (controlledOpen === undefined) return;
+    if (controlledOpen) {
+      resetForm();
+      setOpen(true);
+    } else {
+      setOpen(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [controlledOpen]);
+
   const openComposer = (event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
     resetForm();
     setOpen(true);
+    onOpenChange?.(true);
   };
 
   const closeComposer = () => {
     setStopSignal(current => current + 1);
     setOpen(false);
+    onOpenChange?.(false);
   };
 
   const saveEvent = async () => {
@@ -175,6 +199,7 @@ export default function AddToCalendarButton({
         toast.success(emailReminderEnabled ? 'Event and reminder saved' : 'Added to main calendar');
       }
       setOpen(false);
+      onOpenChange?.(false);
       setStopSignal(current => current + 1);
       await onSaved?.();
     } catch (err: any) {
@@ -191,10 +216,12 @@ export default function AddToCalendarButton({
 
   return (
     <>
-      <button type="button" onClick={openComposer} className={buttonClassName} style={buttonStyle} aria-label={ariaLabel || label}>
-        <ButtonIcon className="h-3.5 w-3.5 flex-shrink-0" />
-        <span className={iconOnly ? 'sr-only' : 'flex-shrink-0 whitespace-nowrap'}>{label}</span>
-      </button>
+      {!hideTrigger && (
+        <button type="button" onClick={openComposer} className={buttonClassName} style={buttonStyle} aria-label={ariaLabel || label}>
+          <ButtonIcon className="h-3.5 w-3.5 flex-shrink-0" />
+          <span className={iconOnly ? 'sr-only' : 'flex-shrink-0 whitespace-nowrap'}>{label}</span>
+        </button>
+      )}
 
       <Modal
         isOpen={open}
