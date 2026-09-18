@@ -16,6 +16,25 @@ export interface QuoteLineItem {
   total_line_item_price?: number;
   labor_amount?: number;
   material_amount?: number;
+  // Section this row belongs to (null on quotes created before sections existed).
+  section_id?: string | null;
+  // Client-side handle used when creating / editing; the server maps it to section_id.
+  section_key?: string;
+}
+
+// A separately priced part of one vendor quote (House / Garage / Alternate /
+// Credit). Adds to (sign 1) or deducts from (sign -1) the quote total and may
+// own its own uploaded document.
+export interface QuoteSection {
+  id: string;
+  quote_id: string;
+  label: string;
+  sign: 1 | -1;
+  sort_order: number;
+  document_id?: string | null;
+  source_file_name?: string | null;
+  source_file_mime_type?: string | null;
+  download_url?: string | null;
 }
 
 export interface ContractorQuote {
@@ -37,10 +56,14 @@ export interface ContractorQuote {
   final_approved_amount?: number | null;
   source_file_name?: string | null;
   source_file_mime_type?: string | null;
+  source_document_id?: string | null;
   document_download_url?: string | null;
   document_original_name?: string | null;
+  // Main document plus any section documents that are a different file.
+  document_count?: number;
   uploaded_by_name?: string | null;
   line_items?: QuoteLineItem[];
+  sections?: QuoteSection[];
   created_at?: string;
   updated_at?: string;
 }

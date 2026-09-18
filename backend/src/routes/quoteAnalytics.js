@@ -110,6 +110,34 @@ function parseLineItems(body) {
   return Array.isArray(parsed) ? parsed : [];
 }
 
+// Sections inside one vendor quote (House / Garage / Alternate / Credit...).
+// A section adds to (sign 1) or deducts from (sign -1) the quote total and may
+// own one of the uploaded documents (file_index = its slot in the upload
+// order). `key` is the client-side handle line items reference; on edit an
+// existing section's key is simply its id.
+function normalizeSectionSign(value) {
+  const raw = String(value ?? '').trim().toLowerCase();
+  return ['-1', 'deduct', 'deducts', 'subtract', 'credit', 'minus'].includes(raw) ? -1 : 1;
+}
+
+function parseSections(body) {
+  const parsed = parseJson(body.sections, []);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.slice(0, 40).map((section, index) => {
+    const key = String(section?.key ?? section?.id ?? index).trim() || String(index);
+    const rawIndex = section?.file_index;
+    const fileIndex = rawIndex === undefined || rawIndex === null || rawIndex === '' ? null : Number.parseInt(String(rawIndex), 10);
+    return {
+      key,
+      id: section?.id ? String(section.id) : null,
+      label: String(section?.label || '').trim().slice(0, 120) || `Section ${index + 1}`,
+      sign: normalizeSectionSign(section?.sign),
+      sort_order: index,
+      file_index: Number.isInteger(fileIndex) && fileIndex >= 0 ? fileIndex : null,
+    };
+  });
+}
+
 function loadCategoryMap(db) {
   const categories = db.prepare(`
     SELECT id, category_group, name, normalized_key
@@ -214,8 +242,9 @@ function resolveContractor(db, body) {
   return contractor;
 }
 
-function validateQuoteInput(db, body, projectIdFromRoute, file) {
+function validateQuoteInput(db, body, projectIdFromRoute, files) {
   const errors = [];
+  const fileList = Array.isArray(files) ? files.filter(Boolean) : (files ? [files] : []);
   const projectId = projectIdFromRoute || String(body.project_id || '').trim();
   const project = projectId ? getProjectOrThrow(db, projectId) : null;
   if (!project) errors.push('Valid property/project is required');
@@ -233,10 +262,20 @@ function validateQuoteInput(db, body, projectIdFromRoute, file) {
   }
 
   const { byName } = loadCategoryMap(db);
+  const sections = parseSections(body);
+  const sectionByKey = new Map(sections.map(section => [section.key, section]));
+  for (const section of sections) {
+    if (section.file_index !== null && !fileList[section.file_index]) {
+      errors.push(`Section "${section.label}": its attached document is missing`);
+    }
+  }
   const rawLineItems = parseLineItems(body);
   if (rawLineItems.length === 0) errors.push('At least one quote line item is required');
 
   const lineItems = rawLineItems.map((item, index) => {
+    const sectionKey = String(item.section_key ?? item.section_id ?? '').trim();
+    const section = sectionKey ? sectionByKey.get(sectionKey) : null;
+    if (sectionKey && !section) errors.push(`Line ${index + 1}: unknown quote section`);
     const categoryValue = String(item.category || '').trim();
     const category = byName.get(normalizeKey(categoryValue));
     if (!categoryValue) errors.push(`Line ${index + 1}: category is required`);
@@ -274,10 +313,15 @@ function validateQuoteInput(db, body, projectIdFromRoute, file) {
       labor_amount: laborAmount,
       material_amount: materialAmount,
       sort_order: index,
+      section_key: section ? section.key : null,
+      section_sign: section ? section.sign : 1,
     };
   });
 
-  const lineItemTotal = lineItems.reduce((sum, item) => sum + item.total_line_item_price, 0);
+  // Net of the quote: deduct sections subtract. Gross keeps the "pricing is
+  // required" rule meaningful when a credit happens to cancel the whole thing.
+  const lineItemTotal = lineItems.reduce((sum, item) => sum + item.section_sign * item.total_line_item_price, 0);
+  const lineItemGross = lineItems.reduce((sum, item) => sum + (item.section_sign > 0 ? item.total_line_item_price : 0), 0);
   const financial = {};
   for (const field of FINANCIAL_FIELDS) {
     const value = numberValue(body[field], field === 'profit_margin' || field === 'final_approved_amount' ? null : 0);
@@ -287,22 +331,39 @@ function validateQuoteInput(db, body, projectIdFromRoute, file) {
   if (!financial.total_quote_amount || financial.total_quote_amount <= 0) {
     financial.total_quote_amount = lineItemTotal;
   }
-  if (!financial.total_quote_amount || financial.total_quote_amount <= 0) {
+  if ((!financial.total_quote_amount || financial.total_quote_amount <= 0) && lineItemGross <= 0) {
     errors.push('Quote pricing is required');
   }
 
-  if (file) {
-    const hash = fileHash(file.path);
-    const duplicate = project
-      ? db.prepare('SELECT id, quote_number FROM contractor_quotes WHERE project_id = ? AND source_file_hash = ?').get(project.id, hash)
-      : null;
-    if (duplicate) {
-      errors.push(`Duplicate quote upload detected for ${duplicate.quote_number}`);
-    }
-    return { errors, project, quoteDate, quoteYear, status, contractor, financial, lineItems, fileHash: hash };
+  // Every uploaded document is hashed: the same file twice on one quote, or a
+  // file already attached to another quote on this project (as its main
+  // document or a section's), is a duplicate.
+  const fileHashes = fileList.map(upload => fileHash(upload.path));
+  if (project) {
+    const seen = new Set();
+    fileHashes.forEach((hash, index) => {
+      if (seen.has(hash)) {
+        errors.push(`The same document is attached twice (${fileList[index].originalname})`);
+        return;
+      }
+      seen.add(hash);
+      const duplicate = db.prepare(`
+        SELECT q.id, q.quote_number
+        FROM contractor_quotes q
+        WHERE q.project_id = ?
+          AND (q.source_file_hash = ? OR EXISTS (
+            SELECT 1 FROM quote_sections s WHERE s.quote_id = q.id AND s.source_file_hash = ?
+          ))
+      `).get(project.id, hash, hash);
+      if (duplicate) errors.push(`Duplicate quote upload detected for ${duplicate.quote_number}`);
+    });
   }
 
-  return { errors, project, quoteDate, quoteYear, status, contractor, financial, lineItems, fileHash: null };
+  return {
+    errors, project, quoteDate, quoteYear, status, contractor, financial, lineItems, sections,
+    fileHash: fileHashes[0] || null,
+    fileHashes,
+  };
 }
 
 function quoteSnapshot(db, quoteId) {
@@ -313,7 +374,68 @@ function quoteSnapshot(db, quoteId) {
     WHERE q.id = ?
   `).get(quoteId);
   const lineItems = db.prepare('SELECT * FROM quote_line_items WHERE quote_id = ? ORDER BY sort_order ASC').all(quoteId);
-  return { quote, line_items: lineItems };
+  return { quote, line_items: lineItems, sections: quoteSectionsWithLinks(db, quoteId) };
+}
+
+function sectionDownloadUrl(quoteId, sectionId) {
+  return `/api/quote-analytics/quotes/${quoteId}/sections/${sectionId}/download`;
+}
+
+function quoteSectionsWithLinks(db, quoteId) {
+  return db.prepare('SELECT * FROM quote_sections WHERE quote_id = ? ORDER BY sort_order ASC, created_at ASC').all(quoteId)
+    .map(section => ({
+      ...section,
+      download_url: section.document_id ? sectionDownloadUrl(quoteId, section.id) : null,
+    }));
+}
+
+// Sections for a NEW quote. docsByFileIndex maps an upload slot to the persisted
+// document so a section owns the file that was read for it.
+function insertQuoteSections(db, quoteId, projectId, sections, docsByFileIndex = new Map()) {
+  const idByKey = new Map();
+  const insert = db.prepare(`
+    INSERT INTO quote_sections (
+      id, quote_id, project_id, label, sign, sort_order,
+      document_id, source_file_name, source_file_path, source_file_mime_type, source_file_size, source_file_hash
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  sections.forEach((section, index) => {
+    const doc = section.file_index !== null ? docsByFileIndex.get(section.file_index) || null : null;
+    const id = uuidv4();
+    insert.run(
+      id, quoteId, projectId, section.label, section.sign, index,
+      doc?.documentId || null, doc?.name || null, doc?.path || null, doc?.mime || null, doc?.size || null, doc?.hash || null
+    );
+    idByKey.set(section.key, id);
+  });
+  return idByKey;
+}
+
+// Sections on EDIT: keep (and relabel) the ones the client still lists by id,
+// add the new ones, drop the rest. A dropped section's document stays a project
+// document - only the grouping goes away.
+function reconcileQuoteSections(db, quote, sections) {
+  const existing = db.prepare('SELECT * FROM quote_sections WHERE quote_id = ?').all(quote.id);
+  const existingById = new Map(existing.map(section => [section.id, section]));
+  const idByKey = new Map();
+  const keep = new Set();
+  const update = db.prepare('UPDATE quote_sections SET label = ?, sign = ?, sort_order = ? WHERE id = ?');
+  const insert = db.prepare('INSERT INTO quote_sections (id, quote_id, project_id, label, sign, sort_order) VALUES (?, ?, ?, ?, ?, ?)');
+  sections.forEach((section, index) => {
+    const match = section.id && existingById.has(section.id) ? existingById.get(section.id) : null;
+    if (match) {
+      update.run(section.label, section.sign, index, match.id);
+      keep.add(match.id);
+      idByKey.set(section.key, match.id);
+      return;
+    }
+    const id = uuidv4();
+    insert.run(id, quote.id, quote.project_id, section.label, section.sign, index);
+    idByKey.set(section.key, id);
+  });
+  const remove = db.prepare('DELETE FROM quote_sections WHERE id = ?');
+  for (const section of existing) if (!keep.has(section.id)) remove.run(section.id);
+  return idByKey;
 }
 
 function insertHistoricalRecord(db, quoteId, projectId, quoteYear, actorId, action) {
@@ -326,10 +448,13 @@ function insertHistoricalRecord(db, quoteId, projectId, quoteYear, actorId, acti
 
 function createQuote(req, res, projectIdFromRoute = null) {
   const db = getDb();
-  const file = req.file || null;
-  const validation = validateQuoteInput(db, req.body || {}, projectIdFromRoute, file);
+  // One upload slot per section. The first file doubles as the quote's own
+  // source document so everything keyed on source_document_id keeps working.
+  const files = Array.isArray(req.files) ? req.files.filter(Boolean) : (req.file ? [req.file] : []);
+  const file = files[0] || null;
+  const validation = validateQuoteInput(db, req.body || {}, projectIdFromRoute, files);
   if (validation.errors.length > 0) {
-    removeUploadedFile(file);
+    files.forEach(removeUploadedFile);
     return res.status(validation.errors.some(error => error.startsWith('Duplicate')) ? 409 : 400).json({ errors: validation.errors });
   }
 
@@ -341,7 +466,9 @@ function createQuote(req, res, projectIdFromRoute = null) {
     contractor,
     financial,
     lineItems,
+    sections,
     fileHash: uploadedFileHash,
+    fileHashes,
   } = validation;
 
   try {
@@ -352,17 +479,30 @@ function createQuote(req, res, projectIdFromRoute = null) {
       let sourceFileMimeType = null;
       let sourceFileSize = null;
 
-      if (file) {
-        const stored = persistUploadedFile(project.id, file);
-        sourceFileName = file.originalname;
-        sourceFilePath = stored.relativePath;
-        sourceFileMimeType = file.mimetype;
-        sourceFileSize = file.size;
-        sourceDocumentId = uuidv4();
+      const docsByFileIndex = new Map();
+      files.forEach((upload, index) => {
+        const stored = persistUploadedFile(project.id, upload);
+        const documentId = uuidv4();
         db.prepare(`
           INSERT INTO project_documents (id, project_id, filename, original_name, mime_type, size, document_type, uploaded_by)
           VALUES (?, ?, ?, ?, ?, ?, 'quotes', ?)
-        `).run(sourceDocumentId, project.id, stored.filename, file.originalname, file.mimetype, file.size, req.user.id);
+        `).run(documentId, project.id, stored.filename, upload.originalname, upload.mimetype, upload.size, req.user.id);
+        docsByFileIndex.set(index, {
+          documentId,
+          name: upload.originalname,
+          path: stored.relativePath,
+          mime: upload.mimetype,
+          size: upload.size,
+          hash: fileHashes[index] || null,
+        });
+      });
+      const primaryDoc = docsByFileIndex.get(0) || null;
+      if (primaryDoc) {
+        sourceDocumentId = primaryDoc.documentId;
+        sourceFileName = primaryDoc.name;
+        sourceFilePath = primaryDoc.path;
+        sourceFileMimeType = primaryDoc.mime;
+        sourceFileSize = primaryDoc.size;
       }
 
       const quoteId = uuidv4();
@@ -430,11 +570,12 @@ function createQuote(req, res, projectIdFromRoute = null) {
         req.user.id
       );
 
+      const sectionIdByKey = insertQuoteSections(db, quoteId, project.id, sections, docsByFileIndex);
       const insertLine = db.prepare(`
         INSERT INTO quote_line_items (
           id, quote_id, category_id, category_group, category, subcategory, description,
-          quantity, unit, unit_price, total_line_item_price, labor_amount, material_amount, sort_order
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          quantity, unit, unit_price, total_line_item_price, labor_amount, material_amount, sort_order, section_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       for (const item of lineItems) {
         insertLine.run(
@@ -451,7 +592,8 @@ function createQuote(req, res, projectIdFromRoute = null) {
           item.total_line_item_price,
           item.labor_amount,
           item.material_amount,
-          item.sort_order
+          item.sort_order,
+          item.section_key ? sectionIdByKey.get(item.section_key) || null : null
         );
       }
 
@@ -471,7 +613,7 @@ function createQuote(req, res, projectIdFromRoute = null) {
 
     return res.status(201).json(created);
   } catch (err) {
-    removeUploadedFile(file);
+    files.forEach(removeUploadedFile);
     console.error('[QUOTE_ANALYTICS] create failed:', err);
     return res.status(500).json({ error: 'Failed to create quote' });
   }
@@ -491,7 +633,7 @@ function updateQuote(req, res, forcedProjectId = null) {
   if (validation.errors.length > 0) {
     return res.status(400).json({ errors: validation.errors });
   }
-  const { quoteDate, quoteYear, status, contractor, financial, lineItems } = validation;
+  const { quoteDate, quoteYear, status, contractor, financial, lineItems, sections } = validation;
 
   try {
     const updated = db.transaction(() => {
@@ -519,18 +661,20 @@ function updateQuote(req, res, forcedProjectId = null) {
         existing.id
       );
 
+      const sectionIdByKey = reconcileQuoteSections(db, existing, sections);
       db.prepare('DELETE FROM quote_line_items WHERE quote_id = ?').run(existing.id);
       const insertLine = db.prepare(`
         INSERT INTO quote_line_items (
           id, quote_id, category_id, category_group, category, subcategory, description,
-          quantity, unit, unit_price, total_line_item_price, labor_amount, material_amount, sort_order
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          quantity, unit, unit_price, total_line_item_price, labor_amount, material_amount, sort_order, section_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       for (const item of lineItems) {
         insertLine.run(
           uuidv4(), existing.id, item.category_id, item.category_group, item.category,
           item.subcategory || null, item.description, item.quantity, item.unit || null,
-          item.unit_price, item.total_line_item_price, item.labor_amount, item.material_amount, item.sort_order
+          item.unit_price, item.total_line_item_price, item.labor_amount, item.material_amount, item.sort_order,
+          item.section_key ? sectionIdByKey.get(item.section_key) || null : null
         );
       }
 
@@ -714,11 +858,19 @@ function deleteQuote(req, res, forcedProjectId = null) {
 
   try {
     db.transaction(() => {
-      const doc = quote.source_document_id
-        ? db.prepare('SELECT * FROM project_documents WHERE id = ?').get(quote.source_document_id)
-        : null;
+      // Every document this quote owns: its main file plus each section's own
+      // file (deduplicated - the first section usually re-links the main one).
+      const docIds = new Set();
+      if (quote.source_document_id) docIds.add(quote.source_document_id);
+      for (const section of db.prepare('SELECT document_id FROM quote_sections WHERE quote_id = ?').all(quote.id)) {
+        if (section.document_id) docIds.add(section.document_id);
+      }
+      const docs = Array.from(docIds)
+        .map(id => db.prepare('SELECT * FROM project_documents WHERE id = ?').get(id))
+        .filter(Boolean);
+      db.prepare('DELETE FROM quote_sections WHERE quote_id = ?').run(quote.id);
       db.prepare('DELETE FROM contractor_quotes WHERE id = ?').run(quote.id);
-      if (doc) {
+      for (const doc of docs) {
         db.prepare('DELETE FROM project_documents WHERE id = ?').run(doc.id);
         try {
           const root = path.resolve(documentRoot(quote.project_id));
@@ -925,15 +1077,37 @@ function listQuotes(req, res, forcedProjectId = null) {
     }
   }
 
+  const sectionsByQuote = new Map();
+  if (ids.length > 0) {
+    const placeholders = ids.map(() => '?').join(',');
+    const sections = db.prepare(`
+      SELECT *
+      FROM quote_sections
+      WHERE quote_id IN (${placeholders})
+      ORDER BY sort_order ASC, created_at ASC
+    `).all(...ids);
+    for (const section of sections) {
+      const list = sectionsByQuote.get(section.quote_id) || [];
+      list.push({ ...section, download_url: section.document_id ? sectionDownloadUrl(section.quote_id, section.id) : null });
+      sectionsByQuote.set(section.quote_id, list);
+    }
+  }
+
   res.json({
     page,
     limit,
     total,
-    quotes: rows.map(row => ({
-      ...row,
-      line_items: lineItemsByQuote.get(row.id) || [],
-      document_download_url: row.source_document_id ? `/api/quote-analytics/quotes/${row.id}/download` : null,
-    })),
+    quotes: rows.map(row => {
+      const sections = sectionsByQuote.get(row.id) || [];
+      const extraDocs = sections.filter(section => section.document_id && section.document_id !== row.source_document_id).length;
+      return {
+        ...row,
+        line_items: lineItemsByQuote.get(row.id) || [],
+        sections,
+        document_count: (row.source_document_id ? 1 : 0) + extraDocs,
+        document_download_url: row.source_document_id ? `/api/quote-analytics/quotes/${row.id}/download` : null,
+      };
+    }),
   });
 }
 
@@ -1144,6 +1318,28 @@ function downloadQuoteDocument(req, res, forcedProjectId = null) {
   return res.download(filePath, doc.original_name);
 }
 
+// A section's own document (house PDF, garage PDF...). Same path safety as the
+// quote-level download; the section must belong to the quote in the URL.
+function downloadQuoteSectionDocument(req, res, forcedProjectId = null) {
+  const db = getDb();
+  const quote = db.prepare('SELECT * FROM contractor_quotes WHERE id = ?').get(req.params.id);
+  if (!quote || (forcedProjectId && quote.project_id !== forcedProjectId)) {
+    return res.status(404).json({ error: 'Quote not found' });
+  }
+  const section = db.prepare('SELECT * FROM quote_sections WHERE id = ? AND quote_id = ?').get(req.params.sectionId, quote.id);
+  const doc = section?.document_id
+    ? db.prepare('SELECT * FROM project_documents WHERE id = ? AND project_id = ?').get(section.document_id, quote.project_id)
+    : null;
+  if (!doc) return res.status(404).json({ error: 'Section document not found' });
+
+  const root = path.resolve(documentRoot(quote.project_id));
+  const filePath = path.resolve(root, doc.filename);
+  if (!filePath.startsWith(root) || !fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'Section file not found' });
+  }
+  return res.download(filePath, doc.original_name);
+}
+
 // AI quote reader: send the uploaded PDF/image to Claude and return structured quote data
 // (contractor, line items mapped to real categories, totals) for the front-end to pre-fill.
 async function extractQuoteFromPdf(req, res, _projectIdFromRoute = null) {
@@ -1175,6 +1371,16 @@ async function extractQuoteFromPdf(req, res, _projectIdFromRoute = null) {
       ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } }
       : { type: 'image', source: { type: 'base64', media_type: mime || 'image/jpeg', data: b64 } };
 
+    const lineItemSchema = {
+      type: 'object',
+      additionalProperties: false,
+      required: ['category', 'description', 'total_line_item_price'],
+      properties: {
+        category: categoryNames.length ? { type: 'string', enum: categoryNames } : { type: 'string' },
+        description: { type: 'string' },
+        total_line_item_price: { type: 'number' },
+      },
+    };
     const schema = {
       type: 'object',
       additionalProperties: false,
@@ -1189,16 +1395,19 @@ async function extractQuoteFromPdf(req, res, _projectIdFromRoute = null) {
         labor_cost: { type: 'number' },
         material_cost: { type: 'number' },
         total_quote_amount: { type: 'number' },
-        line_items: {
+        line_items: { type: 'array', items: lineItemSchema },
+        // Present only when the document itself is split into separately
+        // priced parts (House / Garage, base bid + alternates, credits).
+        sections: {
           type: 'array',
           items: {
             type: 'object',
             additionalProperties: false,
-            required: ['category', 'description', 'total_line_item_price'],
+            required: ['label', 'sign', 'line_items'],
             properties: {
-              category: categoryNames.length ? { type: 'string', enum: categoryNames } : { type: 'string' },
-              description: { type: 'string' },
-              total_line_item_price: { type: 'number' },
+              label: { type: 'string' },
+              sign: { type: 'string', enum: ['add', 'deduct'] },
+              line_items: { type: 'array', items: lineItemSchema },
             },
           },
         },
@@ -1211,7 +1420,8 @@ async function extractQuoteFromPdf(req, res, _projectIdFromRoute = null) {
       '- For each line item pick the single closest "category" from the allowed list; if nothing fits well use "General labor".\n' +
       '- If the quote is one lump sum with no itemization, return a single line item using the best overall category with the total as its price.\n' +
       '- Use an empty string or 0 for anything not present in the document. Do not invent values.\n' +
-      '- total_quote_amount is the grand total the contractor is charging.';
+      '- total_quote_amount is the grand total the contractor is charging.\n' +
+      '- If the document is split into distinct parts priced separately (for example "House" and "Garage", a base bid plus alternates, or a credit / deduction), ALSO return them under "sections": one entry per part with its label, sign "add" or "deduct", and that part\'s line items. Put every line item in exactly one section. Return an empty "sections" list when the quote is one undivided scope.';
 
     const message = await client.messages.create({
       model: QUOTE_EXTRACT_MODEL,
@@ -1283,7 +1493,9 @@ function compareQuotes(req, res, forcedProjectId = null) {
     const placeholders = quoteIds.map(() => '?').join(',');
     const lineItems = db.prepare(`
       SELECT quote_id, category, category_group, subcategory, description,
-             quantity, unit, unit_price, total_line_item_price
+             quantity, unit, unit_price, total_line_item_price, section_id,
+             (SELECT label FROM quote_sections s WHERE s.id = quote_line_items.section_id) AS section_label,
+             COALESCE((SELECT sign FROM quote_sections s WHERE s.id = quote_line_items.section_id), 1) AS section_sign
       FROM quote_line_items
       WHERE quote_id IN (${placeholders})
       ORDER BY sort_order ASC
@@ -1329,7 +1541,8 @@ function compareQuotes(req, res, forcedProjectId = null) {
       if (!cellMap.has(category)) cellMap.set(category, new Map());
       const byQuote = cellMap.get(category);
       const current = byQuote.get(row.id) || { amount: 0, line_items: [] };
-      current.amount += numberValue(item.total_line_item_price);
+      // A deduct section (credit / alternate-deduct) counts against the bid.
+      current.amount += (Number(item.section_sign) < 0 ? -1 : 1) * numberValue(item.total_line_item_price);
       current.line_items.push(item);
       byQuote.set(row.id, current);
     }
@@ -1407,7 +1620,7 @@ analyticsRouter.get('/summary', (req, res) => quoteSummary(req, res));
 analyticsRouter.get('/compare', (req, res) => compareQuotes(req, res));
 analyticsRouter.get('/quotes', (req, res) => listQuotes(req, res));
 analyticsRouter.post('/quotes', (req, res) => createQuote(req, res));
-analyticsRouter.post('/quotes/upload', upload.single('quote_file'), (req, res) => createQuote(req, res));
+analyticsRouter.post('/quotes/upload', upload.array('quote_file', 20), (req, res) => createQuote(req, res));
 analyticsRouter.put('/quotes/:id', (req, res) => updateQuote(req, res));
 analyticsRouter.post('/quotes/:id/approve', (req, res) => updateQuoteReviewStatus(req, res, null, 'approved'));
 analyticsRouter.post('/quotes/:id/deny', (req, res) => updateQuoteReviewStatus(req, res, null, 'rejected'));
@@ -1417,6 +1630,7 @@ analyticsRouter.get('/quotes/:id/notes', (req, res) => listQuoteNotes(req, res))
 analyticsRouter.post('/quotes/:id/notes', (req, res) => addQuoteNote(req, res));
 analyticsRouter.delete('/quotes/:id/notes/:noteId', (req, res) => deleteQuoteNote(req, res));
 analyticsRouter.get('/quotes/:id/download', (req, res) => downloadQuoteDocument(req, res));
+analyticsRouter.get('/quotes/:id/sections/:sectionId/download', (req, res) => downloadQuoteSectionDocument(req, res));
 // Project-agnostic AI read so the global Quote Center can auto-extract on upload
 // before a project is chosen. extractQuoteFromPdf does not use the project; it only
 // reads the uploaded file and returns structured fields (nothing is persisted).
@@ -1428,7 +1642,7 @@ projectQuotesRouter.get('/', (req, res) => listQuotes(req, res, req.params.proje
 projectQuotesRouter.get('/summary', (req, res) => quoteSummary(req, res, req.params.projectId));
 projectQuotesRouter.get('/compare', (req, res) => compareQuotes(req, res, req.params.projectId));
 projectQuotesRouter.post('/', (req, res) => createQuote(req, res, req.params.projectId));
-projectQuotesRouter.post('/upload', upload.single('quote_file'), (req, res) => createQuote(req, res, req.params.projectId));
+projectQuotesRouter.post('/upload', upload.array('quote_file', 20), (req, res) => createQuote(req, res, req.params.projectId));
 projectQuotesRouter.put('/:id', (req, res) => updateQuote(req, res, req.params.projectId));
 projectQuotesRouter.post('/extract', extractUpload.single('quote_file'), (req, res) => extractQuoteFromPdf(req, res, req.params.projectId));
 projectQuotesRouter.post('/:id/approve', (req, res) => updateQuoteReviewStatus(req, res, req.params.projectId, 'approved'));
@@ -1439,6 +1653,7 @@ projectQuotesRouter.get('/:id/notes', (req, res) => listQuoteNotes(req, res, req
 projectQuotesRouter.post('/:id/notes', (req, res) => addQuoteNote(req, res, req.params.projectId));
 projectQuotesRouter.delete('/:id/notes/:noteId', (req, res) => deleteQuoteNote(req, res));
 projectQuotesRouter.get('/:id/download', (req, res) => downloadQuoteDocument(req, res, req.params.projectId));
+projectQuotesRouter.get('/:id/sections/:sectionId/download', (req, res) => downloadQuoteSectionDocument(req, res, req.params.projectId));
 
 module.exports = {
   analyticsRouter,

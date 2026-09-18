@@ -1926,6 +1926,32 @@ function initializeSchema() {
     CREATE INDEX IF NOT EXISTS idx_quote_line_items_category
       ON quote_line_items(category, category_group);
 
+    -- Parts of one vendor quote priced separately (House / Garage / Alternate /
+    -- Credit). Each may carry its own source document and either adds to
+    -- (sign 1) or deducts from (sign -1) the quote total. Line items point at
+    -- a section through quote_line_items.section_id (added below).
+    CREATE TABLE IF NOT EXISTS quote_sections (
+      id TEXT PRIMARY KEY,
+      quote_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      label TEXT NOT NULL,
+      sign INTEGER NOT NULL DEFAULT 1 CHECK(sign IN (1, -1)),
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      document_id TEXT,
+      source_file_name TEXT,
+      source_file_path TEXT,
+      source_file_mime_type TEXT,
+      source_file_size INTEGER,
+      source_file_hash TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (quote_id) REFERENCES contractor_quotes(id) ON DELETE CASCADE,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (document_id) REFERENCES project_documents(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_quote_sections_quote
+      ON quote_sections(quote_id, sort_order);
+
     -- Append-only historical snapshots for quote creation/update events.
     CREATE TABLE IF NOT EXISTS historical_quote_records (
       id TEXT PRIMARY KEY,
@@ -2020,6 +2046,8 @@ function initializeSchema() {
   try { db.exec(`ALTER TABLE auth_sessions ADD COLUMN details TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE auth_sessions ADD COLUMN current_ip_address TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE auth_sessions ADD COLUMN ip_address_updated_at TEXT`); } catch (_) { /* already exists */ }
+  // Quote sections (2026-09-18): existing rows keep NULL = not sectioned.
+  try { db.exec(`ALTER TABLE quote_line_items ADD COLUMN section_id TEXT REFERENCES quote_sections(id) ON DELETE SET NULL`); } catch (_) { /* already exists */ }
   try {
     db.exec(`
       UPDATE auth_sessions

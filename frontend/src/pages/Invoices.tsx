@@ -2524,20 +2524,20 @@ export default function Invoices() {
                   {approvedPaymentQueue.map(bill => {
                     const invoice = bill.matched_invoice_id ? invoiceById.get(bill.matched_invoice_id) || null : null;
                     return (
-                    <article key={bill.qbo_id} className={`bt-approved-pay-card${bankEntryChecked[String(bill.qbo_id)] ? ' is-bank-entered' : ''}`}>
-                      {bankEntryChecked[String(bill.qbo_id)] ? (
-                        <div className="bt-bank-entered-banner" aria-hidden="true">Paid - entered in bank</div>
-                      ) : null}
+                    <article key={bill.qbo_id} className={`bt-approved-pay-card bt-approved-pay-card--checklist${bankEntryChecked[String(bill.qbo_id)] ? ' is-bank-entered' : ''}`}>
+                      {/* The card is a one-row grid. The tick gets its own first
+                          column so it sits in line with the pill, and the pill
+                          itself becomes the yellow PAID badge when ticked. */}
+                      <label className="bt-bank-entry-check" title="Tick once you have entered this payment in the bank. This is your checklist only - it does not change the invoice.">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(bankEntryChecked[String(bill.qbo_id)])}
+                          onChange={() => toggleBankEntryChecked(String(bill.qbo_id))}
+                          aria-label={`Entered in bank: ${bill.vendor_name || 'vendor'} ${money(bill.balance || 0)}`}
+                        />
+                      </label>
                       <div className="bt-approved-pay-card-top">
-                        <label className="bt-bank-entry-check" title="Tick once you have entered this payment in the bank. This is your checklist only - it does not change the invoice.">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(bankEntryChecked[String(bill.qbo_id)])}
-                            onChange={() => toggleBankEntryChecked(String(bill.qbo_id))}
-                            aria-label={`Entered in bank: ${bill.vendor_name || 'vendor'} ${money(bill.balance || 0)}`}
-                          />
-                        </label>
-                        <span>Approved</span>
+                        <span>{bankEntryChecked[String(bill.qbo_id)] ? 'Paid · entered in bank' : 'Approved'}</span>
                         <strong>{money(bill.balance || 0)}</strong>
                       </div>
                       <div className="bt-approved-pay-card-body">

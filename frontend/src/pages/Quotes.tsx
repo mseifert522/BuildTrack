@@ -63,7 +63,28 @@ interface QuoteLineForm {
   unit: string;
   unit_price: string;
   total_line_item_price: string;
+  section_key: string;
 }
+
+// One separately priced part of the quote (House / Garage / Alternate / Credit)
+// with its own document and its own add-or-deduct sign.
+interface QuoteSectionForm {
+  key: string;
+  id?: string;
+  label: string;
+  sign: 1 | -1;
+  file: File | null;
+  previewUrl: string | null;
+  extracting: boolean;
+  fileName?: string | null;
+  downloadUrl?: string | null;
+}
+
+let sectionKeySeq = 0;
+const newSectionKey = () => `s${Date.now().toString(36)}${(sectionKeySeq += 1)}`;
+const blankSection = (label = 'Full quote'): QuoteSectionForm => ({
+  key: newSectionKey(), label, sign: 1, file: null, previewUrl: null, extracting: false,
+});
 
 interface QuoteForm {
   project_id: string;
@@ -87,8 +108,8 @@ const blankQuoteForm = (): QuoteForm => ({
   contractor_phone: '', quote_date: todayIso(), status: 'submitted', scope_description: '', notes: '',
 });
 
-const blankLine = (category = ''): QuoteLineForm => ({
-  category, description: '', quantity: '1', unit: '', unit_price: '', total_line_item_price: '',
+const blankLine = (category = '', sectionKey = ''): QuoteLineForm => ({
+  category, description: '', quantity: '1', unit: '', unit_price: '', total_line_item_price: '', section_key: sectionKey,
 });
 
 function num(value: number | string | null | undefined): number {
@@ -448,7 +469,10 @@ export default function Quotes() {
     [filteredSorted, page],
   );
 
-  const attachmentRows = useMemo(() => filteredSorted.filter(q => q.document_download_url), [filteredSorted]);
+  const attachmentRows = useMemo(
+    () => filteredSorted.filter(q => q.document_download_url || (q.sections || []).some(s => s.download_url)),
+    [filteredSorted],
+  );
 
   const toggleSort = (key: 'date' | 'total') => {
     if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
@@ -774,7 +798,7 @@ function QuoteGrid(props: {
                     <td className="px-2 py-1.5 align-top text-gray-500">{shortDate(q.quote_date)}</td>
                     <td className="px-2 py-1.5 align-top">
                       {q.document_download_url
-                        ? <a href={`/api${q.document_download_url.replace(/^\/api/, '')}`} className="inline-flex items-center gap-1 text-blue-600 hover:underline" target="_blank" rel="noopener noreferrer"><FileText className="h-3.5 w-3.5" /> File</a>
+                        ? <a href={`/api${q.document_download_url.replace(/^\/api/, '')}`} className="inline-flex items-center gap-1 text-blue-600 hover:underline" target="_blank" rel="noopener noreferrer" title={Number(q.document_count || 1) > 1 ? 'Main document — section files are under the expanded line items and in Attachments' : undefined}><FileText className="h-3.5 w-3.5" /> {Number(q.document_count || 1) > 1 ? `${q.document_count} files` : 'File'}</a>
                         : <span className="text-gray-300">—</span>}
                     </td>
                     <td className="px-2 py-1.5 text-right align-top">
@@ -842,6 +866,39 @@ function QuoteGrid(props: {
 function LineItemsTable({ quote }: { quote: ContractorQuote }) {
   const items = quote.line_items || [];
   if (items.length === 0) return <p className="text-xs text-gray-400">No itemized line items. Total: {money(quote.total_quote_amount)}</p>;
+  type Item = (typeof items)[number];
+
+  // Rows grouped by section (House / Garage / Credit...). Rows with no section
+  // - every quote saved before sections existed - render exactly as before.
+  const sections = quote.sections || [];
+  const bySection = new Map<string, Item[]>();
+  items.forEach(item => {
+    const key = item.section_id && sections.some(s => s.id === item.section_id) ? String(item.section_id) : '';
+    bySection.set(key, [...(bySection.get(key) || []), item]);
+  });
+  const groups = [
+    ...(bySection.has('') ? [{ key: '', label: sections.length ? 'General' : '', sign: 1, downloadUrl: null as string | null, fileName: null as string | null, items: bySection.get('') || [] }] : []),
+    ...sections.filter(s => bySection.has(s.id)).map(s => ({
+      key: s.id, label: s.label, sign: Number(s.sign) < 0 ? -1 : 1, downloadUrl: s.download_url || null, fileName: s.source_file_name || null, items: bySection.get(s.id) || [],
+    })),
+  ];
+  const grouped = groups.length > 1 || groups.some(g => g.sign < 0);
+  const subtotal = (rows: Item[]) => rows.reduce((sum, item) => sum + num(item.total_line_item_price), 0);
+
+  const renderRow = (item: Item, idx: number) => {
+    const unit = unitCostCell(item);
+    return (
+      <tr key={item.id || idx} className="border-t border-gray-100">
+        <td className="py-1 pr-3 text-gray-600">{item.category || '—'}{item.subcategory ? ` · ${item.subcategory}` : ''}</td>
+        <td className="py-1 pr-3 text-gray-700">{item.description || '—'}</td>
+        <td className="py-1 pr-3 text-right text-gray-600">{num(item.quantity)}</td>
+        <td className="py-1 pr-3 text-gray-500">{item.unit || '—'}</td>
+        <td className="py-1 pr-3 text-right text-gray-600">{unit.text}{unit.lump && <span className="ml-1 rounded bg-gray-100 px-1 text-[9px] font-semibold uppercase tracking-wide text-gray-400">lump</span>}</td>
+        <td className="py-1 pr-3 text-right font-medium text-gray-900">{money(item.total_line_item_price)}</td>
+      </tr>
+    );
+  };
+
   return (
     <table className="w-full text-xs">
       <thead className="text-left text-[10px] uppercase tracking-wide text-gray-400">
@@ -855,20 +912,32 @@ function LineItemsTable({ quote }: { quote: ContractorQuote }) {
         </tr>
       </thead>
       <tbody>
-        {items.map((item, idx) => {
-          const unit = unitCostCell(item);
-          return (
-          <tr key={item.id || idx} className="border-t border-gray-100">
-            <td className="py-1 pr-3 text-gray-600">{item.category || '—'}{item.subcategory ? ` · ${item.subcategory}` : ''}</td>
-            <td className="py-1 pr-3 text-gray-700">{item.description || '—'}</td>
-            <td className="py-1 pr-3 text-right text-gray-600">{num(item.quantity)}</td>
-            <td className="py-1 pr-3 text-gray-500">{item.unit || '—'}</td>
-            <td className="py-1 pr-3 text-right text-gray-600">{unit.text}{unit.lump && <span className="ml-1 rounded bg-gray-100 px-1 text-[9px] font-semibold uppercase tracking-wide text-gray-400">lump</span>}</td>
-            <td className="py-1 pr-3 text-right font-medium text-gray-900">{money(item.total_line_item_price)}</td>
-          </tr>
-          );
-        })}
+        {grouped ? groups.map(group => (
+          <Fragment key={group.key || 'general'}>
+            {group.label ? (
+              <tr className="border-t border-gray-200 bg-gray-50/80">
+                <td colSpan={5} className="py-1 pr-3 font-semibold text-gray-800">
+                  {group.label}
+                  <span className={`ml-2 rounded px-1 text-[9px] font-semibold uppercase tracking-wide ${group.sign < 0 ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}`}>{group.sign < 0 ? 'deducts' : 'adds'}</span>
+                  {group.downloadUrl ? (
+                    <a href={`/api${group.downloadUrl.replace(/^\/api/, '')}`} target="_blank" rel="noopener noreferrer" className="ml-2 inline-flex items-center gap-1 font-normal text-blue-600 hover:underline"><FileText className="h-3 w-3" /> {group.fileName || 'File'}</a>
+                  ) : null}
+                </td>
+                <td className={`py-1 pr-3 text-right font-semibold ${group.sign < 0 ? 'text-red-700' : 'text-gray-900'}`}>{group.sign < 0 ? '−' : ''}{money(subtotal(group.items))}</td>
+              </tr>
+            ) : null}
+            {group.items.map(renderRow)}
+          </Fragment>
+        )) : items.map(renderRow)}
       </tbody>
+      {grouped ? (
+        <tfoot>
+          <tr className="border-t border-gray-200">
+            <td colSpan={5} className="py-1 pr-3 text-right font-semibold text-gray-700">Net total</td>
+            <td className="py-1 pr-3 text-right font-bold text-gray-900">{money(quote.total_quote_amount)}</td>
+          </tr>
+        </tfoot>
+      ) : null}
     </table>
   );
 }
@@ -1340,18 +1409,27 @@ function AttachmentsTable({ rows, loading }: { rows: ContractorQuote[]; loading:
           <tr><th className="px-3 py-2">Project</th><th className="px-3 py-2">Contractor</th><th className="px-3 py-2">Quote #</th><th className="px-3 py-2">File</th><th className="px-3 py-2">Received</th><th className="px-3 py-2 text-right">Download</th></tr>
         </thead>
         <tbody>
-          {rows.map(q => (
-            <tr key={q.id} className="border-t border-gray-100 hover:bg-gray-50">
-              <td className="px-3 py-1.5 text-gray-700">{q.property_address || q.project_name || '—'}</td>
-              <td className="px-3 py-1.5 text-gray-900">{q.contractor_company || q.contractor_name}</td>
-              <td className="px-3 py-1.5 text-gray-500">{q.quote_number}</td>
-              <td className="px-3 py-1.5 text-gray-600">{q.document_original_name || q.source_file_name || 'Source file'}</td>
-              <td className="px-3 py-1.5 text-gray-500">{shortDate(q.quote_date)}</td>
-              <td className="px-3 py-1.5 text-right">
-                <a href={`/api${(q.document_download_url || '').replace(/^\/api/, '')}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-blue-600 hover:underline"><Download className="h-3.5 w-3.5" /> Open</a>
-              </td>
-            </tr>
-          ))}
+          {rows.flatMap(q => {
+            // One row per document: the quote's main file plus each section's own
+            // file (skipping a section that simply re-links the main file).
+            const docs: Array<{ key: string; name: string; url: string; section: string | null }> = [];
+            if (q.document_download_url) docs.push({ key: `${q.id}-main`, name: q.document_original_name || q.source_file_name || 'Source file', url: q.document_download_url, section: null });
+            (q.sections || []).forEach(s => {
+              if (s.download_url && s.document_id !== q.source_document_id) docs.push({ key: `${q.id}-${s.id}`, name: s.source_file_name || s.label, url: s.download_url, section: s.label });
+            });
+            return docs.map(doc => (
+              <tr key={doc.key} className="border-t border-gray-100 hover:bg-gray-50">
+                <td className="px-3 py-1.5 text-gray-700">{q.property_address || q.project_name || '—'}</td>
+                <td className="px-3 py-1.5 text-gray-900">{q.contractor_company || q.contractor_name}</td>
+                <td className="px-3 py-1.5 text-gray-500">{q.quote_number}</td>
+                <td className="px-3 py-1.5 text-gray-600">{doc.name}{doc.section ? <span className="ml-1.5 rounded bg-gray-100 px-1 text-[10px] text-gray-500">{doc.section}</span> : null}</td>
+                <td className="px-3 py-1.5 text-gray-500">{shortDate(q.quote_date)}</td>
+                <td className="px-3 py-1.5 text-right">
+                  <a href={`/api${doc.url.replace(/^\/api/, '')}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-blue-600 hover:underline"><Download className="h-3.5 w-3.5" /> Open</a>
+                </td>
+              </tr>
+            ));
+          })}
         </tbody>
       </table>
     </div>
@@ -1406,8 +1484,34 @@ function AddQuoteModal({ options, defaultProjectId, editQuote, onClose, onSaved 
     scope_description: editQuote.scope_description || '',
     notes: editQuote.notes || '',
   } : { ...blankQuoteForm(), project_id: defaultProjectId });
+  // Sections come first so the line-item initializer below can key rows to
+  // them. A quote saved before sections existed becomes one "Full quote"
+  // section on edit, carrying its original document.
+  const [sections, setSections] = useState<QuoteSectionForm[]>(() => {
+    const existing = editQuote?.sections;
+    if (existing && existing.length) {
+      return existing.map(section => ({
+        key: section.id,
+        id: section.id,
+        label: section.label || 'Section',
+        sign: Number(section.sign) < 0 ? -1 : 1,
+        file: null,
+        previewUrl: null,
+        extracting: false,
+        fileName: section.source_file_name || null,
+        downloadUrl: section.download_url || null,
+      }));
+    }
+    const first = blankSection();
+    if (editQuote) {
+      first.fileName = editQuote.document_original_name || editQuote.source_file_name || null;
+      first.downloadUrl = editQuote.document_download_url || null;
+    }
+    return [first];
+  });
   const [lines, setLines] = useState<QuoteLineForm[]>(() => {
     const items = editQuote?.line_items;
+    const fallbackKey = sections[0]?.key || '';
     if (items && items.length) {
       return items.map(li => ({
         category: li.category || (options.categories[0]?.name || ''),
@@ -1416,9 +1520,10 @@ function AddQuoteModal({ options, defaultProjectId, editQuote, onClose, onSaved 
         unit: li.unit || '',
         unit_price: li.unit_price != null ? String(li.unit_price) : '',
         total_line_item_price: li.total_line_item_price != null ? String(li.total_line_item_price) : '',
+        section_key: li.section_id && sections.some(section => section.key === li.section_id) ? li.section_id : fallbackKey,
       }));
     }
-    return [blankLine(options.categories[0]?.name || '')];
+    return [blankLine(options.categories[0]?.name || '', fallbackKey)];
   });
   // A single category for the WHOLE quote (applied to every line item). When editing,
   // default to the quote's most common existing category.
@@ -1434,15 +1539,14 @@ function AddQuoteModal({ options, defaultProjectId, editQuote, onClose, onSaved 
     return options.categories[0]?.name || '';
   })();
   const [quoteCategory, setQuoteCategory] = useState<string>(initialQuoteCategory);
-  const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
-  const [extracting, setExtracting] = useState(false);
-  const [dragging, setDragging] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [dragKey, setDragKey] = useState<string | null>(null);
+  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const previewUrlsRef = useRef<string[]>([]);
+  const extracting = sections.some(section => section.extracting);
 
-  // Revoke the object URL when the preview changes or the modal unmounts.
-  useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
+  // Revoke every preview object URL when the modal unmounts.
+  useEffect(() => () => { previewUrlsRef.current.forEach(url => URL.revokeObjectURL(url)); }, []);
 
   const categoryNames = options.categories.map(c => c.name);
   const lineTotal = (line: QuoteLineForm) => {
@@ -1450,16 +1554,37 @@ function AddQuoteModal({ options, defaultProjectId, editQuote, onClose, onSaved 
     if (line.total_line_item_price !== '' && Number.isFinite(explicit)) return explicit;
     return num(line.quantity) * num(line.unit_price);
   };
-  const grandTotal = lines.reduce((sum, line) => sum + lineTotal(line), 0);
+  const isBlankLine = (line: QuoteLineForm) => !line.description.trim() && lineTotal(line) <= 0;
+  const sectionSign = (key: string): 1 | -1 => sections.find(section => section.key === key)?.sign ?? 1;
+  const sectionSubtotal = (key: string) => lines.filter(line => line.section_key === key).reduce((sum, line) => sum + lineTotal(line), 0);
+  // Net of the quote: deduct sections subtract.
+  const grandTotal = lines.reduce((sum, line) => sum + sectionSign(line.section_key) * lineTotal(line), 0);
+  const multiSection = sections.length > 1 || sections.some(section => section.sign < 0);
 
   const setLine = (idx: number, patch: Partial<QuoteLineForm>) =>
     setLines(current => current.map((line, i) => (i === idx ? { ...line, ...patch } : line)));
 
-  // Reads the attached PDF/image with AI and pre-fills the form. Runs automatically
-  // on upload (see chooseFile) and can be re-run manually.
-  const runExtract = async (targetFile: File | null = file) => {
+  const setSection = (key: string, patch: Partial<QuoteSectionForm>) =>
+    setSections(current => current.map(section => (section.key === key ? { ...section, ...patch } : section)));
+
+  const addSection = () => setSections(current => [...current, blankSection(`Section ${current.length + 1}`)]);
+
+  // Removing a section keeps its rows: they move to the first remaining section.
+  const removeSection = (key: string) => {
+    if (sections.length <= 1) return;
+    const remaining = sections.filter(section => section.key !== key);
+    const target = remaining[0].key;
+    setSections(remaining);
+    setLines(current => current.map(line => (line.section_key === key ? { ...line, section_key: target } : line)));
+  };
+
+  // Reads one section's document with AI. Contractor details fill only what is
+  // still blank; the section's rows are replaced by what was read. When the AI
+  // finds the document itself is split (house + garage), the target section
+  // takes the first part and new sections are created for the rest.
+  const runExtract = async (sectionKey: string, targetFile: File | null) => {
     if (!targetFile || !isAiReadable(targetFile)) return;
-    setExtracting(true);
+    setSection(sectionKey, { extracting: true });
     try {
       const fd = new FormData();
       fd.append('quote_file', targetFile);
@@ -1468,63 +1593,101 @@ function AddQuoteModal({ options, defaultProjectId, editQuote, onClose, onSaved 
       if (q) {
         setForm(f => ({
           ...f,
-          contractor_name: q.contractor_name || f.contractor_name,
-          contractor_company: q.contractor_company || f.contractor_company,
-          contractor_email: q.contractor_email || f.contractor_email,
-          contractor_phone: q.contractor_phone || f.contractor_phone,
-          scope_description: q.scope_description || f.scope_description,
+          contractor_name: f.contractor_name || q.contractor_name || '',
+          contractor_company: f.contractor_company || q.contractor_company || '',
+          contractor_email: f.contractor_email || q.contractor_email || '',
+          contractor_phone: f.contractor_phone || q.contractor_phone || '',
+          scope_description: f.scope_description || q.scope_description || '',
           quote_date: q.quote_date || f.quote_date,
         }));
-        if (Array.isArray(q.line_items) && q.line_items.length) {
-          // One general category for the whole quote = the most common category the AI found.
-          const counts = new Map<string, number>();
-          for (const li of q.line_items) {
-            const c = categoryNames.includes(li.category) ? li.category : '';
-            if (c) counts.set(c, (counts.get(c) || 0) + 1);
-          }
-          let best = '', bestN = 0;
-          for (const [c, n] of counts) { if (n > bestN) { best = c; bestN = n; } }
-          if (best) setQuoteCategory(best);
-          setLines(q.line_items.map((li: any) => ({
-            category: '',
-            description: li.description || '',
-            quantity: '1',
-            unit: '',
-            unit_price: '',
-            total_line_item_price: li.total_line_item_price != null ? String(li.total_line_item_price) : '',
-          })));
+        const toLines = (items: any[], key: string): QuoteLineForm[] => items.map((li: any) => ({
+          category: '',
+          description: li.description || '',
+          quantity: '1',
+          unit: '',
+          unit_price: '',
+          total_line_item_price: li.total_line_item_price != null ? String(li.total_line_item_price) : '',
+          section_key: key,
+        }));
+        const found: any[] = Array.isArray(q.sections)
+          ? q.sections.filter((s: any) => Array.isArray(s?.line_items) && s.line_items.length)
+          : [];
+        const allItems: any[] = found.length ? found.flatMap((s: any) => s.line_items) : (Array.isArray(q.line_items) ? q.line_items : []);
+        // One general category for the whole quote = the most common category the AI found.
+        const counts = new Map<string, number>();
+        for (const li of allItems) {
+          const c = categoryNames.includes(li.category) ? li.category : '';
+          if (c) counts.set(c, (counts.get(c) || 0) + 1);
         }
-        toast.success('Document read — please review the auto-filled details before saving.');
+        let best = '', bestN = 0;
+        for (const [c, n] of counts) { if (n > bestN) { best = c; bestN = n; } }
+        if (best) setQuoteCategory(best);
+
+        if (found.length > 1) {
+          const extras = found.slice(1).map((s: any) => ({
+            ...blankSection(String(s.label || 'Section')),
+            sign: (s.sign === 'deduct' ? -1 : 1) as 1 | -1,
+          }));
+          setSections(current => {
+            const next = current.map(section => (section.key === sectionKey
+              ? { ...section, label: String(found[0].label || section.label), sign: (found[0].sign === 'deduct' ? -1 : 1) as 1 | -1 }
+              : section));
+            const at = next.findIndex(section => section.key === sectionKey);
+            next.splice(at + 1, 0, ...extras);
+            return next;
+          });
+          const fresh = [
+            ...toLines(found[0].line_items, sectionKey),
+            ...extras.flatMap((section, i) => toLines(found[i + 1].line_items, section.key)),
+          ];
+          setLines(current => [...current.filter(line => line.section_key !== sectionKey && !isBlankLine(line)), ...fresh]);
+          toast.success(`Document read — ${found.length} sections found. Review before saving.`);
+        } else if (allItems.length) {
+          setLines(current => [...current.filter(line => line.section_key !== sectionKey && !isBlankLine(line)), ...toLines(allItems, sectionKey)]);
+          toast.success('Document read — please review the auto-filled details before saving.');
+        } else {
+          toast.success('Document read, but no priced line items were found — enter them manually.');
+        }
       }
     } catch (err: any) {
       toast.error(err?.response?.data?.error || "We couldn't read that document automatically — please enter the details manually.");
     } finally {
-      setExtracting(false);
+      setSection(sectionKey, { extracting: false });
     }
   };
 
   // Validate, preview, and (for PDFs/photos) kick off AI auto-read immediately.
-  const chooseFile = (f: File | null) => {
+  const chooseFile = (sectionKey: string, f: File | null) => {
     if (!f) return;
     const problem = validateUpload(f);
     if (problem) { toast.error(problem); return; }
-    setPreviewUrl(isImageFile(f) ? URL.createObjectURL(f) : null);
-    setFile(f);
-    if (isAiReadable(f)) void runExtract(f);
+    const previewUrl = isImageFile(f) ? URL.createObjectURL(f) : null;
+    if (previewUrl) previewUrlsRef.current.push(previewUrl);
+    setSection(sectionKey, { file: f, previewUrl, fileName: null, downloadUrl: null });
+    if (isAiReadable(f)) void runExtract(sectionKey, f);
   };
 
-  const clearFile = () => {
-    setPreviewUrl(null);
-    setFile(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+  const clearFile = (sectionKey: string) => {
+    setSection(sectionKey, { file: null, previewUrl: null });
+    const input = fileInputRefs.current[sectionKey];
+    if (input) input.value = '';
   };
 
   const submit = async () => {
     if (!form.project_id) { toast.error('Project is required'); return; }
     if (!form.contractor_name.trim() && !form.contractor_company.trim()) { toast.error('Contractor name or company is required'); return; }
     if (!quoteCategory) { toast.error('Select a category for the quote'); return; }
+    if (extracting) { toast.error('Wait for the document to finish reading'); return; }
     const cleanLines = lines.filter(l => l.description.trim() || lineTotal(l) > 0);
     if (cleanLines.length === 0) { toast.error('Add at least one line item'); return; }
+    // file_index = the section's slot in the upload order (set below).
+    const sectionPayload = sections.map((section, idx) => ({
+      key: section.key,
+      id: section.id || null,
+      label: section.label.trim() || `Section ${idx + 1}`,
+      sign: section.sign,
+      file_index: null as number | null,
+    }));
     const payloadLines = cleanLines.map((l, idx) => ({
       category: quoteCategory,
       subcategory: '',
@@ -1534,51 +1697,37 @@ function AddQuoteModal({ options, defaultProjectId, editQuote, onClose, onSaved 
       unit_price: num(l.unit_price),
       total_line_item_price: lineTotal(l),
       sort_order: idx,
+      section_key: sections.some(section => section.key === l.section_key) ? l.section_key : sections[0].key,
     }));
+    const header = {
+      contractor_name: form.contractor_name,
+      contractor_company: form.contractor_company,
+      contractor_email: form.contractor_email,
+      contractor_phone: form.contractor_phone,
+      quote_date: form.quote_date,
+      status: form.status,
+      scope_description: form.scope_description,
+      notes: form.notes,
+      total_quote_amount: grandTotal,
+    };
     setSaving(true);
     try {
       if (isEdit && editQuote) {
-        await updateQuote(editQuote.id, {
-          contractor_name: form.contractor_name,
-          contractor_company: form.contractor_company,
-          contractor_email: form.contractor_email,
-          contractor_phone: form.contractor_phone,
-          quote_date: form.quote_date,
-          status: form.status,
-          scope_description: form.scope_description,
-          notes: form.notes,
-          total_quote_amount: grandTotal,
-          line_items: payloadLines,
-        });
-      } else if (file) {
+        await updateQuote(editQuote.id, { ...header, sections: sectionPayload, line_items: payloadLines });
+      } else if (sections.some(section => section.file)) {
         const fd = new FormData();
         fd.append('project_id', form.project_id);
-        fd.append('contractor_name', form.contractor_name);
-        fd.append('contractor_company', form.contractor_company);
-        fd.append('contractor_email', form.contractor_email);
-        fd.append('contractor_phone', form.contractor_phone);
-        fd.append('quote_date', form.quote_date);
-        fd.append('status', form.status);
-        fd.append('scope_description', form.scope_description);
-        fd.append('notes', form.notes);
-        fd.append('total_quote_amount', String(grandTotal));
+        Object.entries(header).forEach(([key, value]) => fd.append(key, String(value ?? '')));
+        let slot = 0;
+        sections.forEach((section, idx) => {
+          if (section.file) { sectionPayload[idx].file_index = slot; slot += 1; }
+        });
+        fd.append('sections', JSON.stringify(sectionPayload));
         fd.append('line_items', JSON.stringify(payloadLines));
-        fd.append('quote_file', file);
+        sections.forEach(section => { if (section.file) fd.append('quote_file', section.file); });
         await uploadQuote(fd);
       } else {
-        await createQuote({
-          project_id: form.project_id,
-          contractor_name: form.contractor_name,
-          contractor_company: form.contractor_company,
-          contractor_email: form.contractor_email,
-          contractor_phone: form.contractor_phone,
-          quote_date: form.quote_date,
-          status: form.status,
-          scope_description: form.scope_description,
-          notes: form.notes,
-          total_quote_amount: grandTotal,
-          line_items: payloadLines,
-        });
+        await createQuote({ project_id: form.project_id, ...header, sections: sectionPayload, line_items: payloadLines });
       }
       toast.success(isEdit ? 'Quote updated' : 'Quote saved');
       onSaved();
@@ -1634,101 +1783,103 @@ function AddQuoteModal({ options, defaultProjectId, editQuote, onClose, onSaved 
           </label>
         </div>
 
-        {/* Source document upload + automatic AI auto-read (creation only) */}
-        {!isEdit && (
+        {/* Quote sections: each separately priced part (house, garage, alternate,
+            credit) with its own document and its own add-or-deduct sign. */}
         <div>
-          <span className="mb-1 block text-sm font-medium text-gray-600">
-            Source document <span className="font-normal text-gray-400">(optional — attach the contractor's quote)</span>
-          </span>
-
-          {!file ? (
-            <div
-              role="button"
-              tabIndex={0}
-              onClick={() => fileInputRef.current?.click()}
-              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInputRef.current?.click(); } }}
-              onDragEnter={e => { e.preventDefault(); setDragging(true); }}
-              onDragOver={e => { e.preventDefault(); setDragging(true); }}
-              onDragLeave={e => { e.preventDefault(); setDragging(false); }}
-              onDrop={e => { e.preventDefault(); setDragging(false); chooseFile(e.dataTransfer.files?.[0] || null); }}
-              className="flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed px-4 py-6 text-center transition-colors focus:outline-none"
-              style={{ borderColor: dragging ? '#D99D26' : 'rgba(148,163,184,0.4)', background: dragging ? 'rgba(217,157,38,0.14)' : 'rgba(255,255,255,0.03)' }}
-            >
-              <div className="flex h-10 w-10 items-center justify-center rounded-full" style={{ background: 'rgba(217,157,38,0.12)' }}>
-                <Paperclip className="h-5 w-5" style={{ color: '#C4891F' }} />
-              </div>
-              <p className="text-sm font-medium text-gray-700"><span style={{ color: '#C4891F' }}>Click to upload</span> or drag &amp; drop</p>
-              <p className="text-xs text-gray-400">PDF, JPG, PNG, CSV, or Excel · up to {MAX_UPLOAD_MB} MB</p>
-              <p className="mt-0.5 inline-flex items-center gap-1 text-[11px] font-medium" style={{ color: '#93C5FD' }}>
-                <Wand2 className="h-3 w-3" /> PDFs &amp; photos are read automatically by AI
-              </p>
-            </div>
-          ) : (
-            <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-3 py-2.5 shadow-sm">
-              {previewUrl ? (
-                <img src={previewUrl} alt={file.name} className="h-11 w-11 flex-shrink-0 rounded-lg object-cover" />
-              ) : (
-                <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg" style={{ background: isPdfFile(file) ? 'rgba(239,68,68,0.20)' : 'rgba(129,140,248,0.22)' }}>
-                  <FileText className="h-5 w-5" style={{ color: isPdfFile(file) ? '#FCA5A5' : '#BFC6FF' }} />
+          <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+            <span className="text-sm font-semibold text-gray-700">
+              Quote sections <span className="font-normal text-gray-400">— one per priced part; PDFs &amp; photos are read automatically by AI</span>
+            </span>
+            <button type="button" onClick={addSection} className="inline-flex items-center gap-1 text-sm font-medium text-amber-700 hover:text-amber-800"><Plus className="h-3.5 w-3.5" /> Add section</button>
+          </div>
+          <div className="space-y-2">
+            {sections.map((section, idx) => (
+              <div key={section.key} className="rounded-xl border border-gray-200 bg-white p-2.5 shadow-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    value={section.label}
+                    onChange={e => setSection(section.key, { label: e.target.value })}
+                    className="min-w-[160px] flex-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-sm font-semibold text-gray-900 focus:border-amber-400 focus:outline-none"
+                    placeholder={`Section ${idx + 1} — e.g. House, Garage, Credit`}
+                  />
+                  <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 text-xs font-semibold">
+                    <button type="button" onClick={() => setSection(section.key, { sign: 1 })} className="px-2.5 py-1.5" style={section.sign > 0 ? { background: 'rgba(34,197,94,0.18)', color: '#15803D' } : { color: '#6B7280' }} title="This section adds to the quote total">+ Adds</button>
+                    <button type="button" onClick={() => setSection(section.key, { sign: -1 })} className="border-l border-gray-200 px-2.5 py-1.5" style={section.sign < 0 ? { background: 'rgba(239,68,68,0.16)', color: '#B91C1C' } : { color: '#6B7280' }} title="This section is a credit / deduction and subtracts from the total">− Deducts</button>
+                  </div>
+                  <span className={`ml-auto text-xs font-semibold ${section.sign < 0 ? 'text-red-700' : 'text-gray-500'}`}>{section.sign < 0 ? '−' : ''}{money(sectionSubtotal(section.key))}</span>
+                  {sections.length > 1 && (
+                    <button type="button" onClick={() => removeSection(section.key)} className="rounded-lg p-1.5 text-gray-300 transition-colors hover:bg-red-50 hover:text-red-600" title="Remove section (its rows move to the first section)"><Trash2 className="h-4 w-4" /></button>
+                  )}
                 </div>
-              )}
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-gray-800">{file.name}</p>
-                <p className="text-xs text-gray-400">{formatBytes(file.size)}</p>
+
+                {isEdit ? (
+                  <p className="mt-2 text-xs text-gray-500">
+                    {section.fileName
+                      ? <>Document: {section.downloadUrl ? <a href={`/api${section.downloadUrl.replace(/^\/api/, '')}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{section.fileName}</a> : section.fileName}</>
+                      : 'No document attached to this section.'}
+                  </p>
+                ) : !section.file ? (
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => fileInputRefs.current[section.key]?.click()}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInputRefs.current[section.key]?.click(); } }}
+                    onDragEnter={e => { e.preventDefault(); setDragKey(section.key); }}
+                    onDragOver={e => { e.preventDefault(); setDragKey(section.key); }}
+                    onDragLeave={e => { e.preventDefault(); setDragKey(null); }}
+                    onDrop={e => { e.preventDefault(); setDragKey(null); chooseFile(section.key, e.dataTransfer.files?.[0] || null); }}
+                    className="mt-2 flex cursor-pointer flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-lg border-2 border-dashed px-3 py-3 text-center text-xs transition-colors focus:outline-none"
+                    style={{ borderColor: dragKey === section.key ? '#D99D26' : 'rgba(148,163,184,0.4)', background: dragKey === section.key ? 'rgba(217,157,38,0.14)' : 'rgba(255,255,255,0.03)' }}
+                  >
+                    <Paperclip className="h-4 w-4" style={{ color: '#C4891F' }} />
+                    <span className="font-medium text-gray-700"><span style={{ color: '#C4891F' }}>Attach this section's document</span> or drag &amp; drop</span>
+                    <span className="text-gray-400">PDF, image, CSV, Excel · up to {MAX_UPLOAD_MB} MB</span>
+                  </div>
+                ) : (
+                  <div className="mt-2 flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                    {section.previewUrl ? (
+                      <img src={section.previewUrl} alt={section.file.name} className="h-9 w-9 flex-shrink-0 rounded object-cover" />
+                    ) : (
+                      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded" style={{ background: isPdfFile(section.file) ? 'rgba(239,68,68,0.20)' : 'rgba(129,140,248,0.22)' }}>
+                        <FileText className="h-4 w-4" style={{ color: isPdfFile(section.file) ? '#FCA5A5' : '#BFC6FF' }} />
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-gray-800">{section.file.name}</p>
+                      <p className="text-xs text-gray-400">{formatBytes(section.file.size)}{section.extracting ? ' · reading with AI, keep this window open…' : ''}</p>
+                    </div>
+                    {section.extracting ? (
+                      <span className="inline-block h-4 w-4 flex-shrink-0 animate-spin rounded-full border-2 border-blue-300 border-t-transparent" />
+                    ) : isAiReadable(section.file) ? (
+                      <button type="button" onClick={() => runExtract(section.key, section.file)} title="Re-read this document with AI" className="inline-flex flex-shrink-0 items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-semibold" style={{ borderColor: 'rgba(59,130,246,0.4)', background: 'rgba(59,130,246,0.16)', color: '#93C5FD' }}>
+                        <Wand2 className="h-3 w-3" /> Re-read
+                      </button>
+                    ) : (
+                      <span className="text-[11px] text-gray-400">Not auto-readable</span>
+                    )}
+                    <button type="button" onClick={() => clearFile(section.key)} disabled={section.extracting} title="Remove file" className="flex-shrink-0 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-40"><X className="h-4 w-4" /></button>
+                  </div>
+                )}
+                {!isEdit && (
+                  <input ref={el => { fileInputRefs.current[section.key] = el; }} type="file" accept={ACCEPTED_UPLOAD} className="hidden" onChange={e => chooseFile(section.key, e.target.files?.[0] || null)} />
+                )}
               </div>
-              {!extracting && isAiReadable(file) && (
-                <button
-                  type="button"
-                  onClick={() => runExtract(file)}
-                  title="Re-read this document with AI"
-                  className="inline-flex flex-shrink-0 items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-semibold"
-                  style={{ borderColor: 'rgba(59,130,246,0.4)', background: 'rgba(59,130,246,0.16)', color: '#93C5FD' }}
-                >
-                  <Wand2 className="h-3 w-3" /> Re-read
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={clearFile}
-                disabled={extracting}
-                title="Remove file"
-                className="flex-shrink-0 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          )}
-
-          <input ref={fileInputRef} type="file" accept={ACCEPTED_UPLOAD} className="hidden" onChange={e => chooseFile(e.target.files?.[0] || null)} />
-
-          {extracting && (
-            <div className="mt-2 flex items-start gap-2.5 rounded-xl border px-3 py-2.5" style={{ borderColor: 'rgba(59,130,246,0.4)', background: 'rgba(59,130,246,0.12)' }}>
-              <span className="mt-0.5 inline-block h-4 w-4 flex-shrink-0 animate-spin rounded-full border-2 border-blue-300 border-t-transparent" />
-              <div>
-                <p className="text-sm font-semibold" style={{ color: '#93C5FD' }}>Analyzing your document with AI…</p>
-                <p className="text-xs" style={{ color: 'rgba(191,219,254,0.85)' }}>
-                  Please keep this window open. The contractor details and line items below will be filled in automatically once the analysis is complete.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {file && !extracting && !isAiReadable(file) && (
-            <p className="mt-1.5 text-xs text-gray-400">This file type can't be auto-read — please enter the quote details manually below.</p>
-          )}
+            ))}
+          </div>
+          {isEdit && <p className="mt-1.5 text-xs text-gray-400">Documents are attached when a quote is created; sections and their rows can be changed here.</p>}
         </div>
-        )}
 
         {/* Line items */}
         <div>
           <div className="mb-1.5 flex items-center justify-between">
             <span className="text-sm font-semibold text-gray-700">Line items</span>
-            <button type="button" onClick={() => setLines(c => [...c, blankLine(options.categories[0]?.name || '')])} className="inline-flex items-center gap-1 text-sm font-medium text-amber-700 hover:text-amber-800"><Plus className="h-3.5 w-3.5" /> Add row</button>
+            <button type="button" onClick={() => setLines(c => [...c, blankLine(options.categories[0]?.name || '', sections[0]?.key || '')])} className="inline-flex items-center gap-1 text-sm font-medium text-amber-700 hover:text-amber-800"><Plus className="h-3.5 w-3.5" /> Add row</button>
           </div>
           <div className="overflow-auto rounded-lg border border-gray-200">
             <table className="w-full text-xs">
               <thead className="bg-gray-50 text-left text-[10px] uppercase tracking-wide text-gray-500">
                 <tr>
+                  {sections.length > 1 && <th className="px-2 py-1.5">Section</th>}
                   <th className="px-2 py-1.5">Description</th>
                   <th className="px-2 py-1.5 text-right">Qty</th>
                   <th className="px-2 py-1.5">Unit</th>
@@ -1740,6 +1891,13 @@ function AddQuoteModal({ options, defaultProjectId, editQuote, onClose, onSaved 
               <tbody>
                 {lines.map((line, idx) => (
                   <tr key={idx} className="border-t border-gray-100">
+                    {sections.length > 1 && (
+                      <td className="px-2 py-1">
+                        <select value={line.section_key} onChange={e => setLine(idx, { section_key: e.target.value })} className="w-32 rounded border border-gray-200 px-1.5 py-1">
+                          {sections.map(section => <option key={section.key} value={section.key}>{section.label || 'Section'}</option>)}
+                        </select>
+                      </td>
+                    )}
                     <td className="px-2 py-1"><input value={line.description} onChange={e => setLine(idx, { description: e.target.value })} className="w-full min-w-[200px] rounded border border-gray-200 px-1.5 py-1" placeholder="Line item description" /></td>
                     <td className="px-2 py-1"><input type="number" value={line.quantity} onChange={e => setLine(idx, { quantity: e.target.value })} className="w-16 rounded border border-gray-200 px-1.5 py-1 text-right" /></td>
                     <td className="px-2 py-1"><input value={line.unit} onChange={e => setLine(idx, { unit: e.target.value })} className="w-16 rounded border border-gray-200 px-1.5 py-1" placeholder="ea" /></td>
@@ -1752,8 +1910,17 @@ function AddQuoteModal({ options, defaultProjectId, editQuote, onClose, onSaved 
                 ))}
               </tbody>
               <tfoot>
+                {multiSection && sections.map(section => (
+                  <tr key={`sub-${section.key}`} className="border-t border-gray-100 bg-white text-gray-600">
+                    <td className="px-2 py-1 text-right" colSpan={sections.length > 1 ? 5 : 4}>
+                      {section.label || 'Section'} <span className="text-[10px] uppercase text-gray-400">{section.sign < 0 ? 'deducts' : 'adds'}</span>
+                    </td>
+                    <td className={`px-2 py-1 text-right ${section.sign < 0 ? 'text-red-700' : 'text-gray-800'}`}>{section.sign < 0 ? '−' : ''}{money(sectionSubtotal(section.key))}</td>
+                    <td></td>
+                  </tr>
+                ))}
                 <tr className="border-t border-gray-200 bg-gray-50 font-semibold">
-                  <td className="px-2 py-1.5 text-gray-600" colSpan={4}>Total</td>
+                  <td className="px-2 py-1.5 text-gray-600" colSpan={sections.length > 1 ? 5 : 4}>{multiSection ? 'Net total' : 'Total'}</td>
                   <td className="px-2 py-1.5 text-right text-gray-900">{money(grandTotal)}</td>
                   <td></td>
                 </tr>
