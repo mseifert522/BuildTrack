@@ -1254,6 +1254,12 @@ export default function Invoices() {
   const quickBooksMirrorRows = useMemo(() => (
     sortQuickBooksInvoiceRows(quickBooksStatusScopedRows[deferredQuickBooksBillFilter] || [], quickBooksEffectiveInvoiceSort)
   ), [deferredQuickBooksBillFilter, quickBooksEffectiveInvoiceSort, quickBooksStatusScopedRows]);
+  // Footer total for the Open balance column: what the currently shown queue is
+  // worth. On the default "Waiting for Approval" tab this is the dollar value
+  // still awaiting an approval decision.
+  const quickBooksVisibleOpenBalanceTotal = useMemo(() => (
+    quickBooksMirrorRows.reduce((sum, { bill }) => sum + quickBooksMoneyAmount(bill.balance), 0)
+  ), [quickBooksMirrorRows]);
   const quickBooksProjectSpendSummary = useMemo<QuickBooksProjectSpendSummary | null>(() => {
     if (!quickBooksInvoiceFilterNeedsProject || !quickBooksInvoiceFilter.projectId || !quickBooksInvoiceFilterReady) return null;
     const selectedProject = projectById.get(quickBooksInvoiceFilter.projectId);
@@ -1381,12 +1387,12 @@ export default function Invoices() {
     return (
       <button
         type="button"
-        className={`inline-flex items-center gap-1 bg-transparent p-0 text-left font-black uppercase tracking-wide transition ${activeSort ? 'text-white' : 'text-orange-300 hover:text-white'}`}
+        className={`inline-flex items-center gap-1 bg-transparent p-0 text-left font-bold uppercase tracking-wide transition ${activeSort ? 'text-white' : 'text-slate-400 hover:text-white'}`}
         onClick={() => updateQuickBooksInvoiceSort(key)}
         title={`Sort by ${label}`}
       >
         <span>{label}</span>
-        <SortIcon className={`h-3.5 w-3.5 ${activeSort ? 'opacity-100' : 'opacity-60'}`} />
+        <SortIcon className={`h-3.5 w-3.5 ${activeSort ? 'opacity-100' : 'opacity-25'}`} />
       </button>
     );
   };
@@ -2356,6 +2362,20 @@ export default function Invoices() {
                         );
                       })}
                     </tbody>
+                    {quickBooksMirrorRows.length > 0 && (
+                      <tfoot className="bt-qbo-bill-table-foot">
+                        <tr>
+                          <td colSpan={5} className="bt-qbo-foot-label">
+                            {selectedQuickBooksBillFilter.label} total
+                            <span className="bt-qbo-foot-count">
+                              {quickBooksMirrorRows.length} invoice{quickBooksMirrorRows.length === 1 ? '' : 's'}
+                            </span>
+                          </td>
+                          <td className="bt-qbo-foot-total">{money(quickBooksVisibleOpenBalanceTotal)}</td>
+                          <td colSpan={2} />
+                        </tr>
+                      </tfoot>
+                    )}
                   </table>
                 </div>
               </div>

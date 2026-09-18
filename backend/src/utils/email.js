@@ -554,7 +554,7 @@ async function sendInvoiceEmail({ invoice, project, contractor, pdfBuffer }) {
   }
 }
 
-async function sendApprovedPayNotificationEmail({ approvedInvoices, approvedInvoice, approvedBy }) {
+async function sendApprovedPayNotificationEmail({ approvedInvoices, approvedInvoice, approvedBy, newlyApproved }) {
   const transporter = createTransporter();
   const operationsEmail = process.env.APPROVED_INVOICE_NOTIFY_EMAIL || 'info@newurbandev.com';
   const appUrl = (process.env.APP_URL || BRAND.url || 'https://buildtrack.newurbandev.com').replace(/\/$/, '');
@@ -563,6 +563,29 @@ async function sendApprovedPayNotificationEmail({ approvedInvoices, approvedInvo
   const approvedLabel = approvedInvoice
     ? `${approvedInvoice.external_invoice_number || approvedInvoice.invoice_number || approvedInvoice.id} - ${approvedInvoice.vendor_name || approvedInvoice.contractor_name || 'Contractor'}`
     : 'Approved invoice queue';
+
+  // When an approval burst is digested, `newlyApproved` carries every bill approved
+  // in that burst so the email names all of them, not just a single one.
+  const justApproved = Array.isArray(newlyApproved) ? newlyApproved.filter(Boolean) : [];
+  const justApprovedTotal = justApproved.reduce(
+    (sum, item) => sum + Number(item.quickbooks_balance ?? item.total ?? 0),
+    0
+  );
+  const approverName = escapeHtml(approvedBy || 'A BuildTrack user');
+  const approvalIntro = justApproved.length
+    ? `${approverName} approved ${justApproved.length} invoice${justApproved.length === 1 ? '' : 's'} for payment, totaling $${justApprovedTotal.toFixed(2)}.`
+    : `${approverName} approved an invoice for payment.`;
+  const newApprovalHeading = justApproved.length > 1 ? 'New approvals' : 'New approval';
+  const newApprovalBody = justApproved.length
+    ? justApproved.map(item => `
+      <p style="font-size:14px; color:#111827; font-weight:700; margin:0 0 6px;">
+        ${escapeHtml(item.vendor_name || item.contractor_name || 'Contractor')}
+        &nbsp;&middot;&nbsp; ${escapeHtml(item.external_invoice_number || item.invoice_number || item.id || '')}
+        &nbsp;&middot;&nbsp; <span style="font-weight:400; color:#6B7280;">${escapeHtml(item.address || item.job_name || 'Project not listed')}</span>
+        &nbsp;&mdash;&nbsp; $${Number(item.quickbooks_balance ?? item.total ?? 0).toFixed(2)}
+      </p>
+    `).join('')
+    : `<p style="font-size:14px; color:#111827; font-weight:700; margin:0;">${escapeHtml(approvedLabel)}</p>`;
 
   const invoiceRows = rows.length
     ? rows.map(invoice => `
@@ -587,11 +610,11 @@ async function sendApprovedPayNotificationEmail({ approvedInvoices, approvedInvo
   const html = emailWrapper(`
     <h2 style="color:#111827; font-size:20px; font-weight:800; margin:0 0 8px;">BuildTrack approved invoices ready for payment review</h2>
     <p style="color:#6B7280; font-size:14px; line-height:1.6; margin:0 0 18px;">
-      ${escapeHtml(approvedBy || 'A BuildTrack user')} approved an invoice for payment. QuickBooks remains the accounting source of truth for final paid/unpaid balances.
+      ${approvalIntro} QuickBooks remains the accounting source of truth for final paid/unpaid balances.
     </p>
     <div style="background:#FFFBEB; border:1px solid #FDE68A; border-radius:12px; padding:16px; margin-bottom:18px;">
-      <p style="font-size:12px; color:#92400E; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin:0 0 8px;">New approval</p>
-      <p style="font-size:14px; color:#111827; font-weight:700; margin:0;">${escapeHtml(approvedLabel)}</p>
+      <p style="font-size:12px; color:#92400E; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin:0 0 8px;">${newApprovalHeading}</p>
+      ${newApprovalBody}
     </div>
     <table style="width:100%; border-collapse:collapse; margin-bottom:18px;">
       <thead>

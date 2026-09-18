@@ -129,3 +129,143 @@
   background: #1e293b !important;
   box-shadow: none !important;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Waiting for Approval — calm treatment (2026-09-18, Mike: "too many border
+   lines and too busy").
+
+   The section was four nested bordered boxes (section > table-shell > title >
+   table) and every row was its own card with a top border, a bottom border, a
+   4px coloured left rail and a 4px right rail. That is six-plus lines before
+   any data is read.
+
+   Now: ONE border around the section, ONE hairline under the header, ONE
+   hairline between rows. Status still reads from the status chip, so the row
+   rails are gone rather than recoloured. Everything here is scoped to
+   .bt-qbo-mirror-section and this file loads last, so it settles the cascade
+   without touching the heavy treatment other pages rely on.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Drop the decorative overlays that draw extra edges on the panel. */
+.bt-qbo-mirror-section::before,
+.bt-qbo-mirror-section::after {
+  display: none !important;
+}
+
+/* Keep exactly one outer border; lose the glow and the gradients. */
+.bt-qbo-mirror-section {
+  border: 1px solid rgba(148, 163, 184, 0.22) !important;
+  background: #0B1120 !important;
+  box-shadow: none !important;
+}
+
+/* The inner shell becomes a plain container - no second box. */
+.bt-qbo-mirror-section .bt-qbo-table-shell {
+  margin: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* Title sits above the table separated by a single hairline. */
+.bt-qbo-mirror-section .bt-qbo-table-title {
+  border: none !important;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 14px 16px !important;
+}
+
+/* No row-cards: collapse the borders and remove the 8px gap grid. */
+.bt-qbo-mirror-section .bt-qbo-bill-table {
+  border-collapse: collapse !important;
+  border-spacing: 0 !important;
+  padding: 0 !important;
+}
+
+/* Header: one hairline underneath, one muted colour, no bevel. */
+.bt-qbo-mirror-section .bt-qbo-bill-table th {
+  border: none !important;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.22) !important;
+  background: transparent !important;
+  color: #94A3B8 !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  padding: 12px 14px !important;
+}
+
+/* Rows: a single hairline between them and nothing else. */
+.bt-qbo-mirror-section .bt-qbo-bill-table tbody td {
+  border: none !important;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.10) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: #E2E8F0 !important;
+  font-weight: 600 !important;
+  padding: 14px !important;
+}
+
+.bt-qbo-mirror-section .bt-qbo-bill-table tbody tr:last-child td {
+  border-bottom: none !important;
+}
+
+/* Quiet hover, no lift. */
+.bt-qbo-mirror-section .bt-qbo-bill-table tbody tr:hover td {
+  background: rgba(148, 163, 184, 0.07) !important;
+}
+
+/* Emphasis without shouting: drop the hard text shadows and the forced black
+   weights the heavy theme applied to every figure in the row. */
+.bt-qbo-mirror-section .bt-qbo-bill-table td strong,
+.bt-qbo-mirror-section .bt-qbo-bill-table td small,
+.bt-qbo-mirror-section .bt-qbo-money {
+  text-shadow: none !important;
+  font-weight: 700 !important;
+}
+
+.bt-qbo-mirror-section .bt-qbo-bill-table td small {
+  color: #94A3B8 !important;
+  font-weight: 500 !important;
+}
+
+/* ── Open-balance column total ──────────────────────────────────────────────
+   Mike: show what the Waiting for Approval queue is worth at the bottom of the
+   Open balance column. One hairline above it, consistent with the rest. */
+.bt-qbo-mirror-section .bt-qbo-bill-table-foot td {
+  border: none !important;
+  border-top: 1px solid rgba(148, 163, 184, 0.22) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  padding: 14px !important;
+  color: #94A3B8 !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+}
+
+.bt-qbo-mirror-section .bt-qbo-bill-table-foot .bt-qbo-foot-label {
+  text-align: right !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.04em !important;
+  white-space: nowrap !important;
+}
+
+.bt-qbo-mirror-section .bt-qbo-bill-table-foot .bt-qbo-foot-count {
+  display: inline-block;
+  margin-left: 8px;
+  color: #64748B !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+}
+
+.bt-qbo-mirror-section .bt-qbo-bill-table-foot .bt-qbo-foot-total {
+  color: #FFFFFF !important;
+  font-size: 16px !important;
+  font-weight: 800 !important;
+  white-space: nowrap !important;
+}

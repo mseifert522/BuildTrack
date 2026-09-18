@@ -2090,6 +2090,175 @@ function markPaymentQueueRowsNotified(db, rows, userId) {
   write();
 }
 
+// ── Approval digest (2026-09-18, Mike's spec) ────────────────────────────────
+// Approving a QuickBooks bill for pay used to email nobody: management only
+// heard about it on the biweekly Friday 8am ET run, or when a human clicked
+// "notify" on the Invoice Center. Approvals arrive in bursts (six inside
+// sixteen minutes is a normal morning), so an email per approval would flood
+// info@. Instead the timer restarts on every approval and fires once approving
+// has been idle for QBO_APPROVAL_DIGEST_DELAY_MS, with
+// QBO_APPROVAL_DIGEST_MAX_WAIT_MS capping how long a steady stream can defer
+// it. One email per burst, naming every bill approved in that burst plus the
+// whole approved-to-pay queue.
+const APPROVAL_DIGEST_DEFAULT_DELAY_MS = 10 * 60 * 1000;
+const APPROVAL_DIGEST_DEFAULT_MAX_WAIT_MS = 30 * 60 * 1000;
+const APPROVAL_DIGEST_RECOVERY_WINDOW_HOURS = 2;
+
+let approvalDigestTimer = null;
+let approvalDigestFirstQueuedAt = null;
+let approvalDigestSending = false;
+const approvalDigestPending = new Map();
+
+function approvalDigestEnabled() {
+  // Inherits the Friday-queue kill switch on purpose: a blue-green green
+  // container already sets that to stay silent during an overlap, and the
+  // approval route can fire a digest even when no scheduler was started.
+  if (process.env.QBO_PAYMENT_QUEUE_NOTIFY_ENABLED === 'false'
+    || process.env.PAYMENT_QUEUE_NOTIFY_ENABLED === 'false') return false;
+  return process.env.QBO_APPROVAL_DIGEST_ENABLED !== 'false';
+}
+
+function approvalDigestDelayMs() {
+  const requested = Number(process.env.QBO_APPROVAL_DIGEST_DELAY_MS || APPROVAL_DIGEST_DEFAULT_DELAY_MS);
+  if (!Number.isFinite(requested) || requested < 0) return APPROVAL_DIGEST_DEFAULT_DELAY_MS;
+  return requested;
+}
+
+function approvalDigestMaxWaitMs() {
+  const requested = Number(process.env.QBO_APPROVAL_DIGEST_MAX_WAIT_MS || APPROVAL_DIGEST_DEFAULT_MAX_WAIT_MS);
+  const floor = approvalDigestDelayMs();
+  if (!Number.isFinite(requested) || requested <= 0) return Math.max(APPROVAL_DIGEST_DEFAULT_MAX_WAIT_MS, floor);
+  return Math.max(requested, floor);
+}
+
+function scheduleApprovalDigest() {
+  if (approvalDigestTimer) clearTimeout(approvalDigestTimer);
+  const now = Date.now();
+  if (!approvalDigestFirstQueuedAt) approvalDigestFirstQueuedAt = now;
+  const elapsed = now - approvalDigestFirstQueuedAt;
+  const delay = Math.max(Math.min(approvalDigestDelayMs(), approvalDigestMaxWaitMs() - elapsed), 0);
+  approvalDigestTimer = setTimeout(() => {
+    approvalDigestTimer = null;
+    flushApprovalDigest().catch(err => console.error('[QBO] Approval digest email failed:', err.message));
+  }, delay);
+  approvalDigestTimer.unref?.();
+}
+
+function queueApprovalDigest(bill, user) {
+  if (!approvalDigestEnabled() || !bill?.qbo_id) return;
+  approvalDigestPending.set(String(bill.qbo_id), {
+    approver_id: user?.id || null,
+    approver_name: user?.name || user?.email || 'BuildTrack',
+  });
+  scheduleApprovalDigest();
+}
+
+function dropApprovalDigestEntry(qboId) {
+  approvalDigestPending.delete(String(qboId));
+}
+
+async function flushApprovalDigest() {
+  if (approvalDigestSending) return;
+  if (!approvalDigestPending.size) {
+    approvalDigestFirstQueuedAt = null;
+    return;
+  }
+
+  approvalDigestSending = true;
+  // Claim the burst up front so approvals landing mid-send start a fresh
+  // window instead of being swallowed by this one.
+  const burst = new Map(approvalDigestPending);
+  approvalDigestPending.clear();
+  approvalDigestFirstQueuedAt = null;
+
+  try {
+    if (!isEmailConfigured()) {
+      console.warn('[QBO] Approval digest skipped: email is not configured.');
+      return;
+    }
+    const db = getDb();
+    const rows = approvedPaymentQueueRows(db);
+    const emailRows = paymentQueueEmailRows(rows);
+    // Only announce bills still approved and unpaid at send time — an approval
+    // reversed inside the debounce window must not reach management.
+    const liveIds = new Set(rows.map(row => String(row.qbo_id)));
+    const newlyApproved = emailRows.filter(row => burst.has(String(row.id)) && liveIds.has(String(row.id)));
+    if (!newlyApproved.length) {
+      console.log('[QBO] Approval digest skipped: nothing in the burst is still approved and unpaid.');
+      return;
+    }
+
+    const approverNames = Array.from(new Set(
+      Array.from(burst.values()).map(entry => entry.approver_name).filter(Boolean)
+    ));
+    const approvedBy = approverNames.length ? approverNames.join(', ') : 'BuildTrack';
+    const actorId = Array.from(burst.values()).map(entry => entry.approver_id).find(Boolean)
+      || paymentQueueAutomationUserId(db);
+
+    await sendApprovedPayNotificationEmail({
+      approvedInvoices: emailRows,
+      newlyApproved,
+      approvedBy,
+    });
+
+    markPaymentQueueRowsNotified(db, rows, actorId);
+    const burstTotal = newlyApproved.reduce((sum, row) => sum + normalizeMoney(row.quickbooks_balance), 0);
+    const queueTotal = paymentQueueTotal(rows);
+    if (actorId) {
+      logActivity({
+        userId: actorId,
+        action: 'quickbooks_payment_queue_approval_digest',
+        entityType: 'quickbooks_payment_queue',
+        entityId: new Date().toISOString().slice(0, 10),
+        details: {
+          approved_in_burst: newlyApproved.length,
+          approved_in_burst_total: normalizeMoney(burstTotal),
+          queue_bill_count: emailRows.length,
+          queue_total_balance: normalizeMoney(queueTotal),
+          approved_by: approvedBy,
+          recipient: process.env.APPROVED_INVOICE_NOTIFY_EMAIL || 'info@newurbandev.com',
+        },
+      });
+    }
+    console.log(`[QBO] Approval digest email sent: ${newlyApproved.length} newly approved ($${normalizeMoney(burstTotal).toFixed(2)}), queue $${normalizeMoney(queueTotal).toFixed(2)}.`);
+  } finally {
+    approvalDigestSending = false;
+    // Anything queued while the send was in flight gets its own window.
+    if (approvalDigestPending.size) scheduleApprovalDigest();
+  }
+}
+
+// A container restart drops the in-memory burst. Re-arm only for bills approved
+// very recently and never notified, so a redeploy cannot replay weeks of
+// already-handled approvals.
+function recoverPendingApprovalDigest() {
+  if (!approvalDigestEnabled()) return;
+  try {
+    const db = getDb();
+    const rows = db.prepare(`
+      SELECT qb.qbo_id, qb.payment_approved_by, u.name AS approver_name, u.email AS approver_email
+      FROM quickbooks_bills qb
+      LEFT JOIN users u ON u.id = qb.payment_approved_by
+      WHERE COALESCE(qb.payment_approval_status, '') = ?
+        AND qb.payment_status != 'paid'
+        AND qb.payment_approval_notified_at IS NULL
+        AND qb.payment_approved_at IS NOT NULL
+        AND julianday('now') - julianday(qb.payment_approved_at) <= ?
+    `).all(PAYMENT_APPROVAL_STATUS, APPROVAL_DIGEST_RECOVERY_WINDOW_HOURS / 24);
+    if (!rows.length) return;
+    for (const row of rows) {
+      approvalDigestPending.set(String(row.qbo_id), {
+        approver_id: row.payment_approved_by || null,
+        approver_name: row.approver_name || row.approver_email || 'BuildTrack',
+      });
+    }
+    scheduleApprovalDigest();
+    console.log(`[QBO] Approval digest re-armed after restart for ${rows.length} un-notified approval(s).`);
+  } catch (err) {
+    console.error('[QBO] Approval digest restart recovery failed:', err.message);
+  }
+}
+
 function vendorReceiptEmailEnabled() {
   return process.env.QBO_VENDOR_RECEIPT_EMAIL_ENABLED !== 'false'
     && process.env.QUICKBOOKS_VENDOR_RECEIPT_EMAIL_ENABLED !== 'false';
@@ -3089,6 +3258,8 @@ router.put('/bills/:qboId/approve-for-pay', authorize(...QUICKBOOKS_ADMIN_ROLES)
       payment_run_date: updated.payment_run_date,
     },
   });
+  // Debounced so a burst of approvals becomes one email to management.
+  queueApprovalDigest(updated, req.user);
   res.json(updated);
 });
 
@@ -3124,6 +3295,8 @@ router.put('/bills/:qboId/remove-from-pay', authorize(...QUICKBOOKS_ADMIN_ROLES)
     entityId: updated.qbo_id,
     details: { vendor_name: updated.vendor_name, balance: updated.balance },
   });
+  // Un-approved inside the debounce window: never announce it.
+  dropApprovalDigestEntry(updated.qbo_id);
   res.json(updated);
 });
 
@@ -3403,6 +3576,12 @@ function startQuickBooksPaymentQueueScheduler() {
   setTimeout(run, 10 * 1000).unref?.();
   setInterval(run, intervalMs).unref?.();
   console.log(`[QBO] Friday payment queue email scheduler enabled: every other Friday from 2026-06-12 after ${getPaymentQueueNotifyHourEt()}:00 ET.`);
+  if (approvalDigestEnabled()) {
+    console.log(`[QBO] Approval digest email enabled: ${Math.round(approvalDigestDelayMs() / 1000)}s after the last approval (max ${Math.round(approvalDigestMaxWaitMs() / 1000)}s).`);
+    setTimeout(recoverPendingApprovalDigest, 15 * 1000).unref?.();
+  } else {
+    console.log('[QBO] Approval digest email disabled by environment.');
+  }
 }
 
 router.startQuickBooksAutoSync = startQuickBooksAutoSync;
