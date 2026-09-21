@@ -777,12 +777,13 @@ export default function Quotes() {
         />
       )}
 
+      {/* Subtitle stays on one line: the full scope text ran to three lines and pushed the document down. */}
       {docsViewer && (
         <QuoteDocumentModal
           title={`${docsViewer.quote.contractor_company || docsViewer.quote.contractor_name} · ${docsViewer.quote.quote_number}`}
           subtitle={[
             docsViewer.quote.property_address || docsViewer.quote.project_name,
-            quoteTitle(docsViewer.quote),
+            clipText(quoteTitle(docsViewer.quote), 70),
             money(docsViewer.quote.total_quote_amount),
             shortDate(docsViewer.quote.quote_date),
           ].filter(Boolean).join(' · ')}
@@ -1542,9 +1543,20 @@ function QuoteDocumentModal({ title, subtitle, docs, initialKey, onClose }: {
   }, [activeUrl, activeMime, activeName]);
 
   return (
-    <Modal isOpen onClose={onClose} title={title} size="xl" description={subtitle || 'Quote document'}>
+    // The panel gets a fixed height and the body becomes a flex column, so the document
+    // takes whatever space the header, switcher and footer leave. A fixed-height frame
+    // inside the default scrolling body overflowed the 90vh panel.
+    <Modal
+      isOpen
+      onClose={onClose}
+      title={title}
+      size="2xl"
+      description={subtitle || 'Quote document'}
+      panelClassName="h-[92dvh] sm:h-[90vh]"
+      bodyClassName="flex min-h-0 flex-1 flex-col p-4"
+    >
       {docs.length > 1 && (
-        <div className="mb-2 flex flex-wrap items-center gap-1.5">
+        <div className="mb-2 flex flex-shrink-0 flex-wrap items-center gap-1.5">
           {docs.map(doc => (
             <button
               key={doc.key}
@@ -1562,7 +1574,7 @@ function QuoteDocumentModal({ title, subtitle, docs, initialKey, onClose }: {
           ))}
         </div>
       )}
-      <div className="h-[72vh] w-full">
+      <div className="min-h-0 w-full flex-1">
         {!active ? (
           <div className="flex h-full flex-col items-center justify-center gap-1.5 text-sm text-gray-400">
             <FileText className="h-6 w-6 text-gray-300" />
@@ -1592,7 +1604,7 @@ function QuoteDocumentModal({ title, subtitle, docs, initialKey, onClose }: {
         ) : null}
       </div>
       {active && blobUrl && (
-        <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-gray-400">
+        <div className="mt-2 flex flex-shrink-0 items-center justify-between gap-3 text-[11px] text-gray-400">
           <span className="truncate" title={active.fileName || active.label}>{active.fileName || active.label}</span>
           <a href={blobUrl} download={active.fileName || 'quote-document'} className="inline-flex flex-shrink-0 items-center gap-1 font-semibold text-blue-600 hover:underline">
             <Download className="h-3.5 w-3.5" /> Download

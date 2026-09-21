@@ -60,7 +60,7 @@ export default function GlobalImageLightbox() {
 
   return (
     <div
-      className="fixed inset-0 z-[300] flex items-center justify-center bg-black/90 p-4"
+      className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/90 p-4"
       onClick={() => setImage(null)}
       role="dialog"
       aria-modal="true"

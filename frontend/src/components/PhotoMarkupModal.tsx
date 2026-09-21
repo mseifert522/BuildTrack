@@ -167,7 +167,7 @@ export default function PhotoMarkupModal({
   if (!open || !photo) return null;
 
   return (
-    <div className="fixed inset-0 z-[120] flex flex-col bg-slate-950" role="dialog" aria-modal="true" aria-label={title}>
+    <div className="fixed inset-0 z-[1150] flex flex-col bg-slate-950" role="dialog" aria-modal="true" aria-label={title}>
       {/* Header */}
       <div className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
         <button
