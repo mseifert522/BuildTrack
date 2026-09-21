@@ -227,6 +227,67 @@ function clipText(text: string, n = 50): string {
   return t.length > n ? `${t.slice(0, n).trimEnd()}…` : t;
 }
 
+// One viewable file belonging to a quote.
+interface QuoteDoc {
+  key: string;
+  label: string;
+  url: string;                 // server path as the API returns it, e.g. /api/quote-analytics/…
+  fileName?: string | null;
+  mime?: string | null;
+}
+
+// Every document attached to a quote: the main source file plus any section that
+// owns its own upload. Both download routes already exist server-side and both
+// URLs are already in the list payload, so the viewer needs no extra request.
+// Deduped on document_id, not URL: a section that simply re-links the main file
+// has its own distinct download URL but is the same document, and listing it
+// twice would show the reader two identical tabs.
+function quoteDocuments(quote: ContractorQuote): QuoteDoc[] {
+  const docs: QuoteDoc[] = [];
+  const seen = new Set<string>();
+  const add = (doc: QuoteDoc, documentId?: string | null) => {
+    if (!doc.url) return;
+    const identity = documentId ? `doc:${documentId}` : `url:${doc.url}`;
+    if (seen.has(identity)) return;
+    seen.add(identity);
+    docs.push(doc);
+  };
+  const sections = quote.sections || [];
+  if (quote.document_download_url) {
+    add({
+      key: 'main',
+      label: sections.length ? 'Full quote' : 'Quote document',
+      url: quote.document_download_url,
+      fileName: quote.source_file_name || quote.document_original_name || null,
+      mime: quote.source_file_mime_type || null,
+    }, quote.source_document_id);
+  }
+  for (const section of sections) {
+    if (!section.download_url) continue;
+    add({
+      key: `section:${section.id}`,
+      label: section.label || 'Section',
+      url: section.download_url,
+      fileName: section.source_file_name || null,
+      mime: section.source_file_mime_type || null,
+    }, section.document_id);
+  }
+  return docs;
+}
+
+// Fallback when the server sends a generic content-type: a blob: URL is rendered
+// purely on the Blob's own type, so an untyped PDF would show an empty frame.
+function guessMimeFromName(fileName?: string | null): string {
+  const ext = String(fileName || '').toLowerCase().match(/\.([a-z0-9]+)$/)?.[1];
+  if (ext === 'pdf') return 'application/pdf';
+  if (ext === 'png') return 'image/png';
+  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+  if (ext === 'gif') return 'image/gif';
+  if (ext === 'webp') return 'image/webp';
+  if (ext === 'heic' || ext === 'heif') return 'image/heic';
+  return '';
+}
+
 function csvCell(value: unknown): string {
   let text = value === null || value === undefined ? '' : String(value);
   // Neutralize spreadsheet formula injection from contractor-supplied fields.
@@ -255,6 +316,8 @@ export default function Quotes() {
   // Queue, not a single slot: two in-flight approvals could otherwise overwrite
   // an unread "no email sent" dialog when their responses race.
   const [approvalEmailNotices, setApprovalEmailNotices] = useState<ApprovalEmailNotice[]>([]);
+  // The quote whose documents are open in the reader, and which of them to show first.
+  const [docsViewer, setDocsViewer] = useState<{ quote: ContractorQuote; docKey?: string } | null>(null);
 
   const [compare, setCompare] = useState<CompareResponse | null>(null);
   const [compareLoading, setCompareLoading] = useState(false);
@@ -678,7 +741,7 @@ export default function Quotes() {
       ) : tab === 'audit' ? (
         <AuditLog rows={activity} loading={activityLoading} />
       ) : tab === 'attachments' ? (
-        <AttachmentsTable rows={attachmentRows} loading={listLoading} />
+        <AttachmentsTable rows={attachmentRows} loading={listLoading} onOpen={(q, docKey) => setDocsViewer({ quote: q, docKey })} />
       ) : (
         <QuoteGrid
           rows={pageRows}
@@ -691,6 +754,7 @@ export default function Quotes() {
           onRestore={handleRestore}
           onDelete={handleDelete}
           onModify={handleModify}
+          onOpenDocs={(q, docKey) => setDocsViewer({ quote: q, docKey })}
           canDelete={canDelete}
           busyId={busyId}
           sortKey={sortKey}
@@ -713,6 +777,21 @@ export default function Quotes() {
         />
       )}
 
+      {docsViewer && (
+        <QuoteDocumentModal
+          title={`${docsViewer.quote.contractor_company || docsViewer.quote.contractor_name} · ${docsViewer.quote.quote_number}`}
+          subtitle={[
+            docsViewer.quote.property_address || docsViewer.quote.project_name,
+            quoteTitle(docsViewer.quote),
+            money(docsViewer.quote.total_quote_amount),
+            shortDate(docsViewer.quote.quote_date),
+          ].filter(Boolean).join(' · ')}
+          docs={quoteDocuments(docsViewer.quote)}
+          initialKey={docsViewer.docKey}
+          onClose={() => setDocsViewer(null)}
+        />
+      )}
+
       <QuoteApprovalEmailNoticeModal notice={approvalEmailNotices[0] ?? null} onClose={() => setApprovalEmailNotices(list => list.slice(1))} />
     </div>
   );
@@ -732,6 +811,7 @@ function QuoteGrid(props: {
   onRestore: (q: ContractorQuote) => void;
   onDelete: (q: ContractorQuote) => void;
   onModify: (q: ContractorQuote) => void;
+  onOpenDocs: (q: ContractorQuote, docKey?: string) => void;
   canDelete: boolean;
   busyId: string | null;
   sortKey: 'date' | 'total';
@@ -742,7 +822,7 @@ function QuoteGrid(props: {
   totalPages: number;
   totalRows: number;
 }) {
-  const { rows, loading, tab, expanded, setExpanded, onApprove, onDeny, onRestore, onDelete, onModify, canDelete, busyId, sortKey, sortDir, toggleSort, page, setPage, totalPages, totalRows } = props;
+  const { rows, loading, tab, expanded, setExpanded, onApprove, onDeny, onRestore, onDelete, onModify, onOpenDocs, canDelete, busyId, sortKey, sortDir, toggleSort, page, setPage, totalPages, totalRows } = props;
   if (loading) return <Loading message="Loading quotes…" />;
   if (totalRows === 0) {
     return <Empty message={tab === 'approved' ? 'No approved quotes yet.' : tab === 'rejected' ? 'No rejected quotes yet.' : 'No quotes found.'} icon={<ClipboardList className="h-8 w-8" />} />;
@@ -772,10 +852,22 @@ function QuoteGrid(props: {
           <tbody>
             {rows.map(q => {
               const open = expanded[q.id];
+              const docs = quoteDocuments(q);
               return (
                 <Fragment key={q.id}>
-                  <tr className="border-t border-gray-100 hover:bg-amber-50/40">
-                    <td className="px-2 py-1.5 align-top">
+                  <tr
+                    className="cursor-pointer border-t border-gray-100 hover:bg-amber-50/40"
+                    onClick={event => {
+                      // One guard covers the chevron, every action button and anything
+                      // added to the row later. Deliberately no role/tabIndex on the <tr>:
+                      // that would override role="row" and break table navigation — the
+                      // Title cell below carries the real, focusable button instead.
+                      if ((event.target as HTMLElement).closest('button, a, input, select, textarea, label')) return;
+                      if ((window.getSelection()?.toString() || '').length > 0) return;
+                      onOpenDocs(q);
+                    }}
+                  >
+                    <td className="px-2 py-1.5 align-top" onClick={event => event.stopPropagation()}>
                       <button onClick={() => setExpanded(s => ({ ...s, [q.id]: !s[q.id] }))} className="text-gray-400 hover:text-gray-700" aria-label="Toggle line items">
                         {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                       </button>
@@ -790,18 +882,39 @@ function QuoteGrid(props: {
                     <td className="px-2 py-1.5 align-top">
                       <span className="inline-block rounded bg-gray-50 px-1.5 py-0.5 text-[11px] font-medium text-gray-600">{primaryCategory(q)}</span>
                     </td>
-                    <td className="whitespace-nowrap px-2 py-1.5 align-top text-gray-700" title={quoteTitle(q)}>{clipText(quoteTitle(q), 50)}</td>
+                    <td className="whitespace-nowrap px-2 py-1.5 align-top text-gray-700">
+                      {/* The keyboard-reachable way into the viewer; the row click is a mouse enhancement. */}
+                      <button
+                        type="button"
+                        onClick={() => onOpenDocs(q)}
+                        title={`${quoteTitle(q)}${docs.length ? ` — open ${docs.length > 1 ? `${docs.length} documents` : 'document'}` : ' — no document attached'}`}
+                        className="text-left text-gray-700 hover:text-amber-700 hover:underline"
+                      >
+                        {clipText(quoteTitle(q), 50)}
+                      </button>
+                    </td>
                     <td className="px-2 py-1.5 text-center align-top text-gray-500">{(q.line_items || []).length}</td>
                     <td className="px-2 py-1.5 text-right align-top font-semibold text-gray-900">{money(q.total_quote_amount)}</td>
                     {locked && <td className="px-2 py-1.5 text-right align-top font-semibold text-green-700">{q.final_approved_amount === null || q.final_approved_amount === undefined ? '—' : money(q.final_approved_amount)}</td>}
                     <td className="px-2 py-1.5 align-top"><StatusPill status={q.status} /></td>
                     <td className="px-2 py-1.5 align-top text-gray-500">{shortDate(q.quote_date)}</td>
                     <td className="px-2 py-1.5 align-top">
-                      {q.document_download_url
-                        ? <a href={`/api${q.document_download_url.replace(/^\/api/, '')}`} className="inline-flex items-center gap-1 text-blue-600 hover:underline" target="_blank" rel="noopener noreferrer" title={Number(q.document_count || 1) > 1 ? 'Main document — section files are under the expanded line items and in Attachments' : undefined}><FileText className="h-3.5 w-3.5" /> {Number(q.document_count || 1) > 1 ? `${q.document_count} files` : 'File'}</a>
+                      {/* Was an <a href> to a Bearer-only API route, which always 401'd in a
+                          new tab. The viewer fetches the file through the authenticated client. */}
+                      {docs.length > 0
+                        ? (
+                          <button
+                            type="button"
+                            onClick={() => onOpenDocs(q, docs[0].key)}
+                            className="inline-flex items-center gap-1 text-blue-600 hover:underline"
+                            title={docs.length > 1 ? `${docs.length} documents — open the viewer to switch between them` : `Open ${docs[0].fileName || 'document'}`}
+                          >
+                            <FileText className="h-3.5 w-3.5" /> {docs.length > 1 ? `${docs.length} files` : 'File'}
+                          </button>
+                        )
                         : <span className="text-gray-300">—</span>}
                     </td>
-                    <td className="px-2 py-1.5 text-right align-top">
+                    <td className="px-2 py-1.5 text-right align-top" onClick={event => event.stopPropagation()}>
                       <div className="flex justify-end gap-1">
                         {!locked && q.status !== 'rejected' && (
                           <>
@@ -838,7 +951,7 @@ function QuoteGrid(props: {
                             Modify Quote
                           </button>
                         </div>
-                        <LineItemsTable quote={q} />
+                        <LineItemsTable quote={q} onOpenDoc={docKey => onOpenDocs(q, docKey)} />
                         <QuoteNotes quoteId={q.id} />
                       </td>
                     </tr>
@@ -863,7 +976,9 @@ function QuoteGrid(props: {
   );
 }
 
-function LineItemsTable({ quote }: { quote: ContractorQuote }) {
+// onOpenDoc is optional: Bid Leveling renders this with a synthetic quote that has
+// no sections, so there is no section document to open there.
+function LineItemsTable({ quote, onOpenDoc }: { quote: ContractorQuote; onOpenDoc?: (docKey: string) => void }) {
   const items = quote.line_items || [];
   if (items.length === 0) return <p className="text-xs text-gray-400">No itemized line items. Total: {money(quote.total_quote_amount)}</p>;
   type Item = (typeof items)[number];
@@ -920,7 +1035,13 @@ function LineItemsTable({ quote }: { quote: ContractorQuote }) {
                   {group.label}
                   <span className={`ml-2 rounded px-1 text-[9px] font-semibold uppercase tracking-wide ${group.sign < 0 ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}`}>{group.sign < 0 ? 'deducts' : 'adds'}</span>
                   {group.downloadUrl ? (
-                    <a href={`/api${group.downloadUrl.replace(/^\/api/, '')}`} target="_blank" rel="noopener noreferrer" className="ml-2 inline-flex items-center gap-1 font-normal text-blue-600 hover:underline"><FileText className="h-3 w-3" /> {group.fileName || 'File'}</a>
+                    onOpenDoc ? (
+                      <button type="button" onClick={() => onOpenDoc(`section:${group.key}`)} className="ml-2 inline-flex items-center gap-1 font-normal text-blue-600 hover:underline" title={`Open ${group.fileName || 'this section document'}`}>
+                        <FileText className="h-3 w-3" /> {group.fileName || 'File'}
+                      </button>
+                    ) : (
+                      <span className="ml-2 inline-flex items-center gap-1 font-normal text-gray-400"><FileText className="h-3 w-3" /> {group.fileName || 'File'}</span>
+                    )
                   ) : null}
                 </td>
                 <td className={`py-1 pr-3 text-right font-semibold ${group.sign < 0 ? 'text-red-700' : 'text-gray-900'}`}>{group.sign < 0 ? '−' : ''}{money(subtotal(group.items))}</td>
@@ -1359,39 +1480,125 @@ function BidLeveling(props: {
       {expandedDetails}
 
       {viewing && (
-        <QuotePdfModal quoteId={viewing.quoteId} title={viewing.title} onClose={() => setViewing(null)} />
+        // The compare payload carries no section rows, so this tab can only offer
+        // the main document. See AllQuotes for the full multi-document switcher.
+        <QuoteDocumentModal
+          title={viewing.title}
+          docs={[{ key: 'main', label: 'Quote document', url: `/api/quote-analytics/quotes/${viewing.quoteId}/download` }]}
+          onClose={() => setViewing(null)}
+        />
       )}
     </div>
   );
 }
 
-// In-app document reader: streams the quote's source file (with auth) and shows it inline.
-function QuotePdfModal({ quoteId, title, onClose }: { quoteId: string; title: string; onClose: () => void }) {
+// In-app document reader: streams a quote's files (with auth) and shows them inline.
+// A quote can carry several documents — the full quote plus one per section — so
+// this keeps a switcher and fetches only the one on screen.
+// The file MUST be fetched as a blob: these routes are Bearer-authenticated, so a
+// plain <a href> or <iframe src> pointed at them is an unauthenticated 401.
+function QuoteDocumentModal({ title, subtitle, docs, initialKey, onClose }: {
+  title: string;
+  subtitle?: string;
+  docs: QuoteDoc[];
+  initialKey?: string;
+  onClose: () => void;
+}) {
+  const [activeKey, setActiveKey] = useState(
+    () => (initialKey && docs.some(d => d.key === initialKey) ? initialKey : docs[0]?.key || '')
+  );
+  const active = docs.find(d => d.key === activeKey) || docs[0] || null;
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [kind, setKind] = useState<'pdf' | 'image' | 'other'>('pdf');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  const activeUrl = active?.url || '';
+  const activeMime = active?.mime || '';
+  const activeName = active?.fileName || '';
   useEffect(() => {
-    let active = true;
+    if (!activeUrl) { setLoading(false); return; }
+    let cancelled = false;
     let created = '';
     setLoading(true);
     setError('');
-    api.get(`/quote-analytics/quotes/${quoteId}/download`, { responseType: 'blob' })
-      .then(res => { if (!active) return; created = URL.createObjectURL(res.data as Blob); setBlobUrl(created); })
-      .catch(() => { if (active) setError('Could not load this document.'); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; if (created) URL.revokeObjectURL(created); };
-  }, [quoteId]);
+    setBlobUrl(null);
+    // The stored URLs are absolute API paths; the axios client is already based at /api.
+    api.get(activeUrl.replace(/^\/api/, ''), { responseType: 'blob' })
+      .then(res => {
+        if (cancelled) return;
+        const raw = res.data as Blob;
+        const type = raw.type && raw.type !== 'application/octet-stream'
+          ? raw.type
+          : (activeMime || guessMimeFromName(activeName) || raw.type);
+        const typed = type && type !== raw.type ? new Blob([raw], { type }) : raw;
+        setKind(type.startsWith('image/') ? 'image' : type === 'application/pdf' ? 'pdf' : 'other');
+        created = URL.createObjectURL(typed);
+        setBlobUrl(created);
+      })
+      .catch(() => { if (!cancelled) setError('Could not load this document.'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; if (created) URL.revokeObjectURL(created); };
+  }, [activeUrl, activeMime, activeName]);
+
   return (
-    <Modal isOpen onClose={onClose} title={title} size="xl" description="Original quote document">
+    <Modal isOpen onClose={onClose} title={title} size="xl" description={subtitle || 'Quote document'}>
+      {docs.length > 1 && (
+        <div className="mb-2 flex flex-wrap items-center gap-1.5">
+          {docs.map(doc => (
+            <button
+              key={doc.key}
+              type="button"
+              onClick={() => setActiveKey(doc.key)}
+              title={doc.fileName || doc.label}
+              className={`rounded-md border px-2.5 py-1 text-[11px] font-semibold ${
+                doc.key === active?.key
+                  ? 'border-amber-300 bg-amber-50 text-amber-800'
+                  : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+              }`}
+            >
+              {doc.label}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="h-[72vh] w-full">
-        {loading ? (
-          <div className="flex h-full items-center justify-center text-sm text-gray-400">Loading quote…</div>
+        {!active ? (
+          <div className="flex h-full flex-col items-center justify-center gap-1.5 text-sm text-gray-400">
+            <FileText className="h-6 w-6 text-gray-300" />
+            <p>No document was attached to this quote.</p>
+          </div>
+        ) : loading ? (
+          <div className="flex h-full items-center justify-center text-sm text-gray-400">Loading document…</div>
         ) : error ? (
           <div className="flex h-full items-center justify-center text-sm text-gray-400">{error}</div>
         ) : blobUrl ? (
-          <iframe title="Quote document" src={blobUrl} className="h-full w-full rounded-lg border-0 bg-white" />
+          kind === 'image' ? (
+            // Inline style, not bg-white: quotes.css rethemes .bg-white with !important.
+            <div className="flex h-full w-full items-center justify-center overflow-auto rounded-lg" style={{ background: '#ffffff' }}>
+              <img src={blobUrl} alt={active.fileName || active.label} className="max-h-full max-w-full object-contain" />
+            </div>
+          ) : kind === 'pdf' ? (
+            <iframe title={active.label} src={blobUrl} className="h-full w-full rounded-lg border-0" style={{ background: '#ffffff' }} />
+          ) : (
+            <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-gray-400">
+              <FileText className="h-6 w-6 text-gray-300" />
+              <p>This file type can’t be previewed here.</p>
+              <a href={blobUrl} download={active.fileName || 'quote-document'} className="inline-flex items-center gap-1 font-semibold text-blue-600 hover:underline">
+                <Download className="h-3.5 w-3.5" /> Download {active.fileName || 'file'}
+              </a>
+            </div>
+          )
         ) : null}
       </div>
+      {active && blobUrl && (
+        <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-gray-400">
+          <span className="truncate" title={active.fileName || active.label}>{active.fileName || active.label}</span>
+          <a href={blobUrl} download={active.fileName || 'quote-document'} className="inline-flex flex-shrink-0 items-center gap-1 font-semibold text-blue-600 hover:underline">
+            <Download className="h-3.5 w-3.5" /> Download
+          </a>
+        </div>
+      )}
     </Modal>
   );
 }
@@ -1399,7 +1606,7 @@ function QuotePdfModal({ quoteId, title, onClose }: { quoteId: string; title: st
 // ─────────────────────────────────────────────────────────────────────────────
 // Attachments + Audit
 // ─────────────────────────────────────────────────────────────────────────────
-function AttachmentsTable({ rows, loading }: { rows: ContractorQuote[]; loading: boolean }) {
+function AttachmentsTable({ rows, loading, onOpen }: { rows: ContractorQuote[]; loading: boolean; onOpen: (q: ContractorQuote, docKey: string) => void }) {
   if (loading) return <Loading message="Loading attachments…" />;
   if (rows.length === 0) return <Empty message="No source files attached to quotes in this view." icon={<Paperclip className="h-8 w-8" />} />;
   return (
@@ -1410,22 +1617,21 @@ function AttachmentsTable({ rows, loading }: { rows: ContractorQuote[]; loading:
         </thead>
         <tbody>
           {rows.flatMap(q => {
-            // One row per document: the quote's main file plus each section's own
-            // file (skipping a section that simply re-links the main file).
-            const docs: Array<{ key: string; name: string; url: string; section: string | null }> = [];
-            if (q.document_download_url) docs.push({ key: `${q.id}-main`, name: q.document_original_name || q.source_file_name || 'Source file', url: q.document_download_url, section: null });
-            (q.sections || []).forEach(s => {
-              if (s.download_url && s.document_id !== q.source_document_id) docs.push({ key: `${q.id}-${s.id}`, name: s.source_file_name || s.label, url: s.download_url, section: s.label });
-            });
+            // One row per document, from the same helper the reader uses, so this
+            // tab and the viewer can never disagree about what a quote contains.
+            const docs = quoteDocuments(q);
             return docs.map(doc => (
-              <tr key={doc.key} className="border-t border-gray-100 hover:bg-gray-50">
+              <tr key={`${q.id}-${doc.key}`} className="border-t border-gray-100 hover:bg-gray-50">
                 <td className="px-3 py-1.5 text-gray-700">{q.property_address || q.project_name || '—'}</td>
                 <td className="px-3 py-1.5 text-gray-900">{q.contractor_company || q.contractor_name}</td>
                 <td className="px-3 py-1.5 text-gray-500">{q.quote_number}</td>
-                <td className="px-3 py-1.5 text-gray-600">{doc.name}{doc.section ? <span className="ml-1.5 rounded bg-gray-100 px-1 text-[10px] text-gray-500">{doc.section}</span> : null}</td>
+                <td className="px-3 py-1.5 text-gray-600">{doc.fileName || doc.label}{doc.key !== 'main' ? <span className="ml-1.5 rounded bg-gray-100 px-1 text-[10px] text-gray-500">{doc.label}</span> : null}</td>
                 <td className="px-3 py-1.5 text-gray-500">{shortDate(q.quote_date)}</td>
                 <td className="px-3 py-1.5 text-right">
-                  <a href={`/api${doc.url.replace(/^\/api/, '')}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-blue-600 hover:underline"><Download className="h-3.5 w-3.5" /> Open</a>
+                  {/* Was an <a href> to a Bearer-only route, which always 401'd. */}
+                  <button type="button" onClick={() => onOpen(q, doc.key)} className="inline-flex items-center gap-1 text-blue-600 hover:underline">
+                    <Download className="h-3.5 w-3.5" /> Open
+                  </button>
                 </td>
               </tr>
             ));
