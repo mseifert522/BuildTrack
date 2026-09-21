@@ -9,6 +9,7 @@ const { authenticate, authorize, authorizeUpperManagement, blockProjectManagerMu
 const { logActivity } = require('../utils/audit');
 const { logDataAccess } = require('../utils/dataAccessAudit');
 const { getNoteDeletePermission, getNoteEditPermission } = require('../utils/projectNotes');
+const { broadcastToProject } = require('./notes');
 const { recordWorkItemEvent } = require('../utils/workItemEvents');
 const { syncContractorProjectAssignments } = require('../utils/contractorAccess');
 
@@ -1881,7 +1882,7 @@ router.post('/:id/notes', authorizeProjectAccess, (req, res) => {
   db.prepare('INSERT INTO project_notes (id, project_id, user_id, note, note_type, visibility) VALUES (?, ?, ?, ?, ?, ?)')
     .run(id, req.params.id, req.user.id, note, note_type || 'general', noteVisibility);
   logActivity({ userId: req.user.id, projectId: req.params.id, action: 'note_added', entityType: 'note', entityId: id });
-  res.status(201).json({
+  const newNote = {
     id,
     project_id: req.params.id,
     user_id: req.user.id,
@@ -1901,7 +1902,10 @@ router.post('/:id/notes', authorizeProjectAccess, (req, res) => {
     photo_caption: null,
     photos: [],
     created_at: new Date().toISOString(),
-  });
+  };
+  // Live notes: push it to open notes streams (routes/notes.js /stream).
+  broadcastToProject(req.params.id, { type: 'new_note', note: newNote });
+  res.status(201).json(newNote);
 });
 
 // PUT /api/projects/:id/notes/:noteId - contractors can edit their own notes for 24 hours; admins can correct notes.
@@ -1940,7 +1944,9 @@ router.put('/:id/notes/:noteId', authorizeProjectAccess, (req, res) => {
     WHERE pn.id = ? AND pn.project_id = ?
   `).get(req.params.noteId, req.params.id);
 
-  res.json(attachPhotosToNotes(db, updated ? [updated] : [], req.user)[0] || updated);
+  const noteWithPhotos = attachPhotosToNotes(db, updated ? [updated] : [], req.user)[0] || updated;
+  if (noteWithPhotos) broadcastToProject(req.params.id, { type: 'update_note', note: noteWithPhotos });
+  res.json(noteWithPhotos);
 });
 
 // DELETE /api/projects/:id/notes/:noteId - Super Admin and Operations Manager can delete any project note.
@@ -1954,6 +1960,7 @@ router.delete('/:id/notes/:noteId', authorizeProjectAccess, (req, res) => {
 
   db.prepare('UPDATE photos SET note_id = NULL WHERE note_id = ?').run(req.params.noteId);
   db.prepare('DELETE FROM project_notes WHERE id = ? AND project_id = ?').run(req.params.noteId, req.params.id);
+  broadcastToProject(req.params.id, { type: 'delete_note', note_id: req.params.noteId });
   logActivity({
     userId: req.user.id,
     projectId: req.params.id,

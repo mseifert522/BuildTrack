@@ -14,6 +14,14 @@ interface AvatarProps {
   fallbackStyle?: CSSProperties;
 }
 
+// The signed-in user's avatar renders from the cached user in localStorage, so on a
+// fresh page load it can be requested before the first API response issues the
+// /uploads login cookie (__Host-bt_files) and 401. An /uploads image that fails is
+// retried ONCE after a short delay, cache-busted, before falling back to initials.
+// A src whose retry also failed is not retried again for the rest of the page load.
+const RETRY_DELAY_MS = 2000;
+const failedAfterRetry = new Set<string>();
+
 const initialsFor = (name?: string | null) => {
   const parts = String(name || '')
     .trim()
@@ -43,24 +51,47 @@ export default function Avatar({
 }: AvatarProps) {
   const normalizedSrc = String(src || '').trim();
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  // url is null while the retry delay runs (initials show meanwhile).
+  const [retry, setRetry] = useState<{ src: string; url: string | null } | null>(null);
 
   useEffect(() => {
     setFailedSrc(null);
+    setRetry(null);
   }, [normalizedSrc]);
 
+  useEffect(() => {
+    if (!retry || retry.url !== null) return;
+    const timer = window.setTimeout(() => {
+      const separator = retry.src.includes('?') ? '&' : '?';
+      setRetry({ src: retry.src, url: `${retry.src}${separator}_r=${Date.now().toString(36)}` });
+    }, RETRY_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [retry]);
+
   const initials = useMemo(() => initialsFor(name), [name]);
-  const canShowImage = Boolean(normalizedSrc && failedSrc !== normalizedSrc);
+  const activeRetry = retry?.src === normalizedSrc ? retry : null;
+  const imageSrc = activeRetry ? activeRetry.url : normalizedSrc;
+  const canShowImage = Boolean(imageSrc && failedSrc !== normalizedSrc);
+
+  const handleImageError = () => {
+    if (!activeRetry && normalizedSrc.startsWith('/uploads/') && !failedAfterRetry.has(normalizedSrc)) {
+      setRetry({ src: normalizedSrc, url: null });
+      return;
+    }
+    if (activeRetry) failedAfterRetry.add(normalizedSrc);
+    setFailedSrc(normalizedSrc);
+  };
   const baseStyle: CSSProperties = { width: size, height: size, ...style };
   const commonClassName = `${roundedClassName} flex-shrink-0 overflow-hidden ${className}`.trim();
 
   if (canShowImage) {
     return (
       <img
-        src={normalizedSrc}
+        src={imageSrc || undefined}
         alt={alt || (name ? `${name} profile photo` : 'User profile photo')}
         className={`${commonClassName} object-cover bg-slate-100 ${imageClassName}`.trim()}
         style={{ objectPosition: 'center top', ...baseStyle, ...imageStyle }}
-        onError={() => setFailedSrc(normalizedSrc)}
+        onError={handleImageError}
       />
     );
   }

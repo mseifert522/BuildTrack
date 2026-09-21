@@ -920,6 +920,43 @@ function ensureQuoteNotes(db) {
   quoteNotesReady = true;
 }
 
+// Quote Center "Audit Log" tab. The bell feed (/api/activity) is only the newest 50
+// activity_log rows of every kind, and QuickBooks sync writes ~2 rows a minute, so
+// filtering it for quote actions almost always came back empty. Read quote rows directly.
+// Every quote row carries a project_id (a quote requires a project, and projects are only
+// archived, never deleted), so project_id IS NOT NULL lets idx_activity_log_project_review
+// serve both the filter and ORDER BY created_at DESC with no sort, skipping the ~98%
+// QuickBooks rows (project_id NULL) entirely. GLOB is case-sensitive and treats _ literally,
+// so 'quote_*' matches exactly the quote_* actions logged above (not vendor_quote_*).
+function listQuoteActivity(req, res) {
+  try {
+    const rows = getDb().prepare(`
+      SELECT
+        al.id,
+        al.project_id,
+        al.action,
+        al.entity_type,
+        al.entity_id,
+        al.details,
+        al.created_at,
+        u.name as user_name,
+        p.address as project_address,
+        p.job_name as project_job_name
+      FROM activity_log al
+      JOIN users u ON u.id = al.user_id
+      LEFT JOIN projects p ON p.id = al.project_id
+      WHERE al.project_id IS NOT NULL
+        AND al.action GLOB 'quote_*'
+      ORDER BY al.created_at DESC
+      LIMIT 200
+    `).all();
+    return res.json(rows);
+  } catch (err) {
+    console.error('[QUOTE_ANALYTICS] activity failed:', err);
+    return res.status(500).json({ error: 'Failed to load quote activity' });
+  }
+}
+
 function listQuoteNotes(req, res, forcedProjectId = null) {
   const db = getDb();
   ensureQuoteNotes(db);
@@ -1618,6 +1655,7 @@ analyticsRouter.get('/options', options);
 analyticsRouter.get('/categories', (req, res) => res.json(loadCategoryMap(getDb()).categories));
 analyticsRouter.get('/summary', (req, res) => quoteSummary(req, res));
 analyticsRouter.get('/compare', (req, res) => compareQuotes(req, res));
+analyticsRouter.get('/activity', (req, res) => listQuoteActivity(req, res));
 analyticsRouter.get('/quotes', (req, res) => listQuotes(req, res));
 analyticsRouter.post('/quotes', (req, res) => createQuote(req, res));
 analyticsRouter.post('/quotes/upload', upload.array('quote_file', 20), (req, res) => createQuote(req, res));

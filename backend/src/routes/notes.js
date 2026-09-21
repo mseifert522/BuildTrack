@@ -1,7 +1,7 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/schema');
-const { authenticate, authorizeProjectAccess } = require('../middleware/auth');
+const { authenticate, authorizeProjectAccess, resolveSessionPrincipal } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
 const { getNoteDeletePermission, getNoteEditPermission } = require('../utils/projectNotes');
 
@@ -70,11 +70,23 @@ function attachPhotosToNotes(db, notes, user) {
   });
 }
 
+// Same rule as GET /notes: a contractor sees only their own notes and public ones.
+function canSeeNote(client, note) {
+  return client.role !== 'contractor' || note.user_id === client.userId || note.visibility === 'public';
+}
+
 function broadcastToProject(projectId, data) {
   const clients = sseClients[projectId] || [];
   const payload = `data: ${JSON.stringify(data)}\n\n`;
-  clients.forEach(({ res }) => {
-    try { res.write(payload); } catch (e) { /* client disconnected */ }
+  // A new note a client cannot see is not sent. An edit can make a note private, so a
+  // client who can no longer see it gets a delete instead and it leaves their screen.
+  const retract = data.type === 'update_note' && data.note
+    ? `data: ${JSON.stringify({ type: 'delete_note', note_id: data.note.id })}\n\n`
+    : null;
+  clients.forEach((client) => {
+    const out = !data.note || canSeeNote(client, data.note) ? payload : retract;
+    if (!out) return;
+    try { client.res.write(out); } catch (e) { /* client disconnected */ }
   });
 }
 
@@ -108,7 +120,9 @@ router.get('/stream', (req, res) => {
 
   // Set SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
+  // no-transform: keeps proxies (Caddy "encode", Cloudflare) from compressing the
+  // stream, which can hold events back in the compressor's buffer.
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
@@ -118,21 +132,41 @@ router.get('/stream', (req, res) => {
 
   // Register this client
   if (!sseClients[projectId]) sseClients[projectId] = [];
-  const client = { res, userId: req.user.id };
+  const client = { res, userId: req.user.id, role: req.user.role };
   sseClients[projectId].push(client);
 
-  // Send a heartbeat every 25s to keep connection alive
-  const heartbeat = setInterval(() => {
-    try { res.write(': heartbeat\n\n'); } catch (e) { clearInterval(heartbeat); }
-  }, 25000);
+  // The stream outlives the request that authenticated it, so each heartbeat re-checks,
+  // read-only like the /uploads gate, that the session is still live (sign-out, security
+  // logout, deactivation, idle expiry), the role is unchanged and a contractor is still
+  // assigned. If not, the stream ends and the client's reconnect gets the 401/403.
+  const stillAuthorized = () => {
+    if (req.auth?.type !== 'jwt') return true;
+    const principal = resolveSessionPrincipal(
+      { userId: req.user.id, sid: req.auth.session_id, iat: req.auth.issued_at },
+      { sessionToken: req.token },
+    );
+    if (!principal || principal.user.role !== client.role) return false;
+    if (client.role !== 'contractor') return true;
+    return Boolean(getDb().prepare('SELECT id FROM project_assignments WHERE project_id = ? AND user_id = ?').get(projectId, req.user.id));
+  };
 
-  // Clean up on disconnect
-  req.on('close', () => {
+  const detach = () => {
     clearInterval(heartbeat);
     if (sseClients[projectId]) {
       sseClients[projectId] = sseClients[projectId].filter(c => c !== client);
     }
-  });
+  };
+
+  // Send a heartbeat every 25s to keep connection alive
+  const heartbeat = setInterval(() => {
+    try {
+      if (!stillAuthorized()) { detach(); res.end(); return; }
+      res.write(': heartbeat\n\n');
+    } catch (e) { clearInterval(heartbeat); }
+  }, 25000);
+
+  // Clean up on disconnect
+  req.on('close', detach);
 });
 
 // POST /api/projects/:projectId/notes — create a note
@@ -259,3 +293,6 @@ router.delete('/:id', (req, res) => {
 });
 
 module.exports = router;
+// The note writes are served by routes/projects.js (mounted first, it shadows the
+// POST/PUT/DELETE handlers above), so it broadcasts through this.
+module.exports.broadcastToProject = broadcastToProject;

@@ -8,6 +8,7 @@ const {
   SESSION_IDLE_TIMEOUT_MINUTES,
   SESSION_ARCHIVE_AFTER_DAYS,
   applySessionRetentionPolicy,
+  revokeUserAccess,
 } = require('../utils/sessionPolicy');
 
 const router = express.Router();
@@ -128,32 +129,6 @@ function writeSecurityEvent(db, req, { action, targetUserId = null, reason = nul
     entityId: targetUserId,
     details,
   });
-}
-
-function revokeUserAccess(db, userId, actorId, reason, revokedAt) {
-  db.prepare(`
-    UPDATE users
-    SET session_revoked_at = ?,
-        last_seen_at = NULL,
-        updated_at = datetime('now')
-    WHERE id = ?
-  `).run(revokedAt, userId);
-
-  db.prepare(`
-    UPDATE auth_sessions
-    SET revoked_at = ?,
-        revoke_reason = ?,
-        revoked_by = ?,
-        updated_at = datetime('now')
-    WHERE user_id = ? AND revoked_at IS NULL
-  `).run(revokedAt, reason, actorId, userId);
-
-  db.prepare('DELETE FROM trusted_devices WHERE user_id = ?').run(userId);
-  db.prepare(`
-    UPDATE mobile_quick_access_tokens
-    SET revoked_at = ?
-    WHERE user_id = ? AND revoked_at IS NULL
-  `).run(revokedAt, userId);
 }
 
 router.get('/sessions', (req, res) => {

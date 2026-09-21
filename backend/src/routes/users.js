@@ -9,6 +9,7 @@ const multer = require('multer');
 const { getDb } = require('../db/schema');
 const { authenticate, authorize, blockProjectManagerMutation, authorizeOverUser, blacklistToken } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
+const { revokeUserAccess } = require('../utils/sessionPolicy');
 const { logDataAccess } = require('../utils/dataAccessAudit');
 const { sendInviteEmail, sendPasswordResetEmail } = require('../utils/email');
 const { decryptJson } = require('../utils/secureFields');
@@ -1738,7 +1739,7 @@ router.put('/:id', authorize('super_admin', 'operations_manager'), async (req, r
   }
 });
 
-// POST /api/users/:id/lockout - instantly deactivate and blacklist user's sessions
+// POST /api/users/:id/lockout - instantly deactivate and revoke all of the user's sessions
 router.post('/:id/lockout', authorize('super_admin', 'operations_manager'), (req, res) => {
   try {
     const db = getDb();
@@ -1750,8 +1751,15 @@ router.post('/:id/lockout', authorize('super_admin', 'operations_manager'), (req
       return res.status(403).json({ error: `You cannot lock out a ${target.role.replace(/_/g, ' ')} account` });
     }
 
-    // Deactivate the account in DB
-    db.prepare(`UPDATE users SET is_active = 0, updated_at = datetime('now') WHERE id = ?`).run(req.params.id);
+    // Deactivate the account and revoke every session exactly like the Security page's
+    // "log out user". session_revoked_at lives in the shared DB, so each existing JWT and
+    // /uploads cookie is dead on both containers and stays dead after an unlock.
+    const revokedAt = new Date().toISOString();
+    const lockOut = db.transaction(() => {
+      db.prepare(`UPDATE users SET is_active = 0, updated_at = datetime('now') WHERE id = ?`).run(req.params.id);
+      revokeUserAccess(db, req.params.id, req.user.id, 'Account locked out', revokedAt);
+    });
+    lockOut();
 
     logActivity({
       userId: req.user.id,
@@ -1780,6 +1788,7 @@ router.post('/:id/unlock', authorize('super_admin', 'operations_manager'), (req,
       return res.status(403).json({ error: `You cannot unlock a ${target.role.replace(/_/g, ' ')} account` });
     }
 
+    // Leaves session_revoked_at alone: pre-lockout tokens stay dead, so the user signs in again.
     db.prepare(`UPDATE users SET is_active = 1, updated_at = datetime('now') WHERE id = ?`).run(req.params.id);
 
     logActivity({

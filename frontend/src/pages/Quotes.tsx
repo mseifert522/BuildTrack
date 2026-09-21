@@ -493,7 +493,7 @@ export default function Quotes() {
     (async () => {
       try {
         const rows = await fetchQuoteActivity();
-        if (active) setActivity(rows.filter(r => String(r.action || '').startsWith('quote')));
+        if (active) setActivity(rows);
       } catch {
         if (active) setActivity([]);
       } finally {
@@ -772,6 +772,7 @@ export default function Quotes() {
           options={options}
           editQuote={editQuote}
           defaultProjectId={editQuote ? editQuote.project_id : filters.project_id}
+          onOpenDoc={docKey => { if (editQuote) setDocsViewer({ quote: editQuote, docKey }); }}
           onClose={() => { setShowAdd(false); setEditQuote(null); }}
           onSaved={() => { setShowAdd(false); setEditQuote(null); reloadAll(); }}
         />
@@ -1657,7 +1658,7 @@ function AttachmentsTable({ rows, loading, onOpen }: { rows: ContractorQuote[]; 
 function AuditLog({ rows, loading }: { rows: ActivityRow[]; loading: boolean }) {
   if (loading) return <Loading message="Loading audit log…" />;
   if (rows.length === 0) return <Empty message="No quote activity recorded yet." icon={<History className="h-8 w-8" />} />;
-  const label = (action: string) => ({ quote_created: 'created a quote', quote_approved: 'approved a quote', quote_rejected: 'denied a quote' } as Record<string, string>)[action] || action.replace(/_/g, ' ');
+  const label = (action: string) => ({ quote_created: 'created a quote', quote_updated: 'edited a quote', quote_approved: 'approved a quote', quote_rejected: 'denied a quote', quote_restored: 'restored a quote', quote_deleted: 'deleted a quote' } as Record<string, string>)[action] || action.replace(/_/g, ' ');
   return (
     <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
       <table className="w-full text-sm">
@@ -1683,10 +1684,13 @@ function AuditLog({ rows, loading }: { rows: ActivityRow[]; loading: boolean }) 
 // ─────────────────────────────────────────────────────────────────────────────
 // Add Quote modal (reuses existing create / upload / extract endpoints)
 // ─────────────────────────────────────────────────────────────────────────────
-function AddQuoteModal({ options, defaultProjectId, editQuote, onClose, onSaved }: {
+function AddQuoteModal({ options, defaultProjectId, editQuote, onOpenDoc, onClose, onSaved }: {
   options: QuoteOptions;
   defaultProjectId: string;
   editQuote?: ContractorQuote | null;
+  // Opens a saved document in the page's QuoteDocumentModal. The parent renders that
+  // reader after this modal, so it stacks on top instead of inside this scrolling form.
+  onOpenDoc: (docKey: string) => void;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -2030,10 +2034,14 @@ function AddQuoteModal({ options, defaultProjectId, editQuote, onClose, onSaved 
                   )}
                 </div>
 
+                {/* The download routes are Bearer-only (a plain link opened a 401 page), so the
+                    saved file opens in the in-app reader. Keys match quoteDocuments(): a saved
+                    section is 'section:<id>'; the lone section of a pre-sections quote has no
+                    id and carries the quote's 'main' document. */}
                 {isEdit ? (
                   <p className="mt-2 text-xs text-gray-500">
                     {section.fileName
-                      ? <>Document: {section.downloadUrl ? <a href={`/api${section.downloadUrl.replace(/^\/api/, '')}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{section.fileName}</a> : section.fileName}</>
+                      ? <>Document: {section.downloadUrl ? <button type="button" onClick={() => onOpenDoc(section.id ? `section:${section.id}` : 'main')} title={`Open ${section.fileName}`} className="text-blue-600 hover:underline">{section.fileName}</button> : section.fileName}</>
                       : 'No document attached to this section.'}
                   </p>
                 ) : !section.file ? (

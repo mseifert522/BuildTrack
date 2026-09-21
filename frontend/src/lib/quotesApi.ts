@@ -296,7 +296,9 @@ export async function extractQuoteFromFile(projectId: string, formData: FormData
   return res.data;
 }
 
+// Quote-only audit rows, filtered server-side. Not the bell feed: /activity is just the
+// newest 50 rows of every kind, which QuickBooks sync fills within ~25 minutes.
 export async function fetchQuoteActivity(): Promise<ActivityRow[]> {
-  const res = await api.get('/activity');
+  const res = await api.get('/quote-analytics/activity');
   return res.data as ActivityRow[];
 }

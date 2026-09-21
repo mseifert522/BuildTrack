@@ -123,6 +123,145 @@ function isVideoAttachment(photo: NotePhoto) {
   return Boolean(photo.mime_type?.startsWith('video/')) || /\.(mp4|mov|m4v|webm|avi|mkv|mpeg|mpg|3gp)$/i.test(photo.filename);
 }
 
+// Live notes stream (GET /api/projects/:id/notes/stream). EventSource cannot send an
+// Authorization header and the API is Bearer-only, so the stream is read with fetch().
+const NOTES_STREAM_IDLE_MS = 60_000; // the server heartbeats every 25s
+const NOTES_STREAM_MAX_BACKOFF_MS = 30_000;
+
+// The api client's auth headers (lib/api.ts), read fresh on every connect: the session
+// refresh in App.tsx rotates the token in localStorage without touching the auth store.
+function eventStreamHeaders(): Record<string, string> | null {
+  const token = localStorage.getItem('token');
+  if (!token) return null;
+  const contractorToken = localStorage.getItem('contractor_token');
+  const activityKey = contractorToken && contractorToken === token
+    ? 'contractor_last_activity_at'
+    : 'auth_last_activity_at';
+  const lastActivity = localStorage.getItem(activityKey);
+  const headers: Record<string, string> = { Accept: 'text/event-stream', Authorization: `Bearer ${token}` };
+  // Like the api client: a reconnect then counts as session activity only when the
+  // user was really active, so a phone left on this page cannot keep a session alive.
+  if (lastActivity) headers['X-BuildTrack-Last-Activity'] = lastActivity;
+  return headers;
+}
+
+// Reads a text/event-stream body and hands each event's data to onMessage, as
+// EventSource's onmessage would. Resolves when the server ends the stream.
+async function readEventStream(
+  body: ReadableStream<Uint8Array>,
+  onMessage: (data: string) => void,
+  onBytes: () => void,
+) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let dataLines: string[] = [];
+  let eventType = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) return;
+    onBytes();
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const raw of lines) {
+      const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
+      if (!line) {
+        // A blank line ends the event; onmessage only ever saw unnamed events.
+        if (dataLines.length && (!eventType || eventType === 'message')) onMessage(dataLines.join('\n'));
+        dataLines = [];
+        eventType = '';
+        continue;
+      }
+      if (line.startsWith(':')) continue; // comment: the server's heartbeat
+      const colon = line.indexOf(':');
+      const field = colon < 0 ? line : line.slice(0, colon);
+      let value = colon < 0 ? '' : line.slice(colon + 1);
+      if (value.startsWith(' ')) value = value.slice(1);
+      if (field === 'data') dataLines.push(value);
+      else if (field === 'event') eventType = value;
+    }
+  }
+}
+
+// Opens the stream and keeps it open: reconnects with jittered backoff, drops a stream
+// that goes silent, and returns the cleanup. A raw fetch, not the api client, so a 401
+// here never trips the api client's global logout redirect.
+function openEventStream(url: string, handlers: {
+  onOpen: () => void;
+  onClose: () => void;
+  onMessage: (data: string) => void;
+}) {
+  let stopped = false;
+  let controller: AbortController | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  let attempt = 0;
+
+  const connect = async () => {
+    if (stopped) return;
+    const ctrl = new AbortController();
+    controller = ctrl;
+    // Silent past two heartbeats means dead (phone slept, network switched) even if
+    // the socket never said so: abort, and the finally block reconnects.
+    const armIdle = () => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => ctrl.abort(), NOTES_STREAM_IDLE_MS);
+    };
+    let retry = true;
+    let openedAt = 0;
+    try {
+      const headers = eventStreamHeaders();
+      if (!headers) { retry = false; return; }
+      armIdle();
+      const res = await fetch(url, { headers, cache: 'no-store', signal: ctrl.signal });
+      if (res.status === 401 || res.status === 403 || res.status === 404) {
+        retry = false; // will not heal on retry; the page's next api call handles a dead session
+        return;
+      }
+      if (!res.ok || !res.body || !(res.headers.get('content-type') || '').startsWith('text/event-stream')) return;
+      openedAt = Date.now();
+      handlers.onOpen();
+      await readEventStream(res.body, handlers.onMessage, armIdle);
+    } catch {
+      /* network error, idle abort or cleanup: handled below */
+    } finally {
+      clearTimeout(idleTimer);
+      if (controller === ctrl) controller = null;
+      if (!stopped) {
+        if (openedAt) handlers.onClose();
+        // A stream that stayed up resets the backoff; one that keeps dying at once does not.
+        if (openedAt && Date.now() - openedAt >= NOTES_STREAM_IDLE_MS) attempt = 0;
+        if (retry) {
+          // ~1s, 2s, 4s ... 30s, jittered so a deploy does not reconnect every phone at once.
+          const delay = Math.min(NOTES_STREAM_MAX_BACKOFF_MS, 1000 * 2 ** attempt) * (0.5 + Math.random() / 2);
+          attempt += 1;
+          reconnectTimer = setTimeout(connect, delay);
+        }
+      }
+    }
+  };
+
+  // Mobile browsers freeze background tabs; on return, reconnect now instead of
+  // waiting out the backoff or the idle timer.
+  const onVisible = () => {
+    if (stopped || controller || document.visibilityState !== 'visible') return;
+    clearTimeout(reconnectTimer);
+    attempt = 0;
+    void connect();
+  };
+  document.addEventListener('visibilitychange', onVisible);
+  void connect();
+
+  return () => {
+    stopped = true;
+    clearTimeout(reconnectTimer);
+    clearTimeout(idleTimer);
+    document.removeEventListener('visibilitychange', onVisible);
+    controller?.abort();
+  };
+}
+
 export default function MobileNotes() {
   const { id: projectId } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -150,7 +289,6 @@ export default function MobileNotes() {
   const noteFileInputRef = useRef<HTMLInputElement>(null);
   const noteFileUrlsRef = useRef<string[]>([]);
   const attachExistingInputRef = useRef<HTMLInputElement>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
   const recognitionRef = useRef<any>(null);
   const canDeleteProjectNotes = ['super_admin', 'operations_manager'].includes(user?.role || '');
 
@@ -182,27 +320,36 @@ export default function MobileNotes() {
     noteFileUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
   }, []);
 
-  // SSE real-time connection
+  // Live notes: new_note / update_note / delete_note events from the notes stream,
+  // read by openEventStream above with the normal Bearer header (never ?token=).
   useEffect(() => {
     if (!projectId || !token) return;
 
     const baseUrl = (api.defaults.baseURL || '').replace(/\/api$/, '');
-    const sseUrl = `${baseUrl}/api/projects/${projectId}/notes/stream`;
+    let active = true;
+    let opens = 0;
 
-    let mounted = true;
-    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
-
-    const connect = () => {
-      if (!mounted) return;
-      // Append token as query param since EventSource doesn't support custom headers
-      const es = new EventSource(`${sseUrl}?token=${token}`);
-      eventSourceRef.current = es;
-
-      es.onopen = () => setConnected(true);
-
-      es.onmessage = (event) => {
+    const close = openEventStream(`${baseUrl}/api/projects/${projectId}/notes/stream`, {
+      onOpen: () => {
+        setConnected(true);
+        opens += 1;
+        if (opens === 1) return;
+        // The server keeps no backlog, so events sent while we were disconnected are
+        // gone: refetch, keeping an optimistic note whose POST has not come back yet.
+        api.get(`/projects/${projectId}/notes`).then(res => {
+          if (!active || !Array.isArray(res.data)) return;
+          const fresh: Note[] = res.data;
+          setNotes(prev => [
+            ...fresh,
+            ...prev.filter(n => String(n.id).startsWith('temp-')
+              && !fresh.some(f => f.user_id === n.user_id && f.note === n.note)),
+          ]);
+        }).catch(() => { /* the next reconnect refetches */ });
+      },
+      onClose: () => setConnected(false),
+      onMessage: (raw) => {
         try {
-          const data = JSON.parse(event.data);
+          const data = JSON.parse(raw);
           if (data.type === 'new_note') {
             setNotes(prev => {
               // Avoid duplicates by server id, and drop our own optimistic temp note.
@@ -216,27 +363,15 @@ export default function MobileNotes() {
             setNotes(prev => prev.filter(n => n.id !== data.note_id));
           }
         } catch { /* ignore parse errors */ }
-      };
-
-      es.onerror = () => {
-        setConnected(false);
-        es.close();
-        // Reconnect after 3 seconds (only while still mounted).
-        if (mounted) reconnectTimer = setTimeout(connect, 3000);
-      };
-    };
-
-    connect();
+      },
+    });
 
     return () => {
-      mounted = false;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      eventSourceRef.current?.close();
+      active = false;
+      close();
+      setConnected(false);
     };
   }, [projectId, token]);
-
-  // Also update the SSE auth — backend needs to accept token via query param
-  // We'll handle this in the backend middleware patch below
 
   const clearNoteFiles = useCallback(() => {
     setNoteFiles([]);

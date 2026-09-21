@@ -139,6 +139,14 @@ export function Empty({ message = 'No items found', icon }: EmptyProps) {
   );
 }
 
+// Open Modals, oldest first. A Modal can open over another (the quote reader over
+// the Modify Quote form) and every open Modal listens on document, so only the
+// topmost may act on Escape / Tab - otherwise one Escape closes both, losing unsaved
+// edits, and the two focus traps fight. The top Modal's listener was also added
+// last, so it runs after the others have already bailed out. A fresh token per open
+// keeps StrictMode's mount -> cleanup -> mount at exactly one entry per Modal.
+const openModalStack: object[] = [];
+
 interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -164,6 +172,8 @@ export function Modal({ isOpen, onClose, title, children, size = 'md', descripti
 
   React.useEffect(() => {
     if (!isOpen) return;
+    const stackToken = {};
+    openModalStack.push(stackToken);
     const previousFocus = document.activeElement as HTMLElement | null;
     const getFocusable = () => Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(
       'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
@@ -175,6 +185,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md', descripti
     }, 0);
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (openModalStack[openModalStack.length - 1] !== stackToken) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         onCloseRef.current();
@@ -201,6 +212,8 @@ export function Modal({ isOpen, onClose, title, children, size = 'md', descripti
     document.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
+      const stackIndex = openModalStack.indexOf(stackToken);
+      if (stackIndex !== -1) openModalStack.splice(stackIndex, 1);
       previousFocus?.focus?.();
     };
   }, [isOpen]);

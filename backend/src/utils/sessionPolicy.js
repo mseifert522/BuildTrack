@@ -45,6 +45,36 @@ function revokeSession(db, sessionId, userId, reason, revokedBy = null) {
   `).run(reason, revokedBy, sessionId, userId);
 }
 
+// Ends every way back in for one user: existing JWTs and /uploads cookies (any iat at
+// or before session_revoked_at is rejected on every container), their auth_sessions
+// rows, trusted-device 2FA skips and mobile quick-access tokens. Used by the Security
+// page logouts and by the Users lockout.
+function revokeUserAccess(db, userId, actorId, reason, revokedAt) {
+  db.prepare(`
+    UPDATE users
+    SET session_revoked_at = ?,
+        last_seen_at = NULL,
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(revokedAt, userId);
+
+  db.prepare(`
+    UPDATE auth_sessions
+    SET revoked_at = ?,
+        revoke_reason = ?,
+        revoked_by = ?,
+        updated_at = datetime('now')
+    WHERE user_id = ? AND revoked_at IS NULL
+  `).run(revokedAt, reason, actorId, userId);
+
+  db.prepare('DELETE FROM trusted_devices WHERE user_id = ?').run(userId);
+  db.prepare(`
+    UPDATE mobile_quick_access_tokens
+    SET revoked_at = ?
+    WHERE user_id = ? AND revoked_at IS NULL
+  `).run(revokedAt, userId);
+}
+
 function applySessionRetentionPolicy(db) {
   const desktopResult = db.prepare(`
     UPDATE auth_sessions
@@ -94,5 +124,6 @@ module.exports = {
   isMobileSessionType,
   sessionExpiryPolicy,
   revokeSession,
+  revokeUserAccess,
   applySessionRetentionPolicy,
 };
