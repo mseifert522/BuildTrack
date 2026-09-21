@@ -87,6 +87,22 @@ function createUploadsGate(uploadsRoot, deps = {}) {
     return null;
   }
 
+  // Project files that an email sent before the gate linked by plain URL
+  // (uploads_public_exceptions, each row expiring). Consulted only for a request that
+  // would otherwise be refused, so signed-in traffic never pays for the lookup.
+  let exceptionStmt = null;
+  function isPublicException(target) {
+    if (target.kind !== 'project') return false;
+    try {
+      exceptionStmt = exceptionStmt || getDb().prepare(
+        "SELECT 1 FROM uploads_public_exceptions WHERE rel_path = ? AND julianday(expires_at) > julianday('now') LIMIT 1"
+      );
+      return Boolean(exceptionStmt.get(target.rel));
+    } catch (_) {
+      return false;
+    }
+  }
+
   // Mirrors authorizeProjectAccess(): only role === 'contractor' is restricted.
   function mayRead(user, target) {
     if (user.role !== 'contractor') return true;
@@ -132,6 +148,7 @@ function createUploadsGate(uploadsRoot, deps = {}) {
       status = 503;
     }
     if (!status) return next();
+    if ((status === 401 || status === 403) && isPublicException(target)) return next();
     if (mode() === 'report') {
       reportWouldDeny(req, target, status);
       return next();

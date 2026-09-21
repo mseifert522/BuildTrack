@@ -213,6 +213,25 @@ function resolveSessionPrincipal({ userId, sid, iat }, { sessionToken = null } =
   return { user, sessionId: sid || null };
 }
 
+// A session JWT must never travel in a URL. Builds before 2026-09-21 opened the
+// live-notes stream as EventSource(...?token=<JWT>), so a token that arrives that way
+// is treated as exposed and its session is ended. The stale tab's next API call gets a
+// 401, which sends it to /login with a full page load, i.e. onto the current build.
+function rejectTokenInUrl(req, res, next) {
+  if (req.query.token === undefined) return next();
+  const token = String(req.query.token);
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET, { ignoreExpiration: true });
+    if (decoded.sid && decoded.userId) {
+      revokeSession(getDb(), decoded.sid, decoded.userId, 'Session token was sent in a URL');
+    }
+    tokenBlacklist.add(token);
+    console.warn(`[auth] ended session ${String(decoded.sid || 'legacy').slice(0, 8)} of user ${String(decoded.userId || '').slice(0, 8)}: its token was sent in a URL`);
+  } catch (_) { /* not a token we issued: nothing to end */ }
+  res.set('Cache-Control', 'no-store');
+  return res.status(401).json({ error: 'Sign-in tokens are not accepted in URLs. Reload BuildTrack.' });
+}
+
 function authenticate(req, res, next) {
   const bearerToken = extractBearerToken(req);
   const apiKey = extractApiKey(req, bearerToken);
@@ -329,6 +348,7 @@ function authorizeProjectAccess(req, res, next) {
 
 module.exports = {
   authenticate,
+  rejectTokenInUrl,
   // used by the /uploads gate (middleware/uploadsGate.js)
   extractBearerToken,
   extractApiKey,

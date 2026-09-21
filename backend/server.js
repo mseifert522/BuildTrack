@@ -6,7 +6,7 @@ const fs = require('fs');
 
 const { initializeSchema } = require('./src/db/schema');
 const { seedDatabase } = require('./src/db/seed');
-const { authenticate } = require('./src/middleware/auth');
+const { authenticate, rejectTokenInUrl } = require('./src/middleware/auth');
 
 const authRoutes = require('./src/routes/auth');
 const userRoutes = require('./src/routes/users');
@@ -154,6 +154,8 @@ app.use('/api/contractors', contractorApiAlias);
 app.use('/api/v1/contractor', contractorApiAlias);
 app.use('/api/v1/contractors', contractorApiAlias);
 
+// Old builds put the session JWT in the live-notes stream URL; see rejectTokenInUrl.
+app.get('/api/projects/:projectId/notes/stream', rejectTokenInUrl);
 app.use('/api/projects', projectRoutes);
 app.use('/api/projects/:projectId/punch-list', punchListRoutes);
 app.use('/api/projects/:projectId/photos', photoRoutes);

@@ -306,7 +306,7 @@ function initializeSchema() {
       name TEXT NOT NULL,
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('super_admin','operations_manager','project_manager','contractor')),
+      role TEXT NOT NULL CHECK(role IN ('super_admin','operations_manager','project_manager','admin_assistant','contractor')),
       phone TEXT,
       company TEXT,
       contractor_category TEXT,
@@ -2209,6 +2209,20 @@ function initializeSchema() {
         FOREIGN KEY (sent_by) REFERENCES users(id)
       );
       CREATE INDEX IF NOT EXISTS idx_punch_list_sends_project ON punch_list_sends(project_id, sent_at);
+    `);
+  } catch (_) { /* best-effort */ }
+  // Emails sent before the /uploads login gate (2026-09-21) linked photos by plain URL.
+  // Each file listed here stays viewable without a login until expires_at; expired rows
+  // are ignored. Read by middleware/uploadsGate.js.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS uploads_public_exceptions (
+        rel_path TEXT PRIMARY KEY,
+        reason TEXT NOT NULL,
+        source_id TEXT,
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
     `);
   } catch (_) { /* best-effort */ }
   try {
