@@ -1519,7 +1519,7 @@ function initializeSchema() {
     -- the other 99%+ and drop its ORDER BY sort entirely.
     -- created_at leads so it also satisfies ORDER BY created_at DESC with no sort
     -- (SQLite walks an index in either direction, so no DESC keyword is needed).
-    -- action is carried so `action IN (...)` is evaluated inside the index.
+    -- action is carried so the action IN (...) test is evaluated inside the index.
     -- Because it is partial on project_id IS NOT NULL, the QuickBooks sync rows
     -- (project_id NULL, 2,880/day) never enter it and cost nothing to maintain.
     CREATE INDEX IF NOT EXISTS idx_activity_log_project_review
