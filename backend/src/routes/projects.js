@@ -568,9 +568,16 @@ function getUnreviewedProjectSummaries(db, userId, options = {}) {
     WHERE al.project_id IS NOT NULL
       AND al.user_id != ?
       AND al.action IN (${placeholders})
-      AND datetime(al.created_at) > datetime(COALESCE(prs.last_reviewed_at, '1970-01-01 00:00:00'))
-      AND (? = 0 OR datetime(al.created_at) > datetime('now', '-30 days'))
-    ORDER BY datetime(al.created_at) DESC, al.created_at DESC
+      -- al.created_at is left BARE so idx_activity_log_project_review can serve both the
+      -- filter and the ORDER BY. Wrapping it in datetime() forced a full scan of activity_log,
+      -- which is ~99% QuickBooks sync rows (project_id IS NULL) and grows 2,880 rows/day.
+      -- datetime() stays on the prs side because the two columns are stored in DIFFERENT
+      -- formats: activity_log.created_at is 'YYYY-MM-DD HH:MM:SS' but
+      -- project_review_state.last_reviewed_at is ISO-8601 with 'T' and 'Z'. A raw string
+      -- compare between them is wrong ('T' > ' '), so the normalization must not be dropped.
+      AND al.created_at > COALESCE(datetime(prs.last_reviewed_at), '1970-01-01 00:00:00')
+      AND (? = 0 OR al.created_at > datetime('now', '-30 days'))
+    ORDER BY al.created_at DESC
     LIMIT 500
   `).all(userId, userId, ...REVIEW_ACTIONS, recentScope);
 

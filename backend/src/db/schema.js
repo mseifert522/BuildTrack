@@ -1513,6 +1513,13 @@ function initializeSchema() {
     CREATE INDEX IF NOT EXISTS idx_activity_log_created_at
       ON activity_log(created_at);
 
+    -- Partial index for the project-review feed (getUnreviewedProjectSummaries).
+    -- Only ~0.6% of activity_log rows carry a project_id; the rest are per-minute
+    -- QuickBooks sync records. Indexing just the project rows lets that query skip
+    -- the other 99%+ and drop its ORDER BY sort entirely.
+    CREATE INDEX IF NOT EXISTS idx_activity_log_project_review
+      ON activity_log(created_at DESC) WHERE project_id IS NOT NULL;
+
     CREATE TABLE IF NOT EXISTS project_documents (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
