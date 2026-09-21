@@ -1517,8 +1517,13 @@ function initializeSchema() {
     -- Only ~0.6% of activity_log rows carry a project_id; the rest are per-minute
     -- QuickBooks sync records. Indexing just the project rows lets that query skip
     -- the other 99%+ and drop its ORDER BY sort entirely.
+    -- created_at leads so it also satisfies ORDER BY created_at DESC with no sort
+    -- (SQLite walks an index in either direction, so no DESC keyword is needed).
+    -- action is carried so `action IN (...)` is evaluated inside the index.
+    -- Because it is partial on project_id IS NOT NULL, the QuickBooks sync rows
+    -- (project_id NULL, 2,880/day) never enter it and cost nothing to maintain.
     CREATE INDEX IF NOT EXISTS idx_activity_log_project_review
-      ON activity_log(created_at DESC) WHERE project_id IS NOT NULL;
+      ON activity_log(created_at, action) WHERE project_id IS NOT NULL;
 
     CREATE TABLE IF NOT EXISTS project_documents (
       id TEXT PRIMARY KEY,
