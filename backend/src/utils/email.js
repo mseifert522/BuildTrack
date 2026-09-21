@@ -931,7 +931,7 @@ async function sendQuoteApprovedEmail({
 
 // Email / Send Punch List: one contractor's punch list for one property.
 // `items` carry title/description/notes/priority/status/due_date and
-// photos[{ url }] (public /uploads links, at most a dozen per item).
+// photos[{ url }] (signed, expiring /uploads links, at most a dozen per item).
 async function sendPunchListEmail({ contractorName, contactName, email, ccEmail, project, items, message, sentByName }) {
   if (!email) throw new Error('Missing contractor email');
   const transporter = createTransporter();

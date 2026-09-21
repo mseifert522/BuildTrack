@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { useAuthStore, roleLabels, canManageUsers, canAccessSettings, canAccessSecurity, canAccessHumanResources } from '../store/authStore';
+import { useAuthStore, roleLabels, canManageUsers, canAccessSettings, canAccessSecurity, canAccessHumanResources, endServerSession } from '../store/authStore';
 import {
   LayoutDashboard, FolderOpen, ClipboardList, FileText,
   Users, Settings, LogOut, Menu, X, Bell, ChevronRight,
@@ -151,6 +151,7 @@ export default function Layout({ children }: LayoutProps) {
   const headerSearchTerm = isVendorDirectory ? vendorSearchTerm : searchTerm;
 
   const handleLogout = () => {
+    endServerSession(localStorage.getItem('token'));
     logout();
     navigate('/login');
   };

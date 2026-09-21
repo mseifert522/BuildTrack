@@ -10,6 +10,7 @@ const {
   revokeSession,
   sessionExpiryPolicy,
 } = require('../utils/sessionPolicy');
+const { ensureUploadsCookie } = require('../utils/uploadsAccess');
 
 // ── Role hierarchy (higher index = more authority) ──────────────────────────
 const ROLE_HIERARCHY = {
@@ -189,6 +190,29 @@ function authenticateApiKey(req, key) {
   return true;
 }
 
+// Read-only twin of authenticate()'s JWT checks, for the /uploads gate. Same rules
+// (active user, security logout, session row, idle expiry) but it never touches
+// last_seen_at or writes rows: an <img> load is not user activity, and a page of
+// thumbnails must not cost a write per image or keep an idle session alive.
+function resolveSessionPrincipal({ userId, sid, iat }, { sessionToken = null } = {}) {
+  if (!userId || !iat) return null;
+  if (sessionToken && tokenBlacklist.has(sessionToken)) return null;
+  const db = getDb();
+  const user = db.prepare('SELECT id, role, is_active, session_revoked_at FROM users WHERE id = ? AND is_active = 1').get(userId);
+  if (!user) return null;
+  if (isTokenRevokedForUser({ iat }, user)) return null;
+  if (sid) {
+    const session = db.prepare(`
+      SELECT id, session_type, issued_at, last_seen_at, created_at, revoked_at
+      FROM auth_sessions WHERE id = ? AND user_id = ? LIMIT 1
+    `).get(sid, user.id);
+    if (!session || session.revoked_at || sessionExpiryPolicy(session)) return null;
+  } else if (isLegacyTokenExpired({ iat })) {
+    return null;
+  }
+  return { user, sessionId: sid || null };
+}
+
 function authenticate(req, res, next) {
   const bearerToken = extractBearerToken(req);
   const apiKey = extractApiKey(req, bearerToken);
@@ -244,6 +268,10 @@ function authenticate(req, res, next) {
       issued_at: decoded.iat || null,
       activity_touched: session?.activity_touched === true,
     };
+    // Give the browser the httpOnly /uploads cookie (a separate, narrow token, not
+    // this JWT). Issued only when missing or stale, and it never throws, so it
+    // cannot fail the API call. Not on the API-key path above.
+    ensureUploadsCookie(req, res, decoded);
     next();
   } catch (err) {
     return res.status(401).json({ error: 'Invalid or expired token' });
@@ -301,6 +329,11 @@ function authorizeProjectAccess(req, res, next) {
 
 module.exports = {
   authenticate,
+  // used by the /uploads gate (middleware/uploadsGate.js)
+  extractBearerToken,
+  extractApiKey,
+  authenticateApiKey,
+  resolveSessionPrincipal,
   authorize,
   authorizeUpperManagement,
   blockProjectManagerMutation,

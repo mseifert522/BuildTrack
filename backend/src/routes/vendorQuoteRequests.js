@@ -9,6 +9,13 @@ const { getDb } = require('../db/schema');
 const { authenticate, authorize, authorizeProjectAccess } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
 const { sendVendorQuoteRequestEmail } = require('../utils/email');
+const { signedUploadUrl } = require('../utils/uploadsAccess');
+
+// Scope photos are shown to vendors with no BuildTrack login, both on the public
+// /vendor-quote/:token page and as images in the request email, so each is a signed
+// link to that one file. The page re-signs on every load; this TTL only really
+// governs the email, and covers the 7-business-day request window with margin.
+const VENDOR_QUOTE_PHOTO_LINK_TTL_S = (Number(process.env.VENDOR_QUOTE_PHOTO_LINK_DAYS) || 21) * 24 * 60 * 60;
 const { cleanPhone, sendContractorText } = require('../utils/textMessaging');
 
 const router = express.Router();
@@ -367,7 +374,8 @@ function selectedScopes(db, request, includePhotos = true) {
       const list = photosByScope.get(photo.scope_id) || [];
       list.push({
         ...photo,
-        url: `/uploads/${request.project_id}/${photo.filename}`,
+        url: signedUploadUrl(`${request.project_id}/${photo.filename}`, { ttlSeconds: VENDOR_QUOTE_PHOTO_LINK_TTL_S })
+          || `/uploads/${request.project_id}/${photo.filename}`,
       });
       photosByScope.set(photo.scope_id, list);
     }

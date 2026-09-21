@@ -4,6 +4,11 @@ const { getDb } = require('../db/schema');
 const { authenticate, authorizeUpperManagement, blockProjectManagerMutation, authorizeProjectAccess } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
 const { isEmailConfigured, sendPunchListEmail } = require('../utils/email');
+const { signedUploadUrl } = require('../utils/uploadsAccess');
+
+// Photo links in a punch-list email go to vendors with no BuildTrack login, so each
+// is a signed, expiring link to that one file (the /uploads gate honors it).
+const PUNCH_PHOTO_LINK_TTL_S = (Number(process.env.PUNCH_EMAIL_PHOTO_LINK_DAYS) || 30) * 24 * 60 * 60;
 
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
@@ -236,8 +241,8 @@ function loadPunchContractor(db, contractorId) {
   `).get(contractorId);
 }
 
-// Up to a dozen photo links per item for the email. /uploads is served
-// publicly by the app, so the links work for the contractor.
+// Up to a dozen photo links per item for the email. /uploads needs a login now, so
+// each link is signed for that one file and expires after PUNCH_PHOTO_LINK_TTL_S.
 function punchItemPhotoLinks(db, projectId, itemId, appUrl) {
   const rows = db.prepare(`
     SELECT ph.id, ph.filename, ph.markup_path
@@ -248,7 +253,12 @@ function punchItemPhotoLinks(db, projectId, itemId, appUrl) {
     ORDER BY datetime(COALESCE(ph.captured_at, ph.taken_at, ph.uploaded_at, ph.created_at)) ASC
     LIMIT 12
   `).all(itemId, projectId, itemId);
-  return rows.map(row => ({ id: row.id, url: `${appUrl}/uploads/${projectId}/${row.markup_path || row.filename}` }));
+  return rows
+    .map(row => ({
+      id: row.id,
+      url: signedUploadUrl(`${projectId}/${row.markup_path || row.filename}`, { ttlSeconds: PUNCH_PHOTO_LINK_TTL_S, baseUrl: appUrl }),
+    }))
+    .filter(link => link.url);
 }
 
 // GET /api/projects/:projectId/punch-list/contractors

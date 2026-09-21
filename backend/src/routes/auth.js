@@ -4,16 +4,51 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/schema');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, blacklistToken } = require('../middleware/auth');
+const { ensureUploadsCookieForSessionToken, clearUploadsCookie } = require('../utils/uploadsAccess');
 const { logActivity } = require('../utils/audit');
 const { sendPasswordResetEmail, send2FACodeEmail, sendContractorPinEmail } = require('../utils/email');
 const { ensureContractorMobileAccountByEmail, normalizeEmail } = require('../utils/contractorAccess');
 const { getClientIp } = require('../utils/requestIp');
 const {
   SESSION_IDLE_TIMEOUT_MINUTES,
+  revokeSession,
 } = require('../utils/sessionPolicy');
 
 const router = express.Router();
+
+// Every response here that hands out a session token (login, PIN, trusted device,
+// quick access, contractor email login, refresh) also sets the /uploads cookie, so
+// photos render on the very first page after sign-in. Non-session tokens fail the
+// JWT_SECRET check inside and are ignored.
+router.use((req, res, next) => {
+  const sendJson = res.json.bind(res);
+  res.json = body => {
+    if (body && typeof body.token === 'string' && res.statusCode < 400) {
+      ensureUploadsCookieForSessionToken(req, res, body.token);
+    }
+    return sendJson(body);
+  };
+  next();
+});
+
+// Signing out has to reach the server: the /uploads cookie is httpOnly (JS cannot
+// clear it), and until now a voluntary logout left the session valid server-side.
+// Deliberately NOT behind authenticate(): an expired or revoked token must still be
+// able to clear the cookie.
+router.post('/logout', (req, res) => {
+  clearUploadsCookie(res);
+  const header = String(req.headers.authorization || '');
+  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET, { ignoreExpiration: true });
+      if (decoded.sid && decoded.userId) revokeSession(getDb(), decoded.sid, decoded.userId, 'User logged out', decoded.userId);
+      blacklistToken(token);
+    } catch (_) { /* nothing valid to revoke; the cookie is cleared regardless */ }
+  }
+  res.status(204).end();
+});
 const MANAGEMENT_ROLES = ['super_admin', 'operations_manager', 'project_manager'];
 const TRUSTED_DEVICE_DAYS = 60;
 const MOBILE_QUICK_ACCESS_DAYS = 7;

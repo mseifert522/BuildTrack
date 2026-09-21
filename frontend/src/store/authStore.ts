@@ -3,6 +3,22 @@ import { create } from 'zustand';
 const AUTH_LAST_ACTIVITY_KEY = 'auth_last_activity_at';
 const AUTH_LAST_REFRESH_KEY = 'auth_last_refresh_at';
 
+// Tell the server this user signed out: it revokes the session and clears the
+// httpOnly /uploads cookie, which JavaScript cannot remove itself. Fire-and-forget,
+// and a raw fetch rather than the api client, so sign-out never waits on the network
+// or trips the 401 redirect. Call it BEFORE localStorage is cleared. Only from the
+// explicit sign-out buttons: a failed background refresh is not a sign-out.
+export function endServerSession(token: string | null) {
+  try {
+    void fetch('/api/auth/logout', {
+      method: 'POST',
+      keepalive: true,
+      credentials: 'same-origin',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    }).catch(() => {});
+  } catch { /* never block sign-out */ }
+}
+
 export interface User {
   id: string;
   name: string;

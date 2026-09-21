@@ -12,7 +12,7 @@ import {
   Plus,
   RefreshCw,
 } from 'lucide-react';
-import { useAuthStore, roleLabels } from '../store/authStore';
+import { useAuthStore, roleLabels, endServerSession } from '../store/authStore';
 import api from '../lib/api';
 import { MOBILE_DATA_CHANGED_EVENT, lastMobileDataChangedAt } from '../lib/mobileEvents';
 
@@ -141,6 +141,8 @@ export default function MobileHome() {
   const rememberedProject = projects.find(project => project.id === localStorage.getItem(storageKey));
 
   const handleLogout = () => {
+    // Contractor sign-in mirrors its JWT into 'token', so this covers both kinds.
+    endServerSession(localStorage.getItem('token') || localStorage.getItem('contractor_token'));
     logout();
     localStorage.removeItem('contractor_token');
     localStorage.removeItem('contractor_user');

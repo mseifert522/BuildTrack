@@ -20,6 +20,8 @@ const textMessageRoutes = require('./src/routes/textMessages');
 const fieldWorkRoutes = require('./src/routes/fieldWork');
 const calendarRoutes = require('./src/routes/calendar');
 const { startCalendarReminderScheduler } = require('./src/services/calendarReminderScheduler');
+const { startActivityRetentionScheduler } = require('./src/services/activityRetentionScheduler');
+const { createUploadsGate, isInlineSafeUpload } = require('./src/middleware/uploadsGate');
 const documentRoutes = require('./src/routes/documents');
 const contractorOnboardingRoutes = require('./src/routes/contractorOnboarding');
 const quoteAnalyticsRoutes = require('./src/routes/quoteAnalytics');
@@ -97,15 +99,33 @@ app.use(express.json({
 }));
 app.use(express.urlencoded({ extended: true, limit: bodyLimit }));
 
-// Serve uploaded files. In-flight chunked-upload pieces live under
-// uploads/chunk-tmp and must never be publicly fetchable.
+// Serve uploaded files behind a login gate (src/middleware/uploadsGate.js). It accepts
+// a signed link, the Max AI API key, a Bearer token, or the httpOnly __Host-bt_files
+// cookie; the API itself stays Bearer-only. UPLOADS_AUTH_MODE=report serves every file
+// and only logs what WOULD be refused (the rollout soak); any other value enforces.
+// In-flight chunked-upload pieces live under uploads/chunk-tmp and are never served
+// (the gate also catches the //chunk-tmp, %2Fchunk-tmp and /./chunk-tmp spellings).
 app.use('/uploads/chunk-tmp', (req, res) => res.status(404).json({ error: 'Not found' }));
-app.use('/uploads', express.static(path.resolve(uploadsPath), {
+app.use('/uploads', createUploadsGate(uploadsPath), express.static(path.resolve(uploadsPath), {
+  index: false,
   setHeaders: (res, filePath) => {
+    // Every upload is private: no shared cache (Cloudflare included) may hold a file
+    // that now needs a login.
     if (filePath.includes(`${path.sep}avatars${path.sep}`)) {
       res.setHeader('Cache-Control', 'private, no-cache, max-age=0, must-revalidate');
     } else if (filePath.includes(`${path.sep}project-main${path.sep}`)) {
       res.setHeader('Cache-Control', 'private, max-age=2592000, immutable');
+    } else {
+      res.setHeader('Cache-Control', res.locals.uploadsCacheControl || 'private, no-cache');
+    }
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-site');
+    // Only images, video and PDF render inline. Anything else downloads inside a CSP
+    // sandbox, so an uploaded .html/.svg can never run as a same-origin page and read
+    // the session token out of localStorage.
+    if (!isInlineSafeUpload(filePath)) {
+      res.setHeader('Content-Disposition', 'attachment');
+      res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
     }
   },
 }));
@@ -497,6 +517,7 @@ async function start() {
       console.log('╚══════════════════════════════════════════════════╝');
       console.log('');
       startCalendarReminderScheduler();
+      startActivityRetentionScheduler();
       if (typeof quickBooksRoutes.startQuickBooksAutoSync === 'function') {
         quickBooksRoutes.startQuickBooksAutoSync();
       }
