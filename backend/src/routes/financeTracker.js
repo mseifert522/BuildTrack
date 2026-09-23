@@ -136,4 +136,15 @@ router.get('/card-activity', async (_req, res) => {
   }
 });
 
+// Every ledger line on every card and line-of-credit account (all years, dated,
+// classed) for Finance Tracker's payoff-by-project view. Read-only.
+router.get('/card-register', async (_req, res) => {
+  try {
+    const register = await quickBooksRoutes.financeTrackerCardRegister();
+    res.json({ ...register, exportedAt: new Date().toISOString() });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message || 'Failed to export the card register.' });
+  }
+});
+
 module.exports = router;

@@ -3763,3 +3763,49 @@ router.financeTrackerCardActivity = async function financeTrackerCardActivity() 
     counts: { accounts: accounts.length, purchases: purchases.length, journals: journals.length },
   };
 };
+
+// ── Card register (2026-09-23) ────────────────────────────────────────────
+// Every line QuickBooks has ever posted to a credit-card or line-of-credit
+// account, dated and classed, straight off the General Ledger report. The
+// Purchase + JournalEntry feed above cannot see transfers, bank-feed payments
+// or opening balances, which is why its traced paydowns covered only $578K of
+// the $2.06M charged. Finance Tracker builds the payoff-by-project view on this.
+const CARD_REGISTER_COLUMNS = 'tx_date,txn_type,doc_num,name,memo,klass_name,split_acc,debt_amt,credit_amt,subt_nat_amount';
+
+router.financeTrackerCardRegister = async function financeTrackerCardRegister(startDate = '2010-01-01') {
+  const db = getDb();
+  const connection = ftGetConnection(db);
+  const accounts = await ftQueryAll(db, connection, 'Account');
+  const targets = accounts.filter((a) => a.AccountType === 'Credit Card' || /LOC/i.test(String(a.Name || '')));
+  const realm = encodeURIComponent(connection.realm_id);
+  const today = new Date().toISOString().slice(0, 10);
+  const rows = [];
+  for (const account of targets) {
+    const report = await qboRequest(
+      db,
+      connection,
+      `/v3/company/${realm}/reports/GeneralLedger?start_date=${startDate}&end_date=${today}&account=${encodeURIComponent(account.Id)}&columns=${CARD_REGISTER_COLUMNS}&accounting_method=Accrual`
+    );
+    const cols = (report?.Columns?.Column || []).map((c) => c.ColType || c.ColTitle || '');
+    const walk = (section) => {
+      for (const r of section?.Row || []) {
+        if (Array.isArray(r.ColData)) {
+          const line = { account: account.Name, accountId: String(account.Id) };
+          r.ColData.forEach((c, i) => {
+            line[cols[i] || `col${i}`] = c?.value ?? '';
+            if (cols[i] === 'txn_type' && c?.id) line.txnId = String(c.id);
+          });
+          // Beginning-balance rows carry no date; keep them, they are real balance.
+          if (line.tx_date || /beginning balance/i.test(String(line.txn_type || line.tx_date || r.ColData[0]?.value || ''))) rows.push(line);
+        }
+        if (r.Rows) walk(r.Rows);
+      }
+    };
+    walk(report?.Rows);
+  }
+  return {
+    accounts: targets.map((a) => ({ id: String(a.Id), name: a.Name, type: a.AccountType, subType: a.AccountSubType, balance: a.CurrentBalance })),
+    rows,
+    counts: { accounts: targets.length, rows: rows.length },
+  };
+};
