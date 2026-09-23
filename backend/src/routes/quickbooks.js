@@ -3764,48 +3764,229 @@ router.financeTrackerCardActivity = async function financeTrackerCardActivity() 
   };
 };
 
-// ── Card register (2026-09-23) ────────────────────────────────────────────
+// -- Card register (2026-09-23) ----------------------------------------------
 // Every line QuickBooks has ever posted to a credit-card or line-of-credit
-// account, dated and classed, straight off the General Ledger report. The
-// Purchase + JournalEntry feed above cannot see transfers, bank-feed payments
-// or opening balances, which is why its traced paydowns covered only $578K of
-// the $2.06M charged. Finance Tracker builds the payoff-by-project view on this.
+// account, dated and attributed to a project class, all years. Built on the
+// General Ledger report (which sees transfers, bank-feed payments and opening
+// balances the Purchase + JournalEntry feed above cannot). The ledger's own
+// card-side line carries no class, so each transaction is attributed through
+// its other side: purchase expense lines, journal-entry offset lines, the bills
+// a card payment settled, deposit lines. Every transaction is expanded ONCE,
+// and only kept expanded when its lines add back to what the ledger posted —
+// otherwise the ledger lines stand — so the register always sums to the
+// QuickBooks balance. Finance Tracker's payoff-by-project view is built on
+// this. Amounts are signed from the card's point of view: positive = balance
+// up (a charge), negative = balance down (a payment).
 const CARD_REGISTER_COLUMNS = 'tx_date,txn_type,doc_num,name,memo,klass_name,split_acc,debt_amt,credit_amt,subt_nat_amount';
+
+// Split `amount` across `parts` ([className, weight]) in proportion to weight;
+// the last share absorbs rounding so the pieces always add back up exactly.
+function ftApportion(amount, parts) {
+  const r2 = (n) => Math.round(n * 100) / 100;
+  const total = parts.reduce((s, [, w]) => s + Math.abs(w), 0);
+  if (!(total > 0)) return [['', r2(amount)]];
+  const byClass = new Map();
+  for (const [cls, w] of parts) byClass.set(cls || '', (byClass.get(cls || '') || 0) + Math.abs(w));
+  const out = [];
+  let left = r2(amount);
+  const entries = [...byClass.entries()];
+  entries.forEach(([cls, w], i) => {
+    const share = i === entries.length - 1 ? left : r2((amount * w) / total);
+    out.push([cls, share]);
+    left = r2(left - share);
+  });
+  return out;
+}
 
 router.financeTrackerCardRegister = async function financeTrackerCardRegister(startDate = '2010-01-01') {
   const db = getDb();
   const connection = ftGetConnection(db);
+  const r2 = (n) => Math.round(n * 100) / 100;
   const accounts = await ftQueryAll(db, connection, 'Account');
-  const targets = accounts.filter((a) => a.AccountType === 'Credit Card' || /LOC/i.test(String(a.Name || '')));
+  const isLoc = (a) => a.AccountSubType === 'LineOfCredit' || /\bLOC\b|line of credit/i.test(String(a.Name || ''));
+  const targets = accounts.filter((a) => a.AccountType === 'Credit Card' || isLoc(a));
+  const [purchases, journals, billPayments, bills, deposits] = await Promise.all([
+    ftQueryAll(db, connection, 'Purchase'),
+    ftQueryAll(db, connection, 'JournalEntry'),
+    ftQueryAll(db, connection, 'BillPayment'),
+    ftQueryAll(db, connection, 'Bill'),
+    ftQueryAll(db, connection, 'Deposit'),
+  ]);
+  const byId = (list) => new Map(list.map((x) => [String(x.Id), x]));
+  const purchaseById = byId(purchases);
+  const journalById = byId(journals);
+  const billPaymentById = byId(billPayments);
+  const billById = byId(bills);
+  const depositById = byId(deposits);
+  const lineClass = (l) => {
+    const d = l.AccountBasedExpenseLineDetail || l.ItemBasedExpenseLineDetail || l.JournalEntryLineDetail || l.DepositLineDetail || {};
+    return d.ClassRef?.name || '';
+  };
   const realm = encodeURIComponent(connection.realm_id);
   const today = new Date().toISOString().slice(0, 10);
   const rows = [];
+  const unexpanded = [];
   for (const account of targets) {
+    const accountId = String(account.Id);
     const report = await qboRequest(
       db,
       connection,
-      `/v3/company/${realm}/reports/GeneralLedger?start_date=${startDate}&end_date=${today}&account=${encodeURIComponent(account.Id)}&columns=${CARD_REGISTER_COLUMNS}&accounting_method=Accrual`
+      `/v3/company/${realm}/reports/GeneralLedger?start_date=${startDate}&end_date=${today}&account=${encodeURIComponent(accountId)}&columns=${CARD_REGISTER_COLUMNS}&accounting_method=Accrual`
     );
-    const cols = (report?.Columns?.Column || []).map((c) => c.ColType || c.ColTitle || '');
+    const cols = (report?.Columns?.Column || []).map(
+      (c) => (c.MetaData || []).find((m) => m.Name === 'ColKey')?.Value || c.ColType || ''
+    );
+    // 1. Collect the ledger lines, grouped by transaction (a transaction with
+    //    several lines on this account appears once per line).
+    const ledger = [];
     const walk = (section) => {
       for (const r of section?.Row || []) {
-        if (Array.isArray(r.ColData)) {
-          const line = { account: account.Name, accountId: String(account.Id) };
-          r.ColData.forEach((c, i) => {
-            line[cols[i] || `col${i}`] = c?.value ?? '';
-            if (cols[i] === 'txn_type' && c?.id) line.txnId = String(c.id);
+        if (Array.isArray(r.ColData) && r.type === 'Data') {
+          const g = {};
+          r.ColData.forEach((c, i) => { g[cols[i] || `col${i}`] = c?.value ?? ''; if (cols[i] === 'txn_type' && c?.id) g.txnId = String(c.id); });
+          ledger.push({
+            account: account.Name, accountId, date: g.tx_date || '', type: g.txn_type || '', txnId: g.txnId || '',
+            docNum: g.doc_num || '', name: g.name || '', memo: g.memo || '', split: g.split_acc || '', klass: g.klass_name || '',
+            amount: r2(Number(g.credit_amt || 0) - Number(g.debt_amt || 0)),
           });
-          // Beginning-balance rows carry no date; keep them, they are real balance.
-          if (line.tx_date || /beginning balance/i.test(String(line.txn_type || line.tx_date || r.ColData[0]?.value || ''))) rows.push(line);
+        } else if (Array.isArray(r.ColData) && /beginning balance/i.test(String(r.ColData[0]?.value || ''))) {
+          const g = {}; r.ColData.forEach((c, i) => { g[cols[i] || `col${i}`] = c?.value ?? ''; });
+          ledger.push({ account: account.Name, accountId, date: startDate, type: 'Beginning Balance', txnId: '', docNum: '', name: '', memo: '', split: '', klass: '', amount: r2(Number(g.subt_nat_amount || 0)) });
         }
         if (r.Rows) walk(r.Rows);
       }
     };
     walk(report?.Rows);
+    const groups = new Map();
+    for (const line of ledger) {
+      const key = line.txnId ? `${line.type}:${line.txnId}` : `line:${groups.size}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(line);
+    }
+    // 2. Expand each transaction once through its other side.
+    for (const lines of groups.values()) {
+      const base = lines[0];
+      const ledgerTotal = r2(lines.reduce((s, l) => s + l.amount, 0));
+      const kindOf = (amt, up, down) => (amt < 0 ? down : up);
+      const purchase = purchaseById.get(base.txnId);
+      const journal = journalById.get(base.txnId);
+      const billPayment = billPaymentById.get(base.txnId);
+      const deposit = depositById.get(base.txnId);
+      let expanded = null;
+      if (purchase && String(purchase.AccountRef?.value) === accountId) {
+        const sign = purchase.Credit ? -1 : 1;
+        expanded = [];
+        for (const l of purchase.Line || []) {
+          if (l.DetailType === 'SubTotalLineDetail') continue;
+          const d = l.AccountBasedExpenseLineDetail || l.ItemBasedExpenseLineDetail || {};
+          // A line booked to this very card is a wash against itself.
+          if (String(d.AccountRef?.value) === accountId) continue;
+          expanded.push({ ...base, klass: lineClass(l), split: d.AccountRef?.name || base.split, amount: r2(sign * Number(l.Amount || 0)), kind: purchase.Credit ? 'credit' : 'charge' });
+        }
+      } else if (journal) {
+        const mine = [];
+        const others = [];
+        for (const l of journal.Line || []) {
+          const d = l.JournalEntryLineDetail || {};
+          if (String(d.AccountRef?.value) === accountId) mine.push(l);
+          else others.push([lineClass(l), Number(l.Amount || 0)]);
+        }
+        if (mine.length) {
+          expanded = [];
+          for (const l of mine) {
+            const d = l.JournalEntryLineDetail || {};
+            const amt = d.PostingType === 'Credit' ? Number(l.Amount || 0) : -Number(l.Amount || 0);
+            const own = lineClass(l);
+            const classed = others.filter(([cls]) => cls);
+            const parts = own ? [[own, 1]] : classed.length ? classed : [['', 1]];
+            for (const [cls, share] of ftApportion(amt, parts)) expanded.push({ ...base, klass: cls, amount: share, kind: kindOf(amt, 'journal-charge', 'journal-payment') });
+          }
+        }
+      } else if (billPayment) {
+        const parts = [];
+        for (const l of billPayment.Line || []) {
+          for (const ref of l.LinkedTxn || []) {
+            const bill = ref.TxnType === 'Bill' ? billById.get(String(ref.TxnId)) : null;
+            if (!bill) continue;
+            const billTotal = (bill.Line || []).reduce((s, bl) => s + Number(bl.Amount || 0), 0) || 1;
+            for (const bl of bill.Line || []) parts.push([lineClass(bl), (Number(l.Amount || 0) * Number(bl.Amount || 0)) / billTotal]);
+          }
+        }
+        if (parts.length) expanded = ftApportion(ledgerTotal, parts).map(([cls, share]) => ({ ...base, klass: cls, amount: share, kind: kindOf(ledgerTotal, 'bill-charge', 'payment') }));
+      } else if (deposit) {
+        const parts = (deposit.Line || []).filter((l) => String(l.DepositLineDetail?.AccountRef?.value) === accountId).map((l) => [lineClass(l), Number(l.Amount || 0)]);
+        if (parts.length) expanded = ftApportion(ledgerTotal, parts).map(([cls, share]) => ({ ...base, klass: cls, amount: share, kind: kindOf(ledgerTotal, 'draw', 'payment') }));
+      }
+      // 3. Keep the expansion only when it adds back to the ledger.
+      const expandedTotal = expanded ? r2(expanded.reduce((s, l) => s + l.amount, 0)) : null;
+      if (expanded && Math.abs(expandedTotal - ledgerTotal) < 0.01) {
+        rows.push(...expanded.filter((l) => l.amount !== 0));
+      } else {
+        if (expanded) unexpanded.push({ account: account.Name, txnId: base.txnId, type: base.type, date: base.date, ledgerTotal, expandedTotal });
+        for (const l of lines) rows.push({ ...l, kind: l.type === 'Beginning Balance' ? 'opening' : kindOf(l.amount, 'charge', 'payment') });
+      }
+    }
   }
   return {
     accounts: targets.map((a) => ({ id: String(a.Id), name: a.Name, type: a.AccountType, subType: a.AccountSubType, balance: a.CurrentBalance })),
     rows,
-    counts: { accounts: targets.length, rows: rows.length },
+    unexpanded,
+    counts: { accounts: targets.length, rows: rows.length, purchases: purchases.length, journals: journals.length, billPayments: billPayments.length, bills: bills.length, deposits: deposits.length },
   };
+};
+
+// -- Read-only ledger + query (2026-09-23) ------------------------------------
+// Two audit primitives for Finance Tracker, both read-only: the General Ledger
+// of any account (dated, classed lines) and a SELECT-only QuickBooks query.
+// They exist so an audit can look at the book directly instead of guessing
+// from aggregates: e.g. rent deposited without a class, or a card paydown
+// booked as a transfer.
+router.financeTrackerLedger = async function financeTrackerLedger(accountKey, startDate, endDate) {
+  const db = getDb();
+  const connection = ftGetConnection(db);
+  const accounts = await ftQueryAll(db, connection, 'Account');
+  const key = String(accountKey || '').trim().toLowerCase();
+  const account = accounts.find((a) => String(a.Id) === key)
+    || accounts.find((a) => String(a.Name || '').toLowerCase() === key)
+    || accounts.find((a) => String(a.FullyQualifiedName || '').toLowerCase() === key)
+    || accounts.find((a) => String(a.Name || '').toLowerCase().includes(key));
+  if (!account) {
+    const err = new Error(`No QuickBooks account matches "${accountKey}".`);
+    err.statusCode = 404;
+    throw err;
+  }
+  const realm = encodeURIComponent(connection.realm_id);
+  const report = await qboRequest(
+    db,
+    connection,
+    `/v3/company/${realm}/reports/GeneralLedger?start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}&account=${encodeURIComponent(account.Id)}&columns=${CARD_REGISTER_COLUMNS}&accounting_method=Accrual`
+  );
+  const cols = (report?.Columns?.Column || []).map(
+    (c) => (c.MetaData || []).find((m) => m.Name === 'ColKey')?.Value || c.ColType || ''
+  );
+  const rows = [];
+  const walk = (section) => {
+    for (const r of section?.Row || []) {
+      if (Array.isArray(r.ColData) && r.type === 'Data') {
+        const g = {};
+        r.ColData.forEach((c, i) => { g[cols[i] || `col${i}`] = c?.value ?? ''; if (cols[i] === 'txn_type' && c?.id) g.txnId = String(c.id); });
+        rows.push(g);
+      }
+      if (r.Rows) walk(r.Rows);
+    }
+  };
+  walk(report?.Rows);
+  return { account: { id: String(account.Id), name: account.Name, type: account.AccountType, balance: account.CurrentBalance }, rows };
+};
+
+router.financeTrackerQuery = async function financeTrackerQuery(query) {
+  const q = String(query || '').trim();
+  if (!/^select\s/i.test(q) || /;/.test(q)) {
+    const err = new Error('Only a single SELECT statement is allowed.');
+    err.statusCode = 400;
+    throw err;
+  }
+  const db = getDb();
+  const connection = ftGetConnection(db);
+  return qboQuery(db, connection, q);
 };

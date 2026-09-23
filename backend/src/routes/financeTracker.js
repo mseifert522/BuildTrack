@@ -147,4 +147,29 @@ router.get('/card-register', async (_req, res) => {
   }
 });
 
+// General Ledger of one account (id or name), dated and classed. Read-only.
+router.get('/ledger', async (req, res) => {
+  try {
+    const account = String(req.query.account || '').trim();
+    const start = String(req.query.start || '2010-01-01').trim();
+    const end = String(req.query.end || new Date().toISOString().slice(0, 10)).trim();
+    if (!account) return res.status(400).json({ error: 'account is required.' });
+    if (!ISO_DATE.test(start) || !ISO_DATE.test(end)) return res.status(400).json({ error: 'start and end must be YYYY-MM-DD.' });
+    const ledger = await quickBooksRoutes.financeTrackerLedger(account, start, end);
+    res.json({ ...ledger, exportedAt: new Date().toISOString() });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message || 'Failed to export the ledger.' });
+  }
+});
+
+// A single SELECT against the QuickBooks query API. Read-only by construction.
+router.get('/query', async (req, res) => {
+  try {
+    const result = await quickBooksRoutes.financeTrackerQuery(String(req.query.q || ''));
+    res.json({ ...result, exportedAt: new Date().toISOString() });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message || 'Query failed.' });
+  }
+});
+
 module.exports = router;
