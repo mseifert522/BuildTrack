@@ -377,7 +377,7 @@ function Segmented<T extends string>({ value, options, onChange, label }: {
           role="radio"
           aria-checked={value === key}
           onClick={() => onChange(key)}
-          className={`min-h-10 flex-1 rounded-lg px-4 text-sm font-bold transition sm:flex-none ${value === key ? 'bg-white text-gray-950 shadow-sm ring-1 ring-gray-200' : 'text-gray-600 hover:text-gray-900'}`}
+          className={`min-h-10 flex-1 cursor-pointer rounded-lg border px-4 text-sm font-bold transition sm:flex-none ${value === key ? 'border-gray-400 bg-white text-gray-950' : 'border-transparent text-gray-600 hover:bg-gray-200 hover:text-gray-900'}`}
         >
           {text}
         </button>
@@ -438,7 +438,7 @@ function SectionCard({ id, step, title, done, icon, children }: {
   );
 }
 
-function DropZone({ id, kind, title, hint, files, queue, onFiles, onRemove, onDismiss, error, disabled }: {
+function DropZone({ id, kind, title, hint, files, queue, onFiles, onRemove, onDismiss, error, fileErrors = {}, disabled }: {
   id: string;
   kind: Kind;
   title: string;
@@ -449,6 +449,7 @@ function DropZone({ id, kind, title, hint, files, queue, onFiles, onRemove, onDi
   onRemove: (file: UploadedFile) => void;
   onDismiss: (key: string) => void;
   error?: string;
+  fileErrors?: Record<string, string>;
   disabled?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -466,7 +467,7 @@ function DropZone({ id, kind, title, hint, files, queue, onFiles, onRemove, onDi
           type="button"
           onClick={() => inputRef.current?.click()}
           disabled={disabled}
-          className="mt-3 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-gray-900 px-4 text-sm font-bold text-white transition hover:bg-gray-800 disabled:opacity-50"
+          className="mt-3 inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-gray-900 px-4 text-sm font-bold text-white transition hover:bg-[#B7791F] active:bg-[#975A16] disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Upload className="h-4 w-4" />
           Choose file or take photo
@@ -495,11 +496,12 @@ function DropZone({ id, kind, title, hint, files, queue, onFiles, onRemove, onDi
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-bold text-gray-900">{file.original_name}</p>
                 <p className="text-xs text-emerald-800">Uploaded securely · {formatFileSize(file.size_bytes)}</p>
+                {fileErrors[file.id] ? <p role="alert" className="text-xs font-bold text-red-700">{fileErrors[file.id]}</p> : null}
               </div>
               <button
                 type="button"
                 onClick={() => onRemove(file)}
-                className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-white hover:text-red-600"
+                className="flex h-9 w-9 flex-shrink-0 cursor-pointer items-center justify-center rounded-lg text-gray-500 transition hover:bg-red-50 hover:text-red-600"
                 aria-label={`Remove ${file.original_name}`}
               >
                 <X className="h-4 w-4" />
@@ -523,7 +525,7 @@ function DropZone({ id, kind, title, hint, files, queue, onFiles, onRemove, onDi
                 <button
                   type="button"
                   onClick={() => onDismiss(item.key)}
-                  className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-white"
+                  className="flex h-9 w-9 flex-shrink-0 cursor-pointer items-center justify-center rounded-lg text-gray-500 transition hover:bg-white hover:text-gray-900"
                   aria-label={`Dismiss ${item.file.name}`}
                 >
                   <X className="h-4 w-4" />
@@ -586,6 +588,7 @@ export default function VendorSetup() {
   const [errors, setErrors] = useState<FieldErrors>({});
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [queue, setQueue] = useState<QueuedUpload[]>([]);
+  const [fileErrors, setFileErrors] = useState<Record<string, string>>({});
   const [touched, setTouched] = useState(false);
   const [autosave, setAutosave] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [submitting, setSubmitting] = useState(false);
@@ -794,9 +797,14 @@ export default function VendorSetup() {
       const data = await requestJson<{ setup_session?: string }>(`/api/vendor-setup/session/files/${file.id}`, { method: 'DELETE', session: sessionRef.current });
       adoptSession(data.setup_session);
       setFiles(prev => prev.filter(item => item.id !== file.id));
+      setFileErrors(prev => {
+        const next = { ...prev };
+        delete next[file.id];
+        return next;
+      });
     } catch (err: any) {
       if (err.status === 401) sessionExpired();
-      else window.alert(err.message);
+      else setFileErrors(prev => ({ ...prev, [file.id]: err.message || 'That file could not be removed. Please try again.' }));
     }
   };
 
@@ -990,7 +998,7 @@ export default function VendorSetup() {
             <button
               type="submit"
               disabled={verifying || code.length !== 6}
-              className="min-h-11 rounded-xl bg-gray-950 px-6 text-sm font-black text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+              className="min-h-11 cursor-pointer rounded-xl bg-gray-950 px-6 text-sm font-black text-white transition hover:bg-[#B7791F] active:bg-[#975A16] disabled:cursor-not-allowed disabled:bg-gray-500 disabled:opacity-60"
             >
               {verifying ? 'Verifying...' : 'Verify and continue'}
             </button>
@@ -999,7 +1007,7 @@ export default function VendorSetup() {
             type="button"
             onClick={() => sendCode('manual')}
             disabled={sendingCode}
-            className="mt-4 inline-flex min-h-10 items-center gap-2 text-sm font-bold text-gray-700 underline-offset-4 hover:underline disabled:opacity-50"
+            className="mt-4 inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-lg px-2 text-sm font-bold text-gray-700 underline-offset-4 transition hover:bg-gray-100 hover:text-gray-950 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Mail className="h-4 w-4" />
             {sendingCode ? 'Sending...' : 'Email me a new code'}
@@ -1093,6 +1101,7 @@ export default function VendorSetup() {
                 onFiles={addFiles}
                 onRemove={removeFile}
                 onDismiss={dismissQueued}
+                fileErrors={fileErrors}
                 error={errors.w9_files}
               />
               <p className="text-xs text-gray-500">
@@ -1224,6 +1233,7 @@ export default function VendorSetup() {
             onFiles={addFiles}
             onRemove={removeFile}
             onDismiss={dismissQueued}
+            fileErrors={fileErrors}
             error={errors.insurance_files}
           />
           <div className="mt-5 grid gap-4 sm:grid-cols-3">
@@ -1272,6 +1282,7 @@ export default function VendorSetup() {
               onFiles={addFiles}
               onRemove={removeFile}
               onDismiss={dismissQueued}
+              fileErrors={fileErrors}
             />
           </div>
           <div className="mt-5">
@@ -1307,7 +1318,7 @@ export default function VendorSetup() {
             <button
               type="submit"
               disabled={submitting}
-              className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[#0D1117] px-6 text-sm font-black text-white shadow-sm transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#0D1117] px-6 text-sm font-black text-white transition hover:bg-[#B7791F] active:bg-[#975A16] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <LockKeyhole className="h-4 w-4" />}
               {submitting ? 'Submitting securely...' : (

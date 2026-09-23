@@ -759,10 +759,13 @@
   padding: 12px;
 }
 
+/* 1100 = the shared Modal's tier (components/ui.tsx), above the desktop topbar
+   (z 1000) and its dropdowns (1010). At 80 the topbar and its search box painted
+   over the Create/Edit Event dialog and the scrim left the nav undimmed. */
 .ops-modal {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  z-index: 1100;
   display: flex;
   align-items: center;
   justify-content: center;

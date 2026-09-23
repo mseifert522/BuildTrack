@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { CheckCircle2, Copy, FileCheck2, Landmark, Mail, ShieldCheck } from 'lucide-react';
+import { CheckCircle2, Copy, FileCheck2, Landmark, Loader2, Mail, ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../lib/api';
 import { Modal } from './ui';
@@ -101,7 +101,8 @@ export default function VendorSetupInviteModal({ isOpen, onClose, onSent }: Prop
               <button
                 type="button"
                 onClick={copyLink}
-                className="inline-flex h-8 flex-shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2.5 text-xs font-black text-gray-700 hover:bg-gray-50"
+                className="bt-vs-btn flex-shrink-0"
+                title="Copy the secure vendor link"
               >
                 <Copy className="h-3.5 w-3.5" />
                 Copy
@@ -111,18 +112,18 @@ export default function VendorSetupInviteModal({ isOpen, onClose, onSent }: Prop
               Only send this link to the vendor. It expires in 14 days; the vendor also confirms a code sent to {result.sent_to}.
             </p>
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-col-reverse gap-2 sm:flex-row">
             <button
               type="button"
               onClick={() => { setResult(null); setForm(emptyForm); }}
-              className="flex-1 rounded-xl border border-gray-300 py-2.5 text-sm font-bold text-gray-700 hover:bg-gray-50"
+              className="bt-vs-btn bt-vs-btn--lg sm:flex-1"
             >
               Set up another vendor
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 rounded-xl bg-blue-600 py-2.5 text-sm font-black text-white hover:bg-blue-700"
+              className="bt-vs-btn bt-vs-btn--lg bt-vs-btn--primary sm:flex-1"
             >
               Done
             </button>
@@ -132,7 +133,7 @@ export default function VendorSetupInviteModal({ isOpen, onClose, onSent }: Prop
         <form onSubmit={submit} className="space-y-5" noValidate>
           <div>
             <p className="mb-2 block text-sm font-bold text-gray-700">Vendor type</p>
-            <div className="inline-flex rounded-lg border border-gray-300 bg-white p-0.5" role="radiogroup" aria-label="Vendor type">
+            <div className="bt-vs-toggle" role="radiogroup" aria-label="Vendor type">
               {(['contractor', 'supplier'] as const).map(type => (
                 <button
                   key={type}
@@ -140,7 +141,6 @@ export default function VendorSetupInviteModal({ isOpen, onClose, onSent }: Prop
                   role="radio"
                   aria-checked={form.vendor_type === type}
                   onClick={() => setForm(prev => ({ ...prev, vendor_type: type }))}
-                  className={`rounded-md px-4 py-1.5 text-xs font-black transition ${form.vendor_type === type ? 'bg-slate-950 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
                 >
                   {type === 'contractor' ? 'Contractor' : 'Supplier'}
                 </button>
@@ -188,19 +188,20 @@ export default function VendorSetupInviteModal({ isOpen, onClose, onSent }: Prop
             <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</div>
           ) : null}
 
-          <div className="flex gap-3">
+          <div className="flex flex-col-reverse gap-2 sm:flex-row">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 rounded-xl border border-gray-300 py-2.5 text-sm font-bold text-gray-700 hover:bg-gray-50"
+              className="bt-vs-btn bt-vs-btn--lg sm:flex-1"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={sending}
-              className="flex-1 rounded-xl bg-blue-600 py-2.5 text-sm font-black text-white hover:bg-blue-700 disabled:opacity-50"
+              className="bt-vs-btn bt-vs-btn--lg bt-vs-btn--primary sm:flex-1"
             >
+              {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
               {sending ? 'Sending...' : 'Send Setup Email'}
             </button>
           </div>

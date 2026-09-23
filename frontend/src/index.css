@@ -3529,3 +3529,67 @@ textarea,
 .bt-desktop-shell.bt-desktop-shell .bt-hr-candidate-row:active .text-slate-500 {
   color: #d8e2ec !important;
 }
+
+/* ── Set Up New Vendor buttons (Contractors page, its dialogs, vendor documents) ──
+   Three app-wide rules make plain utility classes useless on these buttons: the
+   Quiet Carbon block repaints bg-white/bg-slate-* with !important (so hover:bg-*
+   never shows), the unlayered `button { font: inherit }` above beats text-xs, and
+   Tailwind v4 leaves buttons on the arrow cursor. These classes carry their own
+   cursor, size and hover/pressed/focus/disabled colours instead. flat-ui.css strips
+   shadows and gradients, so every state change here is a solid colour. */
+.bt-vs-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #3b4455;
+  border-radius: 8px;
+  background-color: #1c1f29;
+  color: #e5e7eb;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.1;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.bt-vs-btn svg { flex-shrink: 0; }
+.bt-vs-btn:hover:not(:disabled):not([aria-disabled="true"]) { background-color: #2b3244; border-color: #67e8f9; color: #ffffff; }
+.bt-vs-btn:active:not(:disabled):not([aria-disabled="true"]) { background-color: #36405a; }
+.bt-vs-btn:disabled,
+.bt-vs-btn[aria-disabled="true"] { cursor: not-allowed; opacity: 0.55; }
+/* Large buttons may carry an email address ("Yes, send to ..."), which has no
+   break opportunities, so let it wrap anywhere instead of overflowing on phones. */
+.bt-vs-btn--lg { min-height: 42px; min-width: 0; max-width: 100%; padding: 8px 18px; font-size: 14px; white-space: normal; overflow-wrap: anywhere; text-align: center; }
+.bt-vs-btn--block { width: 100%; }
+.bt-vs-btn--primary { background-color: #2563eb; border-color: #3b82f6; color: #ffffff; }
+.bt-vs-btn--primary:hover:not(:disabled):not([aria-disabled="true"]) { background-color: #1d4ed8; border-color: #93c5fd; color: #ffffff; }
+.bt-vs-btn--primary:active:not(:disabled):not([aria-disabled="true"]) { background-color: #1e40af; }
+.bt-vs-btn--danger { background-color: rgba(239, 68, 68, 0.10); border-color: rgba(248, 113, 113, 0.55); color: #fca5a5; }
+.bt-vs-btn--danger:hover:not(:disabled):not([aria-disabled="true"]) { background-color: #dc2626; border-color: #f87171; color: #ffffff; }
+.bt-vs-btn--danger:active:not(:disabled):not([aria-disabled="true"]) { background-color: #b91c1c; }
+.bt-vs-btn--danger-solid { background-color: #dc2626; border-color: #ef4444; color: #ffffff; }
+.bt-vs-btn--danger-solid:hover:not(:disabled):not([aria-disabled="true"]) { background-color: #b91c1c; border-color: #fca5a5; color: #ffffff; }
+.bt-vs-btn--success { background-color: rgba(16, 185, 129, 0.10); border-color: rgba(52, 211, 153, 0.55); color: #6ee7b7; }
+.bt-vs-btn--success:hover:not(:disabled):not([aria-disabled="true"]) { background-color: #047857; border-color: #34d399; color: #ffffff; }
+.bt-vs-btn--ghost { border-color: transparent; background-color: transparent; color: #cbd5e1; }
+.bt-vs-btn--ghost:hover:not(:disabled):not([aria-disabled="true"]) { background-color: #2b3244; border-color: #3b4455; color: #ffffff; }
+.bt-vs-btn--icon { min-width: 34px; padding: 0 8px; }
+.bt-vs-toggle { display: inline-flex; border: 1px solid #3b4455; border-radius: 8px; background-color: #14171e; padding: 2px; }
+.bt-vs-toggle > button {
+  min-height: 30px;
+  padding: 0 14px;
+  border-radius: 6px;
+  color: #a1a1aa;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.bt-vs-toggle > button:hover { background-color: #242834; color: #ffffff; }
+.bt-vs-toggle > button[aria-checked="true"] { background-color: #2563eb; color: #ffffff; }
+.bt-vs-panel-toggle { cursor: pointer; border-radius: 8px; transition: background-color 0.15s ease; }
+.bt-vs-panel-toggle:hover { background-color: #242834; }

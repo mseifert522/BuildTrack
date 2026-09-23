@@ -497,7 +497,9 @@ export default function Layout({ children }: LayoutProps) {
 
       {/* Mobile Sidebar Overlay */}
       {sidebarOpen && (
-        <div className="fixed inset-0 z-40 lg:hidden">
+        // 1050: above the topbar (1000) and its dropdowns (1010) so the scrim covers
+        // the whole screen, below dialogs (1100).
+        <div className="fixed inset-0 z-[1050] lg:hidden">
           <div
             className="absolute inset-0"
             style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}

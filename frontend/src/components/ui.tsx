@@ -242,7 +242,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md', descripti
             <h3 id={titleId} className="text-base font-bold text-slate-950">{title}</h3>
             {description && <p id={descriptionId} className="mt-1 text-sm text-slate-500">{description}</p>}
           </div>
-          <button onClick={onClose} className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700" aria-label={`Close ${title}`}>
+          <button type="button" onClick={onClose} className="cursor-pointer rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700" aria-label={`Close ${title}`}>
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>

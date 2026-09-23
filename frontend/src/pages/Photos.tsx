@@ -581,11 +581,14 @@ export default function Photos() {
       )}
 
       {lightbox && (
-        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4" onClick={() => setLightbox(null)}>
+        // Lightbox tier (1200): at z-50 the desktop topbar covered the top of the
+        // photo and its close button. data-no-image-lightbox keeps the global
+        // lightbox from opening a second copy when the enlarged photo is clicked.
+        <div className="fixed inset-0 z-[1200] bg-black/90 flex items-center justify-center p-4" data-no-image-lightbox="true" onClick={() => setLightbox(null)}>
           {lightbox.isVideo ? (
             <video src={lightbox.src} controls autoPlay className="max-w-full max-h-full rounded-lg" onClick={e => e.stopPropagation()} />
           ) : (
-            <img src={lightbox.src} alt="" className="max-w-full max-h-full object-contain rounded-lg" />
+            <img src={lightbox.src} alt="" className="max-w-full max-h-full object-contain rounded-lg" onClick={e => e.stopPropagation()} />
           )}
           <button className="absolute top-4 right-4 text-white/70 hover:text-white" onClick={() => setLightbox(null)}>
             <X className="w-8 h-8" />
@@ -643,7 +646,9 @@ function PhotoDescriptionModal({
 
   return (
     <>
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
+    {/* Shared Modal tier (1100): above the desktop topbar (1000), below the
+        PhotoMarkupModal (1150) that opens from here. */}
+    <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
       <div className="w-full max-w-3xl overflow-hidden rounded-xl border border-amber-400/40 bg-slate-950 shadow-2xl" onClick={event => event.stopPropagation()}>
         <div
           className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3"

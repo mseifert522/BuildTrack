@@ -3,6 +3,7 @@ import { Download, Eye, FileText, Lock, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../lib/api';
 import { Modal } from './ui';
+import ConfirmDialog from './ConfirmDialog';
 import { formatEasternDate } from '../lib/time';
 import { formatFileSize, type VendorSetupDocument, type VendorSetupInvite } from '../lib/vendorSetup';
 
@@ -20,6 +21,8 @@ export default function VendorSetupDocuments({ contractorId }: { contractorId: s
   const [data, setData] = useState<DocumentsPayload | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [viewer, setViewer] = useState<{ doc: VendorSetupDocument; url: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<VendorSetupDocument | null>(null);
+  const [deleteError, setDeleteError] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -88,15 +91,18 @@ export default function VendorSetupDocuments({ contractorId }: { contractorId: s
     }
   };
 
-  const remove = async (doc: VendorSetupDocument) => {
-    if (!window.confirm(`Delete "${doc.original_name}" (${doc.kind_label}) from this vendor? This cannot be undone.`)) return;
+  const remove = async () => {
+    const doc = deleteTarget;
+    if (!doc) return;
     setBusyId(doc.id);
+    setDeleteError('');
     try {
       await api.delete(`/vendor-setup/files/${doc.id}`);
       toast.success('Document deleted');
+      setDeleteTarget(null);
       await load();
     } catch (err) {
-      toast.error(await readError(err, 'Could not delete the document'));
+      setDeleteError(await readError(err, 'Could not delete the document'));
     } finally {
       setBusyId(null);
     }
@@ -136,7 +142,8 @@ export default function VendorSetupDocuments({ contractorId }: { contractorId: s
                         type="button"
                         onClick={() => view(doc)}
                         disabled={busyId === doc.id}
-                        className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-black text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                        className="bt-vs-btn"
+                        title={`Open ${doc.original_name}`}
                       >
                         <Eye className="h-3.5 w-3.5" />
                         View
@@ -146,7 +153,8 @@ export default function VendorSetupDocuments({ contractorId }: { contractorId: s
                       type="button"
                       onClick={() => download(doc)}
                       disabled={busyId === doc.id}
-                      className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-black text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                      className="bt-vs-btn"
+                      title={`Download ${doc.original_name}`}
                     >
                       <Download className="h-3.5 w-3.5" />
                       Download
@@ -161,9 +169,9 @@ export default function VendorSetupDocuments({ contractorId }: { contractorId: s
                 {data.can_delete ? (
                   <button
                     type="button"
-                    onClick={() => remove(doc)}
+                    onClick={() => { setDeleteError(''); setDeleteTarget(doc); }}
                     disabled={busyId === doc.id}
-                    className="inline-flex min-h-8 items-center gap-1 rounded-lg px-2 text-xs font-black text-red-500 hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
+                    className="bt-vs-btn bt-vs-btn--danger bt-vs-btn--icon"
                     title="Delete document"
                     aria-label={`Delete ${doc.original_name}`}
                   >
@@ -199,7 +207,7 @@ export default function VendorSetupDocuments({ contractorId }: { contractorId: s
               <button
                 type="button"
                 onClick={() => download(viewer.doc)}
-                className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-black text-gray-700 hover:bg-gray-50"
+                className="bt-vs-btn"
               >
                 <Download className="h-3.5 w-3.5" />
                 Download
@@ -208,6 +216,29 @@ export default function VendorSetupDocuments({ contractorId }: { contractorId: s
           </>
         ) : null}
       </Modal>
+
+      <ConfirmDialog
+        isOpen={Boolean(deleteTarget)}
+        title="Delete this document?"
+        confirmLabel="Yes, delete document"
+        cancelLabel="Keep it"
+        busyLabel="Deleting..."
+        tone="danger"
+        busy={Boolean(deleteTarget && busyId === deleteTarget.id)}
+        error={deleteError}
+        onConfirm={remove}
+        onCancel={() => setDeleteTarget(null)}
+      >
+        {deleteTarget ? (
+          <div className="space-y-3 text-sm leading-6 text-gray-700">
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-3.5">
+              <p className="text-[11px] font-black uppercase tracking-wide text-amber-700">{deleteTarget.kind_label}</p>
+              <p className="break-all font-black text-gray-900">{deleteTarget.original_name}</p>
+            </div>
+            <p>The file is permanently erased from BuildTrack. This cannot be undone.</p>
+          </div>
+        ) : null}
+      </ConfirmDialog>
     </div>
   );
 }

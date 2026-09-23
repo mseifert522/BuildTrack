@@ -8598,7 +8598,9 @@ function PhotoNoteModal({
 
   return (
     <>
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
+    {/* Shared Modal tier (1100): above the desktop topbar (1000), below the
+        PhotoMarkupModal (1150) that opens from here. */}
+    <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
       <div className="w-full max-w-3xl overflow-hidden rounded-xl border border-amber-400/40 bg-slate-950 shadow-2xl" onClick={event => event.stopPropagation()}>
         <div
           className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3"

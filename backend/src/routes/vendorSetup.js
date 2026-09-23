@@ -413,6 +413,32 @@ router.post('/invites', authenticate, authorize(...MANAGEMENT_ROLES), async (req
   }
 });
 
+// A vendor who already started keeps what they typed, but fields that still hold
+// only our prefill follow a correction made on resend - otherwise their saved draft
+// would put the old company name / email straight back on the form.
+function syncDraftPrefill(db, inviteId, changes) {
+  const row = db.prepare('SELECT data_encrypted FROM vendor_setup_drafts WHERE invite_id = ?').get(inviteId);
+  if (!row) return;
+  try {
+    const draft = decryptJson(row.data_encrypted) || {};
+    let touched = false;
+    for (const [field, [from, to]] of Object.entries(changes)) {
+      if (from === to) continue;
+      const current = String(draft[field] ?? '').trim();
+      if (!current || current.toLowerCase() === String(from || '').trim().toLowerCase()) {
+        draft[field] = to;
+        touched = true;
+      }
+    }
+    if (touched) {
+      db.prepare('UPDATE vendor_setup_drafts SET data_encrypted = ?, updated_at = ? WHERE invite_id = ?')
+        .run(encryptJson(draft), nowIso(), inviteId);
+    }
+  } catch (err) {
+    console.error('[vendor-setup] draft prefill sync failed:', err?.message || err);
+  }
+}
+
 router.post('/invites/:id/resend', authenticate, authorize(...MANAGEMENT_ROLES), async (req, res) => {
   try {
     const db = getDb();
@@ -423,6 +449,9 @@ router.post('/invites/:id/resend', authenticate, authorize(...MANAGEMENT_ROLES),
 
     const nextEmail = req.body?.email !== undefined ? normalizeEmail(req.body.email) : invite.email;
     if (!nextEmail) throw httpError(400, 'Enter a valid company email address');
+    // The resend dialog shows both for confirmation and lets staff correct either.
+    const nextCompany = req.body?.company_name !== undefined ? cleanString(req.body.company_name, 150) : invite.company_name;
+    if (!nextCompany) throw httpError(400, 'Enter the company name');
     if (nextEmail !== invite.email) {
       const other = db.prepare(`
         SELECT id, expires_at FROM vendor_setup_invites
@@ -435,35 +464,73 @@ router.post('/invites/:id/resend', authenticate, authorize(...MANAGEMENT_ROLES),
     // cannot be re-sent). A vendor already verified keeps working in their session.
     const rawToken = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + INVITE_DAYS * 24 * 60 * 60 * 1000).toISOString();
-    const previous = { token_hash: invite.token_hash, expires_at: invite.expires_at, email: invite.email };
+    const previous = {
+      token_hash: invite.token_hash,
+      expires_at: invite.expires_at,
+      email: invite.email,
+      company_name: invite.company_name,
+      last_sent_at: invite.last_sent_at,
+      contractor_id: invite.contractor_id,
+      match_kind: invite.match_kind,
+    };
+    // A corrected name or email can point at a different existing vendor (or none),
+    // so the match made when the request was created is redone.
+    const identityChanged = nextEmail !== invite.email || nextCompany !== invite.company_name;
+    const match = identityChanged ? findMatchingVendor(db, { email: nextEmail, companyName: nextCompany }) : null;
+    const nextContractorId = identityChanged ? (match?.id || null) : invite.contractor_id;
+    const nextMatchKind = identityChanged ? (match?.match_kind || null) : invite.match_kind;
     const now = nowIso();
     db.prepare(`
       UPDATE vendor_setup_invites
-      SET token_hash = ?, expires_at = ?, email = ?, send_count = send_count + 1, last_sent_at = ?, updated_at = ?
+      SET token_hash = ?, expires_at = ?, email = ?, company_name = ?, contractor_id = ?, match_kind = ?,
+          send_count = send_count + 1, last_sent_at = ?, updated_at = ?
       WHERE id = ?
-    `).run(tokenHash(rawToken), expiresAt, nextEmail, now, now, invite.id);
+    `).run(tokenHash(rawToken), expiresAt, nextEmail, nextCompany, nextContractorId, nextMatchKind, now, now, invite.id);
 
     let setupUrl;
     try {
-      setupUrl = await sendInviteEmailOrThrow({ ...invite, email: nextEmail, expires_at: expiresAt }, rawToken);
+      setupUrl = await sendInviteEmailOrThrow({ ...invite, email: nextEmail, company_name: nextCompany, expires_at: expiresAt }, rawToken);
     } catch (mailErr) {
+      // Only undo our own update: if an already-verified vendor submitted while the
+      // email was in flight, their submission (and its contractor_id) must stand.
       db.prepare(`
-        UPDATE vendor_setup_invites SET token_hash = ?, expires_at = ?, email = ?, send_count = send_count - 1, updated_at = ?
-        WHERE id = ?
-      `).run(previous.token_hash, previous.expires_at, previous.email, nowIso(), invite.id);
+        UPDATE vendor_setup_invites
+        SET token_hash = ?, expires_at = ?, email = ?, company_name = ?, contractor_id = ?, match_kind = ?,
+            send_count = send_count - 1, last_sent_at = ?, updated_at = ?
+        WHERE id = ? AND token_hash = ? AND status != 'submitted'
+      `).run(previous.token_hash, previous.expires_at, previous.email, previous.company_name, previous.contractor_id, previous.match_kind, previous.last_sent_at, nowIso(), invite.id, tokenHash(rawToken));
       console.error('[vendor-setup] resend email failed:', mailErr?.message || mailErr);
       throw httpError(502, 'The setup email could not be sent. Check the email address and try again.');
     }
+
+    syncDraftPrefill(db, invite.id, {
+      company_name: [invite.company_name, nextCompany],
+      account_holder_name: [invite.company_name, nextCompany],
+      email: [invite.email, nextEmail],
+    });
 
     logActivity({
       userId: req.user.id,
       action: 'vendor_setup_resent',
       entityType: 'vendor_setup_invite',
       entityId: invite.id,
-      details: { company_name: invite.company_name, email: nextEmail, email_changed: nextEmail !== invite.email },
+      details: {
+        company_name: nextCompany,
+        email: nextEmail,
+        email_changed: nextEmail !== invite.email,
+        company_name_changed: nextCompany !== invite.company_name,
+        previous_company_name: nextCompany !== invite.company_name ? invite.company_name : undefined,
+        matched_vendor: identityChanged ? (match?.vendor_name || null) : undefined,
+      },
     });
 
-    res.json({ invite: inviteShape(loadInvite(db, invite.id), req.user), setup_url: setupUrl, sent_to: nextEmail, cc: officeEmail() });
+    res.json({
+      invite: inviteShape(loadInvite(db, invite.id), req.user),
+      setup_url: setupUrl,
+      sent_to: nextEmail,
+      cc: officeEmail(),
+      matched_vendor: match ? { id: match.id, name: match.vendor_name, match_kind: match.match_kind } : null,
+    });
   } catch (err) {
     sendError(res, err, 'Unable to resend the vendor setup request');
   }
