@@ -3665,14 +3665,14 @@ function buildCardActivity({ accounts, purchases, journals }) {
     byMonth.set(month, (byMonth.get(month) || 0) + amount);
   };
   const addCharge = (card, date, label, amount) => {
-    const key = `${card} ${date.slice(0, 7)} ${label}`;
+    const key = `${card}${date.slice(0, 7)}${label}`;
     const row = charges.get(key) || { card, month: date.slice(0, 7), label, amount: 0 };
     row.amount += amount;
     charges.set(key, row);
     move(card, date, amount);
   };
   const addPayment = (card, ref, date, label, amount) => {
-    const key = `${card} ${ref}`;
+    const key = `${card}${ref}`;
     const row = payments.get(key) || { card, ref, date, label, amount: 0 };
     row.amount += amount;
     payments.set(key, row);
@@ -3805,13 +3805,13 @@ router.financeTrackerCardRegister = async function financeTrackerCardRegister(st
   const accounts = await ftQueryAll(db, connection, 'Account');
   const isLoc = (a) => a.AccountSubType === 'LineOfCredit' || /\bLOC\b|line of credit/i.test(String(a.Name || ''));
   const targets = accounts.filter((a) => a.AccountType === 'Credit Card' || isLoc(a));
-  const [purchases, journals, billPayments, bills, deposits] = await Promise.all([
-    ftQueryAll(db, connection, 'Purchase'),
-    ftQueryAll(db, connection, 'JournalEntry'),
-    ftQueryAll(db, connection, 'BillPayment'),
-    ftQueryAll(db, connection, 'Bill'),
-    ftQueryAll(db, connection, 'Deposit'),
-  ]);
+  // One scan at a time: five parallel paginated scans on top of the app's own
+  // sync is what tripped QuickBooks' concurrency limit (429) on 2026-09-23.
+  const purchases = await ftQueryAll(db, connection, 'Purchase');
+  const journals = await ftQueryAll(db, connection, 'JournalEntry');
+  const billPayments = await ftQueryAll(db, connection, 'BillPayment');
+  const bills = await ftQueryAll(db, connection, 'Bill');
+  const deposits = await ftQueryAll(db, connection, 'Deposit');
   const byId = (list) => new Map(list.map((x) => [String(x.Id), x]));
   const purchaseById = byId(purchases);
   const journalById = byId(journals);
