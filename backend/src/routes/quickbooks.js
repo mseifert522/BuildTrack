@@ -3627,7 +3627,7 @@ router.financeTrackerTransactionsSince = async function financeTrackerTransactio
 router.financeTrackerBalanceSheetByClass = async function financeTrackerBalanceSheetByClass() {
   const db = getDb();
   const connection = ftGetConnection(db);
-  return qboRequest(db, connection, `/v3/company/${encodeURIComponent(connection.realm_id)}/reports/BalanceSheet?summarize_column_by=Classes&accounting_method=Accrual`);
+  return qboRequest(db, connection, `/v3/company/${encodeURIComponent(connection.realm_id)}/reports/BalanceSheet?summarize_column_by=Classes&accounting_method=Accrual&date_macro=Today`);
 };
 
 router.financeTrackerProfitAndLossByClass = async function financeTrackerProfitAndLossByClass(startDate, endDate) {
