@@ -2,6 +2,7 @@ const nodemailer = require('nodemailer');
 const fs = require('fs');
 const path = require('path');
 const PDFDocument = require('pdfkit');
+const { NUD_COMPANY, PAYMENT_POLICY } = require('./companyInfo');
 
 function isEmailConfigured() {
   return Boolean(process.env.SMTP_USER && process.env.SMTP_PASS && process.env.SMTP_PASS !== 'REPLACE_WITH_RESEND_API_KEY');
@@ -1013,8 +1014,281 @@ async function sendPunchListEmail({ contractorName, contactName, email, ccEmail,
   });
 }
 
+// ── Set Up New Vendor (vendorSetup.js) ──────────────────────────────────────
+// The company block and payment policy come from utils/companyInfo.js so the
+// emails and the public portal can never disagree.
+
+function vendorSetupDateLabel(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'America/Detroit' });
+}
+
+function companyContactHtml() {
+  return `
+    <div style="background:#F9FAFB; border:1px solid #E5E7EB; border-radius:12px; padding:16px 18px; margin:0 0 18px;">
+      <p style="font-size:12px; color:#6B7280; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin:0 0 8px;">${escapeHtml(NUD_COMPANY.name)}</p>
+      <p style="font-size:13px; color:#374151; line-height:1.75; margin:0;">
+        ${escapeHtml(NUD_COMPANY.street)}<br />
+        ${escapeHtml(NUD_COMPANY.cityStateZip)}<br />
+        Phone: <a href="${escapeHtml(NUD_COMPANY.phoneHref)}" style="color:#111827; font-weight:700; text-decoration:none;">${escapeHtml(NUD_COMPANY.phone)}</a><br />
+        Email: <a href="mailto:${escapeHtml(NUD_COMPANY.email)}" style="color:#111827; font-weight:700;">${escapeHtml(NUD_COMPANY.email)}</a><br />
+        Office hours: ${escapeHtml(NUD_COMPANY.hours)}
+      </p>
+    </div>`;
+}
+
+function companyContactText() {
+  return [
+    NUD_COMPANY.name,
+    NUD_COMPANY.street,
+    NUD_COMPANY.cityStateZip,
+    `Phone: ${NUD_COMPANY.phone}`,
+    `Email: ${NUD_COMPANY.email}`,
+    `Office hours: ${NUD_COMPANY.hours}`,
+  ].join('\n');
+}
+
+function paymentPolicyHtml() {
+  return `
+    <div style="background:#FFFBEB; border:1px solid #FDE68A; border-radius:12px; padding:18px; margin:0 0 20px;">
+      <p style="font-size:12px; color:#92400E; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin:0 0 4px;">${escapeHtml(PAYMENT_POLICY.title)}</p>
+      <p style="font-size:12px; color:#92400E; font-weight:700; margin:0 0 12px;">Please read before any work begins</p>
+      <p style="font-size:14px; color:#111827; font-weight:700; line-height:1.6; margin:0 0 10px;">${escapeHtml(PAYMENT_POLICY.greeting)}</p>
+      ${PAYMENT_POLICY.paragraphs.map(paragraph => `<p style="font-size:14px; color:#374151; line-height:1.65; margin:0 0 10px;">${escapeHtml(paragraph)}</p>`).join('')}
+    </div>`;
+}
+
+async function sendVendorSetupInviteEmail({ companyName, email, ccEmail, setupUrl, expiresAt }) {
+  if (!email) throw new Error('Missing vendor email');
+  const transporter = createTransporter();
+  const name = String(companyName || '').trim();
+  const safeUrl = escapeHtml(setupUrl);
+  const expires = vendorSetupDateLabel(expiresAt);
+
+  const html = emailWrapper(`
+    <h2 style="color:#111827; font-size:22px; font-weight:800; margin:0 0 10px;">Welcome to New Urban Development</h2>
+    <p style="color:#374151; font-size:14px; line-height:1.65; margin:0 0 14px;">
+      ${name ? `Hello ${escapeHtml(name)},` : 'Hello,'}
+    </p>
+    <p style="color:#374151; font-size:14px; line-height:1.65; margin:0 0 18px;">
+      Thank you for choosing to work with New Urban Development. We are setting you up as an approved vendor so that we can process your invoices and pay you by direct deposit. To complete your setup, please provide the following three items through our secure vendor portal:
+    </p>
+    <div style="background:#F9FAFB; border:1px solid #E5E7EB; border-radius:12px; padding:16px 18px; margin:0 0 20px;">
+      <p style="font-size:12px; color:#6B7280; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin:0 0 10px;">What we need from you</p>
+      <ol style="color:#374151; font-size:14px; line-height:1.65; margin:0; padding-left:20px;">
+        <li style="margin:0 0 8px;"><strong style="color:#111827;">Form W-9</strong> &mdash; complete it online in the portal, or upload a signed copy (PDF, photo, or Word document).</li>
+        <li style="margin:0 0 8px;"><strong style="color:#111827;">Certificate of insurance</strong> &mdash; upload your current certificate of insurance.</li>
+        <li style="margin:0;"><strong style="color:#111827;">ACH direct deposit information</strong> &mdash; your bank routing number and checking account number, along with your authorization for New Urban Development to deposit payments directly into your account.</li>
+      </ol>
+    </div>
+    <a href="${safeUrl}" style="display:block; text-align:center; background:${BRAND.color}; color:#ffffff; padding:15px 24px; border-radius:12px; text-decoration:none; font-weight:800; font-size:15px; margin:0 0 16px;">
+      Start Secure Vendor Setup
+    </a>
+    <div style="background:#ECFDF5; border:1px solid #A7F3D0; border-radius:12px; padding:14px 16px; margin:0 0 20px;">
+      <p style="font-size:12px; color:#047857; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin:0 0 6px;">This is a secure portal</p>
+      <p style="font-size:13px; color:#065F46; line-height:1.6; margin:0;">
+        Your information goes directly to New Urban Development. For your protection, we will email you a 6-digit verification code when you open the link, and your tax and banking details are encrypted when they are stored.
+      </p>
+    </div>
+    ${paymentPolicyHtml()}
+    <p style="color:#6B7280; font-size:12px; line-height:1.6; margin:0 0 18px;">
+      This link is unique to ${name ? escapeHtml(name) : 'your company'}${expires ? ` and expires on ${escapeHtml(expires)}` : ''}. If the button does not open, copy and paste this link into your browser:<br />
+      <span style="word-break:break-all; color:#111827;">${safeUrl}</span>
+    </p>
+    <p style="color:#374151; font-size:14px; line-height:1.65; margin:0 0 12px;">
+      If you have any questions, simply reply to this email or call our office. We look forward to working with you.
+    </p>
+    ${companyContactHtml()}
+    <p style="color:#374151; font-size:14px; line-height:1.6; margin:0;">
+      Sincerely,<br />
+      <strong style="color:#111827;">The New Urban Development Team</strong>
+    </p>
+  `);
+
+  const text = [
+    'Welcome to New Urban Development',
+    '',
+    name ? `Hello ${name},` : 'Hello,',
+    '',
+    'Thank you for choosing to work with New Urban Development. We are setting you up as an approved vendor so that we can process your invoices and pay you by direct deposit. To complete your setup, please provide the following three items through our secure vendor portal:',
+    '',
+    '1. Form W-9 - complete it online in the portal, or upload a signed copy (PDF, photo, or Word document).',
+    '2. Certificate of insurance - upload your current certificate of insurance.',
+    '3. ACH direct deposit information - your bank routing number and checking account number, along with your authorization for New Urban Development to deposit payments directly into your account.',
+    '',
+    `Start your secure vendor setup: ${setupUrl}`,
+    expires ? `This link expires on ${expires}.` : '',
+    '',
+    'This is a secure portal. Your information goes directly to New Urban Development. For your protection, we will email you a 6-digit verification code when you open the link, and your tax and banking details are encrypted when they are stored.',
+    '',
+    PAYMENT_POLICY.title.toUpperCase(),
+    PAYMENT_POLICY.greeting,
+    ...PAYMENT_POLICY.paragraphs.flatMap(paragraph => ['', paragraph]),
+    '',
+    'If you have any questions, simply reply to this email or call our office. We look forward to working with you.',
+    '',
+    companyContactText(),
+    '',
+    'Sincerely,',
+    'The New Urban Development Team',
+  ].join('\n');
+
+  await sendBrandedMail(transporter, {
+    from: process.env.EMAIL_FROM || brandedFrom(),
+    to: email,
+    cc: ccEmail || undefined,
+    replyTo: NUD_COMPANY.email,
+    subject: 'Welcome to New Urban Development - secure vendor setup',
+    html,
+    text,
+  });
+}
+
+async function sendVendorSetupCodeEmail({ companyName, email, code }) {
+  const transporter = createTransporter();
+  const name = String(companyName || '').trim();
+  const html = emailWrapper(`
+    <div style="text-align:center; margin:0 0 22px;">
+      <div style="display:inline-block; background:#ECFDF5; color:#047857; border:1px solid #A7F3D0; border-radius:999px; padding:6px 12px; font-size:11px; font-weight:800; letter-spacing:1px; text-transform:uppercase;">
+        Secure verification
+      </div>
+    </div>
+    <h2 style="color:#111827; font-size:22px; font-weight:800; text-align:center; margin:0 0 10px;">Your vendor setup code</h2>
+    <p style="color:#6B7280; font-size:14px; line-height:1.6; text-align:center; margin:0 0 24px;">
+      ${name ? `Hello ${escapeHtml(name)}, enter` : 'Enter'} this code to open your New Urban Development vendor setup form. The code expires in 10 minutes.
+    </p>
+    <div style="text-align:center; margin:0 0 18px;">
+      <span style="display:inline-block; background:#111827; border-radius:16px; padding:18px 34px; font-size:34px; font-weight:900; letter-spacing:9px; color:#ffffff; font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;">
+        ${escapeHtml(code)}
+      </span>
+    </div>
+    <p style="color:#9CA3AF; font-size:12px; text-align:center; margin:0;">
+      If you did not open the vendor setup link, you can ignore this email.
+    </p>
+  `);
+
+  await sendBrandedMail(transporter, {
+    from: process.env.EMAIL_FROM || brandedFrom(),
+    to: email,
+    replyTo: NUD_COMPANY.email,
+    subject: `Your New Urban Development vendor setup code: ${code}`,
+    html,
+    text: `Your New Urban Development vendor setup code is ${code}. It expires in 10 minutes.`,
+  });
+}
+
+// To the office. Deliberately carries NO full tax ID or bank numbers: those stay
+// encrypted in BuildTrack behind the audited "Show Full Details" reveal.
+async function sendVendorSetupSubmittedEmail({
+  to,
+  companyName,
+  vendorType,
+  contactName,
+  vendorEmail,
+  phone,
+  mailingAddress,
+  w9Summary,
+  insuranceSummary,
+  bankSummary,
+  documentCounts,
+  vendorRecordNote,
+  paymentPolicyAcceptedAt,
+  submittedAt,
+  buildTrackUrl,
+  attachments,
+}) {
+  const transporter = createTransporter();
+  const row = (label, value) => `
+    <tr>
+      <td style="padding:7px 12px 7px 0; border-top:1px solid #E5E7EB; font-size:12px; color:#6B7280; font-weight:700; vertical-align:top; white-space:nowrap;">${escapeHtml(label)}</td>
+      <td style="padding:7px 0; border-top:1px solid #E5E7EB; font-size:13px; color:#111827; line-height:1.5;">${escapeHtml(value || 'Not provided').replace(/\n/g, '<br />')}</td>
+    </tr>`;
+  const counts = documentCounts || {};
+  const docLine = [
+    `${counts.w9 || 0} W-9`,
+    `${counts.insurance || 0} insurance`,
+    `${counts.bank || 0} bank`,
+  ].join(' · ');
+
+  const html = emailWrapper(`
+    <h2 style="color:#111827; font-size:20px; font-weight:800; margin:0 0 8px;">Vendor setup completed</h2>
+    <p style="color:#6B7280; font-size:14px; line-height:1.6; margin:0 0 18px;">
+      <strong style="color:#111827;">${escapeHtml(companyName)}</strong> submitted their W-9, insurance, and ACH information through the secure vendor portal. ${escapeHtml(vendorRecordNote || '')}
+    </p>
+    <div style="background:#F9FAFB; border:1px solid #E5E7EB; border-radius:12px; padding:6px 16px 10px; margin-bottom:18px;">
+      <table style="width:100%; border-collapse:collapse;">
+        ${row('Company', companyName)}
+        ${row('Vendor type', vendorType === 'supplier' ? 'Supplier' : 'Contractor')}
+        ${row('Contact', contactName)}
+        ${row('Email', vendorEmail)}
+        ${row('Phone', phone)}
+        ${row('Mailing address', mailingAddress)}
+        ${row('W-9', w9Summary)}
+        ${row('Insurance', insuranceSummary)}
+        ${row('ACH deposit', bankSummary)}
+        ${row('Documents', docLine)}
+        ${row('Payment policy', paymentPolicyAcceptedAt ? `Accepted ${vendorSetupDateLabel(paymentPolicyAcceptedAt)}` : 'Not accepted')}
+        ${row('Submitted', vendorSetupDateLabel(submittedAt))}
+      </table>
+    </div>
+    <div style="background:#FEF2F2; border:1px solid #FECACA; border-radius:12px; padding:14px 16px; margin-bottom:18px;">
+      <p style="font-size:12px; color:#B91C1C; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin:0 0 6px;">Before the first ACH payment</p>
+      <p style="font-size:13px; color:#374151; line-height:1.6; margin:0;">
+        Confirm the bank details with the vendor by phone, using a number you already have for them &mdash; never one taken from an email. Full tax ID and bank numbers are not included in this email; Super Admins and Operations Managers can view them in BuildTrack under Contractors / Suppliers &rarr; View full profile &rarr; Show Full Details (every view is logged).
+      </p>
+    </div>
+    ${buildTrackUrl ? `
+    <a href="${escapeHtml(buildTrackUrl)}" style="display:block; text-align:center; background:${BRAND.color}; color:#ffffff; padding:14px 24px; border-radius:12px; text-decoration:none; font-weight:800; font-size:14px; margin-bottom:6px;">
+      Open ${escapeHtml(companyName)} in BuildTrack
+    </a>` : ''}
+    ${Array.isArray(attachments) && attachments.length ? `<p style="color:#6B7280; font-size:12px; text-align:center; margin:8px 0 0;">The certificate of insurance is attached.</p>` : ''}
+  `);
+
+  await sendBrandedMail(transporter, {
+    from: process.env.EMAIL_FROM || brandedFrom(),
+    to,
+    subject: `Vendor setup completed - ${companyName}`,
+    html,
+    attachments: Array.isArray(attachments) ? attachments : [],
+  });
+}
+
+async function sendVendorSetupConfirmationEmail({ companyName, email }) {
+  const transporter = createTransporter();
+  const name = String(companyName || '').trim();
+  const html = emailWrapper(`
+    <h2 style="color:#111827; font-size:20px; font-weight:800; margin:0 0 10px;">Thank you &mdash; your vendor setup is complete</h2>
+    <p style="color:#374151; font-size:14px; line-height:1.65; margin:0 0 16px;">
+      ${name ? `Hello ${escapeHtml(name)},` : 'Hello,'}<br /><br />
+      We have received your W-9, certificate of insurance, and direct deposit information. Our office will review everything, and we will contact you at this email address if anything else is needed.
+    </p>
+    <p style="color:#374151; font-size:14px; line-height:1.65; margin:0 0 18px;">
+      As a reminder: ${escapeHtml(PAYMENT_POLICY.summary)}
+    </p>
+    ${companyContactHtml()}
+    <p style="color:#374151; font-size:14px; line-height:1.6; margin:0;">
+      We look forward to working with you.<br /><br />
+      Sincerely,<br />
+      <strong style="color:#111827;">The New Urban Development Team</strong>
+    </p>
+  `);
+
+  await sendBrandedMail(transporter, {
+    from: process.env.EMAIL_FROM || brandedFrom(),
+    to: email,
+    replyTo: NUD_COMPANY.email,
+    subject: 'Thank you - your New Urban Development vendor setup is complete',
+    html,
+  });
+}
+
 module.exports = {
   isEmailConfigured,
+  sendVendorSetupInviteEmail,
+  sendVendorSetupCodeEmail,
+  sendVendorSetupSubmittedEmail,
+  sendVendorSetupConfirmationEmail,
   sendPunchListEmail,
   sendInvoiceEmail,
   sendApprovedPayNotificationEmail,

@@ -13,6 +13,7 @@ const { revokeUserAccess } = require('../utils/sessionPolicy');
 const { logDataAccess } = require('../utils/dataAccessAudit');
 const { sendInviteEmail, sendPasswordResetEmail } = require('../utils/email');
 const { decryptJson } = require('../utils/secureFields');
+const { removeSealedFile } = require('../utils/vendorSetupFiles');
 const { ensureContractorMobileAccount, generatePin, syncContractorProjectAssignments } = require('../utils/contractorAccess');
 
 router.use(authenticate);
@@ -1097,6 +1098,13 @@ router.get('/contractors/:id/1099', authorize('super_admin', 'operations_manager
     license_state: payload.license_state || row.license_state,
     w9_certified: booleanLabel(payload.w9_certified || row.w9_certified),
     ach_authorized: booleanLabel(payload.ach_authorized || row.ach_authorized),
+    // Set by the vendor setup portal (routes/vendorSetup.js); null for older records.
+    w9_method: payload.w9_method || null,
+    w9_signature_name: payload.w9_signature_name || null,
+    w9_signed_at: payload.w9_signed_at || null,
+    account_holder_name: payload.account_holder_name || null,
+    payment_policy_accepted_at: payload.payment_policy_accepted_at || null,
+    backup_withholding: payload.backup_withholding === true,
     redacted_summary: {
       tax_id_last4: row.tax_id_last4,
       bank_account_last4: row.bank_account_last4,
@@ -1412,7 +1420,12 @@ router.put('/contractors/:id/projects', authorize('super_admin', 'operations_man
 // (if any) so the periodic QBO auto-sync will NOT re-create the profile - this is
 // what makes a delete actually stick for QuickBooks-linked vendors. When bulk
 // deleting, the caller wraps repeated invocations in a single db.transaction().
+// Returns the vendor-setup documents (W-9s, voided checks) whose encrypted files
+// the caller removes from disk once that transaction has committed.
 function deleteContractorProfileCascade(db, contractor, userId) {
+  const sealedFiles = db.prepare('SELECT storage_path FROM vendor_setup_files WHERE contractor_id = ?')
+    .all(contractor.id).map(row => row.storage_path);
+  db.prepare('DELETE FROM vendor_setup_files WHERE contractor_id = ?').run(contractor.id);
   db.prepare('DELETE FROM contractor_onboarding_requests WHERE contractor_id = ?').run(contractor.id);
   db.prepare('DELETE FROM contractor_compliance_profiles WHERE contractor_id = ?').run(contractor.id);
   db.prepare('DELETE FROM contractor_project_links WHERE contractor_id = ?').run(contractor.id);
@@ -1437,6 +1450,7 @@ function deleteContractorProfileCascade(db, contractor, userId) {
       WHERE id = ? AND role = 'contractor'
     `).run(contractor.linked_user_id);
   }
+  return sealedFiles;
 }
 
 // DELETE /api/users/contractors/:id/profile - remove a contractor directory record
@@ -1446,10 +1460,12 @@ router.delete('/contractors/:id/profile', authorize('super_admin', 'operations_m
     const contractor = db.prepare('SELECT * FROM contractor_profiles WHERE id = ?').get(req.params.id);
     if (!contractor) return res.status(404).json({ error: 'Contractor not found' });
 
+    let sealedFiles = [];
     const removeContractor = db.transaction(() => {
-      deleteContractorProfileCascade(db, contractor, req.user.id);
+      sealedFiles = deleteContractorProfileCascade(db, contractor, req.user.id);
     });
     removeContractor();
+    sealedFiles.forEach(removeSealedFile);
 
     logActivity({
       userId: req.user.id,
@@ -1483,16 +1499,18 @@ router.post('/contractors/bulk-delete', authorize('super_admin', 'operations_man
     const selectStmt = db.prepare('SELECT * FROM contractor_profiles WHERE id = ?');
     const deleted = [];
     const missing = [];
+    const sealedFiles = [];
 
     const removeMany = db.transaction(() => {
       for (const id of ids) {
         const contractor = selectStmt.get(id);
         if (!contractor) { missing.push(id); continue; }
-        deleteContractorProfileCascade(db, contractor, req.user.id);
+        sealedFiles.push(...deleteContractorProfileCascade(db, contractor, req.user.id));
         deleted.push({ id, name: contractor.vendor_name || null });
       }
     });
     removeMany();
+    sealedFiles.forEach(removeSealedFile);
 
     logActivity({
       userId: req.user.id,

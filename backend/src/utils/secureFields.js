@@ -37,4 +37,29 @@ function decryptJson(value) {
   return JSON.parse(decrypted.toString('utf8'));
 }
 
-module.exports = { encryptJson, decryptJson };
+// Whole files (W-9s, voided checks) are sealed with their own key derived from the
+// same secret, so a copied uploads volume or backup holds only ciphertext.
+// Layout: 'BTF1' | 12-byte IV | 16-byte GCM tag | ciphertext.
+const FILE_MAGIC = Buffer.from('BTF1', 'ascii');
+
+function getFileKey() {
+  return crypto.createHmac('sha256', getEncryptionKey()).update('buildtrack:encrypted-files:v1').digest();
+}
+
+function encryptBuffer(plaintext) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', getFileKey(), iv);
+  const body = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+  return Buffer.concat([FILE_MAGIC, iv, cipher.getAuthTag(), body]);
+}
+
+function decryptBuffer(sealed) {
+  if (!Buffer.isBuffer(sealed) || sealed.length < 32 || !sealed.subarray(0, 4).equals(FILE_MAGIC)) {
+    throw new Error('Invalid encrypted file');
+  }
+  const decipher = crypto.createDecipheriv('aes-256-gcm', getFileKey(), sealed.subarray(4, 16));
+  decipher.setAuthTag(sealed.subarray(16, 32));
+  return Buffer.concat([decipher.update(sealed.subarray(32)), decipher.final()]);
+}
+
+module.exports = { encryptJson, decryptJson, encryptBuffer, decryptBuffer };

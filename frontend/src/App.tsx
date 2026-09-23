@@ -38,6 +38,7 @@ const ChangePassword = lazy(() => import('./pages/ChangePassword'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const ContractorSetup = lazy(() => import('./pages/ContractorSetup'));
+const VendorSetup = lazy(() => import('./pages/VendorSetup'));
 const VendorQuoteRequest = lazy(() => import('./pages/VendorQuoteRequest'));
 const MobileHome = lazy(() => import('./pages/MobileHome'));
 const MobileProjects = lazy(() => import('./pages/MobileProjects'));
@@ -219,6 +220,10 @@ function DeviceHostRedirect() {
 
   useEffect(() => {
     if (!isBuildTrackAppHost()) return;
+    // The vendor setup portal (emailed to outside vendors) is responsive and works on
+    // either host; never bounce a phone to the mobile host for it, since
+    // mobile.buildtrack / m.buildtrack currently fail TLS at Cloudflare.
+    if (location.pathname.startsWith('/vendor-setup/')) return;
 
     const requestedPath = `${location.pathname}${location.search}${location.hash}`;
     const mobileDevice = isLikelyMobileDevice();
@@ -510,6 +515,7 @@ function MobileHostRoutes() {
       <Route path="/forgot-password" element={<AuthRoute><ForgotPassword /></AuthRoute>} />
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/contractor-setup" element={<ContractorSetup />} />
+      <Route path="/vendor-setup/:token" element={<VendorSetup />} />
       <Route path="/vendor-quote/:token" element={<VendorQuoteRequest />} />
 
       {/* Mobile-first BuildTrack app on the dedicated mobile host */}
@@ -621,6 +627,7 @@ export default function App() {
         <Route path="/forgot-password" element={<AuthRoute><ForgotPassword /></AuthRoute>} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/contractor-setup" element={<ContractorSetup />} />
+        <Route path="/vendor-setup/:token" element={<VendorSetup />} />
         <Route path="/vendor-quote/:token" element={<VendorQuoteRequest />} />
 
         {/* Root redirect — smart device detection */}

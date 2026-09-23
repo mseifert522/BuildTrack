@@ -32,6 +32,10 @@ import { useAuthStore } from '../store/authStore';
 import { formatEasternDate, formatEasternDateTime, parseBuildTrackTimestamp } from '../lib/time';
 import { compareByQboActivity, formatQboDate, isQboActive, mergeQboActivity, qboActivityLine, type QboActivityFields } from '../lib/vendorActivity';
 import VoiceTextarea from '../components/VoiceTextarea';
+import VendorSetupInviteModal from '../components/VendorSetupInviteModal';
+import VendorSetupRequests from '../components/VendorSetupRequests';
+import VendorSetupDocuments from '../components/VendorSetupDocuments';
+import type { VendorSetupInvite } from '../lib/vendorSetup';
 
 interface ContractorInvoice {
   id: string;
@@ -147,6 +151,13 @@ interface Sensitive1099Details {
   license_state?: string | null;
   w9_certified?: string | null;
   ach_authorized?: string | null;
+  // Present when the vendor came through Set Up New Vendor.
+  w9_method?: 'online' | 'upload' | null;
+  w9_signature_name?: string | null;
+  w9_signed_at?: string | null;
+  account_holder_name?: string | null;
+  payment_policy_accepted_at?: string | null;
+  backup_withholding?: boolean;
 }
 
 interface ProjectOption {
@@ -295,7 +306,7 @@ const supplierFlag = (contractor: ContractorRow) => Boolean(Number(contractor.is
 
 const supplierOnlyRecord = (contractor: ContractorRow) =>
   supplierFlag(contractor)
-  && String(contractor.source || '').toLowerCase() === 'manual_supplier'
+  && ['manual_supplier', 'vendor_setup'].includes(String(contractor.source || '').toLowerCase())
   && !contractor.connected_project_count
   && !contractor.invoice_count;
 
@@ -535,6 +546,8 @@ export default function Contractors() {
   const [sensitive1099Details, setSensitive1099Details] = useState<Record<string, Sensitive1099Details>>({});
   const [visible1099Details, setVisible1099Details] = useState<Record<string, boolean>>({});
   const [loading1099DetailsId, setLoading1099DetailsId] = useState<string | null>(null);
+  const [vendorSetupOpen, setVendorSetupOpen] = useState(false);
+  const [vendorSetupInvites, setVendorSetupInvites] = useState<VendorSetupInvite[]>([]);
   const canManageVendors = currentUser ? ['super_admin', 'operations_manager'].includes(currentUser.role) : false;
   const canAddCategories = canManageVendors;
   const canReveal1099Details = canManageVendors;
@@ -551,6 +564,16 @@ export default function Contractors() {
     setProjects(Array.isArray(projectsRes.data) ? projectsRes.data : []);
   };
 
+  // Set Up New Vendor requests. Failure only hides the panel; the directory still loads.
+  const loadVendorSetupInvites = async () => {
+    try {
+      const res = await api.get('/vendor-setup/invites');
+      setVendorSetupInvites(Array.isArray(res.data?.invites) ? res.data.invites : []);
+    } catch {
+      /* panel stays as it was */
+    }
+  };
+
   const combinedDirectoryRows = useMemo(() => dedupeDirectoryRows(contractors), [contractors]);
 
   const supplierCategoryOptions = useMemo(
@@ -562,8 +585,12 @@ export default function Contractors() {
     loadDirectory()
       .catch(() => setError('Contractor directory is unavailable for this account.'))
       .finally(() => setLoading(false));
+    loadVendorSetupInvites();
 
-    const refresh = () => loadDirectory().catch(() => {});
+    const refresh = () => {
+      loadDirectory().catch(() => {});
+      loadVendorSetupInvites();
+    };
     const interval = window.setInterval(refresh, 15000);
     window.addEventListener('focus', refresh);
     return () => {
@@ -607,6 +634,15 @@ export default function Contractors() {
     if (!contractorNotes[contractorId]) {
       loadContractorNotes(contractorId).catch(() => {});
     }
+  };
+
+  // A vendor created by a setup submission may not be in the list we already
+  // hold (the directory refreshes every 15 s), so reload before opening.
+  const openVendorFromSetup = async (contractorId: string) => {
+    if (!contractors.some(contractor => contractor.id === contractorId)) {
+      await loadDirectory().catch(() => {});
+    }
+    openContractorDetails(contractorId);
   };
 
   const addContractorNote = async (contractorId: string) => {
@@ -1249,8 +1285,26 @@ export default function Contractors() {
               <Plus className="w-4 h-4" />
               Add Vendor
             </button>
+            <button
+              type="button"
+              onClick={() => setVendorSetupOpen(true)}
+              className="bt-directory-primary-action"
+              title="Email a new vendor a secure link for their W-9, insurance certificate and ACH details"
+            >
+              <Send className="w-4 h-4" />
+              Set Up New Vendor
+            </button>
           </div>
         </div>
+
+        <VendorSetupRequests
+          invites={vendorSetupInvites}
+          onChanged={() => {
+            loadVendorSetupInvites();
+            loadDirectory().catch(() => {});
+          }}
+          onOpenVendor={openVendorFromSetup}
+        />
 
         {error ? (
           <div className="rounded-2xl p-6 text-sm font-semibold text-red-700" style={{ background: '#FEF2F2', border: '1px solid #FECACA' }}>
@@ -1960,6 +2014,12 @@ export default function Contractors() {
         )}
       </div>
 
+      <VendorSetupInviteModal
+        isOpen={vendorSetupOpen}
+        onClose={() => setVendorSetupOpen(false)}
+        onSent={() => { loadVendorSetupInvites(); }}
+      />
+
       <Modal isOpen={choosingVendorType} onClose={() => setChoosingVendorType(false)} title="Add Vendor" size="sm">
         <div className="grid gap-3 sm:grid-cols-2">
           <button
@@ -2361,6 +2421,12 @@ export default function Contractors() {
                         {detailLine('Full routing number', full1099Details.routing_number)}
                         {detailLine('W-9 certified', full1099Details.w9_certified)}
                         {detailLine('ACH authorized', full1099Details.ach_authorized)}
+                        {full1099Details.w9_method ? detailLine('W-9 provided', full1099Details.w9_method === 'online'
+                          ? `Filled out online, signed by ${full1099Details.w9_signature_name || 'vendor'}${full1099Details.w9_signed_at ? ` on ${formatDate(full1099Details.w9_signed_at)}` : ''}`
+                          : 'Uploaded document (see Vendor Setup Documents)') : null}
+                        {full1099Details.account_holder_name ? detailLine('Name on bank account', full1099Details.account_holder_name) : null}
+                        {full1099Details.payment_policy_accepted_at ? detailLine('Payment policy accepted', formatDate(full1099Details.payment_policy_accepted_at)) : null}
+                        {full1099Details.backup_withholding ? detailLine('Backup withholding', 'Yes - the vendor reports an IRS backup withholding notice') : null}
                         {detailLine('Insurance provider', full1099Details.insurance_provider)}
                         {detailLine('Insurance policy number', full1099Details.insurance_policy_number)}
                         {detailLine('Insurance expires', formatDate(full1099Details.insurance_expires_at))}
@@ -2391,6 +2457,8 @@ export default function Contractors() {
                   </div>
                 </div>
               </div>
+
+              <VendorSetupDocuments contractorId={contractor.id} />
 
               <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
                 <div className="mb-3 flex items-center justify-between gap-3">

@@ -24,6 +24,7 @@ const { startActivityRetentionScheduler } = require('./src/services/activityRete
 const { createUploadsGate, isInlineSafeUpload } = require('./src/middleware/uploadsGate');
 const documentRoutes = require('./src/routes/documents');
 const contractorOnboardingRoutes = require('./src/routes/contractorOnboarding');
+const vendorSetupRoutes = require('./src/routes/vendorSetup');
 const quoteAnalyticsRoutes = require('./src/routes/quoteAnalytics');
 const vendorQuoteRequestRoutes = require('./src/routes/vendorQuoteRequests');
 const agentBridgeRoutes = require('./src/routes/agentBridge');
@@ -106,6 +107,9 @@ app.use(express.urlencoded({ extended: true, limit: bodyLimit }));
 // In-flight chunked-upload pieces live under uploads/chunk-tmp and are never served
 // (the gate also catches the //chunk-tmp, %2Fchunk-tmp and /./chunk-tmp spellings).
 app.use('/uploads/chunk-tmp', (req, res) => res.status(404).json({ error: 'Not found' }));
+// Vendor setup documents (W-9s, voided checks) are encrypted at rest and only ever
+// read through /api/vendor-setup/files/:id, which decrypts and audits each read.
+app.use('/uploads/vendor-setup', (req, res) => res.status(404).json({ error: 'Not found' }));
 app.use('/uploads', createUploadsGate(uploadsPath), express.static(path.resolve(uploadsPath), {
   index: false,
   setHeaders: (res, filePath) => {
@@ -173,6 +177,7 @@ app.use('/api/invoices/email-intake', (_req, res) => {
 });
 app.use('/api/documents', documentRoutes);
 app.use('/api/contractor-onboarding', contractorOnboardingRoutes);
+app.use('/api/vendor-setup', vendorSetupRoutes);
 app.use('/api/vendor-quote-requests', vendorQuoteRequestRoutes);
 app.use('/api/agent-bridge', agentBridgeRoutes);
 app.use('/api/quote-analytics', quoteAnalyticsRoutes.analyticsRouter);

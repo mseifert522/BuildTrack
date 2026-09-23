@@ -2983,6 +2983,84 @@ function initializeSchema() {
     `);
   } catch (_) { /* link table already exists */ }
 
+  // Set Up New Vendor (routes/vendorSetup.js): a secure W-9 / insurance / ACH
+  // intake for a company that is not in BuildTrack yet. The contractor_profiles
+  // row is created (or an existing vendor matched) only when the vendor submits.
+  // Timestamps are ISO-8601 strings; compare them with julianday(), never datetime().
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS vendor_setup_invites (
+      id TEXT PRIMARY KEY,
+      company_name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      vendor_type TEXT NOT NULL DEFAULT 'contractor' CHECK(vendor_type IN ('contractor','supplier')),
+      token_hash TEXT UNIQUE NOT NULL,
+      status TEXT NOT NULL DEFAULT 'sent' CHECK(status IN ('sent','verified','submitted')),
+      expires_at TEXT NOT NULL,
+      send_count INTEGER NOT NULL DEFAULT 1,
+      last_sent_at TEXT,
+      opened_at TEXT,
+      verified_at TEXT,
+      submitted_at TEXT,
+      contractor_id TEXT,
+      match_kind TEXT,
+      w9_method TEXT,
+      requested_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (contractor_id) REFERENCES contractor_profiles(id) ON DELETE SET NULL,
+      FOREIGN KEY (requested_by) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_vendor_setup_invites_email
+      ON vendor_setup_invites(email, status);
+
+    CREATE INDEX IF NOT EXISTS idx_vendor_setup_invites_contractor
+      ON vendor_setup_invites(contractor_id);
+
+    CREATE TABLE IF NOT EXISTS vendor_setup_codes (
+      id TEXT PRIMARY KEY,
+      invite_id TEXT NOT NULL,
+      code_hash TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      used INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (invite_id) REFERENCES vendor_setup_invites(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_vendor_setup_codes_invite
+      ON vendor_setup_codes(invite_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS vendor_setup_drafts (
+      invite_id TEXT PRIMARY KEY,
+      data_encrypted TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (invite_id) REFERENCES vendor_setup_invites(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS vendor_setup_files (
+      id TEXT PRIMARY KEY,
+      invite_id TEXT,
+      contractor_id TEXT,
+      kind TEXT NOT NULL CHECK(kind IN ('w9','insurance','bank')),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','submitted')),
+      original_name TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      sha256 TEXT NOT NULL,
+      storage_path TEXT NOT NULL,
+      uploaded_at TEXT NOT NULL,
+      FOREIGN KEY (invite_id) REFERENCES vendor_setup_invites(id) ON DELETE SET NULL,
+      FOREIGN KEY (contractor_id) REFERENCES contractor_profiles(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_vendor_setup_files_invite
+      ON vendor_setup_files(invite_id, kind);
+
+    CREATE INDEX IF NOT EXISTS idx_vendor_setup_files_contractor
+      ON vendor_setup_files(contractor_id, kind);
+  `);
+
   try {
     db.exec(`
       INSERT OR IGNORE INTO contractor_profiles (

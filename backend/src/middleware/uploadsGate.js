@@ -45,7 +45,7 @@ function classifyUploadPath(root, reqPath) {
   if (!absolute.startsWith(root + path.sep)) return null;
   const rel = path.relative(root, absolute).split(path.sep).join('/');
   const [first, ...rest] = rel.split('/');
-  if (first === 'chunk-tmp') return { kind: 'blocked', rel };
+  if (first === 'chunk-tmp' || first === 'vendor-setup') return { kind: 'blocked', rel };
   if (!rest.length || MANAGEMENT_ONLY_DIRS.has(first)) return { kind: 'management', rel };
   if (SHARED_DIRS.has(first)) return { kind: 'shared', rel };
   return { kind: 'project', projectId: first, rel }; // uploads/<projectId>/...
