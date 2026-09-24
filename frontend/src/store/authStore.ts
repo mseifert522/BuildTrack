@@ -109,3 +109,14 @@ export const canAccessSecurity = (role: string) =>
 /** Can access the management-only Human Resources workspace */
 export const canAccessHumanResources = (role: string) =>
   ['super_admin', 'operations_manager', 'project_manager'].includes(role);
+
+/** Can open the Cost Analyzer (QuickBooks spend analytics). Project managers
+ * view everything and may enter project square footage / bedrooms / baths
+ * (field information); category changes and document scans stay with
+ * upper management - see canEditCostAnalyzer. */
+export const canAccessCostAnalyzer = (role: string) =>
+  ['super_admin', 'operations_manager', 'project_manager'].includes(role);
+
+/** Can change vendor / bill categories, correct extracted items and run document scans */
+export const canEditCostAnalyzer = (role: string) =>
+  ['super_admin', 'operations_manager'].includes(role);

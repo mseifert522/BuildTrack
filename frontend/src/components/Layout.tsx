@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { useAuthStore, roleLabels, canManageUsers, canAccessSettings, canAccessSecurity, canAccessHumanResources, endServerSession } from '../store/authStore';
+import { useAuthStore, roleLabels, canManageUsers, canAccessSettings, canAccessSecurity, canAccessHumanResources, canAccessCostAnalyzer, endServerSession } from '../store/authStore';
 import {
   LayoutDashboard, FolderOpen, ClipboardList, FileText,
   Users, Settings, LogOut, Menu, X, Bell, ChevronRight,
   Camera, Search, Trash2, ShieldCheck, MessageSquare,
-  BriefcaseBusiness, CalendarDays
+  BriefcaseBusiness, CalendarDays, Calculator
 } from 'lucide-react';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
@@ -110,11 +110,29 @@ function notificationLabel(action: string, details?: Record<string, any> | null)
     supplier_profile_updated: 'updated a supplier record',
     avatar_updated: 'updated a profile photo',
     quickbooks_invoice_received: 'entered a contractor invoice in QuickBooks',
+    cost_analyzer_vendor_category_set: 'changed a vendor cost category',
+    cost_analyzer_vendor_category_confirmed: 'confirmed a vendor cost category',
+    cost_analyzer_vendors_auto_categorized: 'auto-categorized vendors by keyword',
+    cost_analyzer_bill_category_set: 'changed a bill cost category',
+    cost_analyzer_class_specs_set: 'updated project size details',
+    cost_analyzer_vendor_seed_applied: 'applied vendor cost categories',
+    cost_analyzer_material_item_created: 'added a material price',
+    cost_analyzer_material_item_updated: 'edited a material price',
+    cost_analyzer_material_item_deleted: 'removed a material price',
+    cost_analyzer_material_target_set: 'answered a material cost question',
+    cost_analyzer_scan_started: 'started an invoice scan',
+    cost_analyzer_scan_cancelled: 'cancelled an invoice scan',
   };
   return labels[action] || action.replace(/_/g, ' ');
 }
 
 function notificationLink(log: ActivityLog) {
+  if (log.entity_type === 'cost_analyzer') {
+    if (log.action === 'cost_analyzer_class_specs_set') return '/cost-analyzer?tab=projects';
+    if (log.action.startsWith('cost_analyzer_material')) return '/cost-analyzer?tab=materials';
+    if (log.action.startsWith('cost_analyzer_scan')) return '/cost-analyzer?tab=documents';
+    return '/cost-analyzer?tab=vendors';
+  }
   if (log.project_id && log.entity_type === 'invoice' && log.entity_id) {
     return `/projects/${log.project_id}/invoices/${log.entity_id}`;
   }
@@ -336,6 +354,7 @@ export default function Layout({ children }: LayoutProps) {
     { to: '/contractors', icon: Users, label: 'Vendors', match: ['/contractors', '/suppliers'] },
     ...(user && canAccessSecurity(user.role) ? [{ to: '/security', icon: ShieldCheck, label: 'Security' }] : []),
     ...(user && canAccessHumanResources(user.role) ? [{ to: '/human-resources', icon: BriefcaseBusiness, label: 'Human Resources' }] : []),
+    ...(user && canAccessCostAnalyzer(user.role) ? [{ to: '/cost-analyzer', icon: Calculator, label: 'Cost Analyzer' }] : []),
   ];
 
   const isActive = (path: string, matchPaths: string[] = [path]) =>

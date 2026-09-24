@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node tests/agentBridge.test.js && node tests/quoteAnalytics.test.js && node tests/hrResumeIntake.test.js",
+    "test": "node tests/agentBridge.test.js && node tests/quoteAnalytics.test.js && node tests/hrResumeIntake.test.js && node tests/costAnalyzer.test.js && node tests/costAnalyzerExtraction.test.js",
     "test:agent-bridge": "node tests/agentBridge.test.js",
     "test:hr-resume-intake": "node tests/hrResumeIntake.test.js",
     "test:quotes": "node tests/quoteAnalytics.test.js"

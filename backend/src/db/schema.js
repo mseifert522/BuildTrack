@@ -3147,6 +3147,282 @@ function initializeSchema() {
     });
   } catch (_) { /* quote category bootstrap best-effort */ }
 
+  // ===========================================================================
+  // Cost Analyzer (routes/costAnalyzer.js, services/costAnalyzer*.js).
+  // Additive only: blue and green containers share the live DB during a deploy,
+  // so every statement here must be safe while the other container is serving.
+  // Category ids here are independent from contractor_categories.id; the two
+  // lists are bridged by exact NAME only (services/costAnalyzerCategories.js).
+  // ===========================================================================
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS cost_analyzer_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS cost_analyzer_categories (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        kind TEXT NOT NULL CHECK(kind IN ('trade','supplier','service','other')),
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      -- One row per vendor (QuickBooks vendor and/or contractor profile). 'manual'
+      -- rows are never overwritten by seed/keyword/ai writes.
+      CREATE TABLE IF NOT EXISTS cost_analyzer_vendor_categories (
+        id TEXT PRIMARY KEY,
+        vendor_key TEXT NOT NULL UNIQUE,
+        qbo_vendor_id TEXT NULL UNIQUE,
+        profile_id TEXT NULL REFERENCES contractor_profiles(id) ON DELETE SET NULL,
+        vendor_name TEXT NOT NULL,
+        category_id TEXT NOT NULL REFERENCES cost_analyzer_categories(id),
+        secondary_category_id TEXT NULL,
+        source TEXT NOT NULL CHECK(source IN ('seed','ai','keyword','manual')),
+        confidence REAL NULL,
+        rationale TEXT NULL,
+        needs_owner_input INTEGER NOT NULL DEFAULT 0,
+        confirmed_by TEXT NULL,
+        confirmed_at TEXT NULL,
+        previous_profile_category TEXT NULL,
+        profile_synced_at TEXT NULL,
+        set_by TEXT NULL,
+        set_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_cost_analyzer_vendor_categories_category
+        ON cost_analyzer_vendor_categories(category_id);
+
+      CREATE INDEX IF NOT EXISTS idx_cost_analyzer_vendor_categories_profile
+        ON cost_analyzer_vendor_categories(profile_id);
+
+      -- Appended on EVERY vendor category write (seed rows: set_by NULL,
+      -- set_by_name 'Seed <version>').
+      CREATE TABLE IF NOT EXISTS cost_analyzer_vendor_category_history (
+        id TEXT PRIMARY KEY,
+        vendor_category_id TEXT NOT NULL,
+        vendor_name TEXT NOT NULL,
+        from_category_id TEXT NULL,
+        to_category_id TEXT NOT NULL,
+        from_secondary_id TEXT NULL,
+        to_secondary_id TEXT NULL,
+        source TEXT NOT NULL,
+        confidence REAL NULL,
+        rationale TEXT NULL,
+        set_by TEXT NULL,
+        set_by_name TEXT NULL,
+        set_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_cost_analyzer_vendor_category_history_vendor
+        ON cost_analyzer_vendor_category_history(vendor_category_id, set_at);
+
+      -- Per-bill category override (manual) or AI suggestion. Keyword hits are
+      -- computed on read and never persisted.
+      CREATE TABLE IF NOT EXISTS cost_analyzer_bill_categories (
+        qbo_bill_id TEXT PRIMARY KEY,
+        category_id TEXT NOT NULL,
+        source TEXT NOT NULL CHECK(source IN ('ai','manual')),
+        confidence REAL NULL,
+        rationale TEXT NULL,
+        set_by TEXT NULL,
+        set_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_cost_analyzer_bill_categories_category
+        ON cost_analyzer_bill_categories(category_id);
+
+      -- Size details per QuickBooks class (property/project), keyed on qbo_class_id
+      -- because a class does not have to be a BuildTrack project.
+      CREATE TABLE IF NOT EXISTS cost_analyzer_class_specs (
+        qbo_class_id TEXT PRIMARY KEY,
+        class_name TEXT NOT NULL,
+        project_id TEXT NULL REFERENCES projects(id) ON DELETE SET NULL,
+        square_feet REAL NULL,
+        bedrooms REAL NULL,
+        bathrooms REAL NULL,
+        units INTEGER NULL,
+        stories REAL NULL,
+        year_built INTEGER NULL,
+        project_type TEXT NULL CHECK(project_type IN ('rehab','new_construction','rental_maintenance','wholesale','other')),
+        notes TEXT NULL,
+        updated_by TEXT NULL,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      -- One row per QuickBooks bill attachment read by the invoice extractor.
+      CREATE TABLE IF NOT EXISTS cost_analyzer_documents (
+        attachment_id TEXT PRIMARY KEY REFERENCES quickbooks_bill_attachments(id) ON DELETE CASCADE,
+        qbo_bill_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','running','extracted','unreadable','failed','skipped','duplicate')),
+        content_hash TEXT NULL,
+        duplicate_of TEXT NULL,
+        bills_covered_json TEXT NULL,
+        claimed_by_run_id TEXT NULL,
+        model TEXT NULL,
+        doc_type TEXT NULL,
+        vendor_on_document TEXT NULL,
+        document_date TEXT NULL,
+        document_total REAL NULL,
+        totals_match INTEGER NULL,
+        totals_match_reason TEXT NULL,
+        labor_total REAL NULL,
+        material_total REAL NULL,
+        labor_hours REAL NULL,
+        labor_days REAL NULL,
+        labor_rate REAL NULL,
+        labor_performed_by TEXT NULL,
+        suggested_category_id TEXT NULL,
+        suggested_category_confidence REAL NULL,
+        summary TEXT NULL,
+        extracted_json TEXT NULL,
+        unknowns_json TEXT NULL,
+        confidence REAL NULL,
+        error TEXT NULL,
+        input_tokens INTEGER NULL,
+        output_tokens INTEGER NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        started_at TEXT NULL,
+        extracted_at TEXT NULL,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_cost_analyzer_documents_status
+        ON cost_analyzer_documents(status);
+
+      CREATE INDEX IF NOT EXISTS idx_cost_analyzer_documents_hash
+        ON cost_analyzer_documents(content_hash);
+
+      CREATE INDEX IF NOT EXISTS idx_cost_analyzer_documents_bill
+        ON cost_analyzer_documents(qbo_bill_id);
+
+      -- Priced lines read off documents (source 'ai') or typed in by a manager
+      -- (source 'manual').
+      CREATE TABLE IF NOT EXISTS cost_analyzer_material_items (
+        id TEXT PRIMARY KEY,
+        attachment_id TEXT NULL REFERENCES cost_analyzer_documents(attachment_id) ON DELETE CASCADE,
+        qbo_bill_id TEXT NULL,
+        qbo_class_id TEXT NULL,
+        line_no INTEGER NOT NULL DEFAULT 0,
+        description TEXT NOT NULL,
+        item_kind TEXT NOT NULL,
+        material_family TEXT NULL,
+        material_type TEXT NULL,
+        material_type_raw TEXT NULL,
+        spec TEXT NULL,
+        phase TEXT NULL,
+        quantity REAL NULL,
+        unit TEXT NULL,
+        unit_price REAL NULL,
+        line_total REAL NULL,
+        pricing_basis TEXT NULL CHECK(pricing_basis IN ('unit','job')),
+        hours REAL NULL,
+        days REAL NULL,
+        rate REAL NULL,
+        location TEXT NULL,
+        confidence REAL NULL,
+        needs_review INTEGER NOT NULL DEFAULT 0,
+        review_reason TEXT NULL,
+        source TEXT NOT NULL DEFAULT 'ai' CHECK(source IN ('ai','manual')),
+        note TEXT NULL,
+        set_by TEXT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_cost_analyzer_material_items_type
+        ON cost_analyzer_material_items(material_family, material_type);
+
+      CREATE INDEX IF NOT EXISTS idx_cost_analyzer_material_items_bill
+        ON cost_analyzer_material_items(qbo_bill_id);
+
+      CREATE INDEX IF NOT EXISTS idx_cost_analyzer_material_items_attachment
+        ON cost_analyzer_material_items(attachment_id);
+
+      -- The 12 owner "cost per material" targets and whether each has an answer.
+      CREATE TABLE IF NOT EXISTS cost_analyzer_material_targets (
+        target TEXT PRIMARY KEY,
+        status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','answered','not_applicable')),
+        answer TEXT NULL,
+        answered_by TEXT NULL,
+        answered_at TEXT NULL
+      );
+
+      -- Document scan runs; a 'running' row with a fresh heartbeat is the lock.
+      CREATE TABLE IF NOT EXISTS cost_analyzer_scan_runs (
+        id TEXT PRIMARY KEY,
+        started_by TEXT NULL,
+        started_at TEXT NOT NULL DEFAULT (datetime('now')),
+        finished_at TEXT NULL,
+        heartbeat_at TEXT NULL,
+        status TEXT NOT NULL CHECK(status IN ('running','completed','failed','cancelled')),
+        scope TEXT NOT NULL,
+        total INTEGER NOT NULL DEFAULT 0,
+        done INTEGER NOT NULL DEFAULT 0,
+        failed INTEGER NOT NULL DEFAULT 0,
+        skipped INTEGER NOT NULL DEFAULT 0,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        error TEXT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_cost_analyzer_scan_runs_status
+        ON cost_analyzer_scan_runs(status, started_at);
+    `);
+  } catch (err) {
+    console.error('[COST-ANALYZER] schema creation failed:', err.message);
+  }
+
+  // Lazy require: services/costAnalyzerCategories.js must not be loaded at the top
+  // of this file (it would be a circular import through utils/audit -> db/schema).
+  let costAnalyzerCategories = null;
+  try {
+    costAnalyzerCategories = require('../services/costAnalyzerCategories');
+  } catch (err) {
+    console.error('[COST-ANALYZER] categories service unavailable:', err.message);
+  }
+
+  try {
+    if (costAnalyzerCategories) costAnalyzerCategories.ensureTaxonomy(db);
+  } catch (err) {
+    console.error('[COST-ANALYZER] taxonomy upsert failed:', err.message);
+  }
+
+  try {
+    if (costAnalyzerCategories) costAnalyzerCategories.applyCostAnalyzerVendorSeed(db);
+  } catch (err) {
+    console.error('[COST-ANALYZER] vendor seed failed:', err.message);
+  }
+
+  // Recovery after a restart. Runs first: a 'running' run whose heartbeat went
+  // stale belonged to a process that is gone (a live blue/green sibling keeps its
+  // heartbeat fresh and is left alone). Then documents: anything still 'running'
+  // that is not claimed by a live run goes back to 'pending'.
+  try {
+    db.exec(`
+      UPDATE cost_analyzer_scan_runs
+      SET status = 'failed', error = 'interrupted by restart', finished_at = datetime('now')
+      WHERE status = 'running'
+        AND (heartbeat_at IS NULL OR heartbeat_at < datetime('now', '-2 minutes'))
+    `);
+  } catch (_) { /* recovery best-effort */ }
+
+  try {
+    db.exec(`
+      UPDATE cost_analyzer_documents
+      SET status = 'pending', claimed_by_run_id = NULL
+      WHERE status = 'running'
+        AND (
+          claimed_by_run_id IS NULL
+          OR claimed_by_run_id NOT IN (SELECT id FROM cost_analyzer_scan_runs WHERE status = 'running')
+        )
+    `);
+  } catch (_) { /* recovery best-effort */ }
+
   // Auto-assign PINs to existing users without one
   const usersWithoutPin = db.prepare("SELECT id FROM users WHERE pin IS NULL").all();
   if (usersWithoutPin.length > 0) {

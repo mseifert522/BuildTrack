@@ -1,7 +1,7 @@
 import { Component, lazy, Suspense, useEffect, useRef, type ErrorInfo, type ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
-import { useAuthStore, canManageUsers, canAccessSettings, canAccessSecurity, canAccessHumanResources } from './store/authStore';
+import { useAuthStore, canManageUsers, canAccessSettings, canAccessSecurity, canAccessHumanResources, canAccessCostAnalyzer } from './store/authStore';
 import Layout from './components/Layout';
 import GlobalImageLightbox from './components/GlobalImageLightbox';
 import DraftAutosave from './components/DraftAutosave';
@@ -34,6 +34,7 @@ const Users = lazy(() => import('./pages/Users'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Security = lazy(() => import('./pages/Security'));
 const HumanResources = lazy(() => import('./pages/HumanResources'));
+const CostAnalyzer = lazy(() => import('./pages/CostAnalyzer'));
 const ChangePassword = lazy(() => import('./pages/ChangePassword'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
@@ -290,6 +291,15 @@ function HumanResourcesRoute({ children }: { children: ReactNode }) {
   if (!token || !user) return <Navigate to="/login" replace />;
   if (user.force_password_reset) return <Navigate to="/change-password" replace />;
   if (!canAccessHumanResources(user.role)) return <Navigate to="/dashboard" replace />;
+  return <>{children}</>;
+}
+
+/** Only management roles can access the Cost Analyzer */
+function CostAnalyzerRoute({ children }: { children: ReactNode }) {
+  const { user, token } = useAuthStore();
+  if (!token || !user) return <Navigate to="/login" replace />;
+  if (user.force_password_reset) return <Navigate to="/change-password" replace />;
+  if (!canAccessCostAnalyzer(user.role)) return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
 }
 
@@ -551,6 +561,7 @@ function MobileHostRoutes() {
       <Route path="/settings" element={<UpperManagementMobileRoute allowed={canAccessSettings}><Layout><Settings /></Layout></UpperManagementMobileRoute>} />
       <Route path="/security" element={<UpperManagementMobileRoute allowed={canAccessSecurity}><Layout><Security /></Layout></UpperManagementMobileRoute>} />
       <Route path="/human-resources" element={<UpperManagementMobileRoute allowed={canAccessHumanResources}><Layout><HumanResources /></Layout></UpperManagementMobileRoute>} />
+      <Route path="/cost-analyzer" element={<UpperManagementMobileRoute allowed={canAccessCostAnalyzer}><Layout><CostAnalyzer /></Layout></UpperManagementMobileRoute>} />
 
       <Route path="/documents" element={<Navigate to="/" replace />} />
 
@@ -730,6 +741,11 @@ export default function App() {
           <HumanResourcesRoute>
             <Layout><HumanResources /></Layout>
           </HumanResourcesRoute>
+        } />
+        <Route path="/cost-analyzer" element={
+          <CostAnalyzerRoute>
+            <Layout><CostAnalyzer /></Layout>
+          </CostAnalyzerRoute>
         } />
 
         {/* Legacy contractor app entry points now leave the desktop host. */}
