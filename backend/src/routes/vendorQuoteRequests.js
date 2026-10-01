@@ -9,6 +9,7 @@ const { getDb } = require('../db/schema');
 const { authenticate, authorize, authorizeProjectAccess } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
 const { sendVendorQuoteRequestEmail } = require('../utils/email');
+const { resolveQuoteVendor } = require('../utils/quoteVendorIntake');
 const { signedUploadUrl } = require('../utils/uploadsAccess');
 
 // Scope photos are shown to vendors with no BuildTrack login, both on the public
@@ -723,6 +724,10 @@ router.post('/public/:token/submit', quotePdfUploadMiddleware, (req, res) => {
         source_file_name: created.quote.source_file_name || null,
       },
     });
+    // The vendor gets their answer first; filing them in the directory (and, if
+    // their name cannot be read, emailing the office) happens after.
+    resolveQuoteVendor(db, created.quote.id, { id: request.created_by }, { notify: true })
+      .catch(vendorErr => console.error('[VENDOR_QUOTE] vendor intake failed:', vendorErr));
   } catch (err) {
     removeUploadedFile(quotePdf);
     console.error('[VENDOR_QUOTE] submit failed:', err);

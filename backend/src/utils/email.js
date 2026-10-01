@@ -930,6 +930,71 @@ async function sendQuoteApprovedEmail({
   });
 }
 
+// The office inbox that hears about quotes whose vendor could not be added.
+function vendorClarificationRecipient() {
+  return String(process.env.VENDOR_CLARIFICATION_EMAIL || NUD_COMPANY.email).trim();
+}
+
+// A quote was added but its vendor could not be put in the directory because the
+// vendor's name could not be read from it (Mike, 2026-10-01). Goes to the main
+// office address; the quote itself is already saved.
+async function sendVendorClarificationEmail({
+  quoteNumber,
+  projectLabel,
+  readName,
+  reason,
+  totalAmount,
+  fileName,
+  addedBy,
+  quoteUrl,
+}) {
+  const to = vendorClarificationRecipient();
+  if (!to) throw new Error('Missing office email');
+  const transporter = createTransporter();
+  const amountLabel = totalAmount === null || totalAmount === undefined || totalAmount === ''
+    ? null
+    : `$${Number(totalAmount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const link = absoluteUrl(quoteUrl || '/quotes');
+  const row = (label, value) => (value
+    ? `<p style="font-size:13px; color:#374151; margin:0 0 8px;"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</p>`
+    : '');
+
+  const html = emailWrapper(`
+    <h2 style="color:#111827; font-size:20px; font-weight:800; margin:0 0 8px;">Vendor could not be added</h2>
+    <p style="color:#6B7280; font-size:14px; line-height:1.6; margin:0 0 18px;">
+      A quote${quoteNumber ? ` (<strong style="color:#111827;">${escapeHtml(quoteNumber)}</strong>)` : ''} was added to BuildTrack, but its vendor could not be added to the system.
+      The vendor's name is not listed on the quote correctly, so the system needs clarification on the name of the vendor.
+    </p>
+    <div style="background:#FFFBEB; border:1px solid #FDE68A; border-radius:12px; padding:16px; margin-bottom:18px;">
+      <p style="font-size:12px; color:#92400E; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin:0 0 6px;">Why</p>
+      <p style="font-size:14px; color:#78350F; font-weight:700; line-height:1.5; margin:0;">${escapeHtml(reason || 'The vendor name on the quote could not be read.')}</p>
+    </div>
+    <div style="background:#F9FAFB; border:1px solid #E5E7EB; border-radius:12px; padding:16px; margin-bottom:18px;">
+      <p style="font-size:12px; color:#374151; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin:0 0 8px;">Quote details</p>
+      ${row('Quote number', quoteNumber)}
+      ${row('Property', projectLabel)}
+      ${row('Name read from the quote', readName || '(none)')}
+      ${row('Quote total', amountLabel)}
+      ${row('Document', fileName)}
+      ${row('Added by', addedBy)}
+    </div>
+    <p style="color:#374151; font-size:14px; line-height:1.6; margin:0 0 18px;">
+      To fix it, open the quote, choose <strong>Modify</strong>, and enter the vendor's company name. BuildTrack adds the vendor to Contractors / Suppliers as soon as the quote is saved with a name it can read.
+    </p>
+    <p style="margin:0 0 4px;">
+      <a href="${escapeHtml(link)}" style="display:inline-block; background:#D99D26; color:#111827; font-weight:800; font-size:14px; text-decoration:none; padding:11px 18px; border-radius:10px;">Open the quote in BuildTrack</a>
+    </p>
+  `);
+
+  await sendBrandedMail(transporter, {
+    from: process.env.EMAIL_FROM || brandedFrom(),
+    to,
+    subject: `Vendor could not be added - quote ${quoteNumber || ''} needs the vendor's name`.replace(/\s+/g, ' ').trim(),
+    html,
+  });
+  return { to };
+}
+
 // Email / Send Punch List: one contractor's punch list for one property.
 // `items` carry title/description/notes/priority/status/due_date and
 // photos[{ url }] (signed, expiring /uploads links, at most a dozen per item).
@@ -1303,4 +1368,6 @@ module.exports = {
   sendContractorSetupCodeEmail,
   sendContractorSubmissionPdfEmail,
   sendQuoteApprovedEmail,
+  sendVendorClarificationEmail,
+  vendorClarificationRecipient,
 };

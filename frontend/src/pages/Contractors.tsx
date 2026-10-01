@@ -35,6 +35,8 @@ import VoiceTextarea from '../components/VoiceTextarea';
 import VendorSetupInviteModal from '../components/VendorSetupInviteModal';
 import VendorSetupRequests from '../components/VendorSetupRequests';
 import VendorSetupDocuments from '../components/VendorSetupDocuments';
+import AddVendorModal from '../components/AddVendorModal';
+import { onVendorAdded } from '../lib/vendors';
 import type { VendorSetupInvite } from '../lib/vendorSetup';
 
 interface ContractorInvoice {
@@ -203,20 +205,6 @@ const fallbackCategories = [
   'Framing',
 ];
 
-const supplierCategoryDefaults = [
-  'General Building Materials',
-  'Lumber',
-  'Roofing Materials',
-  'Electrical Supplies',
-  'Plumbing Supplies',
-  'HVAC Supplies',
-  'Drywall',
-  'Flooring',
-  'Paint',
-  'Appliances',
-  'Portable Toilets',
-  'Tool Rentals',
-];
 
 const money = (value?: number | null) =>
   Number(value || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
@@ -487,16 +475,6 @@ const emptyContractorForm = {
   contractor_categories: [] as string[],
 };
 
-const emptySupplierForm = {
-  name: '',
-  contact: '',
-  email: '',
-  phone: '',
-  billing_address: '',
-  account_number: '',
-  categories: [] as string[],
-};
-
 export default function Contractors() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -521,17 +499,13 @@ export default function Contractors() {
   const [savingNotes, setSavingNotes] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [choosingVendorType, setChoosingVendorType] = useState(false);
-  const [addingContractor, setAddingContractor] = useState(false);
-  const [addingSupplier, setAddingSupplier] = useState(false);
-  const [addForm, setAddForm] = useState(emptyContractorForm);
-  const [supplierForm, setSupplierForm] = useState(emptySupplierForm);
+  // Adding goes through the shared AddVendorModal (also on the top bar and every
+  // project page), so there is one Add Vendor form with one duplicate check.
+  const [addVendorOpen, setAddVendorOpen] = useState(false);
   const [editingContractor, setEditingContractor] = useState<ContractorRow | null>(null);
   const [editForm, setEditForm] = useState(emptyContractorForm);
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [projectFilter, setProjectFilter] = useState('');
-  const [savingAdd, setSavingAdd] = useState(false);
-  const [savingSupplier, setSavingSupplier] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
   const [deletingContractorId, setDeletingContractorId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
@@ -576,11 +550,6 @@ export default function Contractors() {
 
   const combinedDirectoryRows = useMemo(() => dedupeDirectoryRows(contractors), [contractors]);
 
-  const supplierCategoryOptions = useMemo(
-    () => uniqueCategoryList([...supplierCategoryDefaults, ...categories]),
-    [categories]
-  );
-
   useEffect(() => {
     loadDirectory()
       .catch(() => setError('Contractor directory is unavailable for this account.'))
@@ -593,10 +562,19 @@ export default function Contractors() {
     };
     const interval = window.setInterval(refresh, 15000);
     window.addEventListener('focus', refresh);
+    // A vendor added from this page, the top bar or a project page: reload and
+    // search for it - a brand-new vendor has no QuickBooks payments yet, so the
+    // default "Most active" view would otherwise hide it (search covers everyone).
+    const stopVendorAdded = onVendorAdded(vendor => {
+      loadDirectory().catch(() => {});
+      if (vendor?.name) navigate({ pathname: '/contractors', search: `?search=${encodeURIComponent(vendor.name)}` }, { replace: true });
+    });
     return () => {
       window.clearInterval(interval);
       window.removeEventListener('focus', refresh);
+      stopVendorAdded();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadContractorNotes = async (contractorId: string) => {
@@ -719,30 +697,6 @@ export default function Contractors() {
     setProjectFilter('');
   };
 
-  const openAdd = () => {
-    setAddForm(emptyContractorForm);
-    setSelectedProjectIds([]);
-    setProjectFilter('');
-    setAddingContractor(true);
-  };
-
-  const openAddSupplier = () => {
-    setSupplierForm({
-      ...emptySupplierForm,
-      categories: ['General Building Materials'],
-    });
-    setAddingSupplier(true);
-  };
-
-  const chooseVendorType = (type: 'contractor' | 'supplier') => {
-    setChoosingVendorType(false);
-    if (type === 'contractor') {
-      openAdd();
-      return;
-    }
-    openAddSupplier();
-  };
-
   const setFormCategorySelection = (target: 'add' | 'edit', categoryName: string, selected: boolean) => {
     const update = (prev: typeof emptyContractorForm) => {
       const nextCategories = selected
@@ -756,8 +710,7 @@ export default function Contractors() {
       };
     };
 
-    if (target === 'add') setAddForm(update);
-    else setEditForm(update);
+    if (target === 'edit') setEditForm(update);
   };
 
   const addCategory = async (target: 'add' | 'edit') => {
@@ -815,49 +768,6 @@ export default function Contractors() {
     </div>
   );
 
-  const setSupplierCategorySelection = (categoryName: string, selected: boolean) => {
-    setSupplierForm(prev => {
-      const nextCategories = selected
-        ? uniqueCategoryList([...(prev.categories || []), categoryName])
-        : (prev.categories || []).filter(item => item !== categoryName);
-      return { ...prev, categories: nextCategories };
-    });
-  };
-
-  const renderSupplierCategorySelector = () => (
-    <div className="sm:col-span-2">
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <label className="block text-sm font-bold text-gray-700">Supplier Categories</label>
-        <span className="rounded-full bg-white px-2.5 py-1 text-xs font-black text-blue-700 ring-1 ring-blue-100">
-          {supplierForm.categories.length} selected
-        </span>
-      </div>
-      <div className="grid max-h-48 gap-2 overflow-y-auto rounded-xl border border-gray-200 bg-gray-50 p-3 sm:grid-cols-2 lg:grid-cols-3">
-        {supplierCategoryOptions.map(item => {
-          const selected = supplierForm.categories.includes(item);
-          return (
-            <label
-              key={item}
-              className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold transition-colors"
-              style={{
-                background: selected ? '#EFF6FF' : '#FFFFFF',
-                borderColor: selected ? '#93C5FD' : '#E5E7EB',
-                color: selected ? '#1D4ED8' : '#374151',
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={selected}
-                onChange={event => setSupplierCategorySelection(item, event.target.checked)}
-              />
-              <span className="truncate">{item}</span>
-            </label>
-          );
-        })}
-      </div>
-    </div>
-  );
-
   const saveEdit = async () => {
     if (!editingContractor || !editForm.vendor_name.trim()) {
       toast.error('Contractor name is required');
@@ -880,64 +790,6 @@ export default function Contractors() {
       toast.error(err.response?.data?.error || 'Failed to update contractor');
     } finally {
       setSavingEdit(false);
-    }
-  };
-
-  const saveAdd = async () => {
-    if (!addForm.vendor_name.trim()) {
-      toast.error('Contractor name is required');
-      return;
-    }
-
-    setSavingAdd(true);
-    try {
-      await api.post('/users/contractors/profile', {
-        ...addForm,
-        vendor_name: addForm.vendor_name.trim(),
-        project_ids: selectedProjectIds,
-      });
-      await loadDirectory();
-      toast.success('Contractor added');
-      setAddingContractor(false);
-    } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Failed to add contractor');
-    } finally {
-      setSavingAdd(false);
-    }
-  };
-
-  const closeSupplierModal = () => {
-    setAddingSupplier(false);
-    setSupplierForm(emptySupplierForm);
-  };
-
-  const saveSupplier = async () => {
-    if (!supplierForm.name.trim()) {
-      toast.error('Supplier name is required');
-      return;
-    }
-
-    setSavingSupplier(true);
-    try {
-      const categoriesForPayload = supplierForm.categories.length
-        ? supplierForm.categories
-        : ['General Building Materials'];
-      await api.post('/users/suppliers', {
-        name: supplierForm.name.trim(),
-        contact: supplierForm.contact.trim(),
-        email: supplierForm.email.trim(),
-        phone: supplierForm.phone.trim(),
-        billing_address: supplierForm.billing_address.trim(),
-        account_number: supplierForm.account_number.trim(),
-        categories: categoriesForPayload,
-      });
-      await loadDirectory();
-      toast.success('Supplier added');
-      closeSupplierModal();
-    } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Failed to add supplier');
-    } finally {
-      setSavingSupplier(false);
     }
   };
 
@@ -1279,7 +1131,7 @@ export default function Contractors() {
           <div className="bt-directory-actions flex w-full flex-col gap-2 sm:flex-row xl:w-auto">
             <button
               type="button"
-              onClick={() => setChoosingVendorType(true)}
+              onClick={() => setAddVendorOpen(true)}
               className="bt-directory-primary-action"
             >
               <Plus className="w-4 h-4" />
@@ -2020,98 +1872,7 @@ export default function Contractors() {
         onSent={() => { loadVendorSetupInvites(); }}
       />
 
-      <Modal isOpen={choosingVendorType} onClose={() => setChoosingVendorType(false)} title="Add Vendor" size="sm">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <button
-            type="button"
-            onClick={() => chooseVendorType('contractor')}
-            className="rounded-xl border border-slate-300 bg-white px-4 py-4 text-sm font-black text-slate-900 shadow-sm hover:border-blue-400 hover:bg-blue-50"
-          >
-            Contractor
-          </button>
-          <button
-            type="button"
-            onClick={() => chooseVendorType('supplier')}
-            className="rounded-xl border border-slate-300 bg-white px-4 py-4 text-sm font-black text-slate-900 shadow-sm hover:border-blue-400 hover:bg-blue-50"
-          >
-            Supplier
-          </button>
-        </div>
-      </Modal>
-
-      <Modal isOpen={addingSupplier} onClose={closeSupplierModal} title="Add Supplier" size="lg">
-        <div className="space-y-5">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="sm:col-span-2">
-              <label className="mb-1 block text-sm font-bold text-gray-700">Supplier Name *</label>
-              <input
-                value={supplierForm.name}
-                onChange={event => setSupplierForm(prev => ({ ...prev, name: event.target.value }))}
-                className="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-bold text-gray-700">Contact Person</label>
-              <input
-                value={supplierForm.contact}
-                onChange={event => setSupplierForm(prev => ({ ...prev, contact: event.target.value }))}
-                className="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-bold text-gray-700">Phone</label>
-              <input
-                value={supplierForm.phone}
-                onChange={event => setSupplierForm(prev => ({ ...prev, phone: event.target.value }))}
-                className="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-bold text-gray-700">Email</label>
-              <input
-                value={supplierForm.email}
-                onChange={event => setSupplierForm(prev => ({ ...prev, email: event.target.value }))}
-                className="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-bold text-gray-700">Account Number</label>
-              <input
-                value={supplierForm.account_number}
-                onChange={event => setSupplierForm(prev => ({ ...prev, account_number: event.target.value }))}
-                className="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div className="sm:col-span-2">
-              <label className="mb-1 block text-sm font-bold text-gray-700">Address</label>
-              <textarea
-                value={supplierForm.billing_address}
-                onChange={event => setSupplierForm(prev => ({ ...prev, billing_address: event.target.value }))}
-                rows={3}
-                className="w-full resize-none rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            {renderSupplierCategorySelector()}
-          </div>
-          <div className="flex gap-3">
-            <button
-              type="button"
-              onClick={closeSupplierModal}
-              className="flex-1 rounded-xl border border-gray-300 py-2.5 text-sm font-bold text-gray-700 hover:bg-gray-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={saveSupplier}
-              disabled={savingSupplier}
-              className="flex-1 rounded-xl bg-blue-600 py-2.5 text-sm font-black text-white hover:bg-blue-700 disabled:opacity-50"
-            >
-              {savingSupplier ? 'Saving...' : 'Add Supplier'}
-            </button>
-          </div>
-        </div>
-      </Modal>
+      <AddVendorModal isOpen={addVendorOpen} onClose={() => setAddVendorOpen(false)} />
 
       {selectedContractor && (() => {
         const contractor = selectedContractor;
@@ -2618,107 +2379,6 @@ export default function Contractors() {
           </Modal>
         );
       })()}
-
-      <Modal isOpen={addingContractor} onClose={() => setAddingContractor(false)} title="Add Vendor / Contractor" size="lg">
-        <div className="space-y-5">
-          <div className="grid sm:grid-cols-2 gap-4">
-            <div className="sm:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Vendor / Contractor Name *</label>
-              <input value={addForm.vendor_name} onChange={e => setAddForm(prev => ({ ...prev, vendor_name: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Contact Name</label>
-              <input value={addForm.contact_name} onChange={e => setAddForm(prev => ({ ...prev, contact_name: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-              <select
-                value={addForm.contractor_status}
-                onChange={e => setAddForm(prev => ({ ...prev, contractor_status: e.target.value }))}
-                className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-              >
-                <option value="active">Active</option>
-                <option value="will_use_again">Will use again</option>
-                <option value="terminated">Terminated</option>
-              </select>
-            </div>
-            {renderCategorySelector(addForm, 'add')}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-              <input value={addForm.phone} onChange={e => setAddForm(prev => ({ ...prev, phone: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-              <input value={addForm.email} onChange={e => setAddForm(prev => ({ ...prev, email: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Account Number</label>
-              <input value={addForm.account_number} onChange={e => setAddForm(prev => ({ ...prev, account_number: e.target.value }))} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div className="sm:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Billing Address</label>
-              <textarea value={addForm.billing_address} onChange={e => setAddForm(prev => ({ ...prev, billing_address: e.target.value }))} rows={2} className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-gray-200 p-4">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
-              <div>
-                <p className="text-sm font-black text-gray-900">Connected Projects</p>
-                <p className="text-xs text-gray-500">Optional project links for this contractor.</p>
-              </div>
-              <span className="text-xs font-black text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full">
-                {selectedProjectIds.length} selected
-              </span>
-            </div>
-            <div className="relative mb-3">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                value={projectFilter}
-                onChange={e => setProjectFilter(e.target.value)}
-                aria-label="Filter projects by address or job name"
-                className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
-              {filteredProjectOptions.map(project => {
-                const selected = selectedProjectIds.includes(project.id);
-                return (
-                  <label
-                    key={project.id}
-                    className="flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors"
-                    style={{ borderColor: selected ? '#93C5FD' : '#E5E7EB', background: selected ? '#EFF6FF' : '#FFFFFF' }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selected}
-                      onChange={() => {
-                        setSelectedProjectIds(prev => selected
-                          ? prev.filter(id => id !== project.id)
-                          : [...prev, project.id]
-                        );
-                      }}
-                      className="mt-1"
-                    />
-                    <div className="min-w-0">
-                      <p className="text-sm font-bold text-gray-900">{project.address}</p>
-                      <p className="text-xs text-gray-500">{project.job_name}</p>
-                    </div>
-                  </label>
-                );
-              })}
-              {filteredProjectOptions.length === 0 && <p className="text-sm text-gray-400 px-1">No projects match this filter</p>}
-            </div>
-          </div>
-
-          <div className="flex gap-3 pt-1">
-            <button type="button" onClick={() => setAddingContractor(false)} className="flex-1 py-2.5 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50">Cancel</button>
-            <button type="button" onClick={saveAdd} disabled={savingAdd} className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
-              {savingAdd ? 'Adding...' : 'Add Vendor'}
-            </button>
-          </div>
-        </div>
-      </Modal>
 
       <Modal isOpen={!!editingContractor} onClose={() => setEditingContractor(null)} title="Vendor Details" size="lg">
         <div className="space-y-5">

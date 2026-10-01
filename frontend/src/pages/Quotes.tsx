@@ -20,6 +20,7 @@ import {
   type CompareResponse, type ActivityRow, type QuoteNote,
 } from '../lib/quotesApi';
 import { formatEasternDateTime } from '../lib/time';
+import { quoteVendorMessage } from '../lib/vendors';
 import '../styles/quotes.css';
 
 const PAGE_SIZE = 50;
@@ -36,6 +37,17 @@ const TABS: Array<{ key: TabKey; label: string; icon: typeof ClipboardList }> = 
 ];
 
 const APPROVED_STATUSES = new Set(['approved', 'paid', 'completed']);
+
+// The vendor's name could not be read when the quote was added (see
+// backend/src/utils/quoteVendorIntake.js); cleared once a readable name is saved.
+function quoteNeedsVendor(q: ContractorQuote) {
+  try {
+    const flags = JSON.parse(q.data_quality_flags || '[]');
+    return Array.isArray(flags) && flags.includes('vendor_needs_clarification');
+  } catch {
+    return false;
+  }
+}
 
 interface ProjectBudget {
   id: string;
@@ -299,7 +311,10 @@ export default function Quotes() {
   const [options, setOptions] = useState<QuoteOptions | null>(null);
   const [budgets, setBudgets] = useState<Record<string, number | null>>({});
   const [tab, setTab] = useState<TabKey>('all');
-  const [filters, setFilters] = useState<QuoteFilters>(blankFilters);
+  const [filters, setFilters] = useState<QuoteFilters>(() => ({
+    ...blankFilters(),
+    search: new URLSearchParams(window.location.search).get('search') || '',
+  }));
 
   const [quotes, setQuotes] = useState<ContractorQuote[]>([]);
   const [listLoading, setListLoading] = useState(true);
@@ -876,6 +891,9 @@ function QuoteGrid(props: {
                     </td>
                     <td className="max-w-[180px] truncate px-2 py-1.5 align-top text-gray-700" title={q.property_address || q.project_name}>{q.property_address || q.project_name || '—'}</td>
                     <td className="px-2 py-1.5 align-top">
+                      {quoteNeedsVendor(q) && (
+                        <span className="bt-quote-vendor-needed" title="The vendor's name could not be read from this quote. Modify the quote and enter the vendor's company name.">Vendor needed</span>
+                      )}
                       <div className="max-w-[170px] truncate font-medium text-gray-900" title={q.contractor_company || q.contractor_name}>{q.contractor_company || q.contractor_name}</div>
                       {q.contractor_company && q.contractor_name && q.contractor_name !== q.contractor_company && (
                         <div className="max-w-[170px] truncate text-[11px] text-gray-400" title={q.contractor_name}>{q.contractor_name}</div>
@@ -1766,6 +1784,10 @@ function AddQuoteModal({ options, defaultProjectId, editQuote, onOpenDoc, onClos
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const previewUrlsRef = useRef<string[]>([]);
   const extracting = sections.some(section => section.extracting);
+  const vendorBlank = !form.contractor_name.trim() && !form.contractor_company.trim();
+  // The vendor may be left blank only when the quote document is attached (new
+  // file, or the one an edited quote already carries) - the office can clarify from it.
+  const hasDocument = sections.some(section => section.file || section.fileName || section.downloadUrl);
 
   // Revoke every preview object URL when the modal unmounts.
   useEffect(() => () => { previewUrlsRef.current.forEach(url => URL.revokeObjectURL(url)); }, []);
@@ -1897,7 +1919,7 @@ function AddQuoteModal({ options, defaultProjectId, editQuote, onOpenDoc, onClos
 
   const submit = async () => {
     if (!form.project_id) { toast.error('Project is required'); return; }
-    if (!form.contractor_name.trim() && !form.contractor_company.trim()) { toast.error('Contractor name or company is required'); return; }
+    if (vendorBlank && !hasDocument) { toast.error("Enter the vendor's company name, or attach the quote document"); return; }
     if (!quoteCategory) { toast.error('Select a category for the quote'); return; }
     if (extracting) { toast.error('Wait for the document to finish reading'); return; }
     const cleanLines = lines.filter(l => l.description.trim() || lineTotal(l) > 0);
@@ -1934,8 +1956,9 @@ function AddQuoteModal({ options, defaultProjectId, editQuote, onOpenDoc, onClos
     };
     setSaving(true);
     try {
+      let saved: any;
       if (isEdit && editQuote) {
-        await updateQuote(editQuote.id, { ...header, sections: sectionPayload, line_items: payloadLines });
+        saved = await updateQuote(editQuote.id, { ...header, sections: sectionPayload, line_items: payloadLines });
       } else if (sections.some(section => section.file)) {
         const fd = new FormData();
         fd.append('project_id', form.project_id);
@@ -1947,11 +1970,16 @@ function AddQuoteModal({ options, defaultProjectId, editQuote, onOpenDoc, onClos
         fd.append('sections', JSON.stringify(sectionPayload));
         fd.append('line_items', JSON.stringify(payloadLines));
         sections.forEach(section => { if (section.file) fd.append('quote_file', section.file); });
-        await uploadQuote(fd);
+        saved = await uploadQuote(fd);
       } else {
-        await createQuote({ project_id: form.project_id, ...header, sections: sectionPayload, line_items: payloadLines });
+        saved = await createQuote({ project_id: form.project_id, ...header, sections: sectionPayload, line_items: payloadLines });
       }
       toast.success(isEdit ? 'Quote updated' : 'Quote saved');
+      const vendorNote = quoteVendorMessage(saved?.vendor_resolution);
+      if (vendorNote) {
+        if (vendorNote.tone === 'success') toast.success(vendorNote.text, { duration: 6000 });
+        else toast.error(vendorNote.text, { duration: 10000 });
+      }
       onSaved();
     } catch (err: any) {
       const errs = err?.response?.data?.errors;
@@ -1992,6 +2020,13 @@ function AddQuoteModal({ options, defaultProjectId, editQuote, onOpenDoc, onClos
             <span className="mb-1 block font-medium text-gray-600">Phone</span>
             <input className={field} value={form.contractor_phone} onChange={e => setForm(f => ({ ...f, contractor_phone: e.target.value }))} />
           </label>
+          {vendorBlank && !extracting ? (
+            <p className="bt-quote-vendor-hint sm:col-span-2">
+              {hasDocument
+                ? "No vendor name was found. You can still save: the quote is flagged and the office is emailed to clarify the vendor. Enter the company name if you know it and the vendor is added to Contractors / Suppliers automatically."
+                : "Enter the vendor's company name. A vendor that is not in the system yet is added to Contractors / Suppliers when the quote is saved."}
+            </p>
+          ) : null}
           <label className="text-sm sm:col-span-2">
             <span className="mb-1 block font-medium text-gray-600">Quote title / scope summary</span>
             <input className={field} value={form.scope_description} onChange={e => setForm(f => ({ ...f, scope_description: e.target.value }))} placeholder="Full electrical rough-in & panel upgrade" />

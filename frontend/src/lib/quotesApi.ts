@@ -66,6 +66,11 @@ export interface ContractorQuote {
   sections?: QuoteSection[];
   created_at?: string;
   updated_at?: string;
+  // JSON array; 'vendor_needs_clarification' = the vendor name could not be read.
+  data_quality_flags?: string | null;
+  contractor_profile_id?: string | null;
+  // Name of the Contractors / Suppliers record this quote is tied to.
+  vendor_profile_name?: string | null;
 }
 
 export interface QuoteCategory {

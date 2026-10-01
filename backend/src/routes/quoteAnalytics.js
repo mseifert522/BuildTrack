@@ -10,6 +10,7 @@ const { authenticate, authorizeProjectAccess, PROJECT_MANAGE_ROLES, UPPER_MANAGE
 const { logActivity } = require('../utils/audit');
 const { isEmailConfigured, sendQuoteApprovedEmail } = require('../utils/email');
 const { normalizeEmail } = require('../utils/contractorAccess');
+const { resolveQuoteVendor } = require('../utils/quoteVendorIntake');
 
 const QUOTE_STATUSES = ['draft', 'submitted', 'approved', 'rejected', 'paid', 'completed', 'historical'];
 const QUOTE_FILTER_STATUSES = {
@@ -242,7 +243,8 @@ function resolveContractor(db, body) {
   return contractor;
 }
 
-function validateQuoteInput(db, body, projectIdFromRoute, files) {
+// `opts.hasDocument` (edit) says the quote already carries its document.
+function validateQuoteInput(db, body, projectIdFromRoute, files, opts = {}) {
   const errors = [];
   const fileList = Array.isArray(files) ? files.filter(Boolean) : (files ? [files] : []);
   const projectId = projectIdFromRoute || String(body.project_id || '').trim();
@@ -256,9 +258,12 @@ function validateQuoteInput(db, body, projectIdFromRoute, files) {
   const status = String(body.status || 'draft').toLowerCase();
   if (!QUOTE_STATUSES.includes(status)) errors.push('Invalid quote status');
 
+  // A quote whose document is attached may be saved without a vendor name: the
+  // vendor is then flagged for clarification and the office is emailed (see
+  // resolveQuoteVendor). Without a document there is nothing to clarify from.
   const contractor = resolveContractor(db, body);
-  if (!contractor.contractor_name && !contractor.contractor_company) {
-    errors.push('Contractor name or company is required');
+  if (!contractor.contractor_name && !contractor.contractor_company && fileList.length === 0 && !opts.hasDocument) {
+    errors.push("Enter the vendor's name, or attach the quote document");
   }
 
   const { byName } = loadCategoryMap(db);
@@ -446,7 +451,7 @@ function insertHistoricalRecord(db, quoteId, projectId, quoteYear, actorId, acti
   `).run(uuidv4(), quoteId, projectId, quoteYear, action, JSON.stringify(snapshot), actorId);
 }
 
-function createQuote(req, res, projectIdFromRoute = null) {
+async function createQuote(req, res, projectIdFromRoute = null) {
   const db = getDb();
   // One upload slot per section. The first file doubles as the quote's own
   // source document so everything keyed on source_document_id keeps working.
@@ -471,8 +476,9 @@ function createQuote(req, res, projectIdFromRoute = null) {
     fileHashes,
   } = validation;
 
+  let created;
   try {
-    const created = db.transaction(() => {
+    created = db.transaction(() => {
       let sourceDocumentId = null;
       let sourceFileName = null;
       let sourceFilePath = null;
@@ -610,33 +616,38 @@ function createQuote(req, res, projectIdFromRoute = null) {
       entityId: created.quote.id,
       details: { quote_number: created.quote.quote_number, total: created.quote.total_quote_amount },
     });
-
-    return res.status(201).json(created);
   } catch (err) {
     files.forEach(removeUploadedFile);
     console.error('[QUOTE_ANALYTICS] create failed:', err);
     return res.status(500).json({ error: 'Failed to create quote' });
   }
+
+  // The quote is committed; putting its vendor in the directory comes after.
+  const vendorResolution = await resolveQuoteVendor(db, created.quote.id, req.user, { notify: true });
+  return res.status(201).json({ ...quoteSnapshot(db, created.quote.id), vendor_resolution: vendorResolution });
 }
 
 // Modify an existing quote (header fields + line items). The quote number, project,
 // source document, cost breakdown, and final approved amount are preserved; the editable
 // fields and the line items are replaced. Writes a historical 'updated' snapshot + activity.
-function updateQuote(req, res, forcedProjectId = null) {
+async function updateQuote(req, res, forcedProjectId = null) {
   const db = getDb();
   const existing = db.prepare('SELECT * FROM contractor_quotes WHERE id = ?').get(req.params.id);
   if (!existing || (forcedProjectId && existing.project_id !== forcedProjectId)) {
     return res.status(404).json({ error: 'Quote not found' });
   }
   // The project cannot change on edit — validate against the quote's existing project.
-  const validation = validateQuoteInput(db, req.body || {}, existing.project_id, null);
+  const validation = validateQuoteInput(db, req.body || {}, existing.project_id, null, {
+    hasDocument: Boolean(existing.source_document_id || existing.source_file_path),
+  });
   if (validation.errors.length > 0) {
     return res.status(400).json({ errors: validation.errors });
   }
   const { quoteDate, quoteYear, status, contractor, financial, lineItems, sections } = validation;
 
+  let updated;
   try {
-    const updated = db.transaction(() => {
+    updated = db.transaction(() => {
       db.prepare(`
         UPDATE contractor_quotes SET
           contractor_id = ?, contractor_profile_id = ?, contractor_name = ?, contractor_company = ?,
@@ -691,12 +702,16 @@ function updateQuote(req, res, forcedProjectId = null) {
       entityId: existing.id,
       details: { quote_number: existing.quote_number, total: updated.quote.total_quote_amount },
     });
-
-    return res.json(updated);
   } catch (err) {
     console.error('[QUOTE_ANALYTICS] update failed:', err);
     return res.status(500).json({ error: 'Failed to update quote' });
   }
+
+  // An edit that supplies a readable vendor name adds/links the vendor and clears
+  // the clarification flag. The office was emailed when the quote was added, so an
+  // edit never emails again.
+  const vendorResolution = await resolveQuoteVendor(db, existing.id, req.user, { notify: false });
+  return res.json({ ...quoteSnapshot(db, existing.id), vendor_resolution: vendorResolution });
 }
 
 // The vendor's "email on file" for a quote: the address captured on the quote itself,
@@ -1087,9 +1102,11 @@ function listQuotes(req, res, forcedProjectId = null) {
       vqr.sent_at as quote_request_sent_at,
       vqr.opened_at as quote_request_opened_at,
       vqr.submitted_at as quote_returned_at,
-      vqr.status as quote_request_status
+      vqr.status as quote_request_status,
+      cp.vendor_name as vendor_profile_name
     FROM contractor_quotes q
     LEFT JOIN users u ON u.id = q.uploaded_by
+    LEFT JOIN contractor_profiles cp ON cp.id = q.contractor_profile_id
     LEFT JOIN project_documents pd ON pd.id = q.source_document_id
     LEFT JOIN vendor_quote_requests vqr ON vqr.submitted_quote_id = q.id
     ${where.sql}
@@ -1457,6 +1474,8 @@ async function extractQuoteFromPdf(req, res, _projectIdFromRoute = null) {
       '- For each line item pick the single closest "category" from the allowed list; if nothing fits well use "General labor".\n' +
       '- If the quote is one lump sum with no itemization, return a single line item using the best overall category with the total as its price.\n' +
       '- Use an empty string or 0 for anything not present in the document. Do not invent values.\n' +
+      '- contractor_company / contractor_name / contractor_email / contractor_phone describe the business that ISSUED the quote (its letterhead, logo, signature block or "from" details). Never use the customer it is addressed to (New Urban Development, Seifert Capital or anyone at them), the "bill to" / "sold to" / "ship to" party, or the job/property address.\n' +
+      "- If the issuing business's name is not clearly printed on the document, return an empty string for contractor_company and contractor_name. Do not guess a vendor name from an email domain, a website, a product brand or the line items.\n" +
       '- total_quote_amount is the grand total the contractor is charging.\n' +
       '- If the document is split into distinct parts priced separately (for example "House" and "Garage", a base bid plus alternates, or a credit / deduction), ALSO return them under "sections": one entry per part with its label, sign "add" or "deduct", and that part\'s line items. Put every line item in exactly one section. Return an empty "sections" list when the quote is one undivided scope.';
 

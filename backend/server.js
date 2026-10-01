@@ -33,6 +33,7 @@ const quickBooksRoutes = require('./src/routes/quickbooks');
 const humanResourcesRoutes = require('./src/routes/humanResources');
 const financeTrackerRoutes = require('./src/routes/financeTracker');
 const costAnalyzerRoutes = require('./src/routes/costAnalyzer');
+const agreementRoutes = require('./src/routes/agreements');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -111,6 +112,8 @@ app.use('/uploads/chunk-tmp', (req, res) => res.status(404).json({ error: 'Not f
 // Vendor setup documents (W-9s, voided checks) are encrypted at rest and only ever
 // read through /api/vendor-setup/files/:id, which decrypts and audits each read.
 app.use('/uploads/vendor-setup', (req, res) => res.status(404).json({ error: 'Not found' }));
+// Executed agreements are only ever read through /api/agreements/:id/file (audited).
+app.use('/uploads/agreements', (req, res) => res.status(404).json({ error: 'Not found' }));
 app.use('/uploads', createUploadsGate(uploadsPath), express.static(path.resolve(uploadsPath), {
   index: false,
   setHeaders: (res, filePath) => {
@@ -186,6 +189,7 @@ app.use('/api/security', securityRoutes);
 app.use('/api/quickbooks', quickBooksRoutes);
 app.use('/api/human-resources', humanResourcesRoutes);
 app.use('/api/cost-analyzer', costAnalyzerRoutes);
+app.use('/api/agreements', agreementRoutes);
 app.use('/api/service/finance-tracker', financeTrackerRoutes);
 app.use('/api/projects/:projectId/quotes', quoteAnalyticsRoutes.projectQuotesRouter);
 app.use('/api/invoice-agent', (_req, res) => {

@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { useAuthStore, roleLabels, canManageUsers, canAccessSettings, canAccessSecurity, canAccessHumanResources, canAccessCostAnalyzer, endServerSession } from '../store/authStore';
+import { useAuthStore, roleLabels, canManageUsers, canAccessSettings, canAccessSecurity, canAccessHumanResources, canAccessCostAnalyzer, isAdminRole, endServerSession } from '../store/authStore';
 import {
   LayoutDashboard, FolderOpen, ClipboardList, FileText,
   Users, Settings, LogOut, Menu, X, Bell, ChevronRight,
   Camera, Search, Trash2, ShieldCheck, MessageSquare,
-  BriefcaseBusiness, CalendarDays, Calculator
+  BriefcaseBusiness, CalendarDays, Calculator, UserPlus
 } from 'lucide-react';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
 import Avatar from './Avatar';
+import AddVendorModal from './AddVendorModal';
 import { BUILDTRACK_TRUTH_ICON_SRC } from '../lib/branding';
 import { fileDropHandlers } from '../lib/fileDrop';
 import { formatEasternRelative, parseBuildTrackTimestamp } from '../lib/time';
@@ -122,11 +123,26 @@ function notificationLabel(action: string, details?: Record<string, any> | null)
     cost_analyzer_material_target_set: 'answered a material cost question',
     cost_analyzer_scan_started: 'started an invoice scan',
     cost_analyzer_scan_cancelled: 'cancelled an invoice scan',
+    agreement_uploaded: 'filed an executed agreement',
+    agreement_updated: 'updated an executed agreement',
+    agreement_deleted: 'deleted an executed agreement',
+    quote_vendor_created: 'added a vendor from a quote',
+    quote_vendor_clarification_requested: 'added a quote whose vendor could not be read',
   };
   return labels[action] || action.replace(/_/g, ' ');
 }
 
 function notificationLink(log: ActivityLog) {
+  if (log.entity_type === 'vendor_agreement') {
+    const details = safeDetails(log.details);
+    return details?.project_id && log.action !== 'agreement_deleted' ? `/projects/${details.project_id}#agreements` : '/agreements';
+  }
+  if (log.action === 'quote_vendor_created' || log.action === 'quote_vendor_clarification_requested') {
+    const details = safeDetails(log.details);
+    if (log.action === 'quote_vendor_created' && details?.name) return `/contractors?search=${encodeURIComponent(details.name)}`;
+    if (details?.quote_number) return `/quotes?search=${encodeURIComponent(details.quote_number)}`;
+    return '/quotes';
+  }
   if (log.entity_type === 'cost_analyzer') {
     if (log.action === 'cost_analyzer_class_specs_set') return '/cost-analyzer?tab=projects';
     if (log.action.startsWith('cost_analyzer_material')) return '/cost-analyzer?tab=materials';
@@ -158,6 +174,7 @@ export default function Layout({ children }: LayoutProps) {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [addVendorOpen, setAddVendorOpen] = useState(false);
   const { user, logout, updateUser } = useAuthStore();
   const location = useLocation();
   const navigate = useNavigate();
@@ -203,7 +220,9 @@ export default function Layout({ children }: LayoutProps) {
           userAvatarUrl: log.user_avatar_url || null,
           icon: Icon,
           description: notificationLabel(log.action, details),
-          connectedRecord: log.project_address || log.project_job_name || log.entity_type || 'BuildTrack',
+          connectedRecord: log.project_address || log.project_job_name
+            || (log.entity_type === 'vendor_agreement' ? details?.project || 'Documents & Agreements' : null)
+            || log.entity_type || 'BuildTrack',
           preview: details?.note || details?.title || details?.name || details?.scope_title || details?.material_name,
           createdAt: log.created_at,
           to: notificationLink(log),
@@ -642,8 +661,23 @@ export default function Layout({ children }: LayoutProps) {
             )}
           </div>
 
-          {/* Right: users icon, settings icon, notification bell, user avatar dropdown */}
+          {/* Right: add vendor, users icon, settings icon, notification bell, user avatar dropdown */}
           <div className="flex flex-shrink-0 items-center gap-1 sm:gap-2">
+            {/* Add Vendor - available on every screen (Mike, 2026-10-01). On a project page
+                the dialog opens already connected to that project. */}
+            {user && isAdminRole(user.role) && (
+              <button
+                type="button"
+                onClick={() => { setAddVendorOpen(true); setProfileOpen(false); setNotificationsOpen(false); }}
+                className="bt-topbar-add-vendor"
+                title="Add a new vendor (contractor or supplier) to the system"
+              >
+                <UserPlus className="h-4 w-4" aria-hidden="true" />
+                <span className="hidden sm:inline">Add Vendor</span>
+                <span className="sr-only sm:hidden">Add Vendor</span>
+              </button>
+            )}
+
             {/* Users icon — only for super_admin and operations_manager */}
             {user && canManageUsers(user.role) && (
               <Link
@@ -920,6 +954,14 @@ export default function Layout({ children }: LayoutProps) {
             </div>
           </div>
         </header>
+
+        {user && isAdminRole(user.role) && (
+          <AddVendorModal
+            isOpen={addVendorOpen}
+            onClose={() => setAddVendorOpen(false)}
+            defaultProjectId={location.pathname.match(/^\/projects\/([^/]+)$/)?.[1] || null}
+          />
+        )}
 
         {/* Page content */}
         <main className="bt-horizontal-lock flex-1 overflow-y-auto overflow-x-hidden" style={{ touchAction: 'pan-y', overscrollBehaviorX: 'none' }}>

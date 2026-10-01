@@ -3059,6 +3059,48 @@ function initializeSchema() {
 
     CREATE INDEX IF NOT EXISTS idx_vendor_setup_files_contractor
       ON vendor_setup_files(contractor_id, kind);
+
+    -- Documents & Agreements (Mike, 2026-10-01): every executed contract / signed
+    -- agreement with a vendor or contractor. A document can never be saved without
+    -- BOTH a vendor and a project; the vendor cannot be deleted while it has any
+    -- (users.js deleteContractorProfileCascade). Files live in uploads/agreements/,
+    -- which is never served statically - only via /api/agreements/:id/file.
+    CREATE TABLE IF NOT EXISTS vendor_agreements (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      document_type TEXT NOT NULL,
+      trade TEXT NOT NULL,
+      executed_date TEXT NOT NULL,
+      contract_amount REAL,
+      notes TEXT,
+      contractor_profile_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      original_name TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      sha256 TEXT NOT NULL,
+      storage_path TEXT NOT NULL,
+      uploaded_by TEXT,
+      updated_by TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (contractor_profile_id) REFERENCES contractor_profiles(id),
+      FOREIGN KEY (project_id) REFERENCES projects(id),
+      FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL,
+      FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_vendor_agreements_executed
+      ON vendor_agreements(executed_date DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_vendor_agreements_vendor
+      ON vendor_agreements(contractor_profile_id);
+
+    CREATE INDEX IF NOT EXISTS idx_vendor_agreements_project
+      ON vendor_agreements(project_id);
+
+    CREATE INDEX IF NOT EXISTS idx_vendor_agreements_sha
+      ON vendor_agreements(sha256);
   `);
 
   try {

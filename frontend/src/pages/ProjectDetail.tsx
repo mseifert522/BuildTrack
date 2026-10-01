@@ -1,4 +1,4 @@
-import { type ChangeEvent, type Dispatch, type DragEvent, type KeyboardEvent, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ChangeEvent, type Dispatch, type DragEvent, type KeyboardEvent, type SetStateAction, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore, canChangeProjectStatus, canManageProjects, isAdminRole } from '../store/authStore';
 import api from '../lib/api';
@@ -9,7 +9,7 @@ import {
 } from '../components/QuoteApprovalEmailNotice';
 import Avatar from '../components/Avatar';
 import VoiceTextarea from '../components/VoiceTextarea';
-import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, ClipboardList, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle, Send, Phone, Mail, Building2, AlertTriangle, Check, Paperclip, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, CalendarDays, Search, GripVertical, CheckCircle2, XCircle, Database, ListFilter, Bot, Receipt, Loader2, ListPlus, Printer } from 'lucide-react';
+import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, FileSignature, ClipboardList, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle, Send, Phone, Mail, Building2, AlertTriangle, Check, Paperclip, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, CalendarDays, Search, GripVertical, CheckCircle2, XCircle, Database, ListFilter, Bot, Receipt, Loader2, ListPlus, Printer } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useForm } from 'react-hook-form';
 import { format } from 'date-fns';
@@ -31,11 +31,16 @@ import { MAX_MEDIA_FILE_MB, uploadProjectMedia } from '../lib/projectMediaUpload
 import PhotoMarkupModal from '../components/PhotoMarkupModal';
 import PunchBulkAddModal from '../components/PunchBulkAddModal';
 import PunchListSendModal from '../components/PunchListSendModal';
+import AddVendorModal from '../components/AddVendorModal';
+import { onVendorAdded, quoteVendorMessage } from '../lib/vendors';
+
+// Loaded only when the Documents & Agreements tab is opened.
+const ProjectAgreementsWorkspace = lazy(() => import('./Agreements').then(module => ({ default: module.AgreementsWorkspace })));
 
 // Drag payload for moving an already-attached photo between punch list items.
 const PUNCH_PHOTO_DRAG_MIME = 'application/x-bt-punch-photo';
 
-type Tab = 'overview' | 'details' | 'progress-history' | 'construction-plan' | 'project-timeline' | 'quotes' | 'punch-list' | 'photos' | 'invoices' | 'notes' | 'team' | 'texts';
+type Tab = 'overview' | 'details' | 'progress-history' | 'construction-plan' | 'project-timeline' | 'quotes' | 'punch-list' | 'photos' | 'invoices' | 'notes' | 'team' | 'texts' | 'agreements';
 
 type ProjectCalendarEvent = {
   id: string;
@@ -889,13 +894,14 @@ export default function ProjectDetail() {
   const [tab, setTab] = useState<Tab>(() => {
     try {
       const h = window.location.hash.replace('#', '') as Tab;
-      const valid: Tab[] = ['overview', 'details', 'progress-history', 'construction-plan', 'project-timeline', 'quotes', 'punch-list', 'photos', 'invoices', 'notes', 'team', 'texts'];
+      const valid: Tab[] = ['overview', 'details', 'progress-history', 'construction-plan', 'project-timeline', 'quotes', 'punch-list', 'photos', 'invoices', 'notes', 'team', 'texts', 'agreements'];
       return valid.includes(h) ? h : 'notes';
     } catch {
       return 'notes';
     }
   });
   const [showEdit, setShowEdit] = useState(false);
+  const [addVendorOpen, setAddVendorOpen] = useState(false);
   const [showAssign, setShowAssign] = useState(false);
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [notes, setNotes] = useState<any[]>([]);
@@ -1003,6 +1009,7 @@ export default function ProjectDetail() {
         '#punch-list': 'punch-list',
         '#assigned-contractors': 'team',
         '#notes': 'notes',
+        '#agreements': 'agreements',
     };
     if (hashTabMap[location.hash]) setTab(hashTabMap[location.hash]);
   }, [location.hash]);
@@ -1602,6 +1609,8 @@ export default function ProjectDetail() {
     { id: 'invoices', label: 'Invoices', icon: Receipt },
     { id: 'team', label: 'Assigned Contractors', icon: Users },
     { id: 'texts', label: 'Text Contractors', icon: MessageSquare },
+    // Executed contracts / signed agreements (Mike, 2026-10-01) - management only.
+    ...(canAssign ? [{ id: 'agreements' as Tab, label: 'Documents & Agreements', icon: FileSignature }] : []),
   ];
 
   const updateFieldWorkTask = async (taskId: string, patch: Record<string, any>) => {
@@ -2357,10 +2366,22 @@ export default function ProjectDetail() {
                 )}
               </div>
             </div>
+            {canAssign && (
+              <button
+                type="button"
+                onClick={() => setAddVendorOpen(true)}
+                className="bt-vs-btn bt-project-add-vendor flex-shrink-0"
+                title="Add a new vendor to the system, connected to this project"
+              >
+                <UserPlus className="h-4 w-4" aria-hidden="true" />
+                <span className="hidden sm:inline">Add Vendor</span>
+                <span className="sr-only sm:hidden">Add Vendor</span>
+              </button>
+            )}
           </div>
 
           {/* Tabs */}
-          <div className="bt-project-tabs grid grid-cols-2 items-stretch gap-1.5 overflow-visible sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 2xl:grid-cols-10">
+          <div className="bt-project-tabs bt-project-tabs--compact flex flex-wrap items-stretch gap-1.5 overflow-visible">
             {tabs.map(({ id: tabId, label, icon: Icon }) => (
               <button
                 key={tabId}
@@ -2508,9 +2529,23 @@ export default function ProjectDetail() {
           <ProjectTextMessagesTab projectId={id!} project={project} />
         )}
 
+        {tab === 'agreements' && canAssign && (
+          <Suspense fallback={<Loading message="Loading documents..." />}>
+            <ProjectAgreementsWorkspace projectId={id!} projectAddress={project.address || ''} />
+          </Suspense>
+        )}
+
       </div>
 
       <ProgressMediaLightbox state={noteLightbox} onChange={setNoteLightbox} />
+
+      {canAssign && (
+        <AddVendorModal
+          isOpen={addVendorOpen}
+          onClose={() => setAddVendorOpen(false)}
+          defaultProjectId={id || null}
+        />
+      )}
 
       {/* Edit Project Modal */}
       <Modal isOpen={showEdit} onClose={() => setShowEdit(false)} title="Edit Project" size="lg">
@@ -2702,6 +2737,31 @@ function ProjectContractorAssignmentPanel({
     loadContractors();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  // A vendor added from the top bar or this page's Add Vendor button. A new
+  // contractor arrives already connected; an EXISTING vendor the user picked
+  // instead is connected here, through the same atomic call Assign Contractors uses.
+  const contractorsRef = useRef<ContractorDirectoryRow[]>([]);
+  contractorsRef.current = contractors;
+  useEffect(() => onVendorAdded(vendor => {
+    void (async () => {
+      if (vendor.project_id === projectId && !vendor.linked && vendor.type === 'contractor' && canAssign) {
+        const current = contractorsRef.current
+          .filter(row => row.connected_projects?.some(project => project.id === projectId))
+          .map(row => row.id);
+        if (!current.includes(vendor.id)) {
+          try {
+            await api.put(`/projects/${projectId}/contractors`, { contractor_ids: [...current, vendor.id] });
+            toast.success(`${vendor.name} connected to this project`);
+          } catch (err: any) {
+            toast.error(err?.response?.data?.error || `${vendor.name} could not be connected to this project`);
+          }
+        }
+      }
+      await loadContractors();
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [projectId, canAssign]);
 
   const assignedContractors = useMemo(
     () => contractors.filter(contractor => isConnectedToProject(contractor)).sort((left, right) => contractorDisplayName(left).localeCompare(contractorDisplayName(right))),
@@ -10177,7 +10237,9 @@ function QuotesTab({ projectId, project }: { projectId: string; project: any }) 
   };
 
   const submitProjectQuote = async () => {
-    if (!quoteForm.contractor_name.trim()) return toast.error("Enter the contractor's name");
+    // With the quote document attached the vendor may be left blank: the server then
+    // flags it and emails the office to clarify the vendor (quoteVendorIntake.js).
+    if (!quoteForm.contractor_name.trim() && !quoteFile) return toast.error("Enter the contractor's name, or attach the quote document");
 
     const lineItems = quoteLineItems
       .map(item => ({
@@ -10199,18 +10261,24 @@ function QuotesTab({ projectId, project }: { projectId: string; project: any }) 
         line_items: lineItems,
       };
 
+      let saved: any;
       if (quoteFile) {
         const body = new FormData();
         Object.entries(payload).forEach(([key, value]) => {
           body.append(key, key === 'line_items' ? JSON.stringify(value) : String(value ?? ''));
         });
         body.append('quote_file', quoteFile);
-        await api.post(`/projects/${projectId}/quotes/upload`, body, { headers: { 'Content-Type': 'multipart/form-data' } });
+        saved = await api.post(`/projects/${projectId}/quotes/upload`, body, { headers: { 'Content-Type': 'multipart/form-data' } });
       } else {
-        await api.post(`/projects/${projectId}/quotes`, payload);
+        saved = await api.post(`/projects/${projectId}/quotes`, payload);
       }
 
       toast.success('Quote saved to this project');
+      const vendorNote = quoteVendorMessage(saved?.data?.vendor_resolution);
+      if (vendorNote) {
+        if (vendorNote.tone === 'success') toast.success(vendorNote.text, { duration: 6000 });
+        else toast.error(vendorNote.text, { duration: 10000 });
+      }
       resetQuoteForm();
       setShowAddQuote(false);
       await load();

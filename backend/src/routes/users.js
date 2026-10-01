@@ -15,6 +15,7 @@ const { sendInviteEmail, sendPasswordResetEmail } = require('../utils/email');
 const { decryptJson } = require('../utils/secureFields');
 const { removeSealedFile } = require('../utils/vendorSetupFiles');
 const { ensureContractorMobileAccount, generatePin, syncContractorProjectAssignments } = require('../utils/contractorAccess');
+const { findVendorByName, findVendorByEmail } = require('../utils/vendorDirectory');
 
 router.use(authenticate);
 
@@ -502,6 +503,20 @@ function formatSupplierProfile(supplier) {
   };
 }
 
+// The quick Add Vendor dialog (reachable from every screen) sends
+// check_duplicates: a vendor already in the directory by name or email comes back
+// as 409 + the existing record instead of a second copy. "Add anyway" resends
+// without the flag. The Contractors page keeps its old behavior.
+function duplicateVendorConflict(db, body, name) {
+  if (!body?.check_duplicates) return null;
+  const match = findVendorByName(db, name) || findVendorByEmail(db, body?.email);
+  if (!match) return null;
+  return {
+    error: `${match.vendor_name} is already in Contractors / Suppliers`,
+    duplicate: { id: match.id, name: match.vendor_name, match_kind: match.match_kind },
+  };
+}
+
 function supplierPayload(req) {
   const db = getDb();
   const nextName = String(req.body?.vendor_name || req.body?.name || '').trim();
@@ -691,6 +706,8 @@ router.get('/suppliers', authorize('super_admin', 'operations_manager', 'project
 router.post('/suppliers', authorize('super_admin', 'operations_manager', 'project_manager'), (req, res) => {
   try {
     const payload = supplierPayload(req);
+    const conflict = duplicateVendorConflict(payload.db, req.body, payload.name);
+    if (conflict) return res.status(409).json(conflict);
     const supplierId = uuidv4();
     const markedAt = new Date().toISOString();
 
@@ -1166,6 +1183,8 @@ router.post('/contractors/profile', authorize('super_admin', 'operations_manager
     if (nextEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
       return res.status(400).json({ error: 'Valid contractor email is required' });
     }
+    const conflict = duplicateVendorConflict(db, req.body, nextName);
+    if (conflict) return res.status(409).json(conflict);
 
     const contractorCategories = validateContractorCategories(db, contractor_categories, contractor_category, contractor_secondary_category);
     const primaryCategory = contractorCategories[0] || null;
@@ -1423,6 +1442,13 @@ router.put('/contractors/:id/projects', authorize('super_admin', 'operations_man
 // Returns the vendor-setup documents (W-9s, voided checks) whose encrypted files
 // the caller removes from disk once that transaction has committed.
 function deleteContractorProfileCascade(db, contractor, userId) {
+  // Executed agreements must always keep their vendor (Documents & Agreements).
+  const agreements = db.prepare('SELECT COUNT(*) AS n FROM vendor_agreements WHERE contractor_profile_id = ?').get(contractor.id).n;
+  if (agreements > 0) {
+    const err = new Error(`${contractor.vendor_name || 'This vendor'} has ${agreements} executed agreement${agreements === 1 ? '' : 's'} on file. Reassign ${agreements === 1 ? 'it' : 'them'} to another vendor under Documents & Agreements before deleting.`);
+    err.statusCode = 409;
+    throw err;
+  }
   const sealedFiles = db.prepare('SELECT storage_path FROM vendor_setup_files WHERE contractor_id = ?')
     .all(contractor.id).map(row => row.storage_path);
   db.prepare('DELETE FROM vendor_setup_files WHERE contractor_id = ?').run(contractor.id);
@@ -1480,6 +1506,7 @@ router.delete('/contractors/:id/profile', authorize('super_admin', 'operations_m
 
     res.json({ message: 'Contractor deleted' });
   } catch (err) {
+    if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message });
     console.error(err);
     res.status(500).json({ error: 'Failed to delete contractor' });
   }
@@ -1532,6 +1559,7 @@ router.post('/contractors/bulk-delete', authorize('super_admin', 'operations_man
       missing_ids: missing,
     });
   } catch (err) {
+    if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message });
     console.error(err);
     res.status(500).json({ error: 'Failed to delete records' });
   }

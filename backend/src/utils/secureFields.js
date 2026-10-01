@@ -62,4 +62,10 @@ function decryptBuffer(sealed) {
   return Buffer.concat([decipher.update(sealed.subarray(32)), decipher.final()]);
 }
 
-module.exports = { encryptJson, decryptJson, encryptBuffer, decryptBuffer };
+// A separate key per kind of stored file, derived from the same secret (used by the
+// streaming cipher for executed agreements in routes/agreements.js).
+function deriveFileKey(context) {
+  return crypto.createHmac('sha256', getEncryptionKey()).update(String(context)).digest();
+}
+
+module.exports = { encryptJson, decryptJson, encryptBuffer, decryptBuffer, deriveFileKey };

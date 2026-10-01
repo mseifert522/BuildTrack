@@ -23,6 +23,7 @@ const { logActivity } = require('../utils/audit');
 const { logDataAccess, getClientIp } = require('../utils/dataAccessAudit');
 const { encryptJson, decryptJson } = require('../utils/secureFields');
 const { normalizeEmail } = require('../utils/contractorAccess');
+const { findMatchingVendor } = require('../utils/vendorDirectory');
 const { NUD_COMPANY, PAYMENT_POLICY } = require('../utils/companyInfo');
 const {
   isEmailConfigured,
@@ -143,10 +144,6 @@ function effectiveStatus(invite) {
   return invite.status;
 }
 
-function normalizeVendorName(value) {
-  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
-}
-
 function formatAddress(p) {
   return [
     p.address_line1,
@@ -185,35 +182,8 @@ function limitByIp(name, max, windowMs, message = 'Too many requests. Please wai
 }
 
 // ── vendor matching ──────────────────────────────────────────────────────────
-
-// An email match on the profile or its QuickBooks record is decisive; otherwise an
-// exact (letters + digits) name match, which is the same identity the directory
-// already merges rows on. Linked-to-QuickBooks profiles win ties.
-function findMatchingVendor(db, { email, companyName }) {
-  const normalizedEmail = normalizeEmail(email);
-  if (normalizedEmail) {
-    const byEmail = db.prepare(`
-      SELECT id, vendor_name, quickbooks_vendor_id
-      FROM contractor_profiles
-      WHERE lower(trim(COALESCE(email, ''))) = ? OR lower(trim(COALESCE(quickbooks_primary_email, ''))) = ?
-      ORDER BY quickbooks_vendor_id IS NOT NULL DESC, julianday(updated_at) DESC
-      LIMIT 1
-    `).get(normalizedEmail, normalizedEmail);
-    if (byEmail) return { ...byEmail, match_kind: 'email' };
-  }
-  const key = normalizeVendorName(companyName);
-  if (key.length < 3) return null;
-  const candidates = db.prepare(`
-    SELECT id, vendor_name, quickbooks_display_name, quickbooks_company_name, quickbooks_vendor_id, updated_at
-    FROM contractor_profiles
-  `).all().filter(row => [row.vendor_name, row.quickbooks_display_name, row.quickbooks_company_name]
-    .some(name => name && normalizeVendorName(name) === key));
-  if (!candidates.length) return null;
-  candidates.sort((a, b) => Number(Boolean(b.quickbooks_vendor_id)) - Number(Boolean(a.quickbooks_vendor_id))
-    || String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
-  const best = candidates[0];
-  return { id: best.id, vendor_name: best.vendor_name, quickbooks_vendor_id: best.quickbooks_vendor_id, match_kind: 'name' };
-}
+// findMatchingVendor (email first, then exact name) lives in utils/vendorDirectory.js,
+// shared with quote intake and the quick Add Vendor dialog.
 
 // ── invite shapes ────────────────────────────────────────────────────────────
 

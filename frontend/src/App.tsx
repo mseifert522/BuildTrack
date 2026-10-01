@@ -35,6 +35,7 @@ const Settings = lazy(() => import('./pages/Settings'));
 const Security = lazy(() => import('./pages/Security'));
 const HumanResources = lazy(() => import('./pages/HumanResources'));
 const CostAnalyzer = lazy(() => import('./pages/CostAnalyzer'));
+const Agreements = lazy(() => import('./pages/Agreements'));
 const ChangePassword = lazy(() => import('./pages/ChangePassword'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
@@ -562,6 +563,7 @@ function MobileHostRoutes() {
       <Route path="/security" element={<UpperManagementMobileRoute allowed={canAccessSecurity}><Layout><Security /></Layout></UpperManagementMobileRoute>} />
       <Route path="/human-resources" element={<UpperManagementMobileRoute allowed={canAccessHumanResources}><Layout><HumanResources /></Layout></UpperManagementMobileRoute>} />
       <Route path="/cost-analyzer" element={<UpperManagementMobileRoute allowed={canAccessCostAnalyzer}><Layout><CostAnalyzer /></Layout></UpperManagementMobileRoute>} />
+      <Route path="/agreements" element={<ManagementMobileRoute><Layout><Agreements /></Layout></ManagementMobileRoute>} />
 
       <Route path="/documents" element={<Navigate to="/" replace />} />
 
@@ -746,6 +748,12 @@ export default function App() {
           <CostAnalyzerRoute>
             <Layout><CostAnalyzer /></Layout>
           </CostAnalyzerRoute>
+        } />
+        {/* Documents & Agreements: management roles (contractors are sent to mobile) */}
+        <Route path="/agreements" element={
+          <DesktopRoute>
+            <Layout><Agreements /></Layout>
+          </DesktopRoute>
         } />
 
         {/* Legacy contractor app entry points now leave the desktop host. */}

@@ -3593,3 +3593,185 @@ textarea,
 .bt-vs-toggle > button[aria-checked="true"] { background-color: #2563eb; color: #ffffff; }
 .bt-vs-panel-toggle { cursor: pointer; border-radius: 8px; transition: background-color 0.15s ease; }
 .bt-vs-panel-toggle:hover { background-color: #242834; }
+
+/* ── Project page tabs: one compact, even row (Mike, 2026-10-01) ─────────────────
+   Eleven tabs (Documents & Agreements added) must sit on one neat row. The tab
+   buttons previously inherited the 16px body font (unlayered `button { font:
+   inherit }` beats text-[10px]) in a fixed 10-column grid. Doubled class keeps
+   this above mobile-heavy.css's `.bt-desktop-shell .bt-project-tab-button`. */
+.bt-desktop-shell .bt-project-tabs.bt-project-tabs--compact {
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 6px !important;
+  padding: 2px 0 0 !important;
+  border-top: 0 !important;
+}
+.bt-desktop-shell .bt-project-tabs--compact .bt-project-tab-button {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 32px;
+  min-height: 32px !important;
+  padding: 0 10px !important;
+  gap: 6px !important;
+  border: 1px solid #333a47 !important;
+  border-radius: 6px !important;
+  background: #1c1f29 !important;
+  color: #c7cbd4 !important;
+  font-family: inherit !important;
+  font-size: 12.5px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  letter-spacing: 0 !important;
+  white-space: nowrap;
+  text-shadow: none !important;
+  box-shadow: none !important;
+  transform: none !important;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.bt-desktop-shell .bt-project-tabs--compact .bt-project-tab-button span {
+  white-space: nowrap;
+  overflow-wrap: normal;
+  line-height: 1 !important;
+}
+.bt-desktop-shell .bt-project-tabs--compact .bt-project-tab-button svg {
+  width: 14px;
+  height: 14px;
+  color: #8b93a3 !important;
+  filter: none !important;
+}
+.bt-desktop-shell .bt-project-tabs--compact .bt-project-tab-button:hover {
+  background: #242834 !important;
+  border-color: #4b5568 !important;
+  color: #ffffff !important;
+}
+.bt-desktop-shell .bt-project-tabs--compact .bt-project-tab-button.is-active {
+  background: #1e3a5f !important;
+  border-color: #60a5fa !important;
+  color: #ffffff !important;
+}
+.bt-desktop-shell .bt-project-tabs--compact .bt-project-tab-button.is-active svg { color: #93c5fd !important; }
+.bt-desktop-shell .bt-project-tabs--compact .bt-project-tab-button:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 1px;
+}
+
+/* ── Add Vendor (top bar on every screen + project header) ─────────────────────── */
+.bt-desktop-shell .bt-desktop-topbar .bt-topbar-add-vendor {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px !important;
+  border: 1px solid #e7b04a !important;
+  border-radius: 4px !important;
+  background: #d99d26 !important;
+  color: #111827 !important;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.bt-desktop-shell .bt-desktop-topbar .bt-topbar-add-vendor:hover {
+  background: #e7b04a !important;
+  border-color: #f3c56b !important;
+}
+.bt-desktop-shell .bt-desktop-topbar .bt-topbar-add-vendor:focus-visible { outline: 2px solid #60a5fa; outline-offset: 2px; }
+.bt-project-add-vendor { border-color: rgba(217, 157, 38, 0.6); color: #f3c56b; }
+
+/* ── Filter chips (Add Vendor categories, Documents & Agreements type of work) ── */
+.bt-chip-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid #3b4455;
+  border-radius: 999px;
+  background: #1c1f29;
+  color: #c7cbd4;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.bt-chip-toggle:hover { background: #242834; border-color: #67e8f9; color: #ffffff; }
+.bt-chip-toggle.is-selected { background: #1e3a5f; border-color: #60a5fa; color: #ffffff; }
+.bt-chip-count { font-size: 11px; font-weight: 700; color: #8b93a3; }
+.bt-chip-toggle.is-selected .bt-chip-count { color: #bfdbfe; }
+
+/* ── Documents & Agreements ─────────────────────────────────────────────────────── */
+.bt-agreements-table tbody tr.bt-agreements-row:hover > td { background: #242834; }
+.bt-agreements-trade {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px solid rgba(217, 157, 38, 0.45);
+  border-radius: 999px;
+  background: rgba(217, 157, 38, 0.14);
+  color: #f3c56b;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.bt-agreements-drop {
+  padding: 12px;
+  border: 1.5px dashed #3b4455;
+  border-radius: 8px;
+  background: #171a22;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.bt-agreements-drop:hover,
+.bt-agreements-drop.bt-file-drop-active { border-color: #60a5fa; background: #1b2333; }
+.bt-agreements-drop.is-invalid { border-color: #f87171; }
+.bt-agreements-vendor-list li.is-active,
+.bt-agreements-vendor-list li[aria-selected="true"] { background: #242834; }
+
+/* ── Quotes whose vendor could not be read ──────────────────────────────────────── */
+.bt-quote-vendor-needed {
+  display: inline-block;
+  margin-bottom: 2px;
+  padding: 1px 6px;
+  border: 1px solid rgba(245, 166, 35, 0.55);
+  border-radius: 4px;
+  background: rgba(245, 166, 35, 0.16);
+  color: #fbbf24;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.bt-quote-vendor-hint {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(245, 166, 35, 0.45);
+  border-radius: 8px;
+  background: rgba(245, 166, 35, 0.10);
+  color: #fcd34d;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+/* Project tabs on narrower desktops: drop the icons, then tighten, so the eleven
+   tabs stay on one row down to ~1280px (measured in Chromium 2026-10-01). */
+@media (max-width: 1599px) {
+  .bt-desktop-shell .bt-project-tabs--compact .bt-project-tab-button svg { display: none; }
+  .bt-desktop-shell .bt-project-tabs--compact .bt-project-tab-button { padding: 0 9px !important; }
+}
+@media (max-width: 1439px) {
+  .bt-desktop-shell .bt-project-tabs.bt-project-tabs--compact { gap: 4px !important; }
+  .bt-desktop-shell .bt-project-tabs--compact .bt-project-tab-button { padding: 0 7px !important; font-size: 12px !important; }
+}
+
+/* Form fields in the new dialogs/pages: the unlayered `input, select { font: inherit }`
+   reset beats Tailwind's text-sm, which left these at 16px beside 14px labels. */
+.bt-agreements-workspace input,
+.bt-agreements-workspace select,
+.bt-agreements-workspace textarea,
+.bt-add-vendor-form input,
+.bt-add-vendor-form select,
+.bt-add-vendor-form textarea {
+  font-size: 14px;
+}
