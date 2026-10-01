@@ -21,19 +21,34 @@ function cleanVendorName(value) {
     .slice(0, 150);
 }
 
+// The same name without its legal form, so "Oak Roofing" finds "Oak Roofing LLC".
+const LEGAL_SUFFIXES = /\b(l\.?\s?l\.?\s?c|p\.?\s?l\.?\s?l\.?\s?c|l\.?\s?l\.?\s?p|l\.?\s?p|inc(orporated)?|corp(oration)?|co(mpany)?|ltd|limited)\b\.?/gi;
+function looseVendorKey(value) {
+  const stripped = String(value || '').replace(/^\s*the\s+/i, '').replace(/&/g, ' and ').replace(LEGAL_SUFFIXES, ' ');
+  return normalizeVendorName(stripped);
+}
+
 // Exact (letters + digits) name match on the name we file the vendor under or on
 // its QuickBooks names - the same identity the directory already merges rows on.
-// Linked-to-QuickBooks profiles win ties, then the most recently updated.
+// When nothing matches exactly, the same names compared without their legal form
+// (LLC, Inc, Co...). Linked-to-QuickBooks profiles win ties, then the most
+// recently updated.
 function findVendorByName(db, name) {
   const key = normalizeVendorName(name);
   if (key.length < 3) return null;
-  const candidates = db.prepare(`
+  const rows = db.prepare(`
     SELECT id, vendor_name, quickbooks_display_name, quickbooks_company_name, quickbooks_print_on_check_name,
            quickbooks_vendor_id, updated_at
     FROM contractor_profiles
-  `).all().filter(row => [
-    row.vendor_name, row.quickbooks_display_name, row.quickbooks_company_name, row.quickbooks_print_on_check_name,
-  ].some(candidate => candidate && normalizeVendorName(candidate) === key));
+  `).all();
+  const namesOf = row => [row.vendor_name, row.quickbooks_display_name, row.quickbooks_company_name, row.quickbooks_print_on_check_name];
+  let candidates = rows.filter(row => namesOf(row).some(candidate => candidate && normalizeVendorName(candidate) === key));
+  if (!candidates.length) {
+    const loose = looseVendorKey(name);
+    if (loose.length >= 4) {
+      candidates = rows.filter(row => namesOf(row).some(candidate => candidate && looseVendorKey(candidate) === loose));
+    }
+  }
   if (!candidates.length) return null;
   candidates.sort((a, b) => Number(Boolean(b.quickbooks_vendor_id)) - Number(Boolean(a.quickbooks_vendor_id))
     || String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
@@ -150,6 +165,29 @@ function parseFlags(raw) {
   }
 }
 
+// Adds one vendor (contractor) record from a document. No mobile login is made.
+// Callers check findVendorByName/Email first; source records where it came from.
+function insertVendorProfile(db, { name, contact = null, email = null, phone = null, address = null, category = null, source = 'quote' }) {
+  const id = uuidv4();
+  db.prepare(`
+    INSERT INTO contractor_profiles (
+      id, vendor_name, contact_name, email, phone, billing_address, contractor_status,
+      contractor_category, contractor_categories_json, source, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, datetime('now'), datetime('now'))
+  `).run(
+    id,
+    cleanVendorName(name),
+    String(contact || '').trim().slice(0, 150) || null,
+    normalizeEmail(email) || null,
+    String(phone || '').trim().slice(0, 40) || null,
+    String(address || '').trim().slice(0, 300) || null,
+    category || null,
+    JSON.stringify(category ? [category] : []),
+    source
+  );
+  return id;
+}
+
 const NEEDS_VENDOR_FLAG = 'vendor_needs_clarification';
 
 // Put the vendor of a just-saved quote into the directory. Never throws for a data
@@ -243,22 +281,15 @@ function ensureQuoteVendor(db, quoteId, { actorId = null } = {}) {
       ? person.name
       : null;
     const email = normalizeEmail(quote.contractor_email) || null;
-    const id = uuidv4();
-    db.prepare(`
-      INSERT INTO contractor_profiles (
-        id, vendor_name, contact_name, email, phone, billing_address, contractor_status,
-        contractor_category, contractor_categories_json, source, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, 'quote', datetime('now'), datetime('now'))
-    `).run(
-      id,
-      filing.name,
-      contactName,
+    const id = insertVendorProfile(db, {
+      name: filing.name,
+      contact: contactName,
       email,
-      String(quote.contractor_phone || '').trim() || null,
-      String(quote.contractor_address || '').trim() || null,
+      phone: quote.contractor_phone,
+      address: quote.contractor_address,
       category,
-      JSON.stringify(category ? [category] : [])
-    );
+      source: 'quote',
+    });
     link({ id });
     setFlag(false);
     return { status: 'created', contractor_id: id, vendor_name: filing.name, category, created_by: actorId };
@@ -268,6 +299,11 @@ function ensureQuoteVendor(db, quoteId, { actorId = null } = {}) {
 module.exports = {
   NEEDS_VENDOR_FLAG,
   normalizeVendorName,
+  looseVendorKey,
+  parseFlags,
+  contractorCategoryForQuote,
+  insertVendorProfile,
+  staffNameKeys,
   cleanVendorName,
   findVendorByName,
   findVendorByEmail,

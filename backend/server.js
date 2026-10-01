@@ -34,6 +34,8 @@ const humanResourcesRoutes = require('./src/routes/humanResources');
 const financeTrackerRoutes = require('./src/routes/financeTracker');
 const costAnalyzerRoutes = require('./src/routes/costAnalyzer');
 const agreementRoutes = require('./src/routes/agreements');
+const documentReviewRoutes = require('./src/routes/documentReviews');
+const documentReviewService = require('./src/services/documentReview');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -190,6 +192,7 @@ app.use('/api/quickbooks', quickBooksRoutes);
 app.use('/api/human-resources', humanResourcesRoutes);
 app.use('/api/cost-analyzer', costAnalyzerRoutes);
 app.use('/api/agreements', agreementRoutes);
+app.use('/api/document-reviews', documentReviewRoutes);
 app.use('/api/service/finance-tracker', financeTrackerRoutes);
 app.use('/api/projects/:projectId/quotes', quoteAnalyticsRoutes.projectQuotesRouter);
 app.use('/api/invoice-agent', (_req, res) => {
@@ -531,6 +534,8 @@ async function start() {
       console.log('');
       startCalendarReminderScheduler();
       startActivityRetentionScheduler();
+      // The AI reads every agreement and quote document and checks how it is filed.
+      documentReviewService.start();
       if (typeof quickBooksRoutes.startQuickBooksAutoSync === 'function') {
         quickBooksRoutes.startQuickBooksAutoSync();
       }

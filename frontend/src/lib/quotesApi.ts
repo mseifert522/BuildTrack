@@ -71,6 +71,11 @@ export interface ContractorQuote {
   contractor_profile_id?: string | null;
   // Name of the Contractors / Suppliers record this quote is tied to.
   vendor_profile_name?: string | null;
+  // The AI's check of how the quote is filed (document_ai_reviews).
+  ai_status?: 'pending' | 'reading' | 'verified' | 'corrected' | 'needs_review' | 'failed' | 'skipped' | null;
+  ai_findings_json?: string | null;
+  ai_summary?: string | null;
+  ai_reviewed_at?: string | null;
 }
 
 export interface QuoteCategory {

@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ClipboardList, Scale, CheckCircle2, Paperclip, History, Plus, Search, Download,
+  ClipboardList, Scale, CheckCircle2, Paperclip, History, Plus, Search, Download, Layers,
   Check, X, ChevronRight, ChevronDown, RefreshCw, FileText, Trash2, Wand2, Ban, RotateCcw,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -21,14 +21,17 @@ import {
 } from '../lib/quotesApi';
 import { formatEasternDateTime } from '../lib/time';
 import { quoteVendorMessage } from '../lib/vendors';
+import { AiReviewBadge, AiReviewModal } from '../components/AiReview';
+import { aiIsBusy, parseFindings } from '../lib/documentReview';
 import '../styles/quotes.css';
 
 const PAGE_SIZE = 50;
 
-type TabKey = 'all' | 'compare' | 'approved' | 'rejected' | 'attachments' | 'audit';
+type TabKey = 'all' | 'categories' | 'compare' | 'approved' | 'rejected' | 'attachments' | 'audit';
 
 const TABS: Array<{ key: TabKey; label: string; icon: typeof ClipboardList }> = [
   { key: 'all', label: 'All Quotes', icon: FileText },
+  { key: 'categories', label: 'By Category', icon: Layers },
   { key: 'compare', label: 'Compare Bids', icon: Scale },
   { key: 'approved', label: 'Approved Quotes', icon: CheckCircle2 },
   { key: 'rejected', label: 'Rejected Quotes', icon: Ban },
@@ -310,7 +313,7 @@ function csvCell(value: unknown): string {
 export default function Quotes() {
   const [options, setOptions] = useState<QuoteOptions | null>(null);
   const [budgets, setBudgets] = useState<Record<string, number | null>>({});
-  const [tab, setTab] = useState<TabKey>('all');
+  const [tab, setTab] = useState<TabKey>(() => (new URLSearchParams(window.location.search).get('category') ? 'categories' : 'all'));
   const [filters, setFilters] = useState<QuoteFilters>(() => ({
     ...blankFilters(),
     search: new URLSearchParams(window.location.search).get('search') || '',
@@ -343,6 +346,9 @@ export default function Quotes() {
 
   const [showAdd, setShowAdd] = useState(false);
   const [editQuote, setEditQuote] = useState<ContractorQuote | null>(null);
+  const [aiReviewQuote, setAiReviewQuote] = useState<ContractorQuote | null>(null);
+  // By Category: the category being compared (?category= also opens it).
+  const [categoryView, setCategoryView] = useState(() => new URLSearchParams(window.location.search).get('category') || '');
 
   const role = useAuthStore(s => s.user?.role);
   const canDelete = role === 'super_admin' || role === 'operations_manager';
@@ -523,6 +529,18 @@ export default function Quotes() {
     void loadSummary();
     void loadCompare();
   }, [loadList, loadSummary, loadCompare]);
+
+  // The AI reads every quote document after it is saved; refresh while it works.
+  const aiBusy = quotes.some(q => aiIsBusy(q.ai_status));
+  useEffect(() => {
+    if (!aiBusy) return undefined;
+    // Quiet refresh: no loading screen, the rows just update in place.
+    const timer = window.setInterval(() => {
+      if (tab === 'compare' || tab === 'audit') return;
+      fetchQuotes(listParams()).then(res => setQuotes(res.quotes || [])).catch(() => undefined);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [aiBusy, tab, listParams]);
 
   // ── Client-side search + sort + pagination over the loaded set ─────────────
   const filteredSorted = useMemo(() => {
@@ -757,6 +775,17 @@ export default function Quotes() {
         <AuditLog rows={activity} loading={activityLoading} />
       ) : tab === 'attachments' ? (
         <AttachmentsTable rows={attachmentRows} loading={listLoading} onOpen={(q, docKey) => setDocsViewer({ quote: q, docKey })} />
+      ) : tab === 'categories' ? (
+        <CategoryComparison
+          quotes={filteredSorted}
+          loading={listLoading}
+          selected={filters.category || categoryView}
+          onSelect={category => {
+            setCategoryView(category);
+            if (filters.category) setFilters(f => ({ ...f, category: '' }));
+          }}
+          onOpenDocs={(q, docKey) => setDocsViewer({ quote: q, docKey })}
+        />
       ) : (
         <QuoteGrid
           rows={pageRows}
@@ -770,6 +799,7 @@ export default function Quotes() {
           onDelete={handleDelete}
           onModify={handleModify}
           onOpenDocs={(q, docKey) => setDocsViewer({ quote: q, docKey })}
+          onAiReview={q => setAiReviewQuote(q)}
           canDelete={canDelete}
           busyId={busyId}
           sortKey={sortKey}
@@ -809,6 +839,16 @@ export default function Quotes() {
         />
       )}
 
+      {aiReviewQuote ? (
+        <AiReviewModal
+          entityType="quote"
+          entityId={aiReviewQuote.id}
+          title={`${aiReviewQuote.quote_number} · ${aiReviewQuote.contractor_company || aiReviewQuote.contractor_name || 'vendor not read'}`}
+          onClose={() => setAiReviewQuote(null)}
+          onChanged={() => reloadAll()}
+        />
+      ) : null}
+
       <QuoteApprovalEmailNoticeModal notice={approvalEmailNotices[0] ?? null} onClose={() => setApprovalEmailNotices(list => list.slice(1))} />
     </div>
   );
@@ -829,6 +869,7 @@ function QuoteGrid(props: {
   onDelete: (q: ContractorQuote) => void;
   onModify: (q: ContractorQuote) => void;
   onOpenDocs: (q: ContractorQuote, docKey?: string) => void;
+  onAiReview: (q: ContractorQuote) => void;
   canDelete: boolean;
   busyId: string | null;
   sortKey: 'date' | 'total';
@@ -839,7 +880,7 @@ function QuoteGrid(props: {
   totalPages: number;
   totalRows: number;
 }) {
-  const { rows, loading, tab, expanded, setExpanded, onApprove, onDeny, onRestore, onDelete, onModify, onOpenDocs, canDelete, busyId, sortKey, sortDir, toggleSort, page, setPage, totalPages, totalRows } = props;
+  const { rows, loading, tab, expanded, setExpanded, onApprove, onDeny, onRestore, onDelete, onModify, onOpenDocs, onAiReview, canDelete, busyId, sortKey, sortDir, toggleSort, page, setPage, totalPages, totalRows } = props;
   if (loading) return <Loading message="Loading quotes…" />;
   if (totalRows === 0) {
     return <Empty message={tab === 'approved' ? 'No approved quotes yet.' : tab === 'rejected' ? 'No rejected quotes yet.' : 'No quotes found.'} icon={<ClipboardList className="h-8 w-8" />} />;
@@ -898,6 +939,11 @@ function QuoteGrid(props: {
                       {q.contractor_company && q.contractor_name && q.contractor_name !== q.contractor_company && (
                         <div className="max-w-[170px] truncate text-[11px] text-gray-400" title={q.contractor_name}>{q.contractor_name}</div>
                       )}
+                      {q.ai_status ? (
+                        <div className="mt-0.5">
+                          <AiReviewBadge status={q.ai_status} findings={parseFindings(q.ai_findings_json)} onClick={() => onAiReview(q)} />
+                        </div>
+                      ) : null}
                     </td>
                     <td className="px-2 py-1.5 align-top">
                       <span className="inline-block rounded bg-gray-50 px-1.5 py-0.5 text-[11px] font-medium text-gray-600">{primaryCategory(q)}</span>
@@ -1637,6 +1683,201 @@ function QuoteDocumentModal({ title, subtitle, docs, initialKey, onClose }: {
 // ─────────────────────────────────────────────────────────────────────────────
 // Attachments + Audit
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// By Category (Mike, 2026-10-01): every quote for one category of work - e.g. all
+// roofing quotes - on one screen for easy comparison. Grouped by property (the
+// bids for the same job side by side, lowest first) or as one list.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// What a quote prices in one category: its line items in that category, with
+// deduct sections subtracting (the same net rule as the quote total).
+function categoryAmount(quote: ContractorQuote, category: string): number {
+  const signBySection = new Map((quote.sections || []).map(section => [section.id, Number(section.sign) < 0 ? -1 : 1]));
+  return (quote.line_items || [])
+    .filter(item => item.category === category)
+    .reduce((sum, item) => sum + (signBySection.get(item.section_id || '') ?? 1) * num(item.total_line_item_price), 0);
+}
+
+function quoteCategories(quote: ContractorQuote): string[] {
+  return Array.from(new Set((quote.line_items || []).map(item => item.category).filter(Boolean) as string[]));
+}
+
+function median(values: number[]): number {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function CategoryComparison({ quotes, loading, selected, onSelect, onOpenDocs }: {
+  quotes: ContractorQuote[];
+  loading: boolean;
+  selected: string;
+  onSelect: (category: string) => void;
+  onOpenDocs: (q: ContractorQuote, docKey?: string) => void;
+}) {
+  const [grouping, setGrouping] = useState<'property' | 'list'>('property');
+
+  const categories = useMemo(() => {
+    const map = new Map<string, { name: string; quotes: ContractorQuote[] }>();
+    for (const quote of quotes) {
+      for (const name of quoteCategories(quote)) {
+        if (!map.has(name)) map.set(name, { name, quotes: [] });
+        map.get(name)!.quotes.push(quote);
+      }
+    }
+    return [...map.values()].map(entry => {
+      const amounts = entry.quotes.map(q => categoryAmount(q, entry.name)).filter(amount => amount > 0);
+      return {
+        ...entry,
+        count: entry.quotes.length,
+        properties: new Set(entry.quotes.map(q => q.project_id)).size,
+        low: amounts.length ? Math.min(...amounts) : 0,
+        high: amounts.length ? Math.max(...amounts) : 0,
+        median: median(amounts),
+      };
+    }).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  }, [quotes]);
+
+  const current = categories.find(entry => entry.name === selected) || null;
+
+  const rows = useMemo(() => {
+    if (!current) return [];
+    return current.quotes
+      .map(quote => ({ quote, amount: categoryAmount(quote, current.name) }))
+      .sort((a, b) => a.amount - b.amount);
+  }, [current]);
+
+  const groups = useMemo(() => {
+    if (grouping === 'list') return [{ key: 'all', label: '', rows }];
+    const map = new Map<string, { key: string; label: string; rows: typeof rows }>();
+    for (const row of rows) {
+      const key = row.quote.project_id;
+      if (!map.has(key)) map.set(key, { key, label: row.quote.property_address || row.quote.project_name || 'Project', rows: [] });
+      map.get(key)!.rows.push(row);
+    }
+    return [...map.values()].sort((a, b) => b.rows.length - a.rows.length || a.label.localeCompare(b.label));
+  }, [rows, grouping]);
+
+  if (loading) return <Loading message="Loading quotes…" />;
+  if (!categories.length) return <Empty message="No quotes to compare yet." icon={<Layers className="h-8 w-8" />} />;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-1.5" role="group" aria-label="Choose a category">
+        {categories.map(entry => (
+          <button
+            key={entry.name}
+            type="button"
+            aria-pressed={entry.name === selected}
+            onClick={() => onSelect(entry.name === selected ? '' : entry.name)}
+            className={`bt-chip-toggle ${entry.name === selected ? 'is-selected' : ''}`}
+          >
+            {entry.name} <span className="bt-chip-count">{entry.count}</span>
+          </button>
+        ))}
+      </div>
+
+      {!current ? (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {categories.map(entry => (
+            <button key={entry.name} type="button" onClick={() => onSelect(entry.name)} className="bt-quote-category-card text-left">
+              <p className="text-sm font-bold text-gray-900">{entry.name}</p>
+              <p className="mt-0.5 text-xs text-gray-500">{entry.count} quote{entry.count === 1 ? '' : 's'} · {entry.properties} propert{entry.properties === 1 ? 'y' : 'ies'}</p>
+              <p className="mt-2 text-xs text-gray-600">
+                {entry.low ? <>Low <strong className="text-gray-900">{money(entry.low)}</strong> · median <strong className="text-gray-900">{money(entry.median)}</strong> · high <strong className="text-gray-900">{money(entry.high)}</strong></> : 'No priced lines'}
+              </p>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-end justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3">
+            <div>
+              <p className="text-base font-bold text-gray-900">{current.name}</p>
+              <p className="text-xs text-gray-500">
+                {current.count} quote{current.count === 1 ? '' : 's'} across {current.properties} propert{current.properties === 1 ? 'y' : 'ies'} · amounts are this category's lines on each quote
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-4 text-xs text-gray-600">
+              <span>Low <strong className="block text-sm text-gray-900">{money(current.low)}</strong></span>
+              <span>Median <strong className="block text-sm text-gray-900">{money(current.median)}</strong></span>
+              <span>High <strong className="block text-sm text-gray-900">{money(current.high)}</strong></span>
+            </div>
+            <div className="bt-vs-toggle" role="radiogroup" aria-label="Group quotes">
+              <button type="button" role="radio" aria-checked={grouping === 'property'} onClick={() => setGrouping('property')}>By property</button>
+              <button type="button" role="radio" aria-checked={grouping === 'list'} onClick={() => setGrouping('list')}>One list</button>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto rounded-lg border border-gray-200">
+            <table className="w-full min-w-[920px] text-left text-sm">
+              <thead className="bg-gray-50 text-[11px] uppercase text-gray-500">
+                <tr>
+                  <th className="px-3 py-2 font-semibold">Vendor</th>
+                  {grouping === 'list' ? <th className="px-3 py-2 font-semibold">Property</th> : null}
+                  <th className="px-3 py-2 font-semibold">Scope</th>
+                  <th className="px-3 py-2 text-right font-semibold">{current.name}</th>
+                  <th className="px-3 py-2 text-right font-semibold">vs lowest</th>
+                  <th className="px-3 py-2 text-right font-semibold">Quote total</th>
+                  <th className="px-3 py-2 font-semibold">Date</th>
+                  <th className="px-3 py-2 font-semibold">Status</th>
+                  <th className="px-3 py-2 font-semibold"><span className="sr-only">Document</span></th>
+                </tr>
+              </thead>
+              {groups.map(group => {
+                const lowest = group.rows.find(row => row.amount > 0)?.amount || 0;
+                return (
+                  <tbody key={group.key} className="divide-y divide-gray-100">
+                    {group.label ? (
+                      <tr>
+                        <th colSpan={8} className="bg-gray-50 px-3 py-1.5 text-xs font-semibold text-gray-700">
+                          {group.label} <span className="font-normal text-gray-400">· {group.rows.length} quote{group.rows.length === 1 ? '' : 's'}</span>
+                        </th>
+                      </tr>
+                    ) : null}
+                    {group.rows.map(({ quote, amount }, index) => {
+                      const docs = quoteDocuments(quote);
+                      const diff = lowest && amount > lowest ? amount - lowest : 0;
+                      return (
+                        <tr key={quote.id} className="bt-quote-category-row">
+                          <td className="px-3 py-2 align-top">
+                            <div className="flex items-center gap-1.5">
+                              <span className="max-w-[180px] truncate font-medium text-gray-900" title={quote.contractor_company || quote.contractor_name}>{quote.contractor_company || quote.contractor_name || 'Vendor not read'}</span>
+                              {index === 0 && amount > 0 && group.rows.length > 1 ? <span className="bt-quote-lowest">Lowest</span> : null}
+                            </div>
+                            <div className="text-[11px] text-gray-400">{quote.quote_number}</div>
+                          </td>
+                          {grouping === 'list' ? <td className="max-w-[200px] truncate px-3 py-2 align-top text-gray-700" title={quote.property_address || ''}>{quote.property_address || quote.project_name}</td> : null}
+                          <td className="max-w-[260px] px-3 py-2 align-top text-gray-700"><span className="line-clamp-2" title={quoteTitle(quote)}>{quoteTitle(quote)}</span></td>
+                          <td className="whitespace-nowrap px-3 py-2 text-right align-top font-semibold text-gray-900">{money(amount)}</td>
+                          <td className="whitespace-nowrap px-3 py-2 text-right align-top text-xs text-gray-500">
+                            {diff ? `+${money(diff)} (${Math.round((diff / lowest) * 100)}%)` : amount > 0 ? '—' : ''}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 text-right align-top text-gray-700">{money(quote.total_quote_amount)}</td>
+                          <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">{shortDate(quote.quote_date)}</td>
+                          <td className="px-3 py-2 align-top"><StatusPill status={quote.status} /></td>
+                          <td className="whitespace-nowrap px-3 py-2 text-right align-top">
+                            {docs.length ? (
+                              <button type="button" onClick={() => onOpenDocs(quote, docs[0].key)} className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:underline">
+                                <FileText className="h-3.5 w-3.5" /> View PDF
+                              </button>
+                            ) : <span className="text-xs text-gray-400">No document</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                );
+              })}
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function AttachmentsTable({ rows, loading, onOpen }: { rows: ContractorQuote[]; loading: boolean; onOpen: (q: ContractorQuote, docKey: string) => void }) {
   if (loading) return <Loading message="Loading attachments…" />;
   if (rows.length === 0) return <Empty message="No source files attached to quotes in this view." icon={<Paperclip className="h-8 w-8" />} />;

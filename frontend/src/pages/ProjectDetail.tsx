@@ -32,6 +32,8 @@ import PhotoMarkupModal from '../components/PhotoMarkupModal';
 import PunchBulkAddModal from '../components/PunchBulkAddModal';
 import PunchListSendModal from '../components/PunchListSendModal';
 import AddVendorModal from '../components/AddVendorModal';
+import AuthedImage from '../components/AuthedImage';
+import { downloadAuthedFile, openAuthedFile } from '../lib/authFiles';
 import { onVendorAdded, quoteVendorMessage } from '../lib/vendors';
 
 // Loaded only when the Documents & Agreements tab is opened.
@@ -5383,14 +5385,15 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                       </p>
                       <div className="mt-2 flex flex-wrap gap-2">
                         {estimateDocuments.map((doc: any) => (
-                          <a
+                          <button
+                            type="button"
                             key={doc.scope_document_id || doc.id}
-                            href={`/api/documents/${projectId}/${doc.id}/download`}
-                            className="inline-flex max-w-full items-center gap-2 rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-xs font-bold text-slate-100 hover:bg-white/15"
+                            onClick={() => { void openAuthedFile(`/api/documents/${projectId}/${doc.id}/download`, { mime: doc.mime_type }); }}
+                            className="inline-flex max-w-full cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-xs font-bold text-slate-100 hover:bg-white/15"
                           >
                             <FileText className="h-3.5 w-3.5 flex-shrink-0" />
                             <span className="truncate">{doc.original_name || 'Estimate document'}</span>
-                          </a>
+                          </button>
                         ))}
                       </div>
                     </div>
@@ -10579,13 +10582,33 @@ function QuotesTab({ projectId, project }: { projectId: string; project: any }) 
                           {quote.notes && <p className="mt-1 text-xs font-semibold text-slate-300">{quote.notes}</p>}
                         </div>
                         {quote.document_download_url && (
+                          // Fetched with the login (a plain link to /api opens "Authentication required").
                           <div className="flex flex-col gap-2 lg:items-end">
                             {hasImageAttachment && (
-                              <img src={quote.document_download_url} alt="Uploaded quote attachment" className="h-20 w-28 rounded-md border border-cyan-200/30 object-cover" />
+                              <AuthedImage
+                                url={quote.document_download_url}
+                                mime={quote.source_file_mime_type}
+                                alt="Uploaded quote attachment"
+                                className="h-20 w-28 cursor-pointer rounded-md border border-cyan-200/30 object-cover"
+                                onClick={() => { void openAuthedFile(quote.document_download_url, { mime: quote.source_file_mime_type }); }}
+                              />
                             )}
-                            <a href={quote.document_download_url} className="inline-flex min-h-8 items-center justify-center rounded-md border border-cyan-200/50 bg-cyan-400/10 px-2.5 py-1.5 text-xs font-black text-cyan-50 transition hover:bg-cyan-400/25">
-                              {hasImageAttachment ? 'Open Attachment' : 'Download Quote'}
-                            </a>
+                            <div className="flex flex-wrap gap-1.5 lg:justify-end">
+                              <button
+                                type="button"
+                                onClick={() => { void openAuthedFile(quote.document_download_url, { mime: quote.source_file_mime_type }); }}
+                                className="inline-flex min-h-8 cursor-pointer items-center justify-center rounded-md border border-cyan-200/50 bg-cyan-400/10 px-2.5 py-1.5 text-xs font-black text-cyan-50 transition hover:bg-cyan-400/25"
+                              >
+                                {hasImageAttachment ? 'Open Attachment' : 'View Quote PDF'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => { void downloadAuthedFile(quote.document_download_url, quote.source_file_name || `${quote.quote_number}.pdf`); }}
+                                className="inline-flex min-h-8 cursor-pointer items-center justify-center rounded-md border border-cyan-200/50 bg-cyan-400/10 px-2.5 py-1.5 text-xs font-black text-cyan-50 transition hover:bg-cyan-400/25"
+                              >
+                                Download
+                              </button>
+                            </div>
                           </div>
                         )}
                       </div>

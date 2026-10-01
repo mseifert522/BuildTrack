@@ -884,6 +884,7 @@ function deleteQuote(req, res, forcedProjectId = null) {
         .map(id => db.prepare('SELECT * FROM project_documents WHERE id = ?').get(id))
         .filter(Boolean);
       db.prepare('DELETE FROM quote_sections WHERE quote_id = ?').run(quote.id);
+      db.prepare("DELETE FROM document_ai_reviews WHERE entity_type = 'quote' AND entity_id = ?").run(quote.id);
       db.prepare('DELETE FROM contractor_quotes WHERE id = ?').run(quote.id);
       for (const doc of docs) {
         db.prepare('DELETE FROM project_documents WHERE id = ?').run(doc.id);
@@ -1103,10 +1104,15 @@ function listQuotes(req, res, forcedProjectId = null) {
       vqr.opened_at as quote_request_opened_at,
       vqr.submitted_at as quote_returned_at,
       vqr.status as quote_request_status,
-      cp.vendor_name as vendor_profile_name
+      cp.vendor_name as vendor_profile_name,
+      air.status as ai_status,
+      air.findings_json as ai_findings_json,
+      air.summary as ai_summary,
+      air.reviewed_at as ai_reviewed_at
     FROM contractor_quotes q
     LEFT JOIN users u ON u.id = q.uploaded_by
     LEFT JOIN contractor_profiles cp ON cp.id = q.contractor_profile_id
+    LEFT JOIN document_ai_reviews air ON air.entity_type = 'quote' AND air.entity_id = q.id
     LEFT JOIN project_documents pd ON pd.id = q.source_document_id
     LEFT JOIN vendor_quote_requests vqr ON vqr.submitted_quote_id = q.id
     ${where.sql}

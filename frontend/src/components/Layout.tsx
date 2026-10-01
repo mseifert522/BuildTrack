@@ -128,11 +128,27 @@ function notificationLabel(action: string, details?: Record<string, any> | null)
     agreement_deleted: 'deleted an executed agreement',
     quote_vendor_created: 'added a vendor from a quote',
     quote_vendor_clarification_requested: 'added a quote whose vendor could not be read',
+    agreement_vendor_created: 'added a vendor from an agreement',
+    ai_review_corrected: 'filed a document - the AI corrected it',
+    ai_review_flagged: 'filed a document - the AI flagged it to check',
+    ai_review_applied: 'applied the AI reading to a document',
+    ai_review_undone: 'undid the AI corrections on a document',
+    ai_review_backfill_started: 'started an AI re-read of all documents',
+    quote_moved_by_ai: 'had a quote moved to the right project by the AI',
   };
   return labels[action] || action.replace(/_/g, ' ');
 }
 
 function notificationLink(log: ActivityLog) {
+  if (log.entity_type === 'document_review') return '/agreements';
+  if (log.entity_type === 'contractor_quote' && (log.action.startsWith('ai_review') || log.action === 'quote_moved_by_ai')) {
+    const details = safeDetails(log.details);
+    return details?.quote_number ? `/quotes?search=${encodeURIComponent(details.quote_number)}` : '/quotes';
+  }
+  if (log.action === 'agreement_vendor_created') {
+    const details = safeDetails(log.details);
+    return details?.name ? `/contractors?search=${encodeURIComponent(details.name)}` : '/contractors';
+  }
   if (log.entity_type === 'vendor_agreement') {
     const details = safeDetails(log.details);
     return details?.project_id && log.action !== 'agreement_deleted' ? `/projects/${details.project_id}#agreements` : '/agreements';

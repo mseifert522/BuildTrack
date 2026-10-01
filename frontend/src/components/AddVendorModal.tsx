@@ -31,6 +31,8 @@ interface Props {
   defaultProjectId?: string | null;
   defaultType?: 'contractor' | 'supplier';
   initialName?: string;
+  /** Details read from a document by the AI (agreement upload). */
+  initialValues?: { contact_name?: string; email?: string; phone?: string; billing_address?: string };
   /** Called with the vendor that was added - or the existing one the user chose. */
   onAdded?: (vendor: AddedVendor) => void;
 }
@@ -46,7 +48,7 @@ const emptyForm = {
 
 const SUPPLIER_DEFAULT_CATEGORY = 'General Building Materials';
 
-export default function AddVendorModal({ isOpen, onClose, defaultProjectId = null, defaultType = 'contractor', initialName = '', onAdded }: Props) {
+export default function AddVendorModal({ isOpen, onClose, defaultProjectId = null, defaultType = 'contractor', initialName = '', initialValues, onAdded }: Props) {
   const [type, setType] = useState<'contractor' | 'supplier'>(defaultType);
   const [form, setForm] = useState(emptyForm);
   const [categories, setCategories] = useState<string[]>([]);
@@ -62,7 +64,14 @@ export default function AddVendorModal({ isOpen, onClose, defaultProjectId = nul
   useEffect(() => {
     if (!isOpen) return;
     setType(defaultType);
-    setForm({ ...emptyForm, name: initialName });
+    setForm({
+      ...emptyForm,
+      name: initialName,
+      contact_name: initialValues?.contact_name || '',
+      email: initialValues?.email || '',
+      phone: initialValues?.phone || '',
+      billing_address: initialValues?.billing_address || '',
+    });
     setSelectedCategories([]);
     setCategoryFilter('');
     setProjectId(defaultProjectId || '');

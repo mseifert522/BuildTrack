@@ -3101,6 +3101,50 @@ function initializeSchema() {
 
     CREATE INDEX IF NOT EXISTS idx_vendor_agreements_sha
       ON vendor_agreements(sha256);
+
+    -- AI document review (Mike, 2026-10-01): the AI reads every executed
+    -- agreement and every quote document and checks it is filed correctly.
+    -- document_ai_reads caches one read per file content (sha256), so a file is
+    -- never paid for twice (upload-time read, post-save check, split rows).
+    CREATE TABLE IF NOT EXISTS document_ai_reads (
+      sha256 TEXT NOT NULL,
+      read_version INTEGER NOT NULL,
+      model TEXT,
+      read_json TEXT NOT NULL,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (sha256, read_version)
+    );
+
+    -- One review per filed record. entity_type: 'agreement' | 'quote'.
+    CREATE TABLE IF NOT EXISTS document_ai_reviews (
+      id TEXT PRIMARY KEY,
+      entity_type TEXT NOT NULL CHECK(entity_type IN ('agreement','quote')),
+      entity_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      mode TEXT NOT NULL DEFAULT 'upload',
+      entry_index INTEGER,
+      notify_if_unresolved INTEGER NOT NULL DEFAULT 0,
+      file_sha256 TEXT,
+      read_version INTEGER,
+      model TEXT,
+      document_count INTEGER,
+      summary TEXT,
+      findings_json TEXT,
+      corrections_json TEXT,
+      error TEXT,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      requested_by TEXT,
+      claimed_at TEXT,
+      reviewed_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (entity_type, entity_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_document_ai_reviews_status
+      ON document_ai_reviews(status, created_at);
   `);
 
   try {

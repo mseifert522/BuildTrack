@@ -1582,6 +1582,9 @@ module.exports = {
   getRuntimeFlags,
   claimDocument,
   detectFileType,
+  // shared with services/documentReview.js (same PDF/image preparation)
+  preparePdf,
+  prepareImage,
   resolveAttachmentPath,
   normalizeExtraction,
   computeTotalsMatch,

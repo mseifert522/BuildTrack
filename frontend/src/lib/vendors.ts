@@ -43,6 +43,9 @@ export function quoteVendorMessage(resolution?: QuoteVendorResolution | null): {
   }
   if (resolution.status === 'needs_clarification') {
     const n = resolution.notification;
+    if (n?.reason === 'pending_ai_read') {
+      return { tone: 'warning', text: `The vendor's name could not be read from what was entered. The AI is reading the quote for it now - if it cannot find it either, the office (${n.to}) is emailed to clarify.` };
+    }
     const emailed = n?.sent
       ? ` The office (${n.to}) was emailed to clarify the vendor's name.`
       : n?.reason === 'not_requested'
