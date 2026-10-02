@@ -345,3 +345,67 @@
   border: none !important;
   cursor: pointer;
 }
+
+/* Friday queue: when QuickBooks was last checked, plus a manual re-check
+   (2026-10-02). A plain text link like "Clear ticks" - no extra box or border.
+   Sizes and cursor are set here because the unlayered `button { font: inherit }`
+   rule beats utility classes. */
+.bt-approved-pay-sync {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  margin-top: 6px;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.bt-approved-pay-sync button {
+  padding: 0;
+  color: #fde68a;
+  font-size: 11px;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  background: none !important;
+  border: none !important;
+  cursor: pointer;
+}
+
+.bt-approved-pay-sync button:hover:not(:disabled) {
+  color: #fef3c7;
+}
+
+.bt-approved-pay-sync button:disabled {
+  cursor: progress;
+  text-decoration: none;
+  opacity: 0.7;
+}
+
+/* Friday queue cards at <= 900px (2026-10-02). desktop-heavy.css stacks
+   .bt-approved-pay-card into one column at this width, but the !important
+   checklist grid above kept all five columns, which squeezed the details into a
+   sliver and pushed "Verify QBO Paid" off the card on phones. Same breakpoint:
+   tick + header row (pill ... amount, a flex row at this width) on top, then the
+   details, then the buttons. */
+@media (max-width: 900px) {
+  .bt-approved-pay-card--checklist {
+    grid-template-columns: auto minmax(0, 1fr) !important;
+  }
+
+  .bt-approved-pay-card--checklist .bt-approved-pay-card-top {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .bt-approved-pay-card--checklist .bt-approved-pay-card-body,
+  .bt-approved-pay-card--checklist .bt-approved-pay-card-bottom {
+    grid-column: 1 / -1 !important;
+  }
+
+  .bt-approved-pay-card--checklist .bt-approved-pay-card-bottom {
+    flex-wrap: wrap;
+  }
+}

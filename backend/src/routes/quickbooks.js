@@ -1514,7 +1514,7 @@ function upsertBillsAndPayments(db, connection, bills, payments) {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
   `);
   const getExistingBillApproval = db.prepare(`
-    SELECT payment_approval_status
+    SELECT payment_approval_status, payment_status
     FROM quickbooks_bills
     WHERE qbo_id = ?
     LIMIT 1
@@ -1552,6 +1552,7 @@ function upsertBillsAndPayments(db, connection, bills, payments) {
   let matched = 0;
   let ignored = 0;
   let markedPaidFromQueue = 0;
+  const paidFromQueue = [];
   const newBills = [];
   const write = db.transaction(() => {
     if (deleteExcludedBills) deleteExcludedBills.run(...excludedVendors);
@@ -1588,8 +1589,20 @@ function upsertBillsAndPayments(db, connection, bills, payments) {
       const project = findProjectForBill(db, bill, invoice, classRef);
       if (project && classRef) rememberProjectClass(db, project, classRef);
       if (invoice) matched += 1;
-      if (invoice && paymentStatus === 'paid' && paymentApprovalStatusAtSync === PAYMENT_APPROVAL_STATUS && invoice.status !== 'paid') {
+      // A Friday-queue bill that QuickBooks now shows paid leaves the queue on this
+      // write. Counted for every such bill (it used to count only the rare bills with
+      // a matched BuildTrack invoice, so the sync log always said 0).
+      if (
+        paymentStatus === 'paid'
+        && paymentApprovalStatusAtSync === PAYMENT_APPROVAL_STATUS
+        && existingBillApproval?.payment_status !== 'paid'
+      ) {
         markedPaidFromQueue += 1;
+        paidFromQueue.push({
+          qbo_id: String(bill.Id),
+          vendor_name: bill.VendorRef?.name || null,
+          total_amt: normalizeMoney(bill.TotalAmt),
+        });
       }
       upsertBill.run(
         String(bill.Id),
@@ -1691,7 +1704,7 @@ function upsertBillsAndPayments(db, connection, bills, payments) {
   });
 
   write();
-  return { matched, ignored, markedPaidFromQueue, newBills };
+  return { matched, ignored, markedPaidFromQueue, paidFromQueue, newBills };
 }
 
 function reconcileMissingQuickBooksBills(db, connection, bills) {
@@ -2619,6 +2632,99 @@ async function syncQuickBooksBillPdfs({ scope = 'open_missing', force = false, q
   }
 }
 
+function logPaidFromQueue(paidFromQueue, source) {
+  if (!paidFromQueue?.length) return;
+  const names = paidFromQueue.slice(0, 10)
+    .map(bill => `${bill.vendor_name || 'Vendor missing'} $${normalizeMoney(bill.total_amt).toFixed(2)}`)
+    .join(', ');
+  const more = paidFromQueue.length > 10 ? ` and ${paidFromQueue.length - 10} more` : '';
+  console.log(`[QBO] ${paidFromQueue.length} Friday-queue bill(s) now paid in QuickBooks (${source}): ${names}${more}`);
+}
+
+// ── Friday queue re-check (2026-10-02) ───────────────────────────────────────
+// A payment recorded in QuickBooks used to reach the queue only on the next full
+// sync (QBO_AUTO_SYNC_INTERVAL_MS, 60 s in prod) and the Invoice Center only on
+// its own 60 s poll, so a bill the office had just paid could sit in the queue
+// for two minutes and look like the sync was broken. This re-reads ONLY the
+// queued bills (one QBO query, plus recent bill payments when any turned up
+// paid) whenever someone opens or returns to the queue. One in-flight check is
+// shared by every caller and results are reused for a few seconds, so open
+// tabs cannot hammer QuickBooks.
+const PAYMENT_QUEUE_RECHECK_MIN_INTERVAL_MS = 10 * 1000;
+const PAYMENT_QUEUE_RECHECK_PAYMENT_LOOKBACK_DAYS = 3;
+let paymentQueueRecheckPromise = null;
+let paymentQueueRecheckLast = null;
+
+function queuedUnpaidQuickBooksBillIds(db) {
+  // QBO entity ids are numeric; anything else is skipped rather than quoted into a query.
+  return db.prepare(`
+    SELECT qbo_id
+    FROM quickbooks_bills
+    WHERE payment_status != 'paid'
+      AND COALESCE(payment_approval_status, '${PAYMENT_APPROVAL_DEFAULT_STATUS}') = '${PAYMENT_APPROVAL_STATUS}'
+    ORDER BY qbo_id
+  `).all()
+    .map(row => String(row.qbo_id || '').trim())
+    .filter(id => /^[0-9]+$/.test(id));
+}
+
+async function recheckPaymentQueueAgainstQuickBooks() {
+  if (paymentQueueRecheckPromise) return paymentQueueRecheckPromise;
+  if (paymentQueueRecheckLast && Date.now() - paymentQueueRecheckLast.at < PAYMENT_QUEUE_RECHECK_MIN_INTERVAL_MS) {
+    // Bills that check found paid were already announced to whoever triggered it.
+    return { ...paymentQueueRecheckLast.result, now_paid: [], cached: true };
+  }
+
+  paymentQueueRecheckPromise = (async () => {
+    const db = getDb();
+    if (!qboConfig().configured) return { skipped: true, reason: 'missing_credentials' };
+    const connection = getActiveConnection(db);
+    if (!connection) return { skipped: true, reason: 'not_connected' };
+    // A full sync already in flight read QuickBooks before this check will. Let it
+    // write first so it cannot overwrite this fresher answer with older data.
+    if (activeSyncPromise) await activeSyncPromise.catch(() => null);
+
+    const ids = queuedUnpaidQuickBooksBillIds(db);
+    const checkedAt = new Date().toISOString();
+    if (!ids.length) return { checked: 0, found_in_quickbooks: 0, now_paid: [], checked_at: checkedAt };
+
+    const bills = [];
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100).map(id => `'${id}'`).join(', ');
+      const payload = await qboQuery(db, connection, `SELECT * FROM Bill WHERE Id IN (${chunk}) MAXRESULTS 1000`);
+      bills.push(...(payload?.QueryResponse?.Bill || []).filter(bill => bill?.Id));
+    }
+    let payments = [];
+    if (bills.some(bill => paymentStatusForBill(bill) === 'paid')) {
+      // Take the payments too, so Paid in Full shows the pay date straight away.
+      const since = new Date(Date.now() - PAYMENT_QUEUE_RECHECK_PAYMENT_LOOKBACK_DAYS * 86400000).toISOString().slice(0, 10);
+      payments = await fetchAllQboEntitiesWhere(db, connection, 'BillPayment', `Metadata.LastUpdatedTime >= '${since}'`)
+        .catch(err => {
+          console.warn('[QBO] Payment queue re-check: bill payment lookup skipped:', err.message);
+          return [];
+        });
+    }
+    // Bills missing from the answer (deleted in QBO) are left to the full sync's
+    // reconcileMissingQuickBooksBills, which only trusts a complete Bill query.
+    const result = upsertBillsAndPayments(db, connection, bills, payments);
+    logPaidFromQueue(result.paidFromQueue, 'queue re-check');
+    return {
+      checked: ids.length,
+      found_in_quickbooks: bills.length,
+      now_paid: result.paidFromQueue,
+      checked_at: checkedAt,
+    };
+  })();
+
+  try {
+    const result = await paymentQueueRecheckPromise;
+    if (!result.skipped) paymentQueueRecheckLast = { at: Date.now(), result };
+    return result;
+  } finally {
+    paymentQueueRecheckPromise = null;
+  }
+}
+
 async function syncQuickBooksBills({ source = 'manual', userId = null } = {}) {
   if (activeSyncPromise) return activeSyncPromise;
 
@@ -2646,6 +2752,7 @@ async function syncQuickBooksBills({ source = 'manual', userId = null } = {}) {
       const companyName = connection.company_name || await fetchCompanyName(db, connection);
       const vendorResult = upsertQuickBooksVendors(db, connection, vendors);
       const result = upsertBillsAndPayments(db, connection, bills, payments);
+      logPaidFromQueue(result.paidFromQueue, source);
       const missingBillReconciliation = reconcileMissingQuickBooksBills(db, connection, bills);
       // Contractor pay-date notifications are MANUAL-ONLY (2026-08-15, Mike's
       // directive): sync must never email a contractor on its own. The office
@@ -2685,6 +2792,7 @@ async function syncQuickBooksBills({ source = 'manual', userId = null } = {}) {
             matched: result.matched,
             ignored_bills: result.ignored,
             marked_paid_from_friday_queue: result.markedPaidFromQueue,
+            ...(result.paidFromQueue.length ? { paid_from_friday_queue: result.paidFromQueue.slice(0, 25) } : {}),
             new_bills: result.newBills.length,
             contractor_receipt_emails: vendorReceiptNotifications,
             qbo_missing_bills_hidden: missingBillReconciliation.count,
@@ -3268,7 +3376,9 @@ router.put('/bills/:qboId/remove-from-pay', authorize(...QUICKBOOKS_ADMIN_ROLES)
   const bill = getQuickBooksBillRow(db, req.params.qboId);
   if (!bill) return res.status(404).json({ error: 'QuickBooks bill not found.' });
   if (bill.payment_status === 'paid') {
-    return res.status(409).json({ error: 'This bill is already paid in QuickBooks.' });
+    // A card still on screen after the sync saw the payment: the bill has already
+    // left the queue. Hand back the paid row so the page drops it; nothing changes.
+    return res.json({ ...bill, already_paid: true });
   }
   if (bill.payment_approval_status === PAYMENT_APPROVAL_PAID_STATUS) {
     return res.status(409).json({ error: 'This bill is marked paid in BuildTrack and must stay linked to QuickBooks.' });
@@ -3393,7 +3503,26 @@ router.put('/bills/:qboId/mark-paid-from-queue', authorize(...QUICKBOOKS_ADMIN_R
   const bill = getQuickBooksBillRow(db, req.params.qboId);
   if (!bill) return res.status(404).json({ error: 'QuickBooks bill not found.' });
   if (bill.payment_status === 'paid') {
-    return res.status(409).json({ error: 'This bill is already paid in QuickBooks.' });
+    // The minute-by-minute sync usually sees the QuickBooks payment before anyone
+    // clicks Verify. That is a successful verification, not an error (it used to
+    // answer 409 "already paid" and show a red toast on a bill that was fine).
+    if (bill.payment_approval_status === PAYMENT_APPROVAL_STATUS) {
+      logActivity({
+        userId: req.user.id,
+        projectId: bill.project_id || undefined,
+        action: 'quickbooks_bill_payment_verified',
+        entityType: 'quickbooks_bill',
+        entityId: bill.qbo_id,
+        details: {
+          vendor_name: bill.vendor_name,
+          qbo_balance: bill.balance,
+          qbo_payment_status: bill.payment_status,
+          matched_invoice_id: bill.matched_invoice_id,
+          already_synced: true,
+        },
+      });
+    }
+    return res.json({ ...bill, already_paid: true });
   }
   if (bill.payment_approval_status !== PAYMENT_APPROVAL_STATUS) {
     return res.status(409).json({ error: 'Only bills in the Friday payment queue can be marked paid from BuildTrack.' });
@@ -3449,7 +3578,7 @@ router.put('/bills/:qboId/mark-paid-from-queue', authorize(...QUICKBOOKS_ADMIN_R
   // Refresh this one row from QBO before making the decision. The PAID action
   // is verification-only: it never creates a payment or forces a local paid
   // flag when QuickBooks still carries a balance.
-  upsertBillsAndPayments(db, connection, [qboBill], []);
+  logPaidFromQueue(upsertBillsAndPayments(db, connection, [qboBill], []).paidFromQueue, 'verify');
   const refreshed = getQuickBooksBillRow(db, bill.qbo_id);
   if (refreshed.payment_status !== 'paid' && Number(refreshed.balance || 0) > 0) {
     return res.status(409).json({
@@ -3527,6 +3656,26 @@ router.post('/payment-queue/notify', authorize(...QUICKBOOKS_ADMIN_ROLES), async
   }
 });
 
+// POST /api/quickbooks/payment-queue/recheck - re-read the queued bills from
+// QuickBooks right now (see recheckPaymentQueueAgainstQuickBooks). It only reads
+// QuickBooks; BuildTrack's mirror rows are all it changes.
+router.post('/payment-queue/recheck', authorize(...QUICKBOOKS_ADMIN_ROLES), async (req, res) => {
+  try {
+    const result = await recheckPaymentQueueAgainstQuickBooks();
+    if (result.skipped) {
+      const notConnected = result.reason === 'not_connected';
+      return res.status(notConnected ? 409 : 503).json({
+        error: notConnected ? 'QuickBooks is not connected.' : 'QuickBooks credentials are not configured on the server.',
+        ...result,
+      });
+    }
+    res.json({ ...result, stats: statusSummary(getDb()) });
+  } catch (err) {
+    console.error('[QBO] Payment queue re-check failed:', err.message);
+    res.status(502).json({ error: 'Could not reach QuickBooks to re-check the payment queue. The automatic sync keeps trying every minute.' });
+  }
+});
+
 function startQuickBooksAutoSync() {
   if (autoSyncStarted) return;
   if (process.env.QBO_AUTO_SYNC_ENABLED === 'false' || process.env.QUICKBOOKS_AUTO_SYNC_ENABLED === 'false') {
@@ -3592,8 +3741,10 @@ router.syncQuickBooksBillPdfs = syncQuickBooksBillPdfs;
 router.__test = {
   missingQuickBooksBillIds,
   paymentStatusForBill,
+  queuedUnpaidQuickBooksBillIds,
   reconcileMissingQuickBooksBills,
   shouldRestoreDeletedQuickBooksBill,
+  upsertBillsAndPayments,
 };
 
 module.exports = router;
@@ -3665,14 +3816,14 @@ function buildCardActivity({ accounts, purchases, journals }) {
     byMonth.set(month, (byMonth.get(month) || 0) + amount);
   };
   const addCharge = (card, date, label, amount) => {
-    const key = `${card}${date.slice(0, 7)}${label}`;
+    const key = `${card}\u0000${date.slice(0, 7)}\u0000${label}`;
     const row = charges.get(key) || { card, month: date.slice(0, 7), label, amount: 0 };
     row.amount += amount;
     charges.set(key, row);
     move(card, date, amount);
   };
   const addPayment = (card, ref, date, label, amount) => {
-    const key = `${card}${ref}`;
+    const key = `${card}\u0000${ref}`;
     const row = payments.get(key) || { card, ref, date, label, amount: 0 };
     row.amount += amount;
     payments.set(key, row);
@@ -3763,6 +3914,7 @@ router.financeTrackerCardActivity = async function financeTrackerCardActivity() 
     counts: { accounts: accounts.length, purchases: purchases.length, journals: journals.length },
   };
 };
+
 
 // -- Card register (2026-09-23) ----------------------------------------------
 // Every line QuickBooks has ever posted to a credit-card or line-of-credit

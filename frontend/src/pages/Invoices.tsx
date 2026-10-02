@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../lib/api';
 import { Loading } from '../components/ui';
@@ -30,7 +30,7 @@ import {
 } from 'lucide-react';
 import { useAuthStore, isAdminRole } from '../store/authStore';
 import toast from 'react-hot-toast';
-import { formatDateOnly, formatEasternDate, formatEasternDateTime, parseBuildTrackTimestamp } from '../lib/time';
+import { formatDateOnly, formatEasternDate, formatEasternDateTime, formatEasternTime, parseBuildTrackTimestamp } from '../lib/time';
 
 interface InvoicePdfSummary {
   available: boolean;
@@ -849,6 +849,8 @@ export default function Invoices() {
   const [uploadingQboBillPdfId, setUploadingQboBillPdfId] = useState<string | null>(null);
   const [draggingQboBillPdfId, setDraggingQboBillPdfId] = useState<string | null>(null);
   const [notifyingPaymentQueue, setNotifyingPaymentQueue] = useState(false);
+  const [queueCheckedAt, setQueueCheckedAt] = useState<string | null>(null);
+  const [checkingPaymentQueue, setCheckingPaymentQueue] = useState(false);
   const canReadQuickBooksStatus = isAdminRole(user?.role || '');
   const canManageQuickBooks = Boolean(user?.role && QUICKBOOKS_PANEL_ROLES.includes(user.role));
   // Project managers can VIEW the invoice center; every mutation stays behind
@@ -878,6 +880,59 @@ export default function Invoices() {
       toast.error('Failed to load invoices');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Background refresh (no page spinner). A request that fails keeps what is on
+  // screen: the old poll replaced the QuickBooks list with [] on any error, which
+  // blanked the queue until the next poll. With recheckQueue, admins first have
+  // BuildTrack re-read the queued bills from QuickBooks, so a bill paid there a
+  // moment ago leaves the Friday queue now rather than after the next full sync
+  // plus the next poll (up to two minutes).
+  const refreshInvoiceData = async ({
+    recheckQueue = false,
+    announce = false,
+    onlyIfQueueChanged = false,
+  }: { recheckQueue?: boolean; announce?: boolean; onlyIfQueueChanged?: boolean } = {}) => {
+    let nowPaid = 0;
+    let recheckFailed = false;
+    if (recheckQueue && canManageQuickBooks) {
+      try {
+        const res = await api.post('/quickbooks/payment-queue/recheck');
+        setQueueCheckedAt(res.data?.checked_at || new Date().toISOString());
+        nowPaid = Array.isArray(res.data?.now_paid) ? res.data.now_paid.length : 0;
+      } catch (err: any) {
+        recheckFailed = true;
+        if (announce) toast.error(err.response?.data?.error || 'Could not reach QuickBooks to re-check the queue');
+      }
+    }
+    if (!onlyIfQueueChanged || nowPaid > 0) {
+      const [invoiceRes, qboStatusRes, qboBillsRes] = await Promise.all([
+        api.get('/invoices').catch(() => null),
+        canReadQuickBooksStatus ? api.get('/quickbooks/status').catch(() => null) : Promise.resolve(null),
+        canViewQuickBooks ? api.get(QUICKBOOKS_BILLS_PATH).catch(() => null) : Promise.resolve(null),
+      ]);
+      if (Array.isArray(invoiceRes?.data)) setInvoices(invoiceRes.data);
+      if (qboStatusRes?.data) setQuickBooksStatus(qboStatusRes.data);
+      if (Array.isArray(qboBillsRes?.data)) setQuickBooksBills(qboBillsRes.data);
+    }
+    if (announce && !recheckFailed) {
+      toast.success(nowPaid
+        ? `${nowPaid} invoice${nowPaid === 1 ? '' : 's'} paid in QuickBooks; moved to Paid in Full`
+        : 'The Friday queue matches QuickBooks');
+    }
+  };
+  // Timers and window listeners below call the latest render's function.
+  const refreshInvoiceDataRef = useRef(refreshInvoiceData);
+  refreshInvoiceDataRef.current = refreshInvoiceData;
+
+  const checkPaymentQueueNow = async () => {
+    if (checkingPaymentQueue) return;
+    setCheckingPaymentQueue(true);
+    try {
+      await refreshInvoiceData({ recheckQueue: true, announce: true });
+    } finally {
+      setCheckingPaymentQueue(false);
     }
   };
 
@@ -997,28 +1052,37 @@ export default function Invoices() {
   };
 
   useEffect(() => {
-    load();
+    // Ask QuickBooks about the queued bills once the page is up; reload only if any were paid.
+    load().then(() => refreshInvoiceDataRef.current({ recheckQueue: true, onlyIfQueueChanged: true }));
   }, []);
 
   useEffect(() => {
-    const interval = window.setInterval(async () => {
-      try {
-        const [invoiceRes, qboStatusRes, qboBillsRes] = await Promise.all([
-          api.get('/invoices'),
-          canReadQuickBooksStatus ? api.get('/quickbooks/status').catch(() => ({ data: null })) : Promise.resolve({ data: null }),
-          canViewQuickBooks
-            ? api.get(QUICKBOOKS_BILLS_PATH).catch(() => ({ data: [] }))
-            : Promise.resolve({ data: [] }),
-        ]);
-        setInvoices(Array.isArray(invoiceRes.data) ? invoiceRes.data : []);
-        setQuickBooksStatus(qboStatusRes.data || null);
-        setQuickBooksBills(Array.isArray(qboBillsRes.data) ? qboBillsRes.data : []);
-      } catch {
-        // Keep the current dashboard state if a background refresh is interrupted.
-      }
+    // QuickBooks is only re-checked while someone can see the page; hidden tabs
+    // just reload BuildTrack's own data.
+    const interval = window.setInterval(() => {
+      void refreshInvoiceDataRef.current({ recheckQueue: document.visibilityState === 'visible' });
     }, 60_000);
     return () => window.clearInterval(interval);
-  }, [canViewQuickBooks, canReadQuickBooksStatus]);
+  }, []);
+
+  // The office records the payment in QuickBooks in another tab or window, then
+  // comes back here: re-check right away. focus and visibilitychange both fire on
+  // one switch, hence the short guard.
+  const lastReturnRefreshAt = useRef(0);
+  useEffect(() => {
+    const onReturn = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (Date.now() - lastReturnRefreshAt.current < 5_000) return;
+      lastReturnRefreshAt.current = Date.now();
+      void refreshInvoiceDataRef.current({ recheckQueue: true });
+    };
+    window.addEventListener('focus', onReturn);
+    document.addEventListener('visibilitychange', onReturn);
+    return () => {
+      window.removeEventListener('focus', onReturn);
+      document.removeEventListener('visibilitychange', onReturn);
+    };
+  }, []);
 
   useEffect(() => {
     if (!attachmentPreview) {
@@ -1109,6 +1173,10 @@ export default function Invoices() {
     [quickBooksBills]
   );
   const approvedPaymentTotal = approvedPaymentQueue.reduce((sum, bill) => sum + Number(bill.balance || 0), 0);
+  // Newest of this page's own queue re-check and the server's minute-by-minute full sync.
+  const queueLastCheckedAt = [queueCheckedAt, quickBooksStatus?.connection?.last_sync_at || null]
+    .filter((value): value is string => Boolean(parseBuildTrackTimestamp(value)))
+    .sort((a, b) => (parseBuildTrackTimestamp(b)?.getTime() || 0) - (parseBuildTrackTimestamp(a)?.getTime() || 0))[0] || null;
 
   // Bank-entry checklist (Mike, 2026-09-18). Whoever keys these payments into
   // the bank ticks each row as they go so nothing is missed or paid twice. It
@@ -1673,9 +1741,12 @@ export default function Invoices() {
       const res = await api.put(`/quickbooks/bills/${encodeURIComponent(bill.qbo_id)}/remove-from-pay`);
       updateQuickBooksBill(res.data);
       await refreshQuickBooksStatus();
-      toast.success('Invoice removed from the Friday payment queue');
+      toast.success(res.data?.already_paid
+        ? 'Already paid in QuickBooks; moved to Paid in Full'
+        : 'Invoice removed from the Friday payment queue');
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to remove this bill from the payment queue');
+      await refreshInvoiceData();
     } finally {
       setRemovingQboBillId(null);
     }
@@ -1696,10 +1767,13 @@ export default function Invoices() {
       const res = await api.put(`/quickbooks/bills/${encodeURIComponent(bill.qbo_id)}/mark-paid-from-queue`);
       updateQuickBooksBill(res.data);
       await refreshQuickBooksStatus();
-      toast.success('QuickBooks payment confirmed; invoice moved to Paid in Full');
+      toast.success(res.data?.already_paid
+        ? 'Already paid in QuickBooks; moved to Paid in Full'
+        : 'QuickBooks payment confirmed; invoice moved to Paid in Full');
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to verify this invoice in QuickBooks');
-      await load();
+      if (err.response?.data?.bill) updateQuickBooksBill(err.response.data.bill);
+      await refreshInvoiceData();
     } finally {
       setMarkingQboPaidId(null);
     }
@@ -2486,7 +2560,19 @@ export default function Invoices() {
                 <div>
                   <p className="text-xs font-black uppercase tracking-wide text-orange-300">Approved for payment</p>
                   <h2 className="text-lg font-black text-gray-900">Friday payment queue</h2>
-                  <p className="text-sm text-gray-500">Approved invoices show here with the next biweekly Friday pay run. After recording payment in QuickBooks, verify it here.</p>
+                  <p className="text-sm text-gray-500">Approved invoices show here with the next biweekly Friday pay run. Once the payment is recorded in QuickBooks, the invoice moves to Paid in Full on its own.</p>
+                  {canManageQuickBooks && (
+                    <p className="bt-approved-pay-sync" aria-live="polite">
+                      <span>
+                        {queueLastCheckedAt
+                          ? `Checked with QuickBooks at ${formatEasternTime(queueLastCheckedAt, { second: '2-digit' })}`
+                          : 'Checked with QuickBooks every minute'}
+                      </span>
+                      <button type="button" onClick={checkPaymentQueueNow} disabled={checkingPaymentQueue}>
+                        {checkingPaymentQueue ? 'Checking QuickBooks...' : 'Check QuickBooks now'}
+                      </button>
+                    </p>
+                  )}
                 </div>
                 <div className="bt-approved-pay-actions">
                   {canManageQuickBooks && (

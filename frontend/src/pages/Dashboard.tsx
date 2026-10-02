@@ -154,12 +154,11 @@ interface OperationsCalendarEvent {
   created_at?: string | null;
 }
 
-interface FridayPaymentQueueBill {
-  qbo_id?: string;
-  balance?: number | null;
-  total_amt?: number | null;
-  payment_status?: string | null;
-  payment_approval_status?: string | null;
+interface QuickBooksQueueStatus {
+  stats?: {
+    approved_payment_count?: number | null;
+    approved_payment_balance?: number | null;
+  } | null;
 }
 
 type FridayPaymentQueueSummary = {
@@ -516,22 +515,16 @@ const paymentQueueAmount = (value: unknown) => {
   return Number.isFinite(amount) ? amount : 0;
 };
 
-const isFridayPaymentQueueBillPaid = (bill: FridayPaymentQueueBill) => (
-  String(bill.payment_status || '').toLowerCase() === 'paid'
-  || paymentQueueAmount(bill.balance) <= 0
-);
-
-const summarizeFridayPaymentQueue = (bills: FridayPaymentQueueBill[]): FridayPaymentQueueSummary =>
-  bills.reduce<FridayPaymentQueueSummary>((summary, bill) => {
-    if (isFridayPaymentQueueBillPaid(bill) || bill.payment_approval_status !== 'approved_for_payment') {
-      return summary;
+// The server already totals the approved, still-unpaid queue (GET /quickbooks/status
+// -> stats), so the reminder no longer downloads every mirrored bill to count it.
+const fridayPaymentQueueSummaryFromStatus = (status?: QuickBooksQueueStatus | null): FridayPaymentQueueSummary | null => (
+  status?.stats
+    ? {
+      count: paymentQueueAmount(status.stats.approved_payment_count),
+      total: paymentQueueAmount(status.stats.approved_payment_balance),
     }
-
-    return {
-      count: summary.count + 1,
-      total: summary.total + paymentQueueAmount(bill.balance ?? bill.total_amt),
-    };
-  }, emptyFridayPaymentQueueSummary);
+    : null
+);
 
 const calendarPreference = {
   get(key: string, fallback: boolean) {
@@ -619,8 +612,8 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
             ? api.get(`/calendar/events?start=${encodeURIComponent(calendarDataRange.start)}&end=${encodeURIComponent(calendarDataRange.end)}`).catch(() => ({ data: { events: [] } }))
             : Promise.resolve({ data: { events: [] } }),
           !calendarOnly && canReadFridayPaymentQueue
-            ? api.get('/quickbooks/bills?limit=1000').catch(() => ({ data: [] }))
-            : Promise.resolve({ data: [] }),
+            ? api.get('/quickbooks/status').catch(() => ({ data: null }))
+            : Promise.resolve({ data: null }),
         ]);
         const feedItems = Array.isArray(feedRes.data?.items)
           ? feedRes.data.items
@@ -630,9 +623,7 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
         setActivityFeed(dedupeActivityFeedItems(feedItems).slice(0, 25));
         setCalendarEvents(Array.isArray(calendarRes.data?.events) ? calendarRes.data.events : []);
         setFridayPaymentQueueSummary(
-          Array.isArray(paymentQueueRes.data)
-            ? summarizeFridayPaymentQueue(paymentQueueRes.data)
-            : emptyFridayPaymentQueueSummary
+          fridayPaymentQueueSummaryFromStatus(paymentQueueRes.data) || emptyFridayPaymentQueueSummary
         );
       } catch (err) {
         console.error(err);
@@ -660,6 +651,30 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
       document.removeEventListener('visibilitychange', resync);
     };
   }, [canReadOperationsCalendar, calendarDataRange.start, calendarDataRange.end]);
+
+  // Keep the Friday queue reminder current. Bills paid in QuickBooks leave the
+  // queue within a minute; the reminder used to keep its first count until the
+  // dashboard was reloaded.
+  useEffect(() => {
+    if (calendarOnly || !canReadFridayPaymentQueue) return;
+    const refreshSummary = () => {
+      if (document.visibilityState !== 'visible') return;
+      api.get('/quickbooks/status')
+        .then(res => {
+          const summary = fridayPaymentQueueSummaryFromStatus(res.data);
+          if (summary) setFridayPaymentQueueSummary(summary);
+        })
+        .catch(() => {});
+    };
+    const timer = window.setInterval(refreshSummary, 60_000);
+    window.addEventListener('focus', refreshSummary);
+    document.addEventListener('visibilitychange', refreshSummary);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refreshSummary);
+      document.removeEventListener('visibilitychange', refreshSummary);
+    };
+  }, [calendarOnly, canReadFridayPaymentQueue]);
 
   if (loading) return <Loading />;
 
