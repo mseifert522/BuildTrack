@@ -2282,6 +2282,8 @@ function initializeSchema() {
         ON agent_bridge_created_records(request_log_id, record_type);
     `);
   } catch (_) { /* bridge tables already exist */ }
+  // admin:read agents act as this user on the regular API (middleware/agentPrincipal.js).
+  try { db.exec(`ALTER TABLE agent_bridge_agents ADD COLUMN acts_as_user_id TEXT REFERENCES users(id) ON DELETE SET NULL`); } catch (_) { /* already exists */ }
   try {
     db.exec(`
       CREATE TABLE IF NOT EXISTS calendar_email_reminders (

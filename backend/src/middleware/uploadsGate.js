@@ -1,6 +1,6 @@
 'use strict';
 // Auth gate for /uploads. Accepts, in order: a signed link (?exp=&sig=) for that
-// exact file, the Max AI API key, a Bearer session JWT, or the httpOnly
+// exact file, an AI agent key, the Max AI API key, a Bearer session JWT, or the httpOnly
 // __Host-bt_files cookie. The cookie is honored ONLY here and ONLY for GET/HEAD;
 // /api keeps requiring the Bearer header, so the cookie adds no CSRF surface.
 const path = require('path');
@@ -55,9 +55,16 @@ function createUploadsGate(uploadsRoot, deps = {}) {
   const root = path.resolve(uploadsRoot);
   const auth = deps.auth || require('./auth');
   const getDb = deps.getDb || require('../db/schema').getDb;
+  const agentPrincipal = deps.agentPrincipal || require('./agentPrincipal');
   const mode = () => (String(process.env.UPLOADS_AUTH_MODE || 'enforce').toLowerCase() === 'report' ? 'report' : 'enforce');
 
   function principalFor(req) {
+    // 0) AI agent key (admin:read, linked user). Decided here, never falls through.
+    if (agentPrincipal.hasAgentKey(req)) {
+      try {
+        return { via: 'agent', user: agentPrincipal.resolveAgentPrincipal(req).user };
+      } catch (_) { return null; }
+    }
     const bearer = auth.extractBearerToken(req);
     // 1) Max AI API key - same check authenticate() runs first.
     try {

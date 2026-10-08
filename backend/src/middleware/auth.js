@@ -11,6 +11,7 @@ const {
   sessionExpiryPolicy,
 } = require('../utils/sessionPolicy');
 const { ensureUploadsCookie } = require('../utils/uploadsAccess');
+const { authenticateAgentRequest } = require('./agentPrincipal');
 
 // ── Role hierarchy (higher index = more authority) ──────────────────────────
 const ROLE_HIERARCHY = {
@@ -233,6 +234,13 @@ function rejectTokenInUrl(req, res, next) {
 }
 
 function authenticate(req, res, next) {
+  // AI agents (X-BuildTrack-Agent-Key) are decided here and never fall through.
+  try {
+    if (authenticateAgentRequest(req, res)) return next();
+  } catch (err) {
+    return res.status(err.statusCode || 401).json({ error: err.code || 'AGENT_AUTH_FAILED', message: err.message });
+  }
+
   const bearerToken = extractBearerToken(req);
   const apiKey = extractApiKey(req, bearerToken);
 

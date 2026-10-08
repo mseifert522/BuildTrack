@@ -7,6 +7,9 @@ const AGENT_SCOPES = [
   'punch_list:write',
   'agent_logs:read',
   'admin:manage_agents',
+  // Regular /api access as the agent's linked user (middleware/agentPrincipal.js).
+  'admin:read',
+  'notes:write',
 ];
 
 const SCOPE_ITEM_STATUSES = ['not_started', 'in_progress', 'waiting_materials', 'needs_review', 'completed'];
@@ -196,6 +199,20 @@ function streetOnlyCandidate(value) {
   return tokens.join(' ');
 }
 
+// House number + street name, without suffix, city, state or ZIP:
+// "34641 Joel Street, Chesterfield, MI" and "34641 Joel St, New Baltimore, MI 48047"
+// both give "34641 joel". Directions are dropped too ("1132 N Blair" = "1132 Blair");
+// two streets that differ only by direction come back ambiguous, never guessed.
+// Empty unless it starts with a house number.
+const CANONICAL_SUFFIXES = new Set(Object.values(STREET_SUFFIXES));
+const DIRECTIONS = new Set(['n', 's', 'e', 'w', 'north', 'south', 'east', 'west', 'ne', 'nw', 'se', 'sw']);
+function streetCore(value) {
+  const street = String(value || '').split(',')[0];
+  const tokens = tokenizeAddress(street).filter(token => !CANONICAL_SUFFIXES.has(token) && !DIRECTIONS.has(token));
+  if (tokens.length < 2 || !/^\d+[a-z]?$/.test(tokens[0])) return '';
+  return tokens.join(' ');
+}
+
 function similarityScore(left, right) {
   const leftTokens = new Set(tokenizeAddress(left));
   const rightTokens = new Set(tokenizeAddress(right));
@@ -256,6 +273,21 @@ function resolveProperty(db, { propertyId, propertyAddress }) {
     err.statusCode = 409;
     err.matches = exact.map(formatProjectMatch);
     throw err;
+  }
+
+  // Same house number and street name: the city is often given differently
+  // (township vs mailing city), so it must not decide the match.
+  const inputCore = streetCore(propertyAddress);
+  if (inputCore) {
+    const coreMatches = projects.filter(project => streetCore(project.address) === inputCore);
+    if (coreMatches.length === 1) return { project: coreMatches[0], matches: coreMatches.map(formatProjectMatch) };
+    if (coreMatches.length > 1) {
+      const err = new Error('Multiple BuildTrack properties match this address. Please clarify.');
+      err.code = 'AMBIGUOUS_PROPERTY_MATCH';
+      err.statusCode = 409;
+      err.matches = coreMatches.slice(0, 5).map(formatProjectMatch);
+      throw err;
+    }
   }
 
   if (streetOnly) {
@@ -338,6 +370,7 @@ function publicAgent(row) {
     updatedAt: row.updated_at,
     lastUsedAt: row.last_used_at,
     createdByUserId: row.created_by_user_id || null,
+    actsAsUserId: row.acts_as_user_id || null,
     notes: row.notes || '',
   };
 }
