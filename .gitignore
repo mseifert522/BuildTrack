@@ -49,3 +49,4 @@ logs/
 *.before
 *.before-*
 *.codex-backup-*
+frontend/test-results/

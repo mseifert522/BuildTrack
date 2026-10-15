@@ -853,7 +853,7 @@ export default function Layout({ children }: LayoutProps) {
                 <>
                   <div className="fixed inset-0 z-[990]" onClick={() => setProfileOpen(false)} />
                   <div
-                    className="absolute right-0 top-full z-[1010] mt-2 w-72 max-w-[calc(100vw-1rem)] overflow-hidden rounded-md shadow-xl"
+                    className="bt-profile-menu absolute right-0 top-full z-[1010] mt-2 w-72 max-w-[calc(100vw-1rem)] overflow-hidden rounded-md shadow-xl"
                     style={{ background: '#111315', border: '1px solid #E78B4A' }}
                   >
                     {/* Profile header */}

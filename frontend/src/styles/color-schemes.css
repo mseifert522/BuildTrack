@@ -22,10 +22,13 @@ html[data-bt-scheme] body #root .bt-desktop-shell :where(main, .bt-desktop-page)
   color: var(--theme-text) !important;
 }
 html[data-bt-scheme] body #root .bt-desktop-shell :where(*) { border-color: var(--theme-border) !important; }
+/* Unclassified inline labels inherit their containing surface's foreground.
+   Semantic text utilities below still supply status/link/muted colors. */
+html[data-bt-scheme] body #root .bt-desktop-shell :where(span,strong,small,em,b) { color: inherit !important; }
 html[data-bt-scheme] body #root .bt-desktop-shell :where(h1,h2,h3,h4,p,label,legend,td,th) {
   color: var(--theme-text) !important;
 }
-html[data-bt-scheme] body #root .bt-desktop-shell :where(.bg-white, .bg-gray-50, .bg-slate-50, .bg-neutral-50,
+html[data-bt-scheme] body #root .bt-desktop-shell :where([class*="bg-white"], [class*="bg-gray-"], [class*="bg-slate-"], [class*="bg-neutral-"], [class*="bg-zinc-"],
   [class*="bt-"][class*="-card"], [class*="bt-"][class*="-panel"], [class*="bt-"][class*="-section"],
   [class*="bt-"][class*="-workspace"], [class*="bt-"][class*="-table-shell"],
   [class*="bt-"][class*="-filterbar"], [class*="bt-"][class*="-toolbar"],
@@ -39,6 +42,9 @@ html[data-bt-scheme] body #root .bt-desktop-shell :where(.bg-gray-100,.bg-gray-2
   .bt-directory-row,.bt-notification-row,.bt-profile-chip,.bt-topbar-action,[class*="bt-"][class*="-header"],
   [class*="bt-"][class*="-heading"],[class*="bt-"][class*="-table-title"],[class*="bt-"][class*="-table-foot"],
   thead,th) { background-color: var(--theme-raised) !important; color: var(--theme-text) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(tbody,td) {
+  background: var(--theme-surface) !important; color: var(--theme-text) !important;
+}
 html[data-bt-scheme] body #root .bt-desktop-shell :where([class*="text-gray-"],[class*="text-slate-"],[class*="text-neutral-"],
   [class*="text-zinc-"],.text-black,.text-white,.bt-project-title,.bt-sidebar-nav-label) {
   color: var(--theme-text) !important; -webkit-text-fill-color: currentColor !important;
@@ -105,6 +111,141 @@ html[data-bt-scheme] body #root .bt-desktop-shell :where(.bt-sidebar-nav-item:ho
  .hover\:bg-gray-50:hover,.hover\:bg-slate-50:hover,tr:hover > td) { background-color: var(--theme-control) !important; }
 html[data-bt-scheme] body #root .bt-desktop-shell :where(.bt-project-tab-button,.bt-chip-toggle,.bt-invoice-filter,.bt-invoice-refresh) {
   background: var(--theme-control) !important; color: var(--theme-text) !important;
+}
+
+/* Legacy screens have their own surface variables. Bind the pair at the same
+   element that declares those variables, so a child cannot retain a dark well
+   while inheriting the light palette's foreground. */
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-dashboard-page {
+  --bt-dashboard-border: var(--theme-border);
+  --bt-dashboard-border-strong: var(--theme-accent);
+  --bt-dashboard-text: var(--theme-text);
+  --bt-dashboard-text-soft: var(--theme-muted);
+  --bt-dashboard-accent: var(--theme-accent);
+  --bt-dashboard-page-bg: var(--theme-page);
+  --bt-dashboard-panel-bg: var(--theme-surface);
+  --bt-dashboard-panel-header-bg: var(--theme-raised);
+  --bt-dashboard-well-bg: var(--theme-input);
+}
+
+/* Native controls and inline legacy labels use the same account palette. */
+html[data-bt-scheme] body #root .bt-desktop-shell :where(
+  [style*="color:"], .bt-directory-primary-action, .bt-dashboard-payment-queue-reminder,
+  .bt-dashboard-payment-queue-reminder strong, .bt-dashboard-mini-calendar-module button,
+  .bt-dashboard-mini-calendar-module strong, .bt-approved-pay-sync, .bt-approved-pay-total,
+  .bt-approved-pay-card-top, .bt-approved-pay-card-body, .bt-approved-pay-card-bottom,
+  .bt-invoice-section-header span, .bt-approved-pay-header span,
+  .bt-invoice-page-heading span, .bt-qbo-invoice-filter-panel label span,
+  .bt-approved-pay-sync button, .bt-approved-pay-total strong,
+  .bt-dashboard-mini-calendar-module__agenda-title span,
+  .bt-calendar-route-page [class^="ops-"], .bt-calendar-route-page [class*=" ops-"]
+) { color: var(--theme-text) !important; -webkit-text-fill-color: currentColor !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(.bt-calendar-route-page) :where(button,span,strong,small,em,div) {
+  color: var(--theme-text) !important;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell [aria-label$="profile initials"] {
+  background: var(--theme-selected) !important; color: var(--theme-text) !important;
+}
+/* Small inline badges often supply both colors directly instead of utilities. */
+html[data-bt-scheme] body #root .bt-desktop-shell :where(span[style*="background"], .bt-invoice-workflow-key > span) {
+  background: var(--theme-selected) !important; color: var(--theme-text) !important;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-profile-menu :where(button,a) {
+  background: var(--theme-control) !important; color: var(--theme-text) !important;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell :where(
+  .bt-qbo-table-count, .bt-payment-run-chip, .bt-qbo-status-chip, .bt-qbo-pdf-control,
+  .bt-qbo-filter-row, .bt-qbo-period-note,
+  .bt-qbo-pdf-upload-button, .bt-qbo-pdf-button, .bt-qbo-clear-invoice-filter,
+  .bt-invoice-pdf-control-group, .bt-invoice-pdf-control-group button,
+  .bt-invoice-pdf-open-link, .bt-invoice-pdf-close
+) { background: var(--theme-control) !important; color: var(--theme-text) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(
+  .bt-invoice-filter.is-active, .bt-quotes-tabs button[aria-pressed="true"]
+) { background: var(--theme-selected) !important; color: var(--theme-accent) !important; border-color: var(--theme-accent) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-invoice-filter > span {
+  background: var(--theme-surface) !important; color: var(--theme-text) !important;
+}
+
+html[data-bt-scheme] body #root .bt-desktop-shell :where(
+  .bt-dashboard-note-row:hover, .bt-dashboard-payment-queue-reminder:hover,
+  .bt-dashboard-mini-calendar-module button:hover,
+  .bt-approved-pay-panel, .bt-approved-pay-header, .bt-approved-pay-header > div,
+  .bt-approved-pay-total, .bt-approved-pay-sync, .bt-qbo-invoice-filter-count,
+  .bt-directory-list, .bt-directory-list-header, .bt-directory-hero,
+  .bt-directory-chip, .bt-directory-avatar,
+  .ops-calendar, .ops-control-bar, .ops-calendar__filters, .ops-calendar__body,
+  .ops-search, .ops-category-filter, .ops-month-day, .ops-month__weekdays,
+  .ops-week__header, .ops-week__all-day, .ops-time-axis, .ops-day__rail,
+  .ops-time-event, .ops-event-chip, .ops-modal__panel, .ops-modal__header, .ops-modal__actions
+) { background: var(--theme-surface) !important; color: var(--theme-text) !important; }
+
+html[data-bt-scheme] body #root .bt-desktop-shell :where(
+  .ops-icon-button, .ops-depth-button, .ops-secondary-button, .ops-view-toggle,
+  .ops-category-filter__button, .ops-category-filter__reset,
+  .ops-month-day.is-muted, .ops-more-button, .ops-empty-day, .ops-type-toggle button,
+  .ops-hour-slot:hover, .bt-approved-pay-card-bottom button
+) { background: var(--theme-control) !important; color: var(--theme-text) !important; }
+
+html[data-bt-scheme] body #root .bt-desktop-shell :where(
+  .ops-field input, .ops-field select, .ops-field textarea, .ops-assignee-select select, option
+) { background: var(--theme-input) !important; color: var(--theme-text) !important; }
+
+html[data-bt-scheme] body #root .bt-desktop-shell :where(
+  .bt-dashboard-payment-queue-reminder__kicker,
+  .bt-dashboard-payment-queue-reminder__amount strong
+) { color: var(--theme-success) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(
+  .bt-dashboard-mini-calendar-module__kicker, .bt-section-kicker
+) { color: var(--theme-accent) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(
+  .bt-dashboard-mini-calendar-module__weekdays span,
+  .bt-dashboard-mini-calendar-module__agenda-item em,
+  .bt-approved-pay-total small
+) { color: var(--theme-muted) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-dashboard-mini-calendar-module__grid strong {
+  background: var(--theme-text) !important; color: var(--theme-surface) !important;
+}
+
+/* Pair filled actions with their own foreground. The earlier text-white adapter
+   must never turn a primary button's label into the page foreground. */
+html[data-bt-scheme] body #root .bt-desktop-shell :where(
+  .bt-directory-primary-action, .bt-vs-btn--primary, .bt-topbar-add-vendor,
+  .ops-add-button, .ops-view-toggle button.is-active, .ops-type-toggle button.is-active,
+  .ops-month-day.is-today .ops-month-day__number, .ops-week__day-heading.is-today strong,
+  .bt-dashboard-mini-calendar-module__grid button.is-today,
+  .bt-dashboard-mini-calendar-module__grid button.is-selected,
+  button[class*="bg-blue-6"], a[class*="bg-blue-6"],
+  button[class*="bg-indigo-6"], button[class*="bg-emerald-6"],
+  button[class*="bg-green-6"], button[class*="bg-orange-6"], button[class*="bg-amber-5"], button[class*="bg-amber-6"]
+) { background: var(--theme-accent) !important; color: var(--theme-onaccent) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(
+  .bt-directory-primary-action, .bt-vs-btn--primary, .bt-topbar-add-vendor,
+  .ops-add-button, .ops-view-toggle button.is-active, .ops-type-toggle button.is-active,
+  .bt-dashboard-mini-calendar-module__grid button.is-selected,
+  button[class*="bg-blue-6"], a[class*="bg-blue-6"],
+  button[class*="bg-indigo-6"], button[class*="bg-emerald-6"],
+  button[class*="bg-green-6"], button[class*="bg-orange-6"], button[class*="bg-amber-5"], button[class*="bg-amber-6"]
+) :where(*) { color: inherit !important; -webkit-text-fill-color: currentColor !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(
+  .ops-delete-button, button[class*="bg-red-6"], button[class*="bg-red-5"], button[class*="bg-rose-6"]
+) { background: var(--theme-danger) !important; color: var(--theme-onaccent) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(
+  .ops-delete-button, button[class*="bg-red-6"], button[class*="bg-red-5"], button[class*="bg-rose-6"]
+) :where(*) { color: inherit !important; }
+
+html[data-bt-scheme] body #root .bt-desktop-shell :where(button,input,select,textarea):disabled {
+  opacity: 1; background: var(--theme-control) !important; color: var(--theme-muted) !important;
+  cursor: not-allowed;
+}
+
+/* Opacity on readable captions compounds with muted text and fails contrast. */
+html[data-bt-scheme] body #root .bt-desktop-shell :where(span,p,small)[class*="opacity-75"] { opacity: 1; }
+
+/* Modal backdrops remain translucent, while the panel itself stays opaque.
+   Prefix selectors such as bg-slate-950 must not turn a scrim into a solid page. */
+html[data-bt-scheme] body #root .bt-desktop-shell :where(.ops-modal__scrim, .absolute.inset-0.bg-slate-950\/45) {
+  background: rgb(0 0 0 / 55%) !important;
 }
 
 /* The four miniature previews deliberately keep their own colors in every theme. */

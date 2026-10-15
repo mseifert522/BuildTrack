@@ -694,11 +694,12 @@ export default function Quotes() {
       </div>
 
       {/* Tabs */}
-      <div className="mb-4 flex flex-wrap gap-1 border-b border-gray-200">
+      <div className="bt-quotes-tabs mb-4 flex flex-wrap gap-1 border-b border-gray-200">
         {TABS.map(({ key, label, icon: Icon }) => (
           <button
             key={key}
             onClick={() => setTab(key)}
+            aria-pressed={tab === key}
             className="inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors"
             style={{
               borderColor: tab === key ? '#22D3EE' : 'transparent',
