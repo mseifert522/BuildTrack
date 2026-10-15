@@ -24,7 +24,9 @@ Additional states include all project tabs, quote tabs, HR tabs, Cost Analyzer t
 - Immediate preference changes, persistence after reload, failed-save rollback, and agent account status regression checks passed.
 - TypeScript/Vite production build passed. Repository frontend lint: 0 errors, 35 existing warnings.
 
-This is a frontend rendering audit using representative data, not an exhaustive audit of every possible record or business workflow. Authenticated production browser inspection was unavailable because the browser connector failed to initialize. Production verification checks the released assets and container health separately. Uploaded documents and images retain their original contents; their internal text is not recolored.
+This is a frontend rendering audit using representative data, not an exhaustive audit of every possible record or business workflow. Authenticated production browser inspection was unavailable because the browser connector failed to initialize. After deployment, 76 additional rendering checks against the published frontend passed across all four themes, still using intercepted sample API responses. The released assets, public health endpoint, and production container health also passed. Uploaded documents and images retain their original contents; their internal text is not recolored.
+
+Released frontend commit: `812964f`. Production image: `sha256:da7e58ba84c51c904e470271624db462ad4a79edcb932a6e8ac0052f20716baa`. Verified stylesheet: `/assets/index-BRxX98GU.css`.
 
 ## Repeat the browser checks
 
