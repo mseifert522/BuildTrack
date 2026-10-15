@@ -52,7 +52,13 @@ function fixture(url,user){
  if(p==='/quote-analytics/options')return {vendors:[],contractors:[contractor],projects:[project],categories:[{id:'general',category_group:'General',name:'General contractor'}],years:[2026],trades:[],statuses:[]};
  if(p==='/quote-analytics/quotes')return {quotes:[quote],total:1,page:1,limit:20};
  if(p==='/quote-analytics/summary')return {stats:{},totals:{},by_status:[],by_trade:[],by_vendor:[],by_project:[]};
- if(p==='/quote-analytics/activity')return {activity:[],items:[]};
+ if(p==='/quote-analytics/compare')return {
+  project:{...project,square_footage:1800},category_filter:null,
+  contractors:[quote,{...quote,id:'audit-quote-2',quote_number:'Q-102',contractor_name:'Second Sample Contractor',total_quote_amount:4750}].map(q=>({...q,quote_id:q.id,final_approved_amount:null,data_quality_flags:[],line_item_count:1})),
+  rows:[{category:'Cabinets',category_group:'Kitchen',cells:{'audit-quote':{amount:4250,present:true,line_items:[]},'audit-quote-2':{amount:4750,present:true,line_items:[]}},present_count:2,missing_quote_ids:[],has_missing:false,low:4250,high:4750,average:4500,spread:500}],
+  totals:{by_quote:{'audit-quote':4250,'audit-quote-2':4750},low:4250,high:4750,average:4500,price_per_sqft_by_quote:null},
+ };
+ if(p==='/quote-analytics/activity')return [{id:'audit-activity',user_name:user.name,action:'quote_created',entity_type:'quote',entity_id:quote.id,details:'Sample cabinet quote received for review.',created_at:'2026-10-14T14:00:00Z',project_id:project.id,project_address:project.address}];
  if(p==='/field-work/projects/'+project.id)return null;
  if(p==='/cost-analyzer/overview')return {...reportBase,totals:{spend:4250,bills:1,vendors:1,vendors_categorized:0,vendors_needing_review:1,classes:1,classes_with_sqft:0},spend_by_type:{rehab:4250,new_construction:0,maintenance:0,other:0},categories:[],top_vendors:[],documents:docs,last_scan:null,rate_caption:'Sample report'};
  if(p==='/cost-analyzer/vendors')return {...reportBase,vendors:[]};
@@ -80,9 +86,12 @@ const routes=['/dashboard','/operations-calendar','/projects','/projects/audit-p
  return route.fulfill({status:200,json:fixture(url,user)});
  });
  const page=await context.newPage();page.setDefaultTimeout(5000);let current='';page.on('pageerror',e=>errors.push({scheme,page:current,message:e.message}));
+ page.on('console',message=>{if(message.type()==='error'&&message.text().includes('[BuildTrack] Root render error'))errors.push({scheme,page:current,message:message.text()});});
  const audit=async label=>{
    await page.waitForLoadState('networkidle');
    await page.waitForTimeout(250);
+   if(await page.getByText('BuildTrack needs a refresh',{exact:false}).count())throw Error('Application render fallback displayed: '+label);
+   await page.locator('.bt-desktop-shell').waitFor({state:'visible'});
    const result=await page.evaluate(async()=>{
     const r=await axe.run(document,{runOnly:['color-contrast'],resultTypes:['violations','incomplete']});
     // axe cannot resolve float overlaps and single-digit badges. Verify those
