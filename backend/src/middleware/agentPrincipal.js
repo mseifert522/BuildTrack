@@ -30,6 +30,7 @@ const READ_METHODS = new Set(['GET', 'HEAD']);
 // agents (its own key and scopes), the long-lived notes stream, and the
 // QuickBooks OAuth handshake, whose GETs start or finish a connection.
 const DENIED_PATHS = [
+  /^\/api\/notes\/stream\/?$/,
   /^\/api\/auth(\/|$)/,
   /^\/api\/users\/[^/]+\/pin\/?$/,
   /^\/api\/human-resources\/ai-settings(\/|$)/,

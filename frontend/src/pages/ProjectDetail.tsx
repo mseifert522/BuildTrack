@@ -1,3 +1,5 @@
+import NoteReplies from '../components/NoteReplies';
+import { useNotesSync } from '../hooks/useNotesSync';
 import DatedNoteList from '../components/DatedNoteList';
 import { type ChangeEvent, type Dispatch, type DragEvent, type KeyboardEvent, type SetStateAction, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link, useLocation, useNavigate } from 'react-router-dom';
@@ -1049,6 +1051,8 @@ export default function ProjectDetail() {
     setNotes(res.data);
   };
 
+  useNotesSync(id, loadNotes, Boolean(id));
+
   const loadProjectCalendar = useCallback(async () => {
     if (!id || !canViewProjectCalendar(user?.role)) {
       setProjectCalendarEvents([]);
@@ -2068,7 +2072,7 @@ export default function ProjectDetail() {
       </>)}
       {section !== 'composer' && (
       <div className="bt-project-notes-list space-y-2">
-        <DatedNoteList items={notes}>
+        <DatedNoteList items={notes} getTimestamp={note => note.last_activity_at || note.created_at}>
         {note => (
           <div key={note.id} className="bt-project-note-card flex items-start gap-3 rounded-lg bg-slate-900/50 p-4">
             <Avatar src={note.user_avatar_url} name={note.user_name} size={32} />
@@ -2221,6 +2225,7 @@ export default function ProjectDetail() {
                   )}
                 </>
               )}
+              <NoteReplies projectId={id!} noteId={note.id} replies={note.replies} canReply={note.can_reply !== false} />
               {canEditProjectNote(note) && editingNoteId !== note.id && (
                 <button
                   type="button"
@@ -8025,6 +8030,8 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
     }
   };
 
+  useNotesSync(projectId, load);
+
   useEffect(() => {
     load();
     const interval = window.setInterval(load, 30000);
@@ -8222,6 +8229,7 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
                       deletingPhotoId={deletingPhotoId}
                       onPhotoNoteSaved={load}
                     />
+                    {record.kind === 'note' && <NoteReplies projectId={projectId} noteId={record.id.slice(5)} replies={notes.find(note => `note-${note.id}` === record.id)?.replies} />}
                   </div>
                 </div>
               </article>

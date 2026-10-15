@@ -1234,6 +1234,19 @@ function initializeSchema() {
       FOREIGN KEY (edited_by) REFERENCES users(id)
     );
 
+    -- Replies share their parent note's project and visibility; there are no copies.
+    CREATE TABLE IF NOT EXISTS project_note_replies (
+      id TEXT PRIMARY KEY,
+      note_id TEXT NOT NULL REFERENCES project_notes(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      note TEXT NOT NULL CHECK(length(trim(note)) BETWEEN 1 AND 10000),
+      client_id TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(note_id, user_id, client_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_project_note_replies_note_created
+      ON project_note_replies(note_id, created_at);
+
     CREATE TABLE IF NOT EXISTS operations_calendar_events (
       id TEXT PRIMARY KEY,
       project_id TEXT,

@@ -85,3 +85,36 @@ html[data-bt-scheme] body #root .bt-desktop-shell :is(.bt-project-progress-card,
   color: #334155 !important;
 }
 .mobile-shell.bt-mobile-notes-page .bt-mobile-note-content > div > .text-gray-400 { color: #475569 !important; }
+
+/* Conversations use the same readable surface/text pair in every palette. */
+.bt-note-replies { margin-top: 12px; min-width: 0; cursor: default; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-note-replies {
+  --note-text: var(--theme-text);
+  --note-raised: var(--theme-raised);
+  --note-line: color-mix(in srgb, var(--theme-text) 55%, var(--theme-surface));
+}
+.bt-note-reply-list { border-left: 2px solid var(--note-line, #7c8795); padding-left: 12px; }
+.bt-note-reply, .bt-note-reply-form { display: flex; align-items: flex-start; gap: 10px; padding: 12px 0; }
+.bt-note-reply + .bt-note-reply { border-top: 1px solid var(--note-line, #7c8795); }
+.bt-note-reply-content { min-width: 0; flex: 1; }
+.bt-note-reply-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.bt-note-reply-meta strong { font-size: 13px; font-weight: 650; }
+.bt-note-reply-meta time { font-size: 11px; }
+.bt-note-reply-content p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.65; margin: 4px 0 0; }
+.bt-note-reply-content label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+.bt-note-reply-content textarea { width: 100%; min-width: 0 !important; resize: vertical; padding: 10px; border-radius: 6px; font: inherit; font-size: 14px; line-height: 1.5; }
+.bt-note-reply-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.bt-note-reply-controls > span { margin-right: auto; font-size: 11px; }
+.bt-note-replies button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 6px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; }
+.bt-note-replies button:disabled { cursor: not-allowed; opacity: 0.65; }
+.bt-note-replies :is(button, textarea):focus-visible { outline: 2px solid var(--note-text, #17212f); outline-offset: 3px; }
+html body #root :is(.bt-desktop-shell, .bt-mobile-notes-page) .bt-note-replies :is(p, strong, time, label, span, button, textarea) {
+  color: var(--note-text, #17212f) !important;
+  -webkit-text-fill-color: currentColor !important;
+}
+html body #root :is(.bt-desktop-shell, .bt-mobile-notes-page) .bt-note-replies :is(button, textarea) {
+  background: var(--note-raised, #f1f4f7) !important;
+  border: 1px solid var(--note-line, #7c8795) !important;
+}
+html body #root :is(.bt-desktop-shell, .bt-mobile-notes-page) .bt-note-replies textarea::placeholder { color: var(--note-text, #17212f) !important; opacity: 0.7; }
+html body #root :is(.bt-desktop-shell, .bt-mobile-notes-page) .bt-note-replies .bt-note-reply-error { font-weight: 600; border-left: 3px solid currentColor; padding-left: 8px; }

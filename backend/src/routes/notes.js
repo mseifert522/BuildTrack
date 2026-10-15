@@ -1,3 +1,4 @@
+const { attachRepliesToNotes, createNoteReply } = require('../services/noteReplies');
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/schema');
@@ -35,6 +36,32 @@ function withCorrectionDeletePermission(photo, user) {
 
 // In-memory SSE client registry: { projectId: [{ res, userId }] }
 const sseClients = {};
+const feedClients = new Set();
+
+function sessionIsCurrent(req) {
+  if (req.auth?.type !== 'jwt') return false;
+  const principal = resolveSessionPrincipal(
+    { userId: req.user.id, sid: req.auth.session_id, iat: req.auth.issued_at },
+    { sessionToken: req.token },
+  );
+  return Boolean(principal && principal.user.role === req.user.role);
+}
+
+function streamAllNotes(req, res) {
+  if (req.auth?.type !== 'jwt') return res.status(403).json({ error: 'A user session is required' });
+  res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+  res.flushHeaders();
+  res.write(': heartbeat\n\n');
+  const client = { req, res };
+  feedClients.add(client);
+  const heartbeat = setInterval(() => {
+    try {
+      if (!sessionIsCurrent(req)) { res.end(); return; }
+      res.write(': heartbeat\n\n');
+    } catch (_) { res.end(); }
+  }, 25000);
+  res.on('close', () => { clearInterval(heartbeat); feedClients.delete(client); });
+}
 
 function attachPhotosToNotes(db, notes, user) {
   if (!notes.length) return notes;
@@ -56,7 +83,7 @@ function attachPhotosToNotes(db, notes, user) {
     photosByNote.set(photo.note_id, bucket);
   }
 
-  return notes.map(note => {
+  return attachRepliesToNotes(db, notes).map(note => {
     const attachedPhotos = photosByNote.get(note.id) || [];
     const firstPhoto = attachedPhotos[0] || null;
     return {
@@ -76,6 +103,16 @@ function canSeeNote(client, note) {
 }
 
 function broadcastToProject(projectId, data) {
+  // Only invalidate authorized projects. Never broadcast private note content on
+  // the consolidated stream; each screen refetches through its normal access gate.
+  for (const { req, res } of feedClients) {
+    try {
+      if (!sessionIsCurrent(req)) { res.end(); continue; }
+      if (req.user.role === 'contractor' && !getDb().prepare('SELECT id FROM project_assignments WHERE project_id = ? AND user_id = ?').get(projectId, req.user.id)) continue;
+      if (data.note && !canSeeNote({ role: req.user.role, userId: req.user.id }, data.note) && data.type !== 'update_note') continue;
+      res.write(`data: ${JSON.stringify({ type: 'notes_changed', project_id: projectId })}\n\n`);
+    } catch (_) { res.end(); }
+  }
   const clients = sseClients[projectId] || [];
   const payload = `data: ${JSON.stringify(data)}\n\n`;
   // A new note a client cannot see is not sent. An edit can make a note private, so a
@@ -84,9 +121,11 @@ function broadcastToProject(projectId, data) {
     ? `data: ${JSON.stringify({ type: 'delete_note', note_id: data.note.id })}\n\n`
     : null;
   clients.forEach((client) => {
-    const out = !data.note || canSeeNote(client, data.note) ? payload : retract;
-    if (!out) return;
-    try { client.res.write(out); } catch (e) { /* client disconnected */ }
+    try {
+      if (client.stillAuthorized && !client.stillAuthorized()) { client.res.end(); return; }
+      const out = !data.note || canSeeNote(client, data.note) ? payload : retract;
+      if (out) client.res.write(out);
+    } catch (_) { client.res.end(); }
   });
 }
 
@@ -149,6 +188,7 @@ router.get('/stream', (req, res) => {
     if (client.role !== 'contractor') return true;
     return Boolean(getDb().prepare('SELECT id FROM project_assignments WHERE project_id = ? AND user_id = ?').get(projectId, req.user.id));
   };
+  client.stillAuthorized = stillAuthorized;
 
   const detach = () => {
     clearInterval(heartbeat);
@@ -222,6 +262,18 @@ router.post('/', (req, res) => {
   res.status(201).json(newNote);
 });
 
+// Reply access is inherited from the original note. Project access is checked
+// above, and the author/avatar always comes from the authenticated account.
+router.post('/:id/replies', (req, res) => {
+  const result = createNoteReply(getDb(), {
+    projectId: req.params.projectId, noteId: req.params.id, user: req.user,
+    text: req.body?.note, clientId: req.body?.client_id,
+  });
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  if (result.created) broadcastToProject(req.params.projectId, { type: 'note_replied', note: result.note });
+  res.status(result.status).json(result.reply);
+});
+
 // PUT /api/projects/:projectId/notes/:id — edit a note
 router.put('/:id', (req, res) => {
   const { note, note_type, visibility } = req.body;
@@ -272,6 +324,7 @@ router.delete('/:id', (req, res) => {
   const permission = getNoteDeletePermission(req.user, existing);
   if (!permission.allowed) return res.status(permission.status).json({ error: permission.error });
 
+  const deletedReplies = attachRepliesToNotes(db, [existing])[0].replies;
   db.prepare('UPDATE photos SET note_id = NULL WHERE note_id = ?').run(req.params.id);
   db.prepare('DELETE FROM project_notes WHERE id = ? AND project_id = ?').run(req.params.id, req.params.projectId);
   broadcastToProject(req.params.projectId, { type: 'delete_note', note_id: req.params.id });
@@ -283,6 +336,7 @@ router.delete('/:id', (req, res) => {
     entityId: req.params.id,
     // Preserve the deleted note body so a hard delete stays recoverable from the audit trail.
     details: {
+      replies: deletedReplies,
       note: existing.note,
       note_type: existing.note_type,
       author_id: existing.user_id,
@@ -293,6 +347,7 @@ router.delete('/:id', (req, res) => {
 });
 
 module.exports = router;
+module.exports.streamAllNotes = streamAllNotes;
 // The note writes are served by routes/projects.js (mounted first, it shadows the
 // POST/PUT/DELETE handlers above), so it broadcasts through this.
 module.exports.broadcastToProject = broadcastToProject;
