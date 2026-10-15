@@ -1,3 +1,4 @@
+import DatedNoteList from './DatedNoteList';
 import { useEffect, useRef, useState } from 'react';
 
 import { Link, useLocation, useNavigate } from 'react-router-dom';
@@ -784,7 +785,7 @@ export default function Layout({ children }: LayoutProps) {
                         </div>
                       ) : (
                         <div className="space-y-1">
-                          {notificationItems.map(item => {
+                          <DatedNoteList items={notificationItems} getTimestamp={item => item.createdAt}>{item => {
                             const Icon = item.icon;
                             return (
                               <button
@@ -818,7 +819,7 @@ export default function Layout({ children }: LayoutProps) {
                                 </div>
                               </button>
                             );
-                          })}
+                          }}</DatedNoteList>
                         </div>
                       )}
                     </div>

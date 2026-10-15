@@ -1,3 +1,4 @@
+import DatedNoteList from '../components/DatedNoteList';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -1677,7 +1678,8 @@ export default function Contractors() {
                         </div>
                         {(contractor.latest_notes || []).length > 0 ? (
                           <div className="space-y-2">
-                            {(contractor.latest_notes || []).slice(0, 2).map((note, index) => (
+                            <DatedNoteList items={(contractor.latest_notes || []).slice(0, 2)}>
+                            {(note, index) => (
                               <div key={`${note.created_at}-${index}`} className="rounded-lg bg-white border border-slate-200 px-2.5 py-2 hover:border-amber-200">
                                 <div className="mb-1.5 flex items-center justify-between gap-2">
                                   <div className="flex min-w-0 items-center gap-2">
@@ -1710,7 +1712,8 @@ export default function Contractors() {
                                   {note.user_name} · Inserted {formatEasternDateTime(note.created_at, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })} ET
                                 </p>
                               </div>
-                            ))}
+                            )}
+                            </DatedNoteList>
                           </div>
                         ) : (
                           <p className="text-sm text-gray-400">No notes yet</p>
@@ -1827,7 +1830,7 @@ export default function Contractors() {
                             <p className="text-sm text-gray-400">Loading notes...</p>
                           ) : (contractorNotes[contractor.id] || []).length === 0 ? (
                             <p className="text-sm text-gray-400">No notes yet</p>
-                          ) : (contractorNotes[contractor.id] || []).map((note) => (
+                          ) : <DatedNoteList items={contractorNotes[contractor.id] || []}>{note => (
                             <div key={note.id} className="flex items-start gap-3 rounded-xl border border-gray-100 p-3">
                               <Avatar src={note.user_avatar_url} name={note.user_name} size={36} />
                               <div className="flex-1 min-w-0">
@@ -1852,7 +1855,7 @@ export default function Contractors() {
                                 <p className="text-sm text-gray-700 whitespace-pre-wrap mt-1">{note.note}</p>
                               </div>
                             </div>
-                          ))}
+                          )}</DatedNoteList>}
                         </div>
                       </div>
                     </div>
@@ -2315,7 +2318,7 @@ export default function Contractors() {
                   <p className="rounded-xl border border-gray-100 bg-white p-4 text-sm font-semibold text-gray-400">Loading notes...</p>
                 ) : notes.length > 0 ? (
                   <div className="space-y-3">
-                    {notes.map(note => (
+                    <DatedNoteList items={notes}>{note => (
                       <div key={note.id} className="rounded-xl border border-gray-100 bg-white p-4">
                         <div className="mb-2 flex items-center justify-between gap-3">
                           <div className="flex min-w-0 items-center gap-2">
@@ -2340,11 +2343,11 @@ export default function Contractors() {
                         </div>
                         <p className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-700">{note.note}</p>
                       </div>
-                    ))}
+                    )}</DatedNoteList>
                   </div>
                 ) : previewNotes.length > 0 ? (
                   <div className="space-y-3">
-                    {previewNotes.map((note, index) => (
+                    <DatedNoteList items={previewNotes}>{(note, index) => (
                       <div key={`${note.created_at}-${index}`} className="rounded-xl border border-gray-100 bg-white p-4">
                         <div className="mb-2 flex items-center justify-between gap-3">
                           <div className="flex min-w-0 items-center gap-2">
@@ -2369,7 +2372,7 @@ export default function Contractors() {
                         </div>
                         <p className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-700">{note.note}</p>
                       </div>
-                    ))}
+                    )}</DatedNoteList>
                   </div>
                 ) : (
                   <p className="rounded-xl border border-gray-100 bg-white p-4 text-sm font-semibold text-gray-400">No notes yet.</p>

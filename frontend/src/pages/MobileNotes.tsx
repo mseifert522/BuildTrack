@@ -594,9 +594,9 @@ export default function MobileNotes() {
   }
 
   return (
-    <div className="mobile-shell" style={{ background: '#F0F2F5', fontFamily: "'Inter', -apple-system, sans-serif" }}>
+    <div className="mobile-shell bt-mobile-notes-page" style={{ background: '#F0F2F5', fontFamily: "'Inter', -apple-system, sans-serif" }}>
       {/* ── Header ── */}
-      <div style={{ background: 'linear-gradient(135deg, #0D1117 0%, #181D25 100%)', flexShrink: 0 }}>
+      <div className="bt-mobile-notes-header" style={{ background: '#0D1117', flexShrink: 0 }}>
         <div className="flex items-center gap-3 px-4 pt-4 pb-3">
           <button
             onClick={() => navigate(mobilePath(`/project/${projectId}`))}
@@ -613,7 +613,7 @@ export default function MobileNotes() {
                 className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold"
                 style={{
                   background: connected ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
-                  color: connected ? '#22C55E' : '#EF4444',
+                  color: connected ? '#86EFAC' : '#FCA5A5',
                 }}
               >
                 {connected
@@ -622,7 +622,7 @@ export default function MobileNotes() {
                 }
               </span>
             </div>
-            <p className="text-xs truncate mt-0.5" style={{ color: 'rgba(255,255,255,0.5)' }}>{projectAddress}</p>
+            <p className="text-xs truncate mt-0.5" style={{ color: '#CBD5E1' }}>{projectAddress}</p>
           </div>
           <div
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl flex-shrink-0"
@@ -664,7 +664,7 @@ export default function MobileNotes() {
           groupedNotes.map(group => (
             <div key={group.date}>
               {/* Date divider */}
-              <div className="flex items-center gap-3 my-4">
+              <div className="bt-mobile-note-day flex items-center gap-3 my-4">
                 <div className="flex-1 h-px" style={{ background: '#E5E7EB' }} />
                 <span
                   className="text-xs font-bold px-3 py-1 rounded-full flex-shrink-0"
@@ -687,7 +687,7 @@ export default function MobileNotes() {
                   const attachments = notePhotos(note);
 
                   return (
-                    <div key={note.id} className={`flex gap-3 ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}>
+                    <div key={note.id} className={`bt-mobile-note-entry flex gap-3 ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}>
                       {/* Avatar */}
                       <Avatar
                         src={note.user_avatar_url}
@@ -699,7 +699,7 @@ export default function MobileNotes() {
                       />
 
                       {/* Bubble */}
-                      <div className={`flex-1 max-w-xs ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
+                      <div className={`bt-mobile-note-content min-w-0 flex-1 ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
                         {/* Author + role */}
                         <div className={`flex items-center gap-2 mb-1 ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}>
                           <span className="text-xs font-bold text-gray-700">{isOwn ? 'You' : note.user_name}</span>
@@ -713,12 +713,12 @@ export default function MobileNotes() {
 
                         {/* Note content */}
                         <div
-                          className="rounded-2xl px-4 py-3 relative"
+                          className="bt-mobile-note-body w-full rounded-2xl px-4 py-3 relative"
                           style={{
                             background: isEditing
                               ? 'white'
                               : isOwn
-                              ? 'linear-gradient(135deg, #D99D26, #C4891F)'
+                              ? '#FEF3C7'
                               : 'white',
                             boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
                             border: isEditing ? '1px solid #D99D26' : 'none',
@@ -766,7 +766,7 @@ export default function MobileNotes() {
                             <>
                               <p
                                 className="text-sm leading-relaxed whitespace-pre-wrap"
-                                style={{ color: isOwn ? 'white' : '#111827' }}
+                                style={{ color: '#111827' }}
                               >
                                 {note.note}
                               </p>
@@ -798,7 +798,7 @@ export default function MobileNotes() {
                         </div>
 
                         {/* Timestamp + actions */}
-                        <div className={`flex items-center gap-2 mt-1 ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}>
+                        <div className={`bt-mobile-note-actions flex flex-wrap items-center gap-2 mt-2 ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}>
                           <button
                             onClick={() => setExpandedNote(isExpanded ? null : note.id)}
                             className="flex items-center gap-1 text-xs text-gray-400"

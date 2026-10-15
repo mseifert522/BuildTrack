@@ -1,3 +1,4 @@
+import DatedNoteList from '../components/DatedNoteList';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore, isAdminRole } from '../store/authStore';
@@ -1991,7 +1992,8 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
       ) : (
         <div className="bt-dashboard-notes-flow relative flow-root p-4">
           {canReadOperationsCalendar ? renderDashboardCalendarStack() : null}
-          {activityFeed.map((item) => {
+          <DatedNoteList items={activityFeed} getKey={item => `${item.feed_type}-${item.id}`}>
+          {(item) => {
             const summary = getActivitySummary(item);
             const projectTarget = item.project_id ? `/projects/${item.project_id}` : '';
             const projectLabel = item.project_address || item.project_job_name || '';
@@ -2053,7 +2055,8 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
                 </div>
               </div>
             );
-          })}
+          }}
+          </DatedNoteList>
         </div>
       )}
     </div>

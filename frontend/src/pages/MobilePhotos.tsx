@@ -1,3 +1,4 @@
+import { formatEasternDate, formatEasternDateTime } from '../lib/time';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
@@ -202,14 +203,7 @@ function isPhotoContextEnabled(value: number | boolean | undefined, fallback = f
 
 function formatDateTime(value?: string) {
   if (!value) return 'Just now';
-  return new Date(value).toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  });
+  return `${formatEasternDateTime(value, { year: 'numeric' })} ET`;
 }
 
 function clearPreviewUrls(urls: string[]) {
@@ -224,12 +218,7 @@ function isVideoMedia(item: Pick<ProjectPhoto, 'filename' | 'mime_type'> | File)
 function groupPhotosByDay(photos: ProjectPhoto[]) {
   return photos.reduce<{ date: string; photos: ProjectPhoto[] }[]>((groups, photo) => {
     const value = photo.taken_at || photo.created_at;
-    const date = new Date(value).toLocaleDateString('en-US', {
-      weekday: 'long',
-      month: 'long',
-      day: 'numeric',
-      year: 'numeric',
-    });
+    const date = formatEasternDate(value, { weekday: 'long', month: 'long' });
     const last = groups[groups.length - 1];
     if (last && last.date === date) last.photos.push(photo);
     else groups.push({ date, photos: [photo] });
@@ -1792,7 +1781,7 @@ export default function MobilePhotos() {
           <div style={{ display: 'grid', gap: 16 }}>
             {groupedPhotos.map(group => (
               <section key={group.date}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 9 }}>
+                <div className="bt-note-day-boundary" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 9, borderColor: '#7c8795' }}>
                   <div>
                     <p style={{ margin: 0, color: '#111827', fontSize: 14, fontWeight: 900 }}>{group.date}</p>
                     <p style={{ margin: '2px 0 0', color: '#6B7280', fontSize: 11, fontWeight: 700 }}>{group.photos.length} project item{group.photos.length === 1 ? '' : 's'}</p>
@@ -1824,7 +1813,8 @@ export default function MobilePhotos() {
                           event.preventDefault();
                           setLightbox({ src, isVideo });
                         }}
-                        style={{ border: 'none', background: 'white', borderRadius: 14, overflow: 'hidden', padding: 0, textAlign: 'left', boxShadow: '0 1px 8px rgba(0,0,0,0.08)' }}
+                        className="bt-mobile-media-entry"
+                        style={{ border: '1px solid #7c8795', background: 'white', borderRadius: 14, overflow: 'hidden', padding: 0, textAlign: 'left', boxShadow: '0 1px 8px rgba(0,0,0,0.08)' }}
                       >
                         <div style={{ aspectRatio: '1 / 1', background: '#E5E7EB', position: 'relative' }}>
                           {isVideo ? (

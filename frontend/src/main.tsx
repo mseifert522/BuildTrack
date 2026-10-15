@@ -7,6 +7,7 @@ import './operations-calendar-pro.css'
 import './styles/flat-ui.css'
 import App from './App.tsx'
 import './styles/color-schemes.css'
+import './styles/notes.css'
 import { applyColorScheme } from './lib/colorSchemes'
 import { useAuthStore } from './store/authStore'
 

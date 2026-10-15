@@ -1,0 +1,87 @@
+/* Note boundaries must survive legacy border resets and every account palette.
+   Ordinary block flow preserves the dashboard's floating calendar. */
+.bt-note-feed {
+  --note-text: #17212f;
+  --note-surface: #ffffff;
+  --note-raised: #f1f4f7;
+  --note-line: #7c8795;
+  min-width: 0;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-note-feed {
+  --note-text: var(--theme-text);
+  --note-surface: var(--theme-surface);
+  --note-raised: var(--theme-raised);
+  --note-line: color-mix(in srgb, var(--theme-text) 55%, var(--theme-surface));
+}
+.bt-note-day {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  overflow: hidden;
+  margin: 24px 0 12px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+.bt-note-day:first-child { margin-top: 0; }
+.bt-note-day::after {
+  content: '';
+  flex: 1;
+  min-width: 20px;
+  border-top: 2px solid var(--note-line, #7c8795);
+}
+.bt-note-day > span {
+  padding: 6px 10px;
+  border-radius: 5px;
+}
+.bt-note-entry {
+  min-width: 0;
+  overflow: hidden;
+  margin-bottom: 12px;
+  border-radius: 8px;
+}
+.bt-note-feed .bt-note-entry,
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-note-feed .bt-note-entry {
+  border: 1px solid var(--note-line) !important;
+  background: var(--note-surface) !important;
+}
+.bt-note-feed .bt-note-entry > :first-child,
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-note-feed .bt-note-entry > :first-child {
+  margin-bottom: 0 !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+.bt-note-feed .bt-note-day > span,
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-note-feed .bt-note-day > span {
+  background: var(--note-raised) !important;
+  color: var(--note-text) !important;
+  -webkit-text-fill-color: currentColor !important;
+}
+/* Existing progress/media timelines already group by day; retain their layout. */
+html[data-bt-scheme] body #root .bt-desktop-shell :is(.bt-project-progress-card, .bt-media-note-entry, .bt-note-day-boundary) {
+  border-color: color-mix(in srgb, var(--theme-text) 55%, var(--theme-surface)) !important;
+}
+.bt-note-day-boundary { border-bottom: 2px solid; padding-bottom: 10px; }
+/* Mobile notes have their own light shell, independent of desktop palettes. */
+.mobile-shell .bt-mobile-note-entry {
+  border: 1px solid #7c8795;
+  border-radius: 12px;
+  padding: 12px;
+  background: #fff;
+}
+.mobile-shell .bt-mobile-note-day > div { background: #7c8795 !important; }
+.mobile-shell .bt-mobile-note-day > span { color: #374151 !important; }
+.mobile-shell.bt-mobile-notes-page { background: #f0f2f5 !important; color: #17212f !important; }
+.mobile-shell.bt-mobile-notes-page .bt-mobile-notes-header { background: #0d1117 !important; }
+.mobile-shell.bt-mobile-notes-page .bt-mobile-notes-header p { color: #e2e8f0 !important; }
+.mobile-shell.bt-mobile-notes-page .bt-mobile-note-entry { background: #fff !important; }
+.mobile-shell.bt-mobile-notes-page .bt-mobile-note-body { background: #f1f4f7 !important; }
+.mobile-shell.bt-mobile-notes-page .bt-mobile-note-body > p,
+.mobile-shell.bt-mobile-notes-page .bt-mobile-note-body textarea { color: #17212f !important; }
+.mobile-shell.bt-mobile-notes-page .bt-mobile-note-body textarea { min-width: 0 !important; background: #fff !important; }
+.mobile-shell.bt-mobile-notes-page .bt-mobile-note-actions button {
+  font-size: 12px;
+  white-space: nowrap;
+  color: #334155 !important;
+}
+.mobile-shell.bt-mobile-notes-page .bt-mobile-note-content > div > .text-gray-400 { color: #475569 !important; }

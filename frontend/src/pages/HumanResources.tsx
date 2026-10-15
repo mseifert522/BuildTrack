@@ -1,3 +1,5 @@
+import { formatEasternDateTime } from '../lib/time';
+import DatedNoteList from '../components/DatedNoteList';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BadgeDollarSign,
@@ -1871,19 +1873,19 @@ export default function HumanResources() {
 
             <section className="space-y-3">
               <SectionHeading title="Contact history" action={<button className={secondaryButton} onClick={() => openActivity('note')}><Plus className="h-4 w-4" />Note</button>} />
-              <div className="divide-y divide-slate-200">
-                {candidateDetail.activities.map(activity => (
-                  <div key={activity.id} className="flex gap-3 py-3">
+              <div>
+                <DatedNoteList items={candidateDetail.activities} getTimestamp={activity => activity.contacted_at}>{activity => (
+                  <div key={activity.id} className="flex gap-3 p-3">
                     <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-600">
                       {activity.contact_type === 'call' ? <Phone className="h-4 w-4" /> : activity.contact_type === 'email' ? <Mail className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold text-slate-900">{label(activity.contact_type)}{activity.outcome ? ` · ${activity.outcome}` : ''}</p>
                       {activity.notes && <p className="mt-1 whitespace-pre-wrap text-sm text-slate-600">{activity.notes}</p>}
-                      <p className="mt-1 text-xs text-slate-400">{formatDateTime(activity.contacted_at)} · {activity.created_by_name || 'Management'}</p>
+                      <p className="mt-1 text-xs text-slate-400">{formatEasternDateTime(activity.contacted_at, { year: 'numeric' })} ET · {activity.created_by_name || 'Management'}</p>
                     </div>
                   </div>
-                ))}
+                )}</DatedNoteList>
                 {candidateDetail.activities.length === 0 && <p className="py-6 text-center text-sm text-slate-500">No contact activity logged.</p>}
               </div>
             </section>

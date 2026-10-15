@@ -8,13 +8,18 @@ const base=process.env.AUDIT_URL||'http://127.0.0.1:5173';
 const schemes=(process.env.SCHEMES||'01,07,08,02,dark-knight').split(',');
 const project={id:'audit-project',address:'123 Sample Avenue',job_name:'Sample Renovation',status:'active_rehab',start_date:'2026-10-01',target_completion:'2026-12-01',open_punch_items:4,assigned_count:2,budget:125000,updated_at:'2026-10-15',created_at:'2026-10-01',market_status:'not_on_market',work_priority:1,contractors:[],stats:{total_invoiced:4250,total_paid:1250,open_punch_items:4},assigned_users:[]};
 const userBase={id:'audit-user',name:'Audit User',email:'audit@example.invalid',role:'super_admin',is_active:1,company:'Sample Company',created_at:'2026-10-01'};
-const note={id:'audit-note',feed_type:'note',note_type:'field',user_id:'audit-user',user_name:'Audit User',project_id:project.id,project_address:project.address,created_at:'2026-10-15T13:00:00Z',content:'Field inspection completed. Cabinet installation and final painting are scheduled for this week. Please confirm delivery before work begins.',text:'Field inspection completed.',media:[],attachments:[]};
+const note={id:'audit-note',feed_type:'note',note_type:'field',user_id:'audit-user',user_name:'Audit User',user_role:'super_admin',project_id:project.id,project_address:project.address,created_at:'2026-10-15T13:00:00Z',content:'Field inspection completed. Cabinet installation and final painting are scheduled for this week. Please confirm delivery before work begins.',text:'Field inspection completed.',media:[],attachments:[]};
 const invoice={id:'audit-invoice',invoice_number:'INV-101',project_id:project.id,project_address:project.address,contractor_name:'Sample Contractor',status:'submitted',total:4250,amount:4250,created_at:'2026-10-14',line_items:[]};
 const punch={id:'audit-punch',title:'Complete final paint inspection',description:'Confirm finish quality before handover.',status:'in_progress',priority:'high',project_id:project.id,assigned_to:'audit-user',assigned_name:'Audit User',created_at:'2026-10-14',photos:[],comments:[]};
 const event={id:'audit-event',title:'Site inspection',description:'Review remaining work on site.',event_type:'task',status:'open',priority:'high',project_id:project.id,project_address:project.address,start_at:'2026-10-15T16:00:00Z',end_at:'2026-10-15T17:00:00Z',start_date:'2026-10-15',end_date:'2026-10-15',assigned_users:[],is_completed:0};
 note.note=note.content;
-const contractor={id:'audit-vendor',name:'Sample Contractor',company:'Sample Trade Company',email:'vendor@example.invalid',phone:'555-0100',status:'active',is_active:1,is_supplier:false,categories:['General contractor'],assigned_projects:[project],project_count:1,created_at:'2026-10-01',notes_count:1};
+const notes=[note,
+ {...note,id:'audit-midnight',created_at:'2026-10-15T01:30:00Z',note:'Evening delivery confirmed.',content:'Evening delivery confirmed.'},
+ {...note,id:'audit-sql',created_at:'2026-10-15 00:30:00',note:'Office update before delivery.',content:'Office update before delivery.'},
+ {...note,id:'audit-previous-week',created_at:'2026-10-08T17:13:00Z',note:'Previous inspection completed.',content:'Previous inspection completed.'}];
+const contractor={id:'audit-vendor',name:'Sample Contractor',company:'Sample Trade Company',email:'vendor@example.invalid',phone:'555-0100',status:'active',is_active:1,is_supplier:false,categories:['General contractor'],assigned_projects:[project],project_count:1,created_at:'2026-10-01',note_count:notes.length,latest_notes:notes.slice(0,2)};
 const quote={id:'audit-quote',quote_number:'Q-101',project_id:project.id,property_address:project.address,contractor_name:'Sample Contractor',status:'pending',quote_date:'2026-10-14',total_quote_amount:4250,scope_description:'Replace kitchen cabinets',line_items:[],created_at:'2026-10-14'};
+const candidate={id:'audit-candidate',first_name:'Sample',last_name:'Applicant',status:'new',position:'Office coordinator',activity_count:notes.length};
 const docs={attachments:1,pending:1,running:0,extracted:0,unreadable:0,failed:0,skipped:0,duplicate:0};
 const bills=['unpaid','approved','paid'].map((status,i)=>({qbo_id:'audit-bill-'+i,doc_number:'B-10'+i,vendor_name:'Sample Contractor',txn_date:'2026-10-14',due_date:'2026-10-16',total_amt:4250,balance:status==='paid'?0:4250,payment_status:status==='paid'?'paid':'unpaid',payment_approval_status:status==='approved'?'approved_for_payment':null,payment_run_date:'2026-10-16',project_id:project.id,project_address:project.address,invoice_pdf:{available:false}}));
 const reportBase={warnings:[],filters:{today:'2026-10-15'},labels:{full_year:'Full-year hourly rate',annualized:'Annualized rate',window:'Selected window',doc:'Documented cost'},years_available:[2026]};
@@ -26,10 +31,10 @@ function fixture(url,user){
  if(p==='/projects/unreviewed-summary')return {projects:[]};
  if(p==='/projects/'+project.id)return project;
  if(p.endsWith('/punch-list'))return [punch];
- if(p.endsWith('/notes')||p==='/notes/recent')return [note];
+ if(p.endsWith('/notes')||p==='/notes/recent')return notes;
  if(p.endsWith('/photos'))return [];
  if(p.endsWith('/scopes'))return {scopes:[]};
- if(p==='/dashboard/activity-feed')return {items:[note,{...note,id:'audit-note2',user_name:'Sample Team Member',content:'Work is ready for review.'}]};
+ if(p==='/dashboard/activity-feed')return {items:notes};
  if(p==='/calendar/events')return {events:[event]};
  if(p==='/quickbooks/status')return {configured:true,connected:true,connection:{company_name:'Sample Company'},stats:{bill_count:3,paid_count:1,open_count:2,open_balance:8500,unmatched_count:0,approved_payment_count:1,approved_payment_balance:4250}};
  if(p==='/quickbooks/bills')return bills;
@@ -38,13 +43,15 @@ function fixture(url,user){
  if(p==='/invoices'||p.endsWith('/invoices'))return [invoice];
  if(p==='/projects/'+project.id+'/invoices/audit-invoice')return {...invoice,items:[]};
  if(p==='/invoices/email-intake')return {items:[],emails:[],counts:{},total:0};
+ if(p.startsWith('/vendor-setup/vendors/')&&p.endsWith('/documents'))return {documents:[],setup:null,can_view_sensitive:false,can_delete:false};
  if(p==='/vendor-setup/invites')return {invites:[]};
  if(p==='/agreements/options')return {vendors:[],projects:[project],trades:[],document_types:[],max_file_mb:25};
  if(p==='/agreements')return {agreements:[]};
  if(p==='/agent-bridge/admin/agents')return {agents:[],availableScopes:['property:read']};
  if(p==='/agent-bridge/admin/logs')return {logs:[]};
  if(p==='/human-resources/overview')return {stats:{active_employees:2,open_candidates:1,resumes:1,pending_compliance:0,pending_leave:0},hours:{regular_hours:64,overtime_hours:0,pto_hours:0,sick_hours:0},week_start:'2026-10-12',week_end:'2026-10-18',tasks:[]};
- const hr={'candidates':{candidates:[]},'employees':{employees:[]},'time-entries':{entries:[]},'leave-requests':{requests:[]},'benefits':{benefits:[]},'compliance':{tasks:[]},'resume-imports':{batches:[]},'ai-settings/anthropic':{settings:{configured:false}}};
+ if(p==='/human-resources/candidates/audit-candidate')return {candidate,documents:[],activities:notes.map(n=>({id:n.id,contact_type:'note',direction:'internal',contacted_at:n.created_at,created_by_name:n.user_name,notes:n.note}))};
+ const hr={'candidates':{candidates:[candidate]},'employees':{employees:[]},'time-entries':{entries:[]},'leave-requests':{requests:[]},'benefits':{benefits:[]},'compliance':{tasks:[]},'resume-imports':{batches:[]},'ai-settings/anthropic':{settings:{configured:false}}};
  if(p.startsWith('/human-resources/'))return hr[p.slice(17)]||{};
  if(p==='/security/sessions')return {users:[user],sessions:[],archived_sessions:[],counts:{}};
  if(p==='/security/events')return {events:[],counts:{}};
@@ -69,7 +76,8 @@ function fixture(url,user){
  return [];
 }
 const routes=['/dashboard','/operations-calendar','/projects','/projects/audit-project','/quotes','/invoices','/projects/audit-project/invoices/new','/projects/audit-project/invoices/audit-invoice','/punch-list','/photos','/contractors','/users','/settings','/security','/human-resources','/cost-analyzer','/agreements'];
-(async()=>{
+module.exports={fixture,userBase,note,notes,project};
+if(require.main===module)(async()=>{
  const channel=process.env.PLAYWRIGHT_CHANNEL||(process.platform==='win32'?'msedge':undefined);
  const browser=await chromium.launch({channel,headless:true});
  const results=[];const errors=[];const requested=new Set();
