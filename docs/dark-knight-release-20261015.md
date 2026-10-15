@@ -21,3 +21,11 @@ The new image extends the exact prior production image and copies only the front
 - Dark Knight: all 60 desktop route/tab/form/menu states pass measured text contrast checks with representative sample data. Updated settings states also pass in the four existing schemes.
 
 Browser rendering checks intercept API calls and use synthetic records; they do not modify business data or establish exhaustive coverage of every production record and workflow.
+
+## Production verification
+
+Deployed source commit: `0c34080`. Healthy production image: `sha256:91de19eb13a26c596316f0a1170d9f4821ec5a16ad62dacf26e88e62c14257ba`. Published assets: `/assets/index-BqWZWj33.js` and `/assets/index-DiAc_wQP.css`.
+
+The published five-choice preference test passed, including an assertion that the actual Inter Tight webfont is loaded. Public health passed and unauthenticated preference writes correctly returned 401. The live database accepts Dark Knight, retains private file permissions, and passes its integrity check.
+
+All 60 Dark Knight desktop states passed against the published frontend with sample records. Dashboard and Cost Analyzer initially hit 20-second network-idle navigation timeouts; both passed targeted reruns covering their nine states. The combined verified report retains those navigation retries and records zero measured contrast failures or rendering errors.

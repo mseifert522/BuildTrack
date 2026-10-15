@@ -54,6 +54,8 @@ fs.mkdirSync(output,{recursive:true});
     }
     await page.evaluate(()=>document.fonts.ready);
     assert.ok(await page.evaluate(()=>document.fonts.check('16px "Inter Tight Variable"')));
+    const tightLoaded=await page.evaluate(()=>[...document.fonts].some(font=>font.family.replace(/['"]/g,'')==='Inter Tight Variable'&&font.status==='loaded'));
+    assert.ok(tightLoaded,'Inter Tight webfont must be loaded, not just a fallback');
     const font=await page.locator('.bt-desktop-shell').evaluate(el=>getComputedStyle(el).fontFamily);
     assert.match(font,/Inter Tight Variable/);
     await page.reload();
