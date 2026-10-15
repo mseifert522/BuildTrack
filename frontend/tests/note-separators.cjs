@@ -95,7 +95,7 @@ async function boundaries(locator) {
         await page.locator('.bt-directory-row').first().click();
         await checkFeed('Vendor preview',page.locator('.bt-note-feed').first(),2,expectedDays.slice(0,2));
         await page.getByRole('button',{name:'4 notes',exact:true}).click();
-        await checkFeed('Vendor expanded notes',page.locator('.bt-note-feed').last());
+        await checkFeed('Vendor expanded notes',page.locator('.bt-note-feed').nth(1));
         await page.getByRole('button',{name:'View full profile',exact:true}).click();
         await checkFeed('Vendor profile notes',page.locator('[role="dialog"] .bt-note-feed'));
         await page.locator('[role="dialog"] .bt-note-feed').screenshot({path:path.join(out,scheme+'-vendor-notes.png')});

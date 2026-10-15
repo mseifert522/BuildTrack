@@ -23,3 +23,11 @@ Browser checks use intercepted APIs and synthetic records, including a browser t
 This release replaces only the frontend on top of the verified running image `sha256:91de19eb13a26c596316f0a1170d9f4821ec5a16ad62dacf26e88e62c14257ba`. Backend files and database schemas are unchanged. Previous hashed assets remain available for existing sessions. The prior image is retained as `production-prod-buildtrack:rollback-notes-20261015`.
 
 The deployment script verifies the running image still matches discovery, validates Compose, recreates only `prod-buildtrack`, and restores the prior image if the new container does not become healthy.
+
+## Published verification
+
+Deployed application source: `033a4d4`. Healthy production image: `sha256:b96fb908f74afc02aaaa0208990df64f1f0e3dd83a290a66fc4469f260c8c4c4`. Published main assets: `/assets/index-uJbyJTc9.js` and `/assets/index-CRRah_dh.css`. Public `/api/health` returns 200 with status `ok`.
+
+All 60 focused desktop checks pass against the published frontend across five palettes, using synthetic API responses. The Warm Ivory vendor test initially read the preview list before the expanded list finished loading. The regression test now waits for that second list explicitly; the full Warm Ivory rerun passed. Both the initial report and the combined verified report are retained locally.
+
+Public mobile verification is blocked by the mobile hostname's HTTPS handshake failure. Edge reports `ERR_SSL_VERSION_OR_CIPHER_MISMATCH`; a separate request from the production VM also fails before HTTP. No certificate, DNS, or proxy changes were made in this frontend release. Mobile note and photo screens were tested locally, including both OS color settings for note readability; the shared production frontend contains those changes.
