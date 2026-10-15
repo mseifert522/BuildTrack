@@ -396,6 +396,11 @@ router.post('/intake', (req, res) => {
 });
 
 router.use('/admin', authenticate, authorizeUpperManagement);
+router.use('/admin', (_req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  res.set('Pragma', 'no-cache');
+  next();
+});
 
 router.get('/admin/agents', (req, res) => {
   const db = getDb();

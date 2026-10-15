@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import api from '../lib/api';
 import { Loading } from '../components/ui';
 import { Camera, FileImage, Grid, List, MessageSquare, PlayCircle, Trash2, X } from 'lucide-react';
-import { format } from 'date-fns';
+import { formatEasternDate, formatEasternDateTime } from '../lib/time';
 import toast from 'react-hot-toast';
 import { fileDropHandlers } from '../lib/fileDrop';
 import { appendProgressUploadAudit, PROGRESS_MEDIA_ACCEPT } from '../lib/progressUpload';
@@ -102,7 +102,7 @@ function UnsupportedMediaTile({ name }: { name?: string }) {
 
 function groupPhotosByDay(photos: Photo[]) {
   return photos.reduce<{ date: string; photos: Photo[] }[]>((groups, photo) => {
-    const date = format(new Date(photo.taken_at || photo.created_at), 'EEEE, MMMM d, yyyy');
+    const date = formatEasternDate(photo.taken_at || photo.created_at, { weekday: 'long', month: 'long' });
     const last = groups[groups.length - 1];
     if (last && last.date === date) last.photos.push(photo);
     else groups.push({ date, photos: [photo] });
@@ -386,7 +386,7 @@ export default function Photos() {
           <div className="space-y-6">
             {groupedPhotos.map(group => (
               <section key={group.date} className="rounded-2xl border border-gray-200 bg-white p-4">
-                <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <div className="bt-note-day-boundary mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <h2 className="text-sm font-black text-gray-900">{group.date}</h2>
                     <p className="text-xs font-semibold text-gray-500">{group.photos.length} project item{group.photos.length === 1 ? '' : 's'} ordered by capture time</p>
@@ -401,12 +401,12 @@ export default function Photos() {
                     const progressContext = isPhotoContextEnabled(photo.show_in_progress, photo.photo_type === 'progress' || photo.photo_type === 'note');
                     const scopeContext = isPhotoContextEnabled(photo.show_in_scope, photo.photo_type === 'scope' || photo.photo_type === 'construction_plan');
                     const descriptionText = getPhotoDescriptionText(photo);
-                    const photoTimestamp = format(new Date(photo.taken_at || photo.created_at), 'MMM d, yyyy h:mm a');
+                    const photoTimestamp = `${formatEasternDateTime(photo.taken_at || photo.created_at, { year: 'numeric' })} ET`;
                     const uploaderName = photo.uploader_name || photo.uploaded_by_name || 'Unknown user';
                     return (
                       <div
                         key={photo.id}
-                        className="relative group aspect-square rounded-xl overflow-hidden bg-gray-100 cursor-pointer"
+                        className="bt-media-note-entry relative group aspect-square rounded-xl border overflow-hidden bg-gray-100 cursor-pointer"
                         onClick={() => openMedia(photo)}
                       >
                         {isVideo ? (
@@ -492,7 +492,7 @@ export default function Photos() {
           <div className="space-y-5">
             {groupedPhotos.map(group => (
               <section key={group.date}>
-                <h2 className="mb-2 text-xs font-black uppercase tracking-wide text-gray-500">{group.date}</h2>
+                <h2 className="bt-note-day-boundary mb-2 text-xs font-black uppercase tracking-wide text-gray-500">{group.date}</h2>
                 <div className="space-y-2">
                   {group.photos.map(photo => {
                     const src = `/uploads/${photo.project_id}/${(photo as any).markup_path || photo.filename}`;
@@ -501,10 +501,10 @@ export default function Photos() {
                     const progressContext = isPhotoContextEnabled(photo.show_in_progress, photo.photo_type === 'progress' || photo.photo_type === 'note');
                     const scopeContext = isPhotoContextEnabled(photo.show_in_scope, photo.photo_type === 'scope' || photo.photo_type === 'construction_plan');
                     const descriptionText = getPhotoDescriptionText(photo);
-                    const photoTimestamp = format(new Date(photo.taken_at || photo.created_at), 'MMM d, yyyy h:mm a');
+                    const photoTimestamp = `${formatEasternDateTime(photo.taken_at || photo.created_at, { year: 'numeric' })} ET`;
                     const uploaderName = photo.uploader_name || photo.uploaded_by_name || 'Unknown user';
                     return (
-                      <div key={photo.id} className="bg-white rounded-xl border border-gray-200 p-3 flex items-center gap-3">
+                      <div key={photo.id} className="bt-media-note-entry bg-white rounded-xl border border-gray-200 p-3 flex items-center gap-3">
                         <div className="w-16 h-16 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0 cursor-pointer relative" onClick={() => openMedia(photo)}>
                           {isVideo ? (
                             <>

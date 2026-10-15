@@ -1,3 +1,5 @@
+import NoteReplies, { type NoteReply } from '../components/NoteReplies';
+import { openEventStream } from '../lib/noteEvents';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../lib/api';
@@ -8,7 +10,7 @@ import {
   Clock, ChevronDown, Mic, Square, Edit2, Check, X,
   Camera, ImagePlus, PlayCircle, Trash2,
 } from 'lucide-react';
-import { formatEasternDate, formatEasternDateTime, formatEasternRelative } from '../lib/time';
+import { formatEasternDate, formatEasternDateTime, formatEasternRelative, parseBuildTrackTimestamp } from '../lib/time';
 import { fileDropHandlers } from '../lib/fileDrop';
 import { mobilePath } from '../lib/appUrls';
 import { appendProgressUploadAudit, PROGRESS_MEDIA_ACCEPT } from '../lib/progressUpload';
@@ -31,6 +33,9 @@ interface NotePhoto {
 }
 
 interface Note {
+  replies?: NoteReply[];
+  can_reply?: boolean;
+  last_activity_at?: string;
   id: string;
   project_id: string;
   user_id: string;
@@ -123,145 +128,6 @@ function isVideoAttachment(photo: NotePhoto) {
   return Boolean(photo.mime_type?.startsWith('video/')) || /\.(mp4|mov|m4v|webm|avi|mkv|mpeg|mpg|3gp)$/i.test(photo.filename);
 }
 
-// Live notes stream (GET /api/projects/:id/notes/stream). EventSource cannot send an
-// Authorization header and the API is Bearer-only, so the stream is read with fetch().
-const NOTES_STREAM_IDLE_MS = 60_000; // the server heartbeats every 25s
-const NOTES_STREAM_MAX_BACKOFF_MS = 30_000;
-
-// The api client's auth headers (lib/api.ts), read fresh on every connect: the session
-// refresh in App.tsx rotates the token in localStorage without touching the auth store.
-function eventStreamHeaders(): Record<string, string> | null {
-  const token = localStorage.getItem('token');
-  if (!token) return null;
-  const contractorToken = localStorage.getItem('contractor_token');
-  const activityKey = contractorToken && contractorToken === token
-    ? 'contractor_last_activity_at'
-    : 'auth_last_activity_at';
-  const lastActivity = localStorage.getItem(activityKey);
-  const headers: Record<string, string> = { Accept: 'text/event-stream', Authorization: `Bearer ${token}` };
-  // Like the api client: a reconnect then counts as session activity only when the
-  // user was really active, so a phone left on this page cannot keep a session alive.
-  if (lastActivity) headers['X-BuildTrack-Last-Activity'] = lastActivity;
-  return headers;
-}
-
-// Reads a text/event-stream body and hands each event's data to onMessage, as
-// EventSource's onmessage would. Resolves when the server ends the stream.
-async function readEventStream(
-  body: ReadableStream<Uint8Array>,
-  onMessage: (data: string) => void,
-  onBytes: () => void,
-) {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let dataLines: string[] = [];
-  let eventType = '';
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) return;
-    onBytes();
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
-    for (const raw of lines) {
-      const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
-      if (!line) {
-        // A blank line ends the event; onmessage only ever saw unnamed events.
-        if (dataLines.length && (!eventType || eventType === 'message')) onMessage(dataLines.join('\n'));
-        dataLines = [];
-        eventType = '';
-        continue;
-      }
-      if (line.startsWith(':')) continue; // comment: the server's heartbeat
-      const colon = line.indexOf(':');
-      const field = colon < 0 ? line : line.slice(0, colon);
-      let value = colon < 0 ? '' : line.slice(colon + 1);
-      if (value.startsWith(' ')) value = value.slice(1);
-      if (field === 'data') dataLines.push(value);
-      else if (field === 'event') eventType = value;
-    }
-  }
-}
-
-// Opens the stream and keeps it open: reconnects with jittered backoff, drops a stream
-// that goes silent, and returns the cleanup. A raw fetch, not the api client, so a 401
-// here never trips the api client's global logout redirect.
-function openEventStream(url: string, handlers: {
-  onOpen: () => void;
-  onClose: () => void;
-  onMessage: (data: string) => void;
-}) {
-  let stopped = false;
-  let controller: AbortController | null = null;
-  let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
-  let idleTimer: ReturnType<typeof setTimeout> | undefined;
-  let attempt = 0;
-
-  const connect = async () => {
-    if (stopped) return;
-    const ctrl = new AbortController();
-    controller = ctrl;
-    // Silent past two heartbeats means dead (phone slept, network switched) even if
-    // the socket never said so: abort, and the finally block reconnects.
-    const armIdle = () => {
-      clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => ctrl.abort(), NOTES_STREAM_IDLE_MS);
-    };
-    let retry = true;
-    let openedAt = 0;
-    try {
-      const headers = eventStreamHeaders();
-      if (!headers) { retry = false; return; }
-      armIdle();
-      const res = await fetch(url, { headers, cache: 'no-store', signal: ctrl.signal });
-      if (res.status === 401 || res.status === 403 || res.status === 404) {
-        retry = false; // will not heal on retry; the page's next api call handles a dead session
-        return;
-      }
-      if (!res.ok || !res.body || !(res.headers.get('content-type') || '').startsWith('text/event-stream')) return;
-      openedAt = Date.now();
-      handlers.onOpen();
-      await readEventStream(res.body, handlers.onMessage, armIdle);
-    } catch {
-      /* network error, idle abort or cleanup: handled below */
-    } finally {
-      clearTimeout(idleTimer);
-      if (controller === ctrl) controller = null;
-      if (!stopped) {
-        if (openedAt) handlers.onClose();
-        // A stream that stayed up resets the backoff; one that keeps dying at once does not.
-        if (openedAt && Date.now() - openedAt >= NOTES_STREAM_IDLE_MS) attempt = 0;
-        if (retry) {
-          // ~1s, 2s, 4s ... 30s, jittered so a deploy does not reconnect every phone at once.
-          const delay = Math.min(NOTES_STREAM_MAX_BACKOFF_MS, 1000 * 2 ** attempt) * (0.5 + Math.random() / 2);
-          attempt += 1;
-          reconnectTimer = setTimeout(connect, delay);
-        }
-      }
-    }
-  };
-
-  // Mobile browsers freeze background tabs; on return, reconnect now instead of
-  // waiting out the backoff or the idle timer.
-  const onVisible = () => {
-    if (stopped || controller || document.visibilityState !== 'visible') return;
-    clearTimeout(reconnectTimer);
-    attempt = 0;
-    void connect();
-  };
-  document.addEventListener('visibilitychange', onVisible);
-  void connect();
-
-  return () => {
-    stopped = true;
-    clearTimeout(reconnectTimer);
-    clearTimeout(idleTimer);
-    document.removeEventListener('visibilitychange', onVisible);
-    controller?.abort();
-  };
-}
-
 export default function MobileNotes() {
   const { id: projectId } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -327,26 +193,24 @@ export default function MobileNotes() {
 
     const baseUrl = (api.defaults.baseURL || '').replace(/\/api$/, '');
     let active = true;
-    let opens = 0;
+    let streamConnected = false;
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      api.get(`/projects/${projectId}/notes`).then(res => {
+        if (!active || !Array.isArray(res.data)) return;
+        const fresh: Note[] = res.data;
+        setNotes(prev => [...fresh, ...prev.filter(n => String(n.id).startsWith('temp-')
+          && !fresh.some(f => f.user_id === n.user_id && f.note === n.note))]);
+      }).catch(() => { /* retain the last successful view */ });
+    };
 
     const close = openEventStream(`${baseUrl}/api/projects/${projectId}/notes/stream`, {
       onOpen: () => {
         setConnected(true);
-        opens += 1;
-        if (opens === 1) return;
-        // The server keeps no backlog, so events sent while we were disconnected are
-        // gone: refetch, keeping an optimistic note whose POST has not come back yet.
-        api.get(`/projects/${projectId}/notes`).then(res => {
-          if (!active || !Array.isArray(res.data)) return;
-          const fresh: Note[] = res.data;
-          setNotes(prev => [
-            ...fresh,
-            ...prev.filter(n => String(n.id).startsWith('temp-')
-              && !fresh.some(f => f.user_id === n.user_id && f.note === n.note)),
-          ]);
-        }).catch(() => { /* the next reconnect refetches */ });
+        streamConnected = true;
+        refresh();
       },
-      onClose: () => setConnected(false),
+      onClose: () => { streamConnected = false; setConnected(false); },
       onMessage: (raw) => {
         try {
           const data = JSON.parse(raw);
@@ -357,6 +221,8 @@ export default function MobileNotes() {
               const withoutTemp = prev.filter(n => !(String(n.id).startsWith('temp-') && n.user_id === data.note.user_id && n.note === data.note.note));
               return [...withoutTemp, data.note];
             });
+          } else if (data.type === 'note_replied') {
+            refresh();
           } else if (data.type === 'update_note') {
             setNotes(prev => prev.map(n => n.id === data.note.id ? data.note : n));
           } else if (data.type === 'delete_note') {
@@ -366,9 +232,16 @@ export default function MobileNotes() {
       },
     });
 
+    const fallback = window.setInterval(() => { if (!streamConnected) refresh(); }, 30000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+
     return () => {
       active = false;
       close();
+      window.clearInterval(fallback);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
       setConnected(false);
     };
   }, [projectId, token]);
@@ -572,7 +445,10 @@ export default function MobileNotes() {
   }, []);
 
   // Group notes by date
-  const groupedNotes = notes.reduce<{ date: string; notes: Note[] }[]>((groups, note) => {
+  // Keep mobile day groups stable when a reply bumps a desktop thread's activity.
+  const groupedNotes = [...notes].sort((a, b) =>
+    (parseBuildTrackTimestamp(b.created_at)?.getTime() || 0) - (parseBuildTrackTimestamp(a.created_at)?.getTime() || 0)
+  ).reduce<{ date: string; notes: Note[] }[]>((groups, note) => {
     const date = formatEasternDate(note.created_at, {
       weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
     });
@@ -594,9 +470,9 @@ export default function MobileNotes() {
   }
 
   return (
-    <div className="mobile-shell" style={{ background: '#F0F2F5', fontFamily: "'Inter', -apple-system, sans-serif" }}>
+    <div className="mobile-shell bt-mobile-notes-page" style={{ background: '#F0F2F5', fontFamily: "'Inter', -apple-system, sans-serif" }}>
       {/* ── Header ── */}
-      <div style={{ background: 'linear-gradient(135deg, #0D1117 0%, #181D25 100%)', flexShrink: 0 }}>
+      <div className="bt-mobile-notes-header" style={{ background: '#0D1117', flexShrink: 0 }}>
         <div className="flex items-center gap-3 px-4 pt-4 pb-3">
           <button
             onClick={() => navigate(mobilePath(`/project/${projectId}`))}
@@ -613,7 +489,7 @@ export default function MobileNotes() {
                 className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold"
                 style={{
                   background: connected ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
-                  color: connected ? '#22C55E' : '#EF4444',
+                  color: connected ? '#86EFAC' : '#FCA5A5',
                 }}
               >
                 {connected
@@ -622,7 +498,7 @@ export default function MobileNotes() {
                 }
               </span>
             </div>
-            <p className="text-xs truncate mt-0.5" style={{ color: 'rgba(255,255,255,0.5)' }}>{projectAddress}</p>
+            <p className="text-xs truncate mt-0.5" style={{ color: '#CBD5E1' }}>{projectAddress}</p>
           </div>
           <div
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl flex-shrink-0"
@@ -664,7 +540,7 @@ export default function MobileNotes() {
           groupedNotes.map(group => (
             <div key={group.date}>
               {/* Date divider */}
-              <div className="flex items-center gap-3 my-4">
+              <div className="bt-mobile-note-day flex items-center gap-3 my-4">
                 <div className="flex-1 h-px" style={{ background: '#E5E7EB' }} />
                 <span
                   className="text-xs font-bold px-3 py-1 rounded-full flex-shrink-0"
@@ -687,7 +563,7 @@ export default function MobileNotes() {
                   const attachments = notePhotos(note);
 
                   return (
-                    <div key={note.id} className={`flex gap-3 ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}>
+                    <div key={note.id} className={`bt-mobile-note-entry flex gap-3 ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}>
                       {/* Avatar */}
                       <Avatar
                         src={note.user_avatar_url}
@@ -699,7 +575,7 @@ export default function MobileNotes() {
                       />
 
                       {/* Bubble */}
-                      <div className={`flex-1 max-w-xs ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
+                      <div className={`bt-mobile-note-content min-w-0 flex-1 ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
                         {/* Author + role */}
                         <div className={`flex items-center gap-2 mb-1 ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}>
                           <span className="text-xs font-bold text-gray-700">{isOwn ? 'You' : note.user_name}</span>
@@ -713,12 +589,12 @@ export default function MobileNotes() {
 
                         {/* Note content */}
                         <div
-                          className="rounded-2xl px-4 py-3 relative"
+                          className="bt-mobile-note-body w-full rounded-2xl px-4 py-3 relative"
                           style={{
                             background: isEditing
                               ? 'white'
                               : isOwn
-                              ? 'linear-gradient(135deg, #D99D26, #C4891F)'
+                              ? '#FEF3C7'
                               : 'white',
                             boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
                             border: isEditing ? '1px solid #D99D26' : 'none',
@@ -766,7 +642,7 @@ export default function MobileNotes() {
                             <>
                               <p
                                 className="text-sm leading-relaxed whitespace-pre-wrap"
-                                style={{ color: isOwn ? 'white' : '#111827' }}
+                                style={{ color: '#111827' }}
                               >
                                 {note.note}
                               </p>
@@ -798,7 +674,7 @@ export default function MobileNotes() {
                         </div>
 
                         {/* Timestamp + actions */}
-                        <div className={`flex items-center gap-2 mt-1 ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}>
+                        <div className={`bt-mobile-note-actions flex flex-wrap items-center gap-2 mt-2 ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}>
                           <button
                             onClick={() => setExpandedNote(isExpanded ? null : note.id)}
                             className="flex items-center gap-1 text-xs text-gray-400"
@@ -847,6 +723,8 @@ export default function MobileNotes() {
                             </button>
                           )}
                         </div>
+
+                        <NoteReplies projectId={note.project_id} noteId={note.id} replies={note.replies} canReply={note.can_reply !== false} />
 
                         {/* Expanded full timestamp */}
                         {isExpanded && (

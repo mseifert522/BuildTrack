@@ -1,0 +1,120 @@
+/* Note boundaries must survive legacy border resets and every account palette.
+   Ordinary block flow preserves the dashboard's floating calendar. */
+.bt-note-feed {
+  --note-text: #17212f;
+  --note-surface: #ffffff;
+  --note-raised: #f1f4f7;
+  --note-line: #7c8795;
+  min-width: 0;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-note-feed {
+  --note-text: var(--theme-text);
+  --note-surface: var(--theme-surface);
+  --note-raised: var(--theme-raised);
+  --note-line: color-mix(in srgb, var(--theme-text) 55%, var(--theme-surface));
+}
+.bt-note-day {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  overflow: hidden;
+  margin: 24px 0 12px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+.bt-note-day:first-child { margin-top: 0; }
+.bt-note-day::after {
+  content: '';
+  flex: 1;
+  min-width: 20px;
+  border-top: 2px solid var(--note-line, #7c8795);
+}
+.bt-note-day > span {
+  padding: 6px 10px;
+  border-radius: 5px;
+}
+.bt-note-entry {
+  min-width: 0;
+  overflow: hidden;
+  margin-bottom: 12px;
+  border-radius: 8px;
+}
+.bt-note-feed .bt-note-entry,
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-note-feed .bt-note-entry {
+  border: 1px solid var(--note-line) !important;
+  background: var(--note-surface) !important;
+}
+.bt-note-feed .bt-note-entry > :first-child,
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-note-feed .bt-note-entry > :first-child {
+  margin-bottom: 0 !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+.bt-note-feed .bt-note-day > span,
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-note-feed .bt-note-day > span {
+  background: var(--note-raised) !important;
+  color: var(--note-text) !important;
+  -webkit-text-fill-color: currentColor !important;
+}
+/* Existing progress/media timelines already group by day; retain their layout. */
+html[data-bt-scheme] body #root .bt-desktop-shell :is(.bt-project-progress-card, .bt-media-note-entry, .bt-note-day-boundary) {
+  border-color: color-mix(in srgb, var(--theme-text) 55%, var(--theme-surface)) !important;
+}
+.bt-note-day-boundary { border-bottom: 2px solid; padding-bottom: 10px; }
+/* Mobile notes have their own light shell, independent of desktop palettes. */
+.mobile-shell .bt-mobile-note-entry {
+  border: 1px solid #7c8795;
+  border-radius: 12px;
+  padding: 12px;
+  background: #fff;
+}
+.mobile-shell .bt-mobile-note-day > div { background: #7c8795 !important; }
+.mobile-shell .bt-mobile-note-day > span { color: #374151 !important; }
+.mobile-shell.bt-mobile-notes-page { background: #f0f2f5 !important; color: #17212f !important; }
+.mobile-shell.bt-mobile-notes-page .bt-mobile-notes-header { background: #0d1117 !important; }
+.mobile-shell.bt-mobile-notes-page .bt-mobile-notes-header p { color: #e2e8f0 !important; }
+.mobile-shell.bt-mobile-notes-page .bt-mobile-note-entry { background: #fff !important; }
+.mobile-shell.bt-mobile-notes-page .bt-mobile-note-body { background: #f1f4f7 !important; }
+.mobile-shell.bt-mobile-notes-page .bt-mobile-note-body > p,
+.mobile-shell.bt-mobile-notes-page .bt-mobile-note-body textarea { color: #17212f !important; }
+.mobile-shell.bt-mobile-notes-page .bt-mobile-note-body textarea { min-width: 0 !important; background: #fff !important; }
+.mobile-shell.bt-mobile-notes-page .bt-mobile-note-actions button {
+  font-size: 12px;
+  white-space: nowrap;
+  color: #334155 !important;
+}
+.mobile-shell.bt-mobile-notes-page .bt-mobile-note-content > div > .text-gray-400 { color: #475569 !important; }
+
+/* Conversations use the same readable surface/text pair in every palette. */
+.bt-note-replies { margin-top: 12px; min-width: 0; cursor: default; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-note-replies {
+  --note-text: var(--theme-text);
+  --note-raised: var(--theme-raised);
+  --note-line: color-mix(in srgb, var(--theme-text) 55%, var(--theme-surface));
+}
+.bt-note-reply-list { border-left: 2px solid var(--note-line, #7c8795); padding-left: 12px; }
+.bt-note-reply, .bt-note-reply-form { display: flex; align-items: flex-start; gap: 10px; padding: 12px 0; }
+.bt-note-reply + .bt-note-reply { border-top: 1px solid var(--note-line, #7c8795); }
+.bt-note-reply-content { min-width: 0; flex: 1; }
+.bt-note-reply-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.bt-note-reply-meta strong { font-size: 13px; font-weight: 650; }
+.bt-note-reply-meta time { font-size: 11px; }
+.bt-note-reply-content p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.65; margin: 4px 0 0; }
+.bt-note-reply-content label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+.bt-note-reply-content textarea { width: 100%; min-width: 0 !important; resize: vertical; padding: 10px; border-radius: 6px; font: inherit; font-size: 14px; line-height: 1.5; }
+.bt-note-reply-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.bt-note-reply-controls > span { margin-right: auto; font-size: 11px; }
+.bt-note-replies button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 6px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; }
+.bt-note-replies button:disabled { cursor: not-allowed; opacity: 0.65; }
+.bt-note-replies :is(button, textarea):focus-visible { outline: 2px solid var(--note-text, #17212f); outline-offset: 3px; }
+html body #root :is(.bt-desktop-shell, .bt-mobile-notes-page) .bt-note-replies :is(p, strong, time, label, span, button, textarea) {
+  color: var(--note-text, #17212f) !important;
+  -webkit-text-fill-color: currentColor !important;
+}
+html body #root :is(.bt-desktop-shell, .bt-mobile-notes-page) .bt-note-replies :is(button, textarea) {
+  background: var(--note-raised, #f1f4f7) !important;
+  border: 1px solid var(--note-line, #7c8795) !important;
+}
+html body #root :is(.bt-desktop-shell, .bt-mobile-notes-page) .bt-note-replies textarea::placeholder { color: var(--note-text, #17212f) !important; opacity: 0.7; }
+html body #root :is(.bt-desktop-shell, .bt-mobile-notes-page) .bt-note-replies .bt-note-reply-error { font-weight: 600; border-left: 3px solid currentColor; padding-left: 8px; }

@@ -1,3 +1,4 @@
+const { attachRepliesToNotes } = require('../services/noteReplies');
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
@@ -194,7 +195,7 @@ function attachPhotosToNotes(db, notes, user) {
     photosByNote.set(photo.note_id, bucket);
   }
 
-  return notes.map(note => {
+  return attachRepliesToNotes(db, notes).map(note => {
     const attachedPhotos = photosByNote.get(note.id) || [];
     const firstPhoto = attachedPhotos[0] || null;
     return {
@@ -1843,6 +1844,7 @@ router.get('/:id/notes', authorizeProjectAccess, (req, res) => {
   const notes = db.prepare(`
     SELECT
       pn.*,
+      COALESCE((SELECT MAX(r.created_at) FROM project_note_replies r WHERE r.note_id = pn.id), pn.created_at) AS last_activity_at,
       u.name as user_name,
       u.role as user_role,
       u.avatar_url as user_avatar_url,
@@ -1856,7 +1858,7 @@ router.get('/:id/notes', authorizeProjectAccess, (req, res) => {
         OR pn.user_id = ?
         OR pn.visibility = 'public'
       )
-    ORDER BY datetime(pn.created_at) DESC, pn.created_at DESC
+    ORDER BY datetime(last_activity_at) DESC, last_activity_at DESC, pn.id DESC
   `).all(req.params.id, req.user.role, req.user.id);
   const responseNotes = attachPhotosToNotes(db, notes, req.user);
   logDataAccess(req, {
@@ -1958,6 +1960,7 @@ router.delete('/:id/notes/:noteId', authorizeProjectAccess, (req, res) => {
   const permission = getNoteDeletePermission(req.user, existing);
   if (!permission.allowed) return res.status(permission.status).json({ error: permission.error });
 
+  const deletedReplies = attachRepliesToNotes(db, [existing])[0].replies;
   db.prepare('UPDATE photos SET note_id = NULL WHERE note_id = ?').run(req.params.noteId);
   db.prepare('DELETE FROM project_notes WHERE id = ? AND project_id = ?').run(req.params.noteId, req.params.id);
   broadcastToProject(req.params.id, { type: 'delete_note', note_id: req.params.noteId });
@@ -1969,6 +1972,7 @@ router.delete('/:id/notes/:noteId', authorizeProjectAccess, (req, res) => {
     entityId: req.params.noteId,
     // Preserve the deleted note body so a hard delete stays recoverable from the audit trail.
     details: {
+      replies: deletedReplies,
       note: existing.note,
       note_type: existing.note_type,
       author_id: existing.user_id,

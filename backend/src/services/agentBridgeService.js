@@ -49,7 +49,8 @@ function uniqueScopes(values) {
 }
 
 function hashAgentKey(key) {
-  const secret = process.env.AGENT_BRIDGE_KEY_PEPPER || process.env.JWT_SECRET || 'buildtrack-agent-bridge';
+  const secret = process.env.AGENT_BRIDGE_KEY_PEPPER || process.env.JWT_SECRET;
+  if (!secret) throw new Error('Agent key protection is not configured');
   return crypto.createHmac('sha256', secret).update(String(key || '')).digest('hex');
 }
 

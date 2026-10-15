@@ -1,3 +1,4 @@
+import DatedNoteList from '../components/DatedNoteList';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ClipboardList, Scale, CheckCircle2, Paperclip, History, Plus, Search, Download, Layers,
@@ -694,11 +695,12 @@ export default function Quotes() {
       </div>
 
       {/* Tabs */}
-      <div className="mb-4 flex flex-wrap gap-1 border-b border-gray-200">
+      <div className="bt-quotes-tabs mb-4 flex flex-wrap gap-1 border-b border-gray-200">
         {TABS.map(({ key, label, icon: Icon }) => (
           <button
             key={key}
             onClick={() => setTab(key)}
+            aria-pressed={tab === key}
             className="inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors"
             style={{
               borderColor: tab === key ? '#22D3EE' : 'transparent',
@@ -1184,9 +1186,9 @@ function QuoteNotes({ quoteId }: { quoteId: string }) {
       {loading ? (
         <p className="text-xs text-gray-400">Loading notes…</p>
       ) : notes.length > 0 ? (
-        <ul className="mb-2 space-y-1.5">
-          {notes.map(n => (
-            <li key={n.id} className="flex items-start justify-between gap-2 rounded-md bg-white px-2 py-1.5">
+        <DatedNoteList items={notes} className="mb-2">
+          {n => (
+            <div key={n.id} className="flex items-start justify-between gap-2 rounded-md bg-white px-2 py-1.5">
               <div className="min-w-0">
                 <p className="whitespace-pre-wrap break-words text-xs text-gray-700">{n.note}</p>
                 <p className="mt-0.5 text-[10px] text-gray-400">{n.user_name || 'User'} · {formatEasternDateTime(n.created_at, { year: 'numeric' })} ET</p>
@@ -1196,9 +1198,9 @@ function QuoteNotes({ quoteId }: { quoteId: string }) {
                   <X className="h-3.5 w-3.5" />
                 </button>
               )}
-            </li>
-          ))}
-        </ul>
+            </div>
+          )}
+        </DatedNoteList>
       ) : (
         <p className="mb-2 text-xs text-gray-400">No notes yet.</p>
       )}

@@ -615,15 +615,16 @@ export default function App() {
           toastOptions={{
             duration: 3000,
             style: {
-              background: '#181D25',
-              color: '#fff',
+              background: 'var(--theme-surface)',
+              color: 'var(--theme-text)',
+              border: '1px solid var(--theme-border)',
               borderRadius: '12px',
               fontSize: '14px',
               padding: '12px 16px',
               boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
             },
-            success: { iconTheme: { primary: '#D99D26', secondary: '#fff' } },
-            error: { iconTheme: { primary: '#ef4444', secondary: '#fff' } },
+            success: { iconTheme: { primary: 'var(--theme-success)', secondary: 'var(--theme-surface)' } },
+            error: { iconTheme: { primary: 'var(--theme-danger)', secondary: 'var(--theme-surface)' } },
           }}
         />
         <Suspense fallback={<Loading message="Loading BuildTrack..." />}>

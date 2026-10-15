@@ -1,3 +1,4 @@
+import DatedNoteList from './DatedNoteList';
 import { useEffect, useRef, useState } from 'react';
 
 import { Link, useLocation, useNavigate } from 'react-router-dom';
@@ -784,7 +785,7 @@ export default function Layout({ children }: LayoutProps) {
                         </div>
                       ) : (
                         <div className="space-y-1">
-                          {notificationItems.map(item => {
+                          <DatedNoteList items={notificationItems} getTimestamp={item => item.createdAt}>{item => {
                             const Icon = item.icon;
                             return (
                               <button
@@ -818,7 +819,7 @@ export default function Layout({ children }: LayoutProps) {
                                 </div>
                               </button>
                             );
-                          })}
+                          }}</DatedNoteList>
                         </div>
                       )}
                     </div>
@@ -853,7 +854,7 @@ export default function Layout({ children }: LayoutProps) {
                 <>
                   <div className="fixed inset-0 z-[990]" onClick={() => setProfileOpen(false)} />
                   <div
-                    className="absolute right-0 top-full z-[1010] mt-2 w-72 max-w-[calc(100vw-1rem)] overflow-hidden rounded-md shadow-xl"
+                    className="bt-profile-menu absolute right-0 top-full z-[1010] mt-2 w-72 max-w-[calc(100vw-1rem)] overflow-hidden rounded-md shadow-xl"
                     style={{ background: '#111315', border: '1px solid #E78B4A' }}
                   >
                     {/* Profile header */}

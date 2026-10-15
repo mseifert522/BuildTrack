@@ -185,6 +185,7 @@ function publicUser(user) {
     contractor_category: user.contractor_category || null,
     contractor_secondary_category: user.contractor_secondary_category || null,
     avatar_url: user.avatar_url || null,
+    color_scheme: user.color_scheme || '07',
     force_password_reset: user.force_password_reset === 1,
   };
 }
@@ -773,6 +774,7 @@ router.get('/me', authenticate, (req, res) => {
     contractor_category: u.contractor_category || null,
     contractor_secondary_category: u.contractor_secondary_category || null,
     avatar_url: u.avatar_url || null,
+    color_scheme: u.color_scheme || '07',
     last_login_at: u.last_login_at || null,
     last_seen_at: u.last_seen_at || null,
     force_password_reset: u.force_password_reset === 1,

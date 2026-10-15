@@ -1,0 +1,314 @@
+/* Account palettes: color-only adapters over the existing desktop layout.
+   Loaded last because older screens contain inline colors and !important rules. */
+html[data-bt-scheme] body #root .bt-desktop-shell {
+  --bt-bg: var(--theme-page);
+  --bt-surface: var(--theme-surface);
+  --bt-surface-raised: var(--theme-raised);
+  --bt-border: var(--theme-border);
+  --bt-text: var(--theme-text);
+  --bt-text-muted: var(--theme-muted);
+  --bt-text-soft: var(--theme-muted);
+  --bt-ring: var(--theme-accent);
+  --brand-gold: var(--theme-accent);
+  --text-primary: var(--theme-text);
+  --text-secondary: var(--theme-muted);
+  background: var(--theme-page) !important;
+  color: var(--theme-text) !important;
+  font-family: var(--theme-font, 'Inter Variable', Inter, 'Segoe UI', sans-serif) !important;
+}
+html[data-bt-scheme="dark-knight"] body #root .bt-desktop-shell :where(*) {
+  font-family: var(--theme-font) !important;
+}
+html[data-bt-scheme] body { background: var(--theme-page); color: var(--theme-text); }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(main, .bt-desktop-page) {
+  background: var(--theme-page) !important;
+  color: var(--theme-text) !important;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell :where(*) { border-color: var(--theme-border) !important; }
+/* Unclassified inline labels inherit their containing surface's foreground.
+   Semantic text utilities below still supply status/link/muted colors. */
+html[data-bt-scheme] body #root .bt-desktop-shell :where(span,strong,small,em,b) { color: inherit !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(h1,h2,h3,h4,p,label,legend,td,th) {
+  color: var(--theme-text) !important;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell :where([class*="bg-white"], [class*="bg-gray-"], [class*="bg-slate-"], [class*="bg-neutral-"], [class*="bg-zinc-"],
+  [class*="bt-"][class*="-card"], [class*="bt-"][class*="-panel"], [class*="bt-"][class*="-section"],
+  [class*="bt-"][class*="-workspace"], [class*="bt-"][class*="-table-shell"],
+  [class*="bt-"][class*="-filterbar"], [class*="bt-"][class*="-toolbar"],
+  [class*="bt-"][class*="-expanded"], [class*="bt-"][class*="-empty"],
+  [class*="bg-slate-900"], [class*="bg-slate-950"], [class*="bg-gray-900"],
+  [style*="background: rgb(255, 255, 255)"], [style*="background: white"]) {
+  background-color: var(--theme-surface) !important;
+  color: var(--theme-text) !important;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell :where(.bg-gray-100,.bg-gray-200,.bg-slate-100,.bg-slate-200,
+  .bt-directory-row,.bt-notification-row,.bt-profile-chip,.bt-topbar-action,[class*="bt-"][class*="-header"],
+  [class*="bt-"][class*="-heading"],[class*="bt-"][class*="-table-title"],[class*="bt-"][class*="-table-foot"],
+  thead,th) { background-color: var(--theme-raised) !important; color: var(--theme-text) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(tbody,td) {
+  background: var(--theme-surface) !important; color: var(--theme-text) !important;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell :where([class*="text-gray-"],[class*="text-slate-"],[class*="text-neutral-"],
+  [class*="text-zinc-"],.text-black,.text-white,.bt-project-title,.bt-sidebar-nav-label) {
+  color: var(--theme-text) !important; -webkit-text-fill-color: currentColor !important;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell :where([class*="text-gray-4"],[class*="text-gray-5"],[class*="text-gray-6"],
+  [class*="text-slate-4"],[class*="text-slate-5"],[class*="text-slate-6"]) { color: var(--theme-muted) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(input,select,textarea) {
+  background-color: var(--theme-input) !important; color: var(--theme-text) !important;
+  border-color: var(--theme-border) !important; caret-color: var(--theme-accent);
+}
+html[data-bt-scheme] body #root .bt-desktop-shell :where(input,textarea)::placeholder { color: var(--theme-muted) !important; opacity: 1; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(button,a,input,textarea,select):focus-visible {
+  outline: 2px solid var(--theme-accent) !important; outline-offset: 3px !important;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell :where([class*="text-blue-"],[class*="text-sky-"],[class*="text-indigo-"],[class*="text-purple-"],
+  [class*="text-cyan-"],[class*="text-violet-"],[class*="text-fuchsia-"]) { color: var(--theme-accent) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where([class*="bg-blue-50"],[class*="bg-blue-100"],[class*="bg-sky-50"],
+  [class*="bg-indigo-50"],[class*="bg-purple-100"],[class*="bg-cyan-50"]) { background-color: var(--theme-selected) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where([class*="text-green-"],[class*="text-emerald-"],[class*="text-teal-"]) { color: var(--theme-success) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where([class*="text-red-"],[class*="text-rose-"]) { color: var(--theme-danger) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where([class*="text-amber-"],[class*="text-yellow-"],[class*="text-orange-"]) { color: var(--theme-warning) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(.bg-green-100,.bg-green-50,.bg-emerald-100,.bg-emerald-50) { background-color: color-mix(in srgb, var(--theme-success) 12%, var(--theme-surface)) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(.bg-red-100,.bg-red-50,.bg-rose-50) { background-color: color-mix(in srgb, var(--theme-danger) 12%, var(--theme-surface)) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(.bg-amber-100,.bg-amber-50,.bg-orange-100,.bg-orange-50) { background-color: color-mix(in srgb, var(--theme-warning) 12%, var(--theme-surface)) !important; }
+/* Status badges stay legible without reintroducing the old saturated palette. */
+html[data-bt-scheme] body #root .bt-desktop-shell :where(span)[class*="bg-blue-6"],
+html[data-bt-scheme] body #root .bt-desktop-shell :where(span)[class*="bg-cyan-6"] {
+  background: var(--theme-selected) !important; color: var(--theme-accent) !important;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell :where(span)[class*="bg-slate-6"] {
+  background: var(--theme-control) !important; color: var(--theme-muted) !important;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell :where(span)[class*="bg-amber-5"] {
+  background: color-mix(in srgb, var(--theme-warning) 12%, var(--theme-surface)) !important; color: var(--theme-warning) !important;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell :where(span)[class*="bg-emerald-6"],
+html[data-bt-scheme] body #root .bt-desktop-shell :where(span)[class*="bg-emerald-5"],
+html[data-bt-scheme] body #root .bt-desktop-shell :where(span)[class*="bg-teal-6"] {
+  background: color-mix(in srgb, var(--theme-success) 12%, var(--theme-surface)) !important; color: var(--theme-success) !important;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell :where(button,a)[class*="bg-blue-6"],
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-topbar-add-vendor {
+  background: var(--theme-accent) !important; color: var(--theme-onaccent) !important;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell :where(button,a)[class*="bg-blue-6"] :where(svg,span) { color: inherit !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(aside,.bt-sidebar-frame) { background: var(--theme-nav) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-desktop-topbar { background: var(--theme-header) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-projects-header { background: transparent !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(aside,.bt-desktop-topbar) :where([style*="color:"]) { color: var(--theme-text) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(aside,.bt-desktop-topbar) :where(div,button,a)[style*="background:"]:not([class*="inset-0"]) {
+  background-color: var(--theme-surface) !important;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-sidebar-nav-item {
+  background: var(--theme-nav) !important; color: var(--theme-muted) !important;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-sidebar-nav-icon {
+  background: transparent !important; color: inherit !important;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell :where(.bt-sidebar-nav-item.is-active,.bt-project-tab-button.is-active,.bt-chip-toggle.is-selected) {
+  background: var(--theme-selected) !important; color: var(--theme-accent) !important; border-color: var(--theme-accent) !important;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-sidebar-nav-dot { background: var(--theme-accent) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(.bt-sidebar-nav-item:hover,.bt-notification-row:hover,
+ .hover\:bg-gray-50:hover,.hover\:bg-slate-50:hover,tr:hover > td) { background-color: var(--theme-control) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(.bt-project-tab-button,.bt-chip-toggle,.bt-invoice-filter,.bt-invoice-refresh) {
+  background: var(--theme-control) !important; color: var(--theme-text) !important;
+}
+
+/* Legacy screens have their own surface variables. Bind the pair at the same
+   element that declares those variables, so a child cannot retain a dark well
+   while inheriting the light palette's foreground. */
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-dashboard-page {
+  --bt-dashboard-border: var(--theme-border);
+  --bt-dashboard-border-strong: var(--theme-accent);
+  --bt-dashboard-text: var(--theme-text);
+  --bt-dashboard-text-soft: var(--theme-muted);
+  --bt-dashboard-accent: var(--theme-accent);
+  --bt-dashboard-page-bg: var(--theme-page);
+  --bt-dashboard-panel-bg: var(--theme-surface);
+  --bt-dashboard-panel-header-bg: var(--theme-raised);
+  --bt-dashboard-well-bg: var(--theme-input);
+}
+
+/* Native controls and inline legacy labels use the same account palette. */
+html[data-bt-scheme] body #root .bt-desktop-shell :where(
+  [style*="color:"], .bt-directory-primary-action, .bt-dashboard-payment-queue-reminder,
+  .bt-dashboard-payment-queue-reminder strong, .bt-dashboard-mini-calendar-module button,
+  .bt-dashboard-mini-calendar-module strong, .bt-approved-pay-sync, .bt-approved-pay-total,
+  .bt-approved-pay-card-top, .bt-approved-pay-card-body, .bt-approved-pay-card-bottom,
+  .bt-invoice-section-header span, .bt-approved-pay-header span,
+  .bt-invoice-page-heading span, .bt-qbo-invoice-filter-panel label span,
+  .bt-approved-pay-sync button, .bt-approved-pay-total strong,
+  .bt-dashboard-mini-calendar-module__agenda-title span,
+  .bt-calendar-route-page [class^="ops-"], .bt-calendar-route-page [class*=" ops-"]
+) { color: var(--theme-text) !important; -webkit-text-fill-color: currentColor !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(.bt-calendar-route-page) :where(button,span,strong,small,em,div) {
+  color: var(--theme-text) !important;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell [aria-label$="profile initials"] {
+  background: var(--theme-selected) !important; color: var(--theme-text) !important;
+}
+/* Small inline badges often supply both colors directly instead of utilities. */
+html[data-bt-scheme] body #root .bt-desktop-shell :where(span[style*="background"], .bt-invoice-workflow-key > span) {
+  background: var(--theme-selected) !important; color: var(--theme-text) !important;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-profile-menu :where(button,a) {
+  background: var(--theme-control) !important; color: var(--theme-text) !important;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell :where(
+  .bt-qbo-table-count, .bt-payment-run-chip, .bt-qbo-status-chip, .bt-qbo-pdf-control,
+  .bt-qbo-filter-row, .bt-qbo-period-note,
+  .bt-qbo-pdf-upload-button, .bt-qbo-pdf-button, .bt-qbo-clear-invoice-filter,
+  .bt-invoice-pdf-control-group, .bt-invoice-pdf-control-group button,
+  .bt-invoice-pdf-open-link, .bt-invoice-pdf-close
+) { background: var(--theme-control) !important; color: var(--theme-text) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(
+  .bt-invoice-filter.is-active, .bt-quotes-tabs button[aria-pressed="true"]
+) { background: var(--theme-selected) !important; color: var(--theme-accent) !important; border-color: var(--theme-accent) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-invoice-filter > span {
+  background: var(--theme-surface) !important; color: var(--theme-text) !important;
+}
+
+html[data-bt-scheme] body #root .bt-desktop-shell :where(
+  .bt-dashboard-note-row:hover, .bt-dashboard-payment-queue-reminder:hover,
+  .bt-dashboard-mini-calendar-module button:hover,
+  .bt-approved-pay-panel, .bt-approved-pay-header, .bt-approved-pay-header > div,
+  .bt-approved-pay-total, .bt-approved-pay-sync, .bt-qbo-invoice-filter-count,
+  .bt-directory-list, .bt-directory-list-header, .bt-directory-hero,
+  .bt-directory-chip, .bt-directory-avatar,
+  .ops-calendar, .ops-control-bar, .ops-calendar__filters, .ops-calendar__body,
+  .ops-search, .ops-category-filter, .ops-month-day, .ops-month__weekdays,
+  .ops-week__header, .ops-week__all-day, .ops-time-axis, .ops-day__rail,
+  .ops-time-event, .ops-event-chip, .ops-modal__panel, .ops-modal__header, .ops-modal__actions
+) { background: var(--theme-surface) !important; color: var(--theme-text) !important; }
+
+html[data-bt-scheme] body #root .bt-desktop-shell :where(
+  .ops-icon-button, .ops-depth-button, .ops-secondary-button, .ops-view-toggle,
+  .ops-category-filter__button, .ops-category-filter__reset,
+  .ops-month-day.is-muted, .ops-more-button, .ops-empty-day, .ops-type-toggle button,
+  .ops-hour-slot:hover, .bt-approved-pay-card-bottom button
+) { background: var(--theme-control) !important; color: var(--theme-text) !important; }
+
+html[data-bt-scheme] body #root .bt-desktop-shell :where(
+  .ops-field input, .ops-field select, .ops-field textarea, .ops-assignee-select select, option
+) { background: var(--theme-input) !important; color: var(--theme-text) !important; }
+
+html[data-bt-scheme] body #root .bt-desktop-shell :where(
+  .bt-dashboard-payment-queue-reminder__kicker,
+  .bt-dashboard-payment-queue-reminder__amount strong
+) { color: var(--theme-success) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(
+  .bt-dashboard-mini-calendar-module__kicker, .bt-section-kicker
+) { color: var(--theme-accent) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(
+  .bt-dashboard-mini-calendar-module__weekdays span,
+  .bt-dashboard-mini-calendar-module__agenda-item em,
+  .bt-approved-pay-total small
+) { color: var(--theme-muted) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-dashboard-mini-calendar-module__grid strong {
+  background: var(--theme-text) !important; color: var(--theme-surface) !important;
+}
+
+/* Pair filled actions with their own foreground. The earlier text-white adapter
+   must never turn a primary button's label into the page foreground. */
+html[data-bt-scheme] body #root .bt-desktop-shell :where(
+  .bt-directory-primary-action, .bt-vs-btn--primary, .bt-topbar-add-vendor,
+  .ops-add-button, .ops-view-toggle button.is-active, .ops-type-toggle button.is-active,
+  .ops-month-day.is-today .ops-month-day__number, .ops-week__day-heading.is-today strong,
+  .bt-dashboard-mini-calendar-module__grid button.is-today,
+  .bt-dashboard-mini-calendar-module__grid button.is-selected,
+  button[class*="bg-blue-6"], a[class*="bg-blue-6"],
+  button[class*="bg-indigo-6"], button[class*="bg-emerald-6"],
+  button[class*="bg-green-6"], button[class*="bg-orange-6"], button[class*="bg-amber-5"], button[class*="bg-amber-6"]
+) { background: var(--theme-accent) !important; color: var(--theme-onaccent) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(
+  .bt-directory-primary-action, .bt-vs-btn--primary, .bt-topbar-add-vendor,
+  .ops-add-button, .ops-view-toggle button.is-active, .ops-type-toggle button.is-active,
+  .bt-dashboard-mini-calendar-module__grid button.is-selected,
+  button[class*="bg-blue-6"], a[class*="bg-blue-6"],
+  button[class*="bg-indigo-6"], button[class*="bg-emerald-6"],
+  button[class*="bg-green-6"], button[class*="bg-orange-6"], button[class*="bg-amber-5"], button[class*="bg-amber-6"]
+) :where(*) { color: inherit !important; -webkit-text-fill-color: currentColor !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(
+  .ops-delete-button, button[class*="bg-red-6"], button[class*="bg-red-5"], button[class*="bg-rose-6"]
+) { background: var(--theme-danger) !important; color: var(--theme-onaccent) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell :where(
+  .ops-delete-button, button[class*="bg-red-6"], button[class*="bg-red-5"], button[class*="bg-rose-6"]
+) :where(*) { color: inherit !important; }
+
+html[data-bt-scheme] body #root .bt-desktop-shell :where(button,input,select,textarea):disabled {
+  opacity: 1; background: var(--theme-control) !important; color: var(--theme-muted) !important;
+  cursor: not-allowed;
+}
+
+/* Opacity on readable captions compounds with muted text and fails contrast. */
+html[data-bt-scheme] body #root .bt-desktop-shell :where(span,p,small)[class*="opacity-75"] { opacity: 1; }
+
+/* Modal backdrops remain translucent, while the panel itself stays opaque.
+   Prefix selectors such as bg-slate-950 must not turn a scrim into a solid page. */
+html[data-bt-scheme] body #root .bt-desktop-shell :where(.ops-modal__scrim, .absolute.inset-0.bg-slate-950\/45) {
+  background: rgb(0 0 0 / 55%) !important;
+}
+
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-settings-tabs [role="tab"] {
+  background: var(--theme-surface) !important;
+  color: var(--theme-text) !important;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-settings-tabs [role="tab"][aria-selected="true"] {
+  background: var(--theme-accent) !important;
+  color: var(--theme-onaccent) !important;
+  border-color: var(--theme-accent) !important;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-settings-tabs [role="tab"] :where(*) { color: inherit !important; }
+/* Miniature previews deliberately keep their own colors in every theme. */
+html[data-bt-scheme] body #root .bt-account-settings .bt-color-settings {
+  background: var(--theme-surface); border: 1px solid var(--theme-border); border-radius: 12px; padding: 24px;
+}
+.bt-color-eyebrow { color: var(--theme-muted); font-size: 10px; font-weight: 700; letter-spacing: .14em; }
+.bt-color-heading h2 { margin: 6px 0 7px; font-size: 23px; font-weight: 650; letter-spacing: -.03em; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-color-heading { background: transparent !important; }
+html[data-bt-scheme] body #root .bt-color-heading p { font-size: 13px; line-height: 1.6; color: var(--theme-muted) !important; margin: 0; }
+.bt-color-options { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; margin-top: 24px; }
+@media(min-width: 1200px) {
+ .bt-color-options { grid-template-columns: repeat(3, minmax(0,1fr)); }
+}
+html[data-bt-scheme] body #root .bt-color-option {
+  display: block; padding: 12px; border: 1px solid var(--theme-border); border-radius: 10px;
+  text-align: left; background: var(--theme-surface); color: var(--theme-text); cursor: pointer;
+}
+html[data-bt-scheme] body #root .bt-color-option:hover { background: var(--theme-raised); border-color: var(--theme-accent) !important; }
+html[data-bt-scheme] body #root .bt-color-option.is-selected { border: 2px solid var(--theme-accent) !important; padding: 11px; }
+.bt-color-option:disabled { cursor: progress; }
+.bt-color-option-title { display: flex; align-items: center; gap: 7px; margin-top: 14px; font-size: 14px; }
+.bt-color-option-title strong { font-weight: 650; }
+.bt-color-number { font-variant-numeric: tabular-nums; font-size: 10px; color: var(--theme-muted); }
+.bt-color-check { margin-left: auto; border: 1px solid var(--theme-border); width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; }
+html[data-bt-scheme] body #root .bt-desktop-shell .is-selected .bt-color-check { background: var(--theme-accent); color: var(--theme-onaccent) !important; border-color: var(--theme-accent) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell .is-selected .bt-color-check :where(*) { color: inherit !important; }
+html[data-bt-scheme] body #root .bt-color-description { font-size: 12px; line-height: 1.6; min-height: 36px; margin: 8px 0 12px; color: var(--theme-muted) !important; }
+.bt-color-option-footer { border-top: 1px solid var(--theme-border); padding-top: 10px; display: flex; align-items: center; gap: 10px; color: var(--theme-muted); font-size: 10px; }
+.bt-color-option-footer > span { display: flex; gap: 5px; align-items: center; }
+.bt-color-selected-label { margin-left: auto; color: var(--theme-accent); font-weight: 600; }
+html[data-bt-scheme] body #root .bt-color-feedback { margin: 18px 0 0; font-size: 12px; line-height: 1.6; color: var(--theme-muted) !important; min-height: 38px; }
+html[data-bt-scheme] body #root .bt-color-feedback.is-error { color: var(--theme-danger) !important; }
+html[data-bt-scheme] body #root .bt-color-mini { display: flex; height: 126px; border: 1px solid var(--sample-border) !important; border-radius: 6px; background: var(--sample-page); overflow: hidden; }
+html[data-bt-scheme] body #root .bt-color-mini * { border-color: var(--sample-border) !important; }
+.bt-color-mini-nav { background: var(--sample-nav); width: 44px; padding: 12px 7px; border-right: 1px solid; }
+.bt-color-mini-nav b { display: block; width: 13px; height: 13px; background: var(--sample-accent); border-radius: 3px; margin-bottom: 14px; }
+.bt-color-mini-nav i { display: block; height: 4px; margin: 10px 0; background: var(--sample-muted); opacity: .7; border-radius: 1px; }
+.bt-color-mini-nav i:nth-child(2) { background: var(--sample-accent); }
+.bt-color-mini-main { flex: 1; padding: 12px; min-width: 0; }
+.bt-color-mini-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 11px; }
+.bt-color-mini-top i { height: 5px; width: 47%; background: var(--sample-text); border-radius: 2px; }
+.bt-color-mini-top b { height: 10px; width: 24%; background: var(--sample-accent); border-radius: 2px; }
+.bt-color-mini-cards { display: flex; gap: 5px; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-color-mini-cards { background: transparent !important; }
+.bt-color-mini-cards span { flex: 1; height: 27px; background: var(--sample-surface); border: 1px solid; border-radius: 3px; }
+.bt-color-mini-table { margin-top: 8px; border: 1px solid; background: var(--sample-surface); border-radius: 3px; padding: 4px 7px; }
+.bt-color-mini-table i { display: block; height: 3px; background: var(--sample-muted); opacity: .5; margin: 5px 0; width: 77%; }
+.bt-color-mini-table i:nth-child(2) { width: 57%; }
+@media(max-width: 520px) {
+ .bt-color-options { grid-template-columns: 1fr; }
+ html[data-bt-scheme] body #root .bt-account-settings .bt-color-settings { padding: 18px; }
+}

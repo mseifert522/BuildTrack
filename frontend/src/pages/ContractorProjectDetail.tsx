@@ -1,3 +1,4 @@
+import DatedNoteList from '../components/DatedNoteList';
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, MessageSquare, Camera, ClipboardList, Plus, Send, Trash2, Upload, FileText, Package } from 'lucide-react';
@@ -382,7 +383,7 @@ export default function ContractorProjectDetail() {
             {/* Notes List */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {notes.length === 0 && <p style={{ textAlign: 'center', color: '#9CA3AF', fontSize: 13, padding: 32 }}>No notes yet</p>}
-              {notes.map(n => (
+              <DatedNoteList items={notes}>{n => (
                 <div key={n.id} style={{ background: 'white', borderRadius: 14, padding: 14, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 6 }}>
                     <p style={{ fontSize: 13, fontWeight: 700, color: '#111827', margin: 0 }}>
@@ -406,7 +407,7 @@ export default function ContractorProjectDetail() {
                     </div>
                   )}
                 </div>
-              ))}
+              )}</DatedNoteList>
             </div>
           </div>
         )}

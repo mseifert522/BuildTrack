@@ -1,3 +1,6 @@
+import NoteReplies from '../components/NoteReplies';
+import { useNotesSync } from '../hooks/useNotesSync';
+import DatedNoteList from '../components/DatedNoteList';
 import { type ChangeEvent, type Dispatch, type DragEvent, type KeyboardEvent, type SetStateAction, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore, canChangeProjectStatus, canManageProjects, isAdminRole } from '../store/authStore';
@@ -1048,6 +1051,8 @@ export default function ProjectDetail() {
     setNotes(res.data);
   };
 
+  useNotesSync(id, loadNotes, Boolean(id));
+
   const loadProjectCalendar = useCallback(async () => {
     if (!id || !canViewProjectCalendar(user?.role)) {
       setProjectCalendarEvents([]);
@@ -2067,7 +2072,8 @@ export default function ProjectDetail() {
       </>)}
       {section !== 'composer' && (
       <div className="bt-project-notes-list space-y-2">
-        {notes.map(note => (
+        <DatedNoteList items={notes} getTimestamp={note => note.last_activity_at || note.created_at}>
+        {note => (
           <div key={note.id} className="bt-project-note-card flex items-start gap-3 rounded-lg bg-slate-900/50 p-4">
             <Avatar src={note.user_avatar_url} name={note.user_name} size={32} />
             <div className="flex-1 min-w-0">
@@ -2219,6 +2225,7 @@ export default function ProjectDetail() {
                   )}
                 </>
               )}
+              <NoteReplies projectId={id!} noteId={note.id} replies={note.replies} canReply={note.can_reply !== false} />
               {canEditProjectNote(note) && editingNoteId !== note.id && (
                 <button
                   type="button"
@@ -2276,7 +2283,8 @@ export default function ProjectDetail() {
               )}
             </div>
           </div>
-        ))}
+        )}
+        </DatedNoteList>
         {notes.length === 0 && <p className="text-center text-slate-400 text-sm py-8">No notes yet</p>}
       </div>
       )}
@@ -8022,6 +8030,8 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
     }
   };
 
+  useNotesSync(projectId, load);
+
   useEffect(() => {
     load();
     const interval = window.setInterval(load, 30000);
@@ -8150,7 +8160,7 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
       ) : (
         groupedRecords.map(group => (
           <section key={group.date} className="space-y-2">
-            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+            <div className="bt-note-day-boundary flex items-center justify-between border-b border-slate-200 pb-2">
               <h3 className="text-sm font-black text-slate-950">{group.date}</h3>
               <span className="text-xs font-bold text-slate-500">{group.records.length} item{group.records.length === 1 ? '' : 's'}</span>
             </div>
@@ -8219,6 +8229,7 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
                       deletingPhotoId={deletingPhotoId}
                       onPhotoNoteSaved={load}
                     />
+                    {record.kind === 'note' && <NoteReplies projectId={projectId} noteId={record.id.slice(5)} replies={notes.find(note => `note-${note.id}` === record.id)?.replies} />}
                   </div>
                 </div>
               </article>
@@ -9381,7 +9392,7 @@ function PhotosTab({ projectId, project, user }: { projectId: string; project: a
         <div className="space-y-5">
           {groupedPhotos.map(group => (
             <section key={group.date} className="rounded-xl border border-gray-200 bg-white p-3">
-              <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="bt-note-day-boundary mb-3 flex items-center justify-between gap-3">
                 <div>
                   <h3 className="text-sm font-black text-gray-900">{group.date}</h3>
                   <p className="text-xs font-semibold text-gray-500">{group.photos.length} item{group.photos.length === 1 ? '' : 's'} ordered by time taken</p>
@@ -9406,7 +9417,7 @@ function PhotosTab({ projectId, project, user }: { projectId: string; project: a
                       key={key}
                       role="button"
                       tabIndex={0}
-                      className={`relative group aspect-square cursor-pointer overflow-hidden rounded-xl border bg-gray-100 transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-lg ${isSelected ? 'border-cyan-400 ring-4 ring-cyan-300/80' : 'border-transparent'}`}
+                      className={`bt-media-note-entry relative group aspect-square cursor-pointer overflow-hidden rounded-xl border bg-gray-100 transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-lg ${isSelected ? 'border-cyan-400 ring-4 ring-cyan-300/80' : 'border-transparent'}`}
                       onClick={() => {
                         if (mediaKind === 'file') window.open(src, '_blank', 'noopener,noreferrer');
                         else if (lightboxIndex >= 0) setLightbox({ items: lightboxItems, index: lightboxIndex });

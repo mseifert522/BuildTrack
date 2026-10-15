@@ -1,3 +1,6 @@
+import NoteReplies, { type NoteReply } from '../components/NoteReplies';
+import { useNotesSync } from '../hooks/useNotesSync';
+import DatedNoteList from '../components/DatedNoteList';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore, isAdminRole } from '../store/authStore';
@@ -111,6 +114,9 @@ function formatCalendarBadgeDate(value?: string | null) {
 }
 
 interface DashboardActivityFeedItem {
+  replies?: NoteReply[];
+  can_reply?: boolean;
+  last_activity_at?: string;
   id: string;
   feed_type: 'note' | 'activity';
   project_id?: string | null;
@@ -675,6 +681,12 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
       document.removeEventListener('visibilitychange', refreshSummary);
     };
   }, [calendarOnly, canReadFridayPaymentQueue]);
+
+  useNotesSync(undefined, async () => {
+    const response = await api.get('/dashboard/activity-feed?limit=25');
+    const items = response.data?.items || response.data;
+    if (Array.isArray(items)) setActivityFeed(dedupeActivityFeedItems(items).slice(0, 25));
+  }, !calendarOnly);
 
   if (loading) return <Loading />;
 
@@ -1991,7 +2003,8 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
       ) : (
         <div className="bt-dashboard-notes-flow relative flow-root p-4">
           {canReadOperationsCalendar ? renderDashboardCalendarStack() : null}
-          {activityFeed.map((item) => {
+          <DatedNoteList items={activityFeed} getTimestamp={item => item.last_activity_at || item.created_at} getKey={item => `${item.feed_type}-${item.id}`}>
+          {(item) => {
             const summary = getActivitySummary(item);
             const projectTarget = item.project_id ? `/projects/${item.project_id}` : '';
             const projectLabel = item.project_address || item.project_job_name || '';
@@ -2030,6 +2043,7 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
                   <p className="bt-dashboard-note-summary mt-1 whitespace-pre-wrap break-words text-sm font-normal leading-6 text-slate-100">
                     {summary}
                   </p>
+                  {item.feed_type === 'note' && item.project_id && <NoteReplies projectId={item.project_id} noteId={item.id} replies={item.replies} canReply={item.can_reply !== false} />}
                 </div>
                 <div className="flex flex-shrink-0 flex-col items-end gap-1.5 text-right">
                   <span className="text-[11px] font-normal text-slate-500">
@@ -2053,7 +2067,8 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
                 </div>
               </div>
             );
-          })}
+          }}
+          </DatedNoteList>
         </div>
       )}
     </div>

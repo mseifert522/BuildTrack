@@ -3,6 +3,7 @@ const path = require('path');
 const { assignMissingBtInvoiceNumbers } = require('../utils/invoiceNumbers');
 const fs = require('fs');
 const crypto = require('crypto');
+const { ensureAccountColorSchemes } = require('./accountColorMigration');
 
 let db;
 
@@ -290,6 +291,11 @@ function getDb() {
     const dir = path.dirname(dbPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     db = new Database(dbPath);
+    // This database holds credential hashes and encrypted integration secrets.
+    // Keep it and existing WAL files private to the service user.
+    for (const file of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+      if (fs.existsSync(file)) fs.chmodSync(file, 0o600);
+    }
     db.pragma('journal_mode = WAL');
     db.pragma('foreign_keys = ON');
   }
@@ -312,6 +318,7 @@ function initializeSchema() {
       contractor_category TEXT,
       contractor_secondary_category TEXT,
       avatar_url TEXT,
+      color_scheme TEXT NOT NULL DEFAULT '07' CHECK(color_scheme IN ('01','07','08','02','dark-knight')),
       last_login_at TEXT,
       last_seen_at TEXT,
       session_revoked_at TEXT,
@@ -1227,6 +1234,19 @@ function initializeSchema() {
       FOREIGN KEY (edited_by) REFERENCES users(id)
     );
 
+    -- Replies share their parent note's project and visibility; there are no copies.
+    CREATE TABLE IF NOT EXISTS project_note_replies (
+      id TEXT PRIMARY KEY,
+      note_id TEXT NOT NULL REFERENCES project_notes(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      note TEXT NOT NULL CHECK(length(trim(note)) BETWEEN 1 AND 10000),
+      client_id TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(note_id, user_id, client_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_project_note_replies_note_created
+      ON project_note_replies(note_id, created_at);
+
     CREATE TABLE IF NOT EXISTS operations_calendar_events (
       id TEXT PRIMARY KEY,
       project_id TEXT,
@@ -2048,6 +2068,10 @@ function initializeSchema() {
   `);
 
   // ── Runtime migrations (safe to run on every startup) ──
+  if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'color_scheme')) {
+    db.exec("ALTER TABLE users ADD COLUMN color_scheme TEXT NOT NULL DEFAULT '07' CHECK(color_scheme IN ('01','07','08','02','dark-knight'))");
+  }
+  ensureAccountColorSchemes(db);
   try { db.exec(`ALTER TABLE users ADD COLUMN avatar_url TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE users ADD COLUMN last_login_at TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE users ADD COLUMN last_seen_at TEXT`); } catch (_) { /* already exists */ }

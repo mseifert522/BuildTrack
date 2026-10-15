@@ -4,13 +4,15 @@ import api from '../lib/api';
 import { PageHeader } from '../components/ui';
 import Avatar from '../components/Avatar';
 import VoiceTextarea from '../components/VoiceTextarea';
-import { Bot, Camera, Copy, Key, Power, RefreshCw, Shield, Trash2, User } from 'lucide-react';
+import { Bot, Camera, Copy, Key, Palette, Power, RefreshCw, Shield, Trash2, User } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
+import ColorPreferences from '../components/ColorPreferences';
 
 export default function Settings() {
   const { user, updateUser } = useAuthStore();
-  const [activeTab, setActiveTab] = useState('profile');
+  const [activeTab, setActiveTab] = useState(() => window.location.hash === '#agent-bridge'
+    && ['super_admin', 'operations_manager'].includes(user?.role || '') ? 'agent-bridge' : 'profile');
   const [agents, setAgents] = useState<any[]>([]);
   const [agentLogs, setAgentLogs] = useState<any[]>([]);
   const [availableScopes, setAvailableScopes] = useState<string[]>([]);
@@ -99,7 +101,7 @@ export default function Settings() {
 
   useEffect(() => {
     if (activeTab === 'agent-bridge') loadAgentBridge();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    else setOneTimeKey(null);
   }, [activeTab]);
 
   const toggleFormScope = (scope: string) => {
@@ -166,18 +168,22 @@ export default function Settings() {
   const tabs = [
     { id: 'profile', label: 'Profile', icon: User },
     { id: 'security', label: 'Security', icon: Key },
-    { id: 'agent-bridge', label: 'AI Agent Bridge', icon: Bot },
+    ...(['super_admin', 'operations_manager'].includes(user?.role || '')
+      ? [{ id: 'agent-bridge', label: 'AI Agent Bridge', icon: Bot }] : []),
+    { id: 'color', label: 'Preferred Color', icon: Palette },
   ];
 
   return (
-    <div className="p-4 md:p-6 max-w-2xl mx-auto">
+    <div className="bt-account-settings p-4 md:p-6 max-w-2xl mx-auto">
       <PageHeader title="Settings" subtitle="Manage your account settings" />
 
       {/* Tabs */}
-      <div className="flex gap-2 mb-6 overflow-x-auto">
+      <div className="bt-settings-tabs flex gap-2 mb-6 overflow-x-auto" role="tablist" aria-label="Account settings">
         {tabs.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
+            role="tab"
+            aria-selected={activeTab === id}
             onClick={() => setActiveTab(id)}
             className={`flex items-center gap-2 flex-shrink-0 whitespace-nowrap px-4 py-2 rounded-xl text-sm font-medium transition-colors ${activeTab === id ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50'}`}
           >
@@ -186,6 +192,8 @@ export default function Settings() {
           </button>
         ))}
       </div>
+
+      {activeTab === 'color' && <ColorPreferences />}
 
       {activeTab === 'profile' && (
         <div className="bg-white rounded-xl border border-gray-200 p-5">

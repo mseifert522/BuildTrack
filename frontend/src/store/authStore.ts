@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { ColorSchemeId } from '../lib/colorSchemes';
 
 const AUTH_LAST_ACTIVITY_KEY = 'auth_last_activity_at';
 const AUTH_LAST_REFRESH_KEY = 'auth_last_refresh_at';
@@ -31,6 +32,7 @@ export interface User {
   contractor_secondary_category?: string | null;
   avatar_url?: string | null;
   force_password_reset?: boolean;
+  color_scheme?: ColorSchemeId;
 }
 
 interface AuthState {
@@ -99,7 +101,7 @@ export const isAdminRole = (role: string) =>
 
 /** Can access Settings page */
 export const canAccessSettings = (role: string) =>
-  ['super_admin', 'operations_manager'].includes(role);
+  ['super_admin', 'operations_manager', 'project_manager'].includes(role);
 
 /** Can access Security controls (project managers view-only; the backend
  * blocks them from every logout/mutation action) */
