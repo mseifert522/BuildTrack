@@ -7,6 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const { getDb } = require('../db/schema');
+const { COLOR_SCHEMES, agentDirectoryMetadata } = require('../services/accountPreferences');
 const { authenticate, authorize, blockProjectManagerMutation, authorizeOverUser, blacklistToken } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
 const { revokeUserAccess } = require('../utils/sessionPolicy');
@@ -574,6 +575,23 @@ router.get('/me', (req, res) => {
   res.json(user);
 });
 
+// PUT /api/users/me/preferences - current user's appearance only
+router.put('/me/preferences', (req, res) => {
+  const colorScheme = req.body?.color_scheme;
+  if (!COLOR_SCHEMES.includes(colorScheme)) {
+    return res.status(400).json({ error: 'Choose color scheme 01, 07, 08, or 02.' });
+  }
+  try {
+    getDb().prepare("UPDATE users SET color_scheme = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(colorScheme, req.user.id);
+    logActivity({ userId: req.user.id, action: 'color_scheme_updated', entityType: 'user',
+      entityId: req.user.id, details: { color_scheme: colorScheme } });
+    res.json({ color_scheme: colorScheme });
+  } catch {
+    res.status(500).json({ error: 'Unable to save your color preference. Please try again.' });
+  }
+});
+
 // POST /api/users/me/avatar - upload avatar for current user
 router.post('/me/avatar', avatarUpload.single('avatar'), (req, res) => {
   try {
@@ -607,6 +625,7 @@ router.delete('/me/avatar', (req, res) => {
 // GET /api/users - list all users (super_admin, operations_manager only)
 router.get('/', authorize('super_admin', 'operations_manager'), (req, res) => {
   const db = getDb();
+  const agentAccounts = agentDirectoryMetadata(db);
   const users = db.prepare(
     `SELECT
       id, name, email, role, phone, company, contractor_category, contractor_secondary_category, avatar_url,
@@ -624,7 +643,12 @@ router.get('/', authorize('super_admin', 'operations_manager'), (req, res) => {
     recordCount: users.length,
     riskLevel: 'high',
   });
-  res.json(users);
+  res.json(users.map(user => {
+    const agent = agentAccounts.get(user.id);
+    return agent ? { ...user, has_pin: 0, agent_account: {
+      name: agent.agent_name, enabled: Boolean(agent.enabled), last_used_at: agent.last_used_at,
+    } } : user;
+  }));
 });
 
 // GET /api/users/contractors - list contractors for assignment dropdowns
@@ -1706,6 +1730,13 @@ router.post('/', authorize('super_admin', 'operations_manager'), async (req, res
 });
 
 // PUT /api/users/:id - update user (super_admin or operations_manager)
+// Service identities must never be re-enabled for password/PIN login from the user screen.
+router.use('/:id', (req, res, next) => {
+  const linked = getDb().prepare('SELECT id FROM agent_bridge_agents WHERE acts_as_user_id = ? LIMIT 1').get(req.params.id);
+  if (linked) return res.status(403).json({ error: 'Manage this API service account in Settings > AI Agent Bridge.' });
+  next();
+});
+
 router.put('/:id', authorize('super_admin', 'operations_manager'), async (req, res) => {
   try {
     const db = getDb();

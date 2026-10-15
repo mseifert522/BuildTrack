@@ -8,6 +8,7 @@ import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { format, formatDistanceToNow } from 'date-fns';
 import { fileDropHandlers } from '../lib/fileDrop';
+import { Link } from 'react-router-dom';
 
 interface User {
   id: string;
@@ -25,6 +26,7 @@ interface User {
   last_seen_at?: string | null;
   last_login_at?: string | null;
   created_at: string;
+  agent_account?: { name: string; enabled: boolean; last_used_at: string | null };
 }
 
 const fallbackCategories = [
@@ -98,6 +100,7 @@ export default function Users() {
   const canManage = currentUser ? canManageUsers(currentUser.role) : false;
   const canAddCategories = currentUser ? ['super_admin', 'operations_manager'].includes(currentUser.role) : false;
   const canManageUserRecord = (u: User) => {
+    if (u.agent_account) return false;
     if (!canManage || !currentUser || u.id === currentUser.id) return false;
     if (isMikeSeifert(currentUser)) return true;
     return (roleLevel[currentUser.role] ?? -1) > (roleLevel[u.role] ?? -1);
@@ -287,34 +290,35 @@ export default function Users() {
       {loading ? <Loading /> : (
         <div className="space-y-3">
           {users.map(u => (
-            <div key={u.id} className={`bg-white rounded-xl border p-4 flex items-center gap-3 ${!u.is_active ? 'opacity-60 border-red-200 bg-red-50' : 'border-gray-200'}`}>
+            <div key={u.id} className={`bg-white rounded-xl border p-4 flex items-center gap-3 ${!u.is_active && !u.agent_account ? 'opacity-60 border-red-200 bg-red-50' : 'border-gray-200'}`}>
               <div className="relative flex-shrink-0">
                 <Avatar
                   src={u.avatar_url}
                   name={u.name}
                   size={40}
                   roundedClassName="rounded-full"
-                  fallbackClassName={u.is_active ? 'text-blue-700' : 'text-red-500'}
-                  fallbackStyle={{ background: u.is_active ? '#DBEAFE' : '#FEE2E2' }}
+                  fallbackClassName={u.is_active || u.agent_account ? 'text-blue-700' : 'text-red-500'}
+                  fallbackStyle={{ background: u.is_active || u.agent_account ? '#DBEAFE' : '#FEE2E2' }}
                 />
                 <span
-                  className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-white ${u.is_online ? 'bg-green-500' : 'bg-gray-300'}`}
-                  title={u.is_online ? 'Live now' : 'Offline'}
+                  className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-white ${u.agent_account?.enabled || u.is_online ? 'bg-green-500' : 'bg-gray-300'}`}
+                  title={u.agent_account ? (u.agent_account.enabled ? 'API access enabled' : 'API access disabled') : (u.is_online ? 'Live now' : 'Offline')}
                 />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <p className="font-semibold text-gray-900 text-sm">{u.name}</p>
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${roleColors[u.role] || 'bg-gray-100 text-gray-600'}`}>{roleLabels[u.role] || u.role}</span>
-                  <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-bold ${u.is_online ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                    <Radio className={`w-3 h-3 ${u.is_online ? 'animate-pulse' : ''}`} />
-                    {u.is_online ? 'Live now' : 'Offline'}
+                  <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-bold ${u.agent_account?.enabled || u.is_online ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                    <Radio className="w-3 h-3" />
+                    {u.agent_account ? (u.agent_account.enabled ? 'API enabled' : 'API disabled') : (u.is_online ? 'Live now' : 'Offline')}
                   </span>
-                  {!u.is_active && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600 font-medium">Locked Out</span>}
+                  {!u.is_active && !u.agent_account && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600 font-medium">Locked Out</span>}
                 </div>
                 <p className="text-xs text-gray-500">{u.email}</p>
                 {u.phone && <p className="text-xs text-gray-400">{u.phone}</p>}
                 {u.company && <p className="text-xs text-gray-400">{u.company}</p>}
+                {u.agent_account && <p className="text-xs text-gray-500">Private API connection · No session timeout</p>}
                 {u.role === 'contractor' && (u.contractor_category || u.contractor_secondary_category) && (
                   <p className="text-xs text-amber-600 font-semibold">
                     {[u.contractor_category, u.contractor_secondary_category].filter(Boolean).join(' / ')}
@@ -344,6 +348,9 @@ export default function Users() {
                   )}
                 </div>
               </div>
+              {u.agent_account && canManage && (
+                <Link to="/settings#agent-bridge" className="text-xs font-medium text-blue-600">Manage API</Link>
+              )}
               {canManageUserRecord(u) && (
                 <div className="flex items-center gap-1 flex-shrink-0">
                   <button
