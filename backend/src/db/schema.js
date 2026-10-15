@@ -3,6 +3,7 @@ const path = require('path');
 const { assignMissingBtInvoiceNumbers } = require('../utils/invoiceNumbers');
 const fs = require('fs');
 const crypto = require('crypto');
+const { ensureAccountColorSchemes } = require('./accountColorMigration');
 
 let db;
 
@@ -317,7 +318,7 @@ function initializeSchema() {
       contractor_category TEXT,
       contractor_secondary_category TEXT,
       avatar_url TEXT,
-      color_scheme TEXT NOT NULL DEFAULT '07' CHECK(color_scheme IN ('01','07','08','02')),
+      color_scheme TEXT NOT NULL DEFAULT '07' CHECK(color_scheme IN ('01','07','08','02','dark-knight')),
       last_login_at TEXT,
       last_seen_at TEXT,
       session_revoked_at TEXT,
@@ -2055,8 +2056,9 @@ function initializeSchema() {
 
   // ── Runtime migrations (safe to run on every startup) ──
   if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'color_scheme')) {
-    db.exec("ALTER TABLE users ADD COLUMN color_scheme TEXT NOT NULL DEFAULT '07' CHECK(color_scheme IN ('01','07','08','02'))");
+    db.exec("ALTER TABLE users ADD COLUMN color_scheme TEXT NOT NULL DEFAULT '07' CHECK(color_scheme IN ('01','07','08','02','dark-knight'))");
   }
+  ensureAccountColorSchemes(db);
   try { db.exec(`ALTER TABLE users ADD COLUMN avatar_url TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE users ADD COLUMN last_login_at TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE users ADD COLUMN last_seen_at TEXT`); } catch (_) { /* already exists */ }

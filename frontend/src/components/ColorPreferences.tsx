@@ -49,7 +49,7 @@ export default function ColorPreferences() {
           const ModeIcon = scheme.mode === 'Light' ? Sun : Moon;
           return (
             <button type="button" key={scheme.id} className={'bt-color-option' + (active ? ' is-selected' : '')}
-              aria-pressed={active} aria-label={scheme.id + ' ' + scheme.name} disabled={saving}
+              aria-pressed={active} aria-label={(scheme.id === 'dark-knight' ? '05' : scheme.id) + ' ' + scheme.name} disabled={saving}
               onClick={() => void select(scheme.id)}>
               <div className="bt-color-mini" aria-hidden="true" style={{
                 '--sample-page': scheme.colors.page, '--sample-surface': scheme.colors.surface,
@@ -63,7 +63,7 @@ export default function ColorPreferences() {
                   <div className="bt-color-mini-table"><i /><i /><i /></div>
                 </div>
               </div>
-              <div className="bt-color-option-title"><span className="bt-color-number">{scheme.id}</span><strong>{scheme.name}</strong>
+              <div className="bt-color-option-title"><span className="bt-color-number">{scheme.id === 'dark-knight' ? '05' : scheme.id}</span><strong>{scheme.name}</strong>
                 <span className="bt-color-check">{active && <Check size={14} />}</span>
               </div>
               <p className="bt-color-description">{scheme.description}</p>

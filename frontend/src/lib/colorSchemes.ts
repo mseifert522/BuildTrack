@@ -1,4 +1,4 @@
-export type ColorSchemeId = '01' | '07' | '08' | '02';
+export type ColorSchemeId = '01' | '07' | '08' | '02' | 'dark-knight';
 export const DEFAULT_COLOR_SCHEME: ColorSchemeId = '07';
 export const COLOR_SCHEMES = [
   { id: '01', name: 'Porcelain Blue', mode: 'Light', description: 'Crisp white surfaces and a focused blue accent.',
@@ -9,6 +9,8 @@ export const COLOR_SCHEMES = [
     colors: { page: '#191A1C', surface: '#242628', raised: '#2D3033', nav: '#202224', header: '#2C2F32', input: '#1B1D1F', control: '#34383C', selected: '#454C53', text: '#F0F2F4', muted: '#B5BDC6', border: '#4D555F', accent: '#D0D8E2', onaccent: '#252D38', success: '#ADCFB9', danger: '#E4ABB2', warning: '#DECAA8' } },
   { id: '02', name: 'Warm Ivory', mode: 'Light', description: 'Soft ivory surfaces and a warm, understated accent.',
     colors: { page: '#F3F0E9', surface: '#FFFEFA', raised: '#F8F5EE', nav: '#FFFEFA', header: '#EEEAE1', input: '#FFFFFF', control: '#EDE8DD', selected: '#EFE4D1', text: '#302E2A', muted: '#6E6558', border: '#D8D0C2', accent: '#79592F', onaccent: '#FFFFFF', success: '#416343', danger: '#A44242', warning: '#79592F' } },
+  { id: 'dark-knight', name: 'Dark Knight', mode: 'Dark', description: 'Monolith. Pure black, silver accents, and precise Inter Tight typography.',
+    colors: { page: '#090909', surface: '#111111', raised: '#191919', nav: '#070707', header: '#141414', input: '#0C0C0C', control: '#222222', selected: '#303030', text: '#F0F0F0', muted: '#B0B0B0', border: '#414141', accent: '#EEEEEE', onaccent: '#111111', success: '#B9D6C1', danger: '#F0B1B1', warning: '#E3CEAA' } },
 ] as const;
 
 export function normalizeColorScheme(value: unknown): ColorSchemeId {
@@ -20,6 +22,9 @@ export function applyColorScheme(value: unknown) {
   const root = document.documentElement;
   root.dataset.btScheme = scheme.id;
   root.style.colorScheme = scheme.mode.toLowerCase();
+  root.style.setProperty('--theme-font', scheme.id === 'dark-knight'
+    ? "'Inter Tight Variable', 'Inter Tight', 'Segoe UI', sans-serif"
+    : "'Inter Variable', Inter, 'Segoe UI', sans-serif");
   for (const [token, color] of Object.entries(scheme.colors)) root.style.setProperty('--theme-' + token, color);
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', scheme.colors.page);
 }

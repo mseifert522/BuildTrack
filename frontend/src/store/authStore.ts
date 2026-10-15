@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { ColorSchemeId } from '../lib/colorSchemes';
 
 const AUTH_LAST_ACTIVITY_KEY = 'auth_last_activity_at';
 const AUTH_LAST_REFRESH_KEY = 'auth_last_refresh_at';
@@ -31,7 +32,7 @@ export interface User {
   contractor_secondary_category?: string | null;
   avatar_url?: string | null;
   force_password_reset?: boolean;
-  color_scheme?: '01' | '07' | '08' | '02';
+  color_scheme?: ColorSchemeId;
 }
 
 interface AuthState {

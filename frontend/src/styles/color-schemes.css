@@ -14,7 +14,10 @@ html[data-bt-scheme] body #root .bt-desktop-shell {
   --text-secondary: var(--theme-muted);
   background: var(--theme-page) !important;
   color: var(--theme-text) !important;
-  font-family: 'Inter Variable', Inter, 'Segoe UI', sans-serif;
+  font-family: var(--theme-font, 'Inter Variable', Inter, 'Segoe UI', sans-serif) !important;
+}
+html[data-bt-scheme="dark-knight"] body #root .bt-desktop-shell :where(*) {
+  font-family: var(--theme-font) !important;
 }
 html[data-bt-scheme] body { background: var(--theme-page); color: var(--theme-text); }
 html[data-bt-scheme] body #root .bt-desktop-shell :where(main, .bt-desktop-page) {
@@ -248,7 +251,17 @@ html[data-bt-scheme] body #root .bt-desktop-shell :where(.ops-modal__scrim, .abs
   background: rgb(0 0 0 / 55%) !important;
 }
 
-/* The four miniature previews deliberately keep their own colors in every theme. */
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-settings-tabs [role="tab"] {
+  background: var(--theme-surface) !important;
+  color: var(--theme-text) !important;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-settings-tabs [role="tab"][aria-selected="true"] {
+  background: var(--theme-accent) !important;
+  color: var(--theme-onaccent) !important;
+  border-color: var(--theme-accent) !important;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-settings-tabs [role="tab"] :where(*) { color: inherit !important; }
+/* Miniature previews deliberately keep their own colors in every theme. */
 html[data-bt-scheme] body #root .bt-account-settings .bt-color-settings {
   background: var(--theme-surface); border: 1px solid var(--theme-border); border-radius: 12px; padding: 24px;
 }
@@ -257,6 +270,9 @@ html[data-bt-scheme] body #root .bt-account-settings .bt-color-settings {
 html[data-bt-scheme] body #root .bt-desktop-shell .bt-color-heading { background: transparent !important; }
 html[data-bt-scheme] body #root .bt-color-heading p { font-size: 13px; line-height: 1.6; color: var(--theme-muted) !important; margin: 0; }
 .bt-color-options { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; margin-top: 24px; }
+@media(min-width: 1200px) {
+ .bt-color-options { grid-template-columns: repeat(3, minmax(0,1fr)); }
+}
 html[data-bt-scheme] body #root .bt-color-option {
   display: block; padding: 12px; border: 1px solid var(--theme-border); border-radius: 10px;
   text-align: left; background: var(--theme-surface); color: var(--theme-text); cursor: pointer;
@@ -268,7 +284,8 @@ html[data-bt-scheme] body #root .bt-color-option.is-selected { border: 2px solid
 .bt-color-option-title strong { font-weight: 650; }
 .bt-color-number { font-variant-numeric: tabular-nums; font-size: 10px; color: var(--theme-muted); }
 .bt-color-check { margin-left: auto; border: 1px solid var(--theme-border); width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; }
-html[data-bt-scheme] body #root .is-selected .bt-color-check { background: var(--theme-accent); color: var(--theme-onaccent); border-color: var(--theme-accent) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell .is-selected .bt-color-check { background: var(--theme-accent); color: var(--theme-onaccent) !important; border-color: var(--theme-accent) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell .is-selected .bt-color-check :where(*) { color: inherit !important; }
 html[data-bt-scheme] body #root .bt-color-description { font-size: 12px; line-height: 1.6; min-height: 36px; margin: 8px 0 12px; color: var(--theme-muted) !important; }
 .bt-color-option-footer { border-top: 1px solid var(--theme-border); padding-top: 10px; display: flex; align-items: center; gap: 10px; color: var(--theme-muted); font-size: 10px; }
 .bt-color-option-footer > span { display: flex; gap: 5px; align-items: center; }

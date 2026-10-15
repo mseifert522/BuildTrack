@@ -24,6 +24,7 @@ COPY backend/ ./
 
 # Copy built frontend to path server.js expects (../frontend/dist)
 COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
+COPY --from=frontend-build /app/frontend/node_modules/@fontsource-variable/inter-tight/LICENSE /app/frontend/dist/licenses/inter-tight.txt
 
 # Create data and uploads directories
 RUN mkdir -p data uploads

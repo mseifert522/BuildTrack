@@ -38,13 +38,14 @@ const { agentDirectoryMetadata } = require('../src/services/accountPreferences')
   }
   try {
     assert.equal((await call('/api/users/me/preferences','PUT',{color_scheme:'01'},null)).status,401);
-    for(const color_scheme of ['01','07','08','02']) {
+    for(const color_scheme of ['01','07','08','02','dark-knight']) {
       assert.equal((await call('/api/users/me/preferences','PUT',{color_scheme})).status,200);
       assert.equal((await call('/api/auth/me')).body.color_scheme,color_scheme);
     }
     assert.equal((await call('/api/auth/me','GET',undefined,'two')).body.color_scheme,'07');
     assert.equal((await call('/api/users/me/preferences','PUT',{color_scheme:'08',user_id:'one'},'two')).status,200);
-    assert.equal((await call('/api/auth/me')).body.color_scheme,'02');
+    assert.equal((await call('/api/auth/me')).body.color_scheme,'dark-knight');
+    assert.equal((await call('/api/auth/refresh','POST',{})).body.user.color_scheme,'dark-knight');
     for(const color_scheme of ['03',null,7,{},['01']]) {
       assert.equal((await call('/api/users/me/preferences','PUT',{color_scheme})).status,400);
     }
@@ -70,7 +71,7 @@ const { agentDirectoryMetadata } = require('../src/services/accountPreferences')
     delete process.env.JWT_SECRET;
     assert.throws(()=>hashAgentKey('key'),/protection is not configured/);
     process.env.JWT_SECRET=old;
-    console.log('PASS: default, four palettes, cross-user isolation, validation, auth, agent metadata, login protection, key secrecy and no-store');
+    console.log('PASS: default, five palettes, cross-user isolation, validation, auth, agent metadata, login protection, key secrecy and no-store');
   } finally {
     await new Promise(resolve=>server.close(resolve));
     db.close();

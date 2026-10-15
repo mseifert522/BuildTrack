@@ -579,7 +579,7 @@ router.get('/me', (req, res) => {
 router.put('/me/preferences', (req, res) => {
   const colorScheme = req.body?.color_scheme;
   if (!COLOR_SCHEMES.includes(colorScheme)) {
-    return res.status(400).json({ error: 'Choose color scheme 01, 07, 08, or 02.' });
+    return res.status(400).json({ error: 'Choose Porcelain Blue, Midnight Navy, Carbon Silver, Warm Ivory, or Dark Knight.' });
   }
   try {
     getDb().prepare("UPDATE users SET color_scheme = ?, updated_at = datetime('now') WHERE id = ?")

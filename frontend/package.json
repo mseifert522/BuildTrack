@@ -7,11 +7,12 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "test:themes": "node tests/theme-contrast.cjs",
+    "test:themes": "node tests/theme-contrast.cjs && node tests/theme-preferences.cjs",
     "preview": "vite preview"
   },
   "dependencies": {
     "@fontsource-variable/inter": "5.3.0",
+    "@fontsource-variable/inter-tight": "5.3.0",
     "@tailwindcss/vite": "^4.2.2",
     "@tanstack/react-query": "^5.95.2",
     "axios": "^1.13.6",

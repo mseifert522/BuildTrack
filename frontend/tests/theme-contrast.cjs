@@ -5,7 +5,7 @@ const axePath=require.resolve('axe-core/axe.min.js');
 const out=path.resolve(process.env.AUDIT_OUTPUT||path.join(__dirname,'..','test-results','theme-contrast'));
 fs.mkdirSync(out,{recursive:true});
 const base=process.env.AUDIT_URL||'http://127.0.0.1:5173';
-const schemes=(process.env.SCHEMES||'01,07,08,02').split(',');
+const schemes=(process.env.SCHEMES||'01,07,08,02,dark-knight').split(',');
 const project={id:'audit-project',address:'123 Sample Avenue',job_name:'Sample Renovation',status:'active_rehab',start_date:'2026-10-01',target_completion:'2026-12-01',open_punch_items:4,assigned_count:2,budget:125000,updated_at:'2026-10-15',created_at:'2026-10-01',market_status:'not_on_market',work_priority:1,contractors:[],stats:{total_invoiced:4250,total_paid:1250,open_punch_items:4},assigned_users:[]};
 const userBase={id:'audit-user',name:'Audit User',email:'audit@example.invalid',role:'super_admin',is_active:1,company:'Sample Company',created_at:'2026-10-01'};
 const note={id:'audit-note',feed_type:'note',note_type:'field',user_id:'audit-user',user_name:'Audit User',project_id:project.id,project_address:project.address,created_at:'2026-10-15T13:00:00Z',content:'Field inspection completed. Cabinet installation and final painting are scheduled for this week. Please confirm delivery before work begins.',text:'Field inspection completed.',media:[],attachments:[]};

@@ -1,6 +1,6 @@
 'use strict';
 
-const COLOR_SCHEMES = Object.freeze(['01', '07', '08', '02']);
+const COLOR_SCHEMES = Object.freeze(['01', '07', '08', '02', 'dark-knight']);
 const DEFAULT_COLOR_SCHEME = '07';
 
 function normalizeColorScheme(value) {
