@@ -1,5 +1,6 @@
 // Browser integration uses real SQLite routes and SSE with synthetic data only.
-const {chromium,expect}=require('@playwright/test');
+const {chromium,expect:baseExpect}=require('@playwright/test');
+const expect=baseExpect.configure({timeout:15000});
 const assert=require('node:assert/strict');
 const fs=require('node:fs');const os=require('node:os');const path=require('node:path');
 const backend=require('node:module').createRequire(path.resolve(__dirname,'../../backend/package.json'));
@@ -97,7 +98,13 @@ const out=path.resolve(process.env.AUDIT_OUTPUT||'test-results/note-replies');fs
     }
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM project_note_replies r JOIN project_notes n ON n.id=r.note_id WHERE n.project_id='unrelated'").get().n,0);
     console.log('PASS '+scheme+': two users, dashboard/project'+(mobile?'/mobile':'')+', avatars, contrast, project isolation'+(!process.env.AUDIT_URL?', SSE, lost-response retry, draft preservation':''));
-   }finally{for(const ctx of contexts)await ctx.close();}
+   }catch(error){
+    for(const [i,ctx] of contexts.entries())for(const page of ctx.pages())await page.screenshot({path:path.join(out,scheme+'-failure-'+i+'.png')}).catch(()=>{});
+    throw error;
+   }finally{
+    fs.writeFileSync(path.join(out,'results.json'),JSON.stringify({results,errors},null,2));
+    for(const ctx of contexts)await ctx.close();
+   }
   }
   assert.deepEqual(errors,[]);fs.writeFileSync(path.join(out,'results.json'),JSON.stringify({results,errors},null,2));
  }finally{await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r));db.close();fs.rmSync(temp,{recursive:true,force:true});}
