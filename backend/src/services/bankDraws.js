@@ -311,7 +311,7 @@ async function runSync(source, userId) {
     if (!data.ledgers.some(l => l.number === HOLDBACK_ACCOUNT)) {
       throw new Error(`QuickBooks account ${HOLDBACK_ACCOUNT} (Funds in Escrow / Holdbacks) was not found.`);
     }
-    const projects = db.prepare('SELECT id, address, job_name, quickbooks_class_id, quickbooks_class_name FROM projects').all();
+    const projects = db.prepare('SELECT id, address, job_name, status, quickbooks_class_id, quickbooks_class_name FROM projects').all();
     const aliasesByProject = new Map();
     for (const row of db.prepare('SELECT project_id, alias_key FROM project_class_aliases').all()) {
       if (!aliasesByProject.has(row.project_id)) aliasesByProject.set(row.project_id, new Set());
@@ -320,6 +320,7 @@ async function runSync(source, userId) {
     const matches = matchProjectClasses(projects, data.classes, aliasesByProject);
     const syncedAt = new Date().toISOString();
     const { lines, unmatched } = buildDrawLines(data, matches, syncedAt);
+    const consolidated = buildConsolidatedGroups(data, matches, projects);
     const classNameById = new Map(data.classes.map(c => [c.id, c.name]));
     const snapshots = matches.map(m => {
       const classIds = m.classId && m.status !== 'class_missing' ? [m.classId, ...(m.relatedIds || [])] : [];
@@ -370,6 +371,10 @@ async function runSync(source, userId) {
       for (const line of lines) insertLine.run(line);
       db.prepare('DELETE FROM project_finance_snapshots').run();
       for (const snapshot of snapshots) insertSnapshot.run(snapshot);
+      db.prepare(`
+        INSERT INTO finance_consolidated_snapshot (id, payload_json, synced_at) VALUES ('primary', ?, ?)
+        ON CONFLICT(id) DO UPDATE SET payload_json = excluded.payload_json, synced_at = excluded.synced_at
+      `).run(JSON.stringify({ groups: consolidated, period: data.period }), syncedAt);
       db.prepare(`
         UPDATE bank_draw_sync_state
         SET last_synced_at = ?, last_status = 'ok', last_error = NULL, line_count = ?, unmatched_count = ?
@@ -482,6 +487,104 @@ function projectBankDraws(projectId, db = getDb()) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Consolidated Finances (Mike, 2026-10-19): every New Urban Development property in
+// QuickBooks - BuildTrack projects (with their unit / alias / twin classes) and any
+// other address-named class that still carries a balance - as one group each. Sold
+// properties (a 4200 sale line in the life-to-date P&L) are flagged so their leftover
+// balances stay out of the totals. Pure; exported for tests.
+const lineNodes = nodes => (nodes || []).flatMap(n => (n.kind === 'line' ? [n] : n.kind === 'section' ? lineNodes(n.children) : []));
+const findSection = (nodes, predicate) => {
+  for (const n of nodes || []) {
+    if (n.kind !== 'section') continue;
+    if (predicate(n)) return n;
+    const hit = findSection(n.children, predicate);
+    if (hit) return hit;
+  }
+  return null;
+};
+const sumLines = (lines, predicate) => r2(lines.filter(predicate).reduce((s, l) => s + Number(l.amount || 0), 0));
+
+function groupFigures(reports, classIds) {
+  const bs = statementFor(reports.balanceSheet, classIds);
+  const pl = statementFor(reports.profitLoss, classIds);
+  const ttm = reports.profitLossTtm ? statementFor(reports.profitLossTtm, classIds) : { found: false, sections: [], totals: {} };
+  const summary = bs.found ? financeSummary(bs, pl) : null;
+  const liabilitiesSection = findSection(bs.sections, n => n.group === 'Liabilities' || /^liabilities$/i.test(n.title));
+  const loans = lineNodes(liabilitiesSection?.children).map(l => ({ account: l.account, amount: r2(l.amount) })).filter(l => l.amount);
+  const assetLines = lineNodes(bs.sections);
+  const plLines = lineNodes(pl.sections);
+  const expenseSections = ttm.sections.filter(n => n.kind === 'section' && !/^income$|^other income$/i.test(n.title));
+  const ttmExpenseLines = lineNodes(expenseSections);
+  const monthly = ttm.found ? {
+    income: r2((ttm.totals.Income || 0) / 12),
+    expenses: r2(((ttm.totals.COGS || 0) + (ttm.totals.Expenses || 0) + (ttm.totals.OtherExpenses || 0)) / 12),
+    interest: r2(sumLines(ttmExpenseLines, l => /interest/i.test(l.account)) / 12),
+    net: r2((ttm.totals.NetIncome || 0) / 12),
+  } : null;
+  return {
+    found: bs.found,
+    summary,
+    cash_in: summary ? r2(summary.invested - summary.net_debt_after_escrow) : null,
+    loans,
+    carried_interest: sumLines(assetLines, l => String(l.account).startsWith('1235 ')),
+    sold: plLines.some(l => String(l.account).startsWith('4200')),
+    has_balance: Boolean(summary) && (Math.abs(summary.total_assets) >= 0.01 || Math.abs(summary.total_liabilities) >= 0.01),
+    monthly,
+  };
+}
+
+function buildConsolidatedGroups(reports, matches, projects) {
+  const classes = reports.classes || [];
+  const byId = new Map(classes.map(c => [c.id, c]));
+  const projectById = new Map(projects.map(p => [p.id, p]));
+  const groups = [];
+  const claimed = new Set();
+  for (const m of matches) {
+    const project = projectById.get(m.projectId);
+    if (!project || !m.classId || m.status === 'class_missing') continue;
+    const classIds = [m.classId, ...(m.relatedIds || [])];
+    classIds.forEach(id => claimed.add(id));
+    const figures = groupFigures(reports, classIds);
+    groups.push({
+      key: `project:${project.id}`,
+      project_id: project.id,
+      name: (project.job_name || project.address || '').trim(),
+      address: project.address || null,
+      status: project.status || null,
+      in_buildtrack: true,
+      type: project.status === 'long_term_holding' ? 'rental' : 'project',
+      class_names: classIds.map(id => byId.get(id)?.name || id),
+      match_status: m.status,
+      ...figures,
+    });
+  }
+  // Address-named classes with a balance that no BuildTrack project claims.
+  const isDeleted = c => /\(deleted/i.test(c.name);
+  const candidates = classes.filter(c => !claimed.has(c.id) && !isDeleted(c) && addressKey(c.name));
+  const units = new Set(candidates.flatMap(c => relatedClassIds(c, classes)));
+  for (const cls of candidates) {
+    if (units.has(cls.id) || claimed.has(cls.id)) continue;
+    const classIds = [cls.id, ...relatedClassIds(cls, classes).filter(id => !claimed.has(id))];
+    const figures = groupFigures(reports, classIds);
+    if (!figures.has_balance) continue;
+    classIds.forEach(id => claimed.add(id));
+    groups.push({
+      key: `class:${cls.id}`,
+      project_id: null,
+      name: cls.name,
+      address: null,
+      status: null,
+      in_buildtrack: false,
+      type: !figures.sold && (figures.monthly?.income || 0) > 0 ? 'rental' : 'project',
+      class_names: classIds.map(id => byId.get(id)?.name || id),
+      match_status: null,
+      ...figures,
+    });
+  }
+  return groups;
+}
+
 // Potential sale (Mike, 2026-10-19): a manually entered "what the house could sell
 // for", less the realtor commission (3% standard, adjustable per property) and the
 // closing costs entered in dollars. Against the class's balance sheet: paying off what
@@ -526,6 +629,8 @@ function saleProjection(input, summary) {
 }
 
 module.exports = {
+  buildConsolidatedGroups,
+  relatedClassIds,
   normalizeClassName: normalize,
   DEFAULT_COMMISSION_PCT,
   HOLDBACK_ACCOUNT,

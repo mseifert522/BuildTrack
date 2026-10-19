@@ -7,9 +7,10 @@ import {
   LayoutDashboard, FolderOpen, ClipboardList, FileText,
   Users, Settings, LogOut, Menu, X, Bell, ChevronRight,
   Camera, Search, Trash2, ShieldCheck, MessageSquare,
-  BriefcaseBusiness, CalendarDays, Calculator, UserPlus
+  BriefcaseBusiness, CalendarDays, Calculator, UserPlus, Landmark
 } from 'lucide-react';
 import api from '../lib/api';
+import { useFinancialAccess } from '../lib/financialAccess';
 import toast from 'react-hot-toast';
 import Avatar from './Avatar';
 import AddVendorModal from './AddVendorModal';
@@ -193,6 +194,8 @@ export default function Layout({ children }: LayoutProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [addVendorOpen, setAddVendorOpen] = useState(false);
   const { user, logout, updateUser } = useAuthStore();
+  // Consolidated Finances is a financial tab: Super Admin, or users a Super Admin granted.
+  const financialAccess = useFinancialAccess();
   const location = useLocation();
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -391,6 +394,7 @@ export default function Layout({ children }: LayoutProps) {
     ...(user && canAccessSecurity(user.role) ? [{ to: '/security', icon: ShieldCheck, label: 'Security' }] : []),
     ...(user && canAccessHumanResources(user.role) ? [{ to: '/human-resources', icon: BriefcaseBusiness, label: 'Human Resources' }] : []),
     ...(user && canAccessCostAnalyzer(user.role) ? [{ to: '/cost-analyzer', icon: Calculator, label: 'Cost Analyzer' }] : []),
+    ...(financialAccess.allowed ? [{ to: '/consolidated-finances', icon: Landmark, label: 'Consolidated Finances' }] : []),
   ];
 
   const isActive = (path: string, matchPaths: string[] = [path]) =>

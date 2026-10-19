@@ -4203,6 +4203,10 @@ router.projectFinanceReports = async function projectFinanceReports(accountNumbe
     .flat();
   const balanceSheet = await qboRequest(db, connection, `/v3/company/${realm}/reports/BalanceSheet?summarize_column_by=Classes&accounting_method=Accrual&date_macro=Today`);
   const profitLoss = await qboRequest(db, connection, `/v3/company/${realm}/reports/ProfitAndLoss?summarize_column_by=Classes&accounting_method=Accrual&start_date=${encodeURIComponent(startDate)}&end_date=${endDate}`);
+  // The last 12 months by class, for the monthly rent / interest / expenses on rentals
+  // (Consolidated Finances, Mike 2026-10-19).
+  const ttmStartDate = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - 12, new Date().getUTCDate() + 1)).toISOString().slice(0, 10);
+  const profitLossTtm = await qboRequest(db, connection, `/v3/company/${realm}/reports/ProfitAndLoss?summarize_column_by=Classes&accounting_method=Accrual&start_date=${ttmStartDate}&end_date=${endDate}`);
   return {
     realmId: String(connection.realm_id),
     classes,
@@ -4210,6 +4214,7 @@ router.projectFinanceReports = async function projectFinanceReports(accountNumbe
     bankAccountNames,
     balanceSheet,
     profitLoss,
-    period: { start: startDate, end: endDate },
+    profitLossTtm,
+    period: { start: startDate, end: endDate, ttm_start: ttmStartDate },
   };
 };

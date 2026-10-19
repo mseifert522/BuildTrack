@@ -3292,6 +3292,16 @@ function initializeSchema() {
     )
   `);
 
+  // Consolidated Finances (Mike, 2026-10-19): every property group from the last sync
+  // (balances, loans by account, carried interest, last-12-month monthly figures).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS finance_consolidated_snapshot (
+      id TEXT PRIMARY KEY CHECK(id = 'primary'),
+      payload_json TEXT NOT NULL,
+      synced_at TEXT NOT NULL
+    )
+  `);
+
   // Commission + closing costs replaced the single closing-cost % the same day. A row
   // saved at the old 3.5% default gets the 3% standard commission; a custom % stays.
   try { db.exec('ALTER TABLE project_finance_inputs ADD COLUMN commission_pct REAL'); } catch (_) { /* already exists */ }

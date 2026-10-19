@@ -18,6 +18,7 @@ import {
   mobilePath,
 } from './lib/appUrls';
 import { BUILDTRACK_TRUTH_ICON_SRC } from './lib/branding';
+import { useFinancialAccess } from './lib/financialAccess';
 
 const Login = lazy(() => import('./pages/Login'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -35,6 +36,7 @@ const Settings = lazy(() => import('./pages/Settings'));
 const Security = lazy(() => import('./pages/Security'));
 const HumanResources = lazy(() => import('./pages/HumanResources'));
 const CostAnalyzer = lazy(() => import('./pages/CostAnalyzer'));
+const ConsolidatedFinances = lazy(() => import('./pages/ConsolidatedFinances'));
 const Agreements = lazy(() => import('./pages/Agreements'));
 const ChangePassword = lazy(() => import('./pages/ChangePassword'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
@@ -301,6 +303,18 @@ function CostAnalyzerRoute({ children }: { children: ReactNode }) {
   if (!token || !user) return <Navigate to="/login" replace />;
   if (user.force_password_reset) return <Navigate to="/change-password" replace />;
   if (!canAccessCostAnalyzer(user.role)) return <Navigate to="/dashboard" replace />;
+  return <>{children}</>;
+}
+
+/** Financial tabs: Super Admin, or users a Super Admin granted (Mike, 2026-10-19) */
+function FinancialRoute({ children }: { children: ReactNode }) {
+  const { user, token } = useAuthStore();
+  const access = useFinancialAccess();
+  if (!token || !user) return <Navigate to="/login" replace />;
+  if (user.force_password_reset) return <Navigate to="/change-password" replace />;
+  if (isMobileAppHost() || user.role === 'contractor') return <Navigate to={mobilePath()} replace />;
+  if (access.loading) return <Loading message="Checking access..." />;
+  if (!access.allowed) return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
 }
 
@@ -749,6 +763,11 @@ export default function App() {
           <CostAnalyzerRoute>
             <Layout><CostAnalyzer /></Layout>
           </CostAnalyzerRoute>
+        } />
+        <Route path="/consolidated-finances" element={
+          <FinancialRoute>
+            <Layout><ConsolidatedFinances /></Layout>
+          </FinancialRoute>
         } />
         {/* Documents & Agreements: management roles (contractors are sent to mobile) */}
         <Route path="/agreements" element={

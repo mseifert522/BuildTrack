@@ -38,6 +38,7 @@ const documentReviewRoutes = require('./src/routes/documentReviews');
 const scopeDocumentRoutes = require('./src/routes/scopeDocuments');
 const bankDrawRoutes = require('./src/routes/bankDraws');
 const featureAccessRoutes = require('./src/routes/featureAccess');
+const financeConsolidatedRoutes = require('./src/routes/financeConsolidated');
 const documentReviewService = require('./src/services/documentReview');
 
 const app = express();
@@ -179,6 +180,7 @@ app.use('/api/projects/:projectId/notes', notesRoutes);
 app.use('/api/projects/:projectId/scope-document', scopeDocumentRoutes);
 app.use('/api/projects/:projectId/bank-draws', bankDrawRoutes);
 app.use('/api/feature-access', featureAccessRoutes);
+app.use('/api/finance/consolidated', financeConsolidatedRoutes);
 app.use('/api/field-work', fieldWorkRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/search', searchRoutes);

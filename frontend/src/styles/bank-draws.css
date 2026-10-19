@@ -344,6 +344,38 @@ html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-return__table td { back
 .bt-bd-return__total td { padding-top: 12px; padding-bottom: 12px; font-size: 18px; font-weight: 800; }
 html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-return__total td { background: var(--theme-selected) !important; }
 
+/* Consolidated Finances page (2026-10-19) */
+.bt-cf { padding-bottom: 24px; }
+.bt-cf-lede { margin: 0; max-width: 80ch; font-size: 13px; line-height: 1.5; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-cf-lede { color: var(--theme-muted) !important; }
+.bt-cf-table td { vertical-align: middle; }
+.bt-cf-link { display: inline-flex; align-items: center; gap: 5px; font-weight: 700; text-decoration: none; }
+.bt-cf-link.is-inline { display: inline; font-weight: 650; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-cf-link { color: var(--theme-accent) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-cf-link:hover { text-decoration: underline; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-cf-link :where(svg) { color: inherit !important; }
+.bt-cf-name { font-weight: 700; }
+.bt-cf-missing { font-size: 12px; font-style: italic; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-cf-missing { color: var(--theme-muted) !important; }
+.bt-cf-group td { display: table-cell; padding-top: 14px !important; font-size: 11.5px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase; }
+.bt-cf-group td > svg { display: inline-block; margin: -2px 6px 0 0; vertical-align: middle; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-cf-group td { color: var(--theme-accent) !important; background: var(--theme-surface) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-cf-group td :where(svg) { color: inherit !important; }
+.bt-cf-subtotal td { font-weight: 700; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-cf-subtotal td { background: var(--theme-raised) !important; }
+.bt-cf-grand td { padding-top: 12px !important; padding-bottom: 12px !important; font-size: 14.5px; font-weight: 800; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-cf-grand td { background: var(--theme-selected) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-cf-table tfoot td { border-top: 2px solid var(--theme-border) !important; }
+.bt-cf-note { margin: 0; font-size: 12.5px; line-height: 1.55; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-cf-note { color: var(--theme-muted) !important; }
+.bt-cf-props { font-size: 12px; line-height: 1.5; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-cf-props { color: var(--theme-muted) !important; }
+.bt-cf-sold { border-radius: 14px; border: 1px solid #d6dbe3; padding: 14px 18px; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-cf-sold { background: var(--theme-surface) !important; border-color: var(--theme-border) !important; }
+.bt-cf-sold summary { cursor: pointer; font-size: 13px; font-weight: 700; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-cf-sold summary { color: var(--theme-text) !important; }
+.bt-cf-sold[open] summary { margin-bottom: 12px; }
+
 /* Access manager */
 .bt-bd-access ul { margin: 0 0 18px; padding: 0; list-style: none; }
 .bt-bd-access__heading { margin: 0 0 6px; font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }

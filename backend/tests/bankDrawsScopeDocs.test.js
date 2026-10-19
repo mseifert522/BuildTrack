@@ -75,6 +75,19 @@ const PROFIT_LOSS = {
     { type: 'Section', group: 'NetIncome', Summary: { ColData: cols(['Net Income', '600.00', '250.00', '850.00']) } },
   ] },
 };
+const PROFIT_LOSS_TTM = {
+  Columns: { Column: [{ ColTitle: '', ColType: 'Account', MetaData: [{ Name: 'ColKey', Value: 'account' }] }, column('171 Davis', '7'), column('171 Davis Unit A', '71'), column('TOTAL', 'total')] },
+  Rows: { Row: [
+    { type: 'Section', group: 'Income', Header: { ColData: cols(['Income', '', '', '']) }, Rows: { Row: [
+      { type: 'Data', ColData: [{ value: '4000 Rent Income', id: '5' }, { value: '12000.00' }, { value: '600.00' }, { value: '12600.00' }] },
+    ] }, Summary: { ColData: cols(['Total Income', '12000.00', '600.00', '12600.00']) } },
+    { type: 'Section', group: 'Expenses', Header: { ColData: cols(['Expenses', '', '', '']) }, Rows: { Row: [
+      { type: 'Data', ColData: [{ value: '6105 Interest - 30yr Loans - LOCs - CCs - Bridge Loans', id: '41' }, { value: '6000.00' }, { value: '' }, { value: '6000.00' }] },
+      { type: 'Data', ColData: [{ value: '6200 Real Estate Taxes', id: '43' }, { value: '2400.00' }, { value: '' }, { value: '2400.00' }] },
+    ] }, Summary: { ColData: cols(['Total Expenses', '8400.00', '0.00', '8400.00']) } },
+    { type: 'Section', group: 'NetIncome', Summary: { ColData: cols(['Net Income', '3600.00', '600.00', '4200.00']) } },
+  ] },
+};
 const REPORTS = {
   classes: CLASSES,
   ledgers: [{ number: '1130', id: '85', name: 'Construction Loans - Funds in Escrow / Holdbacks', rows: LEDGER_ROWS }],
@@ -160,6 +173,7 @@ const REPORTS = {
   app.use('/api/projects/:projectId/scope-document', require('../src/routes/scopeDocuments'));
   app.use('/api/projects/:projectId/bank-draws', require('../src/routes/bankDraws'));
   app.use('/api/feature-access', require('../src/routes/featureAccess'));
+  app.use('/api/finance/consolidated', require('../src/routes/financeConsolidated'));
   const server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -307,6 +321,39 @@ const REPORTS = {
     db.prepare("INSERT INTO project_finance_inputs (project_id, potential_sale_price, closing_cost_pct) VALUES ('p-bla', 200000, 3.5)").run();
     initializeSchema();
     assert.equal(db.prepare("SELECT commission_pct FROM project_finance_inputs WHERE project_id = 'p-bla'").get().commission_pct, 3);
+
+    // Consolidated Finances: every property combined (171 Davis is a rental: status long_term_holding)
+    db.prepare("UPDATE projects SET status = 'long_term_holding' WHERE id = 'p-dav'").run();
+    quickBooks.projectFinanceReports = async () => ({ ...REPORTS, profitLossTtm: PROFIT_LOSS_TTM, period: { ...REPORTS.period, ttm_start: '2025-10-20' } });
+    await bankDraws.syncBankDraws({ source: 'consolidated test', force: true });
+    await call('/api/projects/p-wis/bank-draws/projection', 'PUT', 'sa', { potential_sale_price: 300000 });
+    assert.equal((await call('/api/finance/consolidated', 'GET', 'pm2')).status, 403, 'not without financial access');
+    assert.equal((await call('/api/finance/consolidated', 'GET', 'ct')).status, 403);
+    assert.equal((await call('/api/finance/consolidated', 'GET', null)).status, 401);
+    let cons = await call('/api/finance/consolidated', 'GET', 'pm');
+    assert.equal(cons.status, 200, 'a granted user sees it');
+    cons = (await call('/api/finance/consolidated', 'GET', 'sa')).body;
+    assert.deepEqual(cons.projects.rows.map(r => r.name), ['2811 Wisconsin'], 'only properties with a balance sheet are combined');
+    assert.deepEqual(cons.rentals.rows.map(r => r.name), ['171 Davis']);
+    const davisRow = cons.rentals.rows[0];
+    assert.deepEqual(davisRow.class_names, ['171 Davis', '171 Davis Unit A']);
+    assert.equal(davisRow.monthly.income, 1050, '12,600 rent over 12 months');
+    assert.equal(davisRow.monthly.interest, 500, '6,000 interest over 12 months');
+    assert.equal(davisRow.monthly.expenses, 700);
+    assert.equal(davisRow.monthly.net, 350);
+    assert.equal(davisRow.cash_in, 30425, 'invested 32,000 less 1,575 owed');
+    assert.equal(cons.totals.count, 2);
+    assert.equal(cons.totals.invested, 60121.79);
+    assert.equal(cons.totals.loans_owed, 31575);
+    assert.equal(cons.totals.escrow, 16755);
+    assert.equal(cons.totals.cash_in, 45301.79);
+    assert.equal(cons.totals.projected_profit, 262878.21, 'Wisconsin priced at 300,000');
+    assert.equal(cons.totals.coming_back, 308180, 'equity of every property + profit where priced');
+    assert.equal(cons.totals.priced_count, 1);
+    assert.deepEqual(cons.totals.unpriced.map(u => u.name), ['171 Davis']);
+    assert.deepEqual(cons.loans_by_account.map(l => [l.account, l.amount]), [['2020 Bridge Loans Due <12 Months', 30000], ['2080 Tenant Security Deposits', 1575]]);
+    assert.equal(cons.rentals.totals.monthly.interest, 500);
+    assert.equal((await call('/api/finance/consolidated/sync', 'POST', 'pm2')).status, 403);
 
     // Revoke
     assert.equal((await call('/api/feature-access/bank_draws/pm', 'DELETE', 'sa')).status, 200);
