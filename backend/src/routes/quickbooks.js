@@ -4147,3 +4147,69 @@ router.financeTrackerQuery = async function financeTrackerQuery(query) {
 
 const financeCompanies = require('../services/financeCompanies')({ getDb, qboConfig, qboEnvironment, qboApiBase, redirectUri, tokenRequest, encryptSecret, addSeconds, qboRequest, qboQuery, logActivity });
 router.financeCompanies = financeCompanies;
+
+// -- Bank Draws (2026-10-19) ---------------------------------------------------
+// The project Bank Draws tab (Mike, 2026-10-19): QuickBooks account 1130 (Funds in
+// Escrow / Holdbacks) allocated by class - the draws - plus the project's Balance
+// Sheet and life-to-date Profit & Loss for its class. Read-only: the Account and
+// Class lists, one General Ledger report per account, and the two statements
+// summarized by class (each column carries the class id as its ColKey).
+// Classification and statement parsing live in services/bankDraws.js.
+const BANK_DRAW_LEDGER_COLUMNS = 'tx_date,txn_type,doc_num,name,memo,klass_name,split_acc,debt_amt,credit_amt';
+
+router.projectFinanceReports = async function projectFinanceReports(accountNumbers, startDate = '2015-01-01') {
+  const db = getDb();
+  const connection = ftGetConnection(db);
+  const realm = encodeURIComponent(connection.realm_id);
+  const accounts = await ftQueryAll(db, connection, 'Account');
+  const classPayload = await qboQuery(db, connection, 'SELECT * FROM Class WHERE Active IN (true, false) MAXRESULTS 1000');
+  const classes = (classPayload?.QueryResponse?.Class || []).map(c => ({
+    id: String(c.Id),
+    name: c.Name || '',
+    fullName: c.FullyQualifiedName || c.Name || '',
+    parentId: c.ParentRef?.value ? String(c.ParentRef.value) : null,
+    active: c.Active !== false,
+  }));
+  const endDate = new Date().toISOString().slice(0, 10);
+  const ledgers = [];
+  for (const number of accountNumbers) {
+    const account = accounts.find(a => String(a.AcctNum || '') === String(number));
+    if (!account) continue;
+    const report = await qboRequest(
+      db,
+      connection,
+      `/v3/company/${realm}/reports/GeneralLedger?start_date=${encodeURIComponent(startDate)}&end_date=${endDate}&account=${encodeURIComponent(account.Id)}&columns=${BANK_DRAW_LEDGER_COLUMNS}&accounting_method=Accrual`
+    );
+    const cols = (report?.Columns?.Column || []).map(
+      (c) => (c.MetaData || []).find((m) => m.Name === 'ColKey')?.Value || c.ColType || ''
+    );
+    const rows = [];
+    const walk = (section) => {
+      for (const r of section?.Row || []) {
+        if (Array.isArray(r.ColData) && r.type === 'Data') {
+          const g = {};
+          r.ColData.forEach((c, i) => { g[cols[i] || `col${i}`] = c?.value ?? ''; if (cols[i] === 'txn_type' && c?.id) g.txnId = String(c.id); });
+          rows.push(g);
+        }
+        if (r.Rows) walk(r.Rows);
+      }
+    };
+    walk(report?.Rows);
+    ledgers.push({ number: String(number), id: String(account.Id), name: account.Name, type: account.AccountType, rows });
+  }
+  const bankAccountNames = accounts
+    .filter(a => a.AccountType === 'Bank')
+    .map(a => [a.AcctNum ? `${a.AcctNum} ${a.Name}` : '', a.Name, a.FullyQualifiedName].filter(Boolean))
+    .flat();
+  const balanceSheet = await qboRequest(db, connection, `/v3/company/${realm}/reports/BalanceSheet?summarize_column_by=Classes&accounting_method=Accrual&date_macro=Today`);
+  const profitLoss = await qboRequest(db, connection, `/v3/company/${realm}/reports/ProfitAndLoss?summarize_column_by=Classes&accounting_method=Accrual&start_date=${encodeURIComponent(startDate)}&end_date=${endDate}`);
+  return {
+    realmId: String(connection.realm_id),
+    classes,
+    ledgers,
+    bankAccountNames,
+    balanceSheet,
+    profitLoss,
+    period: { start: startDate, end: endDate },
+  };
+};

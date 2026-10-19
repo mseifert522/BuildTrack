@@ -3171,6 +3171,91 @@ function initializeSchema() {
 
     CREATE INDEX IF NOT EXISTS idx_document_ai_reviews_status
       ON document_ai_reviews(status, created_at);
+
+    -- Scope of Work PDF (Mike, 2026-10-19): the scope document shown at the top of
+    -- every project's Scope of Work tab. The newest row is the one on screen; older
+    -- rows are earlier versions. Files live in uploads/scope-documents/, which is
+    -- never served statically - only via /api/projects/:id/scope-document.
+    CREATE TABLE IF NOT EXISTS project_scope_documents (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      original_name TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      sha256 TEXT NOT NULL,
+      storage_path TEXT NOT NULL,
+      uploaded_by TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_project_scope_documents_project
+      ON project_scope_documents(project_id, created_at DESC);
+
+    -- Per-user access to restricted tabs (Mike, 2026-10-19). 'bank_draws': Super
+    -- Admin and Operations Manager always; anyone else only with a row here.
+    CREATE TABLE IF NOT EXISTS user_feature_access (
+      user_id TEXT NOT NULL,
+      feature TEXT NOT NULL CHECK(feature IN ('bank_draws')),
+      granted_by TEXT,
+      granted_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (user_id, feature),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (granted_by) REFERENCES users(id) ON DELETE SET NULL
+    );
+
+    -- Bank Draws (Mike, 2026-10-19): QuickBooks account 1130 (Funds in Escrow /
+    -- Holdbacks) allocated by class - each project's construction-loan draws.
+    -- A read-only mirror, rebuilt from QuickBooks on every sync.
+    CREATE TABLE IF NOT EXISTS project_bank_draw_lines (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      qbo_class_id TEXT NOT NULL,
+      account_number TEXT,
+      account_name TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      txn_date TEXT,
+      txn_type TEXT,
+      txn_id TEXT,
+      doc_number TEXT,
+      payee TEXT,
+      memo TEXT,
+      split_account TEXT,
+      amount REAL NOT NULL,
+      sort_index INTEGER NOT NULL DEFAULT 0,
+      synced_at TEXT NOT NULL,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_project_bank_draw_lines_project
+      ON project_bank_draw_lines(project_id, txn_date, sort_index);
+
+    -- The project's Balance Sheet and life-to-date Profit & Loss for its class (and its
+    -- unit classes), as QuickBooks reported them at the last sync, plus how the class
+    -- was matched to the project's address.
+    CREATE TABLE IF NOT EXISTS project_finance_snapshots (
+      project_id TEXT PRIMARY KEY,
+      class_id TEXT,
+      class_names TEXT,
+      match_json TEXT,
+      balance_sheet_json TEXT,
+      profit_loss_json TEXT,
+      summary_json TEXT,
+      period_start TEXT,
+      period_end TEXT,
+      synced_at TEXT NOT NULL,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS bank_draw_sync_state (
+      id TEXT PRIMARY KEY CHECK(id = 'primary'),
+      last_attempt_at TEXT,
+      last_synced_at TEXT,
+      last_status TEXT,
+      last_error TEXT,
+      line_count INTEGER,
+      unmatched_count INTEGER
+    );
   `);
 
   try {

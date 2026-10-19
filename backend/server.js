@@ -35,6 +35,9 @@ const financeTrackerRoutes = require('./src/routes/financeTracker');
 const costAnalyzerRoutes = require('./src/routes/costAnalyzer');
 const agreementRoutes = require('./src/routes/agreements');
 const documentReviewRoutes = require('./src/routes/documentReviews');
+const scopeDocumentRoutes = require('./src/routes/scopeDocuments');
+const bankDrawRoutes = require('./src/routes/bankDraws');
+const featureAccessRoutes = require('./src/routes/featureAccess');
 const documentReviewService = require('./src/services/documentReview');
 
 const app = express();
@@ -116,6 +119,8 @@ app.use('/uploads/chunk-tmp', (req, res) => res.status(404).json({ error: 'Not f
 app.use('/uploads/vendor-setup', (req, res) => res.status(404).json({ error: 'Not found' }));
 // Executed agreements are only ever read through /api/agreements/:id/file (audited).
 app.use('/uploads/agreements', (req, res) => res.status(404).json({ error: 'Not found' }));
+// Scope of Work PDFs are only ever read through /api/projects/:id/scope-document (audited).
+app.use('/uploads/scope-documents', (req, res) => res.status(404).json({ error: 'Not found' }));
 app.use('/uploads', createUploadsGate(uploadsPath), express.static(path.resolve(uploadsPath), {
   index: false,
   setHeaders: (res, filePath) => {
@@ -171,6 +176,9 @@ app.use('/api/projects/:projectId/punch-list', punchListRoutes);
 app.use('/api/projects/:projectId/photos', photoRoutes);
 app.use('/api/projects/:projectId/invoices', invoiceRoutes);
 app.use('/api/projects/:projectId/notes', notesRoutes);
+app.use('/api/projects/:projectId/scope-document', scopeDocumentRoutes);
+app.use('/api/projects/:projectId/bank-draws', bankDrawRoutes);
+app.use('/api/feature-access', featureAccessRoutes);
 app.use('/api/field-work', fieldWorkRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/search', searchRoutes);

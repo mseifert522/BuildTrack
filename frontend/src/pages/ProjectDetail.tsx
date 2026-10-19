@@ -12,7 +12,7 @@ import {
 } from '../components/QuoteApprovalEmailNotice';
 import Avatar from '../components/Avatar';
 import VoiceTextarea from '../components/VoiceTextarea';
-import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, FileSignature, ClipboardList, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle, Send, Phone, Mail, Building2, AlertTriangle, Check, Paperclip, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, CalendarDays, Search, GripVertical, CheckCircle2, XCircle, Database, ListFilter, Bot, Receipt, Loader2, ListPlus, Printer } from 'lucide-react';
+import { ArrowLeft, MapPin, Edit2, Users, Plus, Trash2, Camera, FileImage, FileText, FileSignature, ClipboardList, MessageSquare, UserPlus, Mic, Square, Package, ArrowUp, ArrowDown, ImagePlus, PlayCircle, Send, Phone, Mail, Building2, AlertTriangle, Check, Paperclip, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, CalendarDays, Search, GripVertical, CheckCircle2, XCircle, Database, ListFilter, Bot, Receipt, Loader2, ListPlus, Printer, Landmark } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useForm } from 'react-hook-form';
 import { format } from 'date-fns';
@@ -38,14 +38,17 @@ import AddVendorModal from '../components/AddVendorModal';
 import AuthedImage from '../components/AuthedImage';
 import { downloadAuthedFile, openAuthedFile } from '../lib/authFiles';
 import { onVendorAdded, quoteVendorMessage } from '../lib/vendors';
+import ScopeDocumentPanel from '../components/ScopeDocumentPanel';
 
 // Loaded only when the Documents & Agreements tab is opened.
 const ProjectAgreementsWorkspace = lazy(() => import('./Agreements').then(module => ({ default: module.AgreementsWorkspace })));
+// Loaded only when the Bank Draws tab is opened (Super Admin / Operations Manager / granted users).
+const ProjectBankDraws = lazy(() => import('../components/BankDrawsTab'));
 
 // Drag payload for moving an already-attached photo between punch list items.
 const PUNCH_PHOTO_DRAG_MIME = 'application/x-bt-punch-photo';
 
-type Tab = 'overview' | 'details' | 'progress-history' | 'construction-plan' | 'project-timeline' | 'quotes' | 'punch-list' | 'photos' | 'invoices' | 'notes' | 'team' | 'texts' | 'agreements';
+type Tab = 'overview' | 'details' | 'progress-history' | 'construction-plan' | 'project-timeline' | 'quotes' | 'punch-list' | 'photos' | 'invoices' | 'notes' | 'team' | 'texts' | 'agreements' | 'bank-draws';
 
 type ProjectCalendarEvent = {
   id: string;
@@ -899,7 +902,7 @@ export default function ProjectDetail() {
   const [tab, setTab] = useState<Tab>(() => {
     try {
       const h = window.location.hash.replace('#', '') as Tab;
-      const valid: Tab[] = ['overview', 'details', 'progress-history', 'construction-plan', 'project-timeline', 'quotes', 'punch-list', 'photos', 'invoices', 'notes', 'team', 'texts', 'agreements'];
+      const valid: Tab[] = ['overview', 'details', 'progress-history', 'construction-plan', 'project-timeline', 'quotes', 'punch-list', 'photos', 'invoices', 'notes', 'team', 'texts', 'agreements', 'bank-draws'];
       return valid.includes(h) ? h : 'notes';
     } catch {
       return 'notes';
@@ -907,6 +910,8 @@ export default function ProjectDetail() {
   });
   const [showEdit, setShowEdit] = useState(false);
   const [addVendorOpen, setAddVendorOpen] = useState(false);
+  // Bank Draws is shown only to roles/users the server allows (null = not known yet).
+  const [bankDrawAccess, setBankDrawAccess] = useState<{ allowed: boolean; canManage: boolean } | null>(null);
   const [showAssign, setShowAssign] = useState(false);
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [notes, setNotes] = useState<any[]>([]);
@@ -1000,6 +1005,20 @@ export default function ProjectDetail() {
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
+    if (!user?.id || user.role === 'contractor') { setBankDrawAccess({ allowed: false, canManage: false }); return; }
+    let cancelled = false;
+    api.get('/feature-access/me')
+      .then(res => { if (!cancelled) setBankDrawAccess({ allowed: Boolean(res.data?.access?.bank_draws), canManage: Boolean(res.data?.can_manage) }); })
+      .catch(() => { if (!cancelled) setBankDrawAccess({ allowed: false, canManage: false }); });
+    return () => { cancelled = true; };
+  }, [user?.id, user?.role]);
+
+  // A #bank-draws link opened by someone without access falls back to Notes.
+  useEffect(() => {
+    if (tab === 'bank-draws' && bankDrawAccess && !bankDrawAccess.allowed) setTab('notes');
+  }, [tab, bankDrawAccess]);
+
+  useEffect(() => {
     if (tab !== 'overview') return;
     const interval = window.setInterval(load, 30000);
     return () => window.clearInterval(interval);
@@ -1015,6 +1034,7 @@ export default function ProjectDetail() {
         '#assigned-contractors': 'team',
         '#notes': 'notes',
         '#agreements': 'agreements',
+        '#bank-draws': 'bank-draws',
     };
     if (hashTabMap[location.hash]) setTab(hashTabMap[location.hash]);
   }, [location.hash]);
@@ -1618,6 +1638,8 @@ export default function ProjectDetail() {
     { id: 'texts', label: 'Text Contractors', icon: MessageSquare },
     // Executed contracts / signed agreements (Mike, 2026-10-01) - management only.
     ...(canAssign ? [{ id: 'agreements' as Tab, label: 'Documents & Agreements', icon: FileSignature }] : []),
+    // QuickBooks 1130 draws + class financials (Mike, 2026-10-19) - never shown to project managers.
+    ...(bankDrawAccess?.allowed ? [{ id: 'bank-draws' as Tab, label: 'Bank Draws', icon: Landmark }] : []),
   ];
 
   const updateFieldWorkTask = async (taskId: string, patch: Record<string, any>) => {
@@ -2542,6 +2564,12 @@ export default function ProjectDetail() {
         {tab === 'agreements' && canAssign && (
           <Suspense fallback={<Loading message="Loading documents..." />}>
             <ProjectAgreementsWorkspace projectId={id!} projectAddress={project.address || ''} />
+          </Suspense>
+        )}
+
+        {tab === 'bank-draws' && bankDrawAccess?.allowed && (
+          <Suspense fallback={<Loading message="Loading bank draws..." />}>
+            <ProjectBankDraws projectId={id!} canManageAccess={bankDrawAccess.canManage} />
           </Suspense>
         )}
 
@@ -5093,8 +5121,21 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
     return scopeAttachments.length > 2 ? `${names}, +${scopeAttachments.length - 2} more` : names;
   }, [scopeAttachments]);
 
+  // Changes whenever the entered scope changes, so the generated PDF preview refreshes.
+  const scopePdfKey = [
+    scopes.length,
+    planItems.length,
+    ...scopes.map(scope => scope.updated_at || ''),
+    ...planItems.map(item => item.updated_at || ''),
+  ].join('|');
+
   return (
     <div className="space-y-5">
+      <ScopeDocumentPanel
+        projectId={projectId}
+        projectLabel={project?.address || project?.job_name || 'Scope of Work'}
+        refreshKey={loading ? undefined : scopePdfKey}
+      />
       {loading ? (
         <Loading />
       ) : (
