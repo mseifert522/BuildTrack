@@ -295,6 +295,10 @@ html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-field > span { color: v
   text-transform: none;
   font-variant-numeric: tabular-nums;
 }
+.bt-bd-money { position: relative; display: block; }
+.bt-bd-money__sign { position: absolute; top: 50%; left: 12px; transform: translateY(-50%); font-size: 15px; font-weight: 650; letter-spacing: 0; pointer-events: none; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-money__sign { color: var(--theme-muted) !important; }
+.bt-bd-input.bt-bd-input--money { padding-left: 26px; }
 .bt-bd-proj-preview { margin: 0; padding-bottom: 11px; font-size: 13px; line-height: 1.5; }
 html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-proj-preview { color: var(--theme-muted) !important; }
 html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-proj-preview strong { color: var(--theme-text) !important; }

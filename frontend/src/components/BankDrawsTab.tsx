@@ -4,7 +4,6 @@ import toast from 'react-hot-toast';
 import api from '../lib/api';
 import { formatDateOnly, formatEasternRelative } from '../lib/time';
 import { Modal } from './ui';
-import CurrencyInput from './CurrencyInput';
 import '../styles/bank-draws.css';
 
 // Finance tab (Mike, 2026-10-19; named "Bank Draws" until the same afternoon). Each
@@ -301,13 +300,27 @@ function PotentialSale({ projectId, data, onSaved }: { projectId: string; data: 
     const closing = valid ? Math.round(priceNum * pctNum) / 100 : null;
     return (
       <form className="bt-bd-proj-form" onSubmit={event => { event.preventDefault(); if (valid) void save(); }}>
+        {/* data-autosave="off": the app-wide draft saver keys drafts per form, not per
+            project, so it could restore one house's unsaved price into another's. */}
         <label className="bt-bd-field">
           <span>Potential sales price</span>
-          <CurrencyInput value={price} onChange={setPrice} placeholder="0.00" className="bt-bd-input" />
+          <span className="bt-bd-money">
+            <span className="bt-bd-money__sign" aria-hidden="true">$</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              autoComplete="off"
+              data-autosave="off"
+              value={price}
+              placeholder="0.00"
+              onChange={event => { const next = event.currentTarget.value; if (/^[0-9,]*\.?[0-9]{0,2}$/.test(next)) setPrice(next); }}
+              className="bt-bd-input bt-bd-input--money"
+            />
+          </span>
         </label>
-        <label className="bt-bd-field is-narrow">
+        <label className="bt-bd-field">
           <span>Closing costs (%)</span>
-          <input type="number" inputMode="decimal" step="0.1" min="0" max="20" value={pct} onChange={event => setPct(event.currentTarget.value)} className="bt-bd-input" />
+          <input type="number" inputMode="decimal" step="0.1" min="0" max="20" autoComplete="off" data-autosave="off" value={pct} onChange={event => setPct(event.currentTarget.value)} className="bt-bd-input" />
         </label>
         <p className="bt-bd-proj-preview" aria-live="polite">
           {valid && closing !== null
