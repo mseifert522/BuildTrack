@@ -4,8 +4,8 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
 const { FEATURES, GRANT_MANAGER_ROLES, featureDefinition, hasFeatureAccess } = require('../utils/featureAccess');
 
-// /api/feature-access - who may open the restricted tabs (Bank Draws). Grants are
-// managed from the tab itself by Super Admins and Operations Managers.
+// /api/feature-access - who may open the restricted (financial) tabs. Grants are
+// managed from the tab itself, by Super Admins only.
 const router = express.Router();
 router.use(authenticate);
 

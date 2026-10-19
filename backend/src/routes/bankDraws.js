@@ -9,7 +9,8 @@ const { DEFAULT_COMMISSION_PCT, normalizeClassName, isStale, projectBankDraws, s
 // /api/projects/:projectId/bank-draws - the project's Finance tab (named "Bank Draws"
 // until 2026-10-19): construction-loan draws from QuickBooks, the class's statements,
 // and the manually entered potential sale. Super Admin, Operations Manager and users
-// granted 'bank_draws' only; project managers and contractors get 403 (Mike, 2026-10-19).
+// granted 'bank_draws' only (Super Admin by default; Operations Managers and others only
+// when a Super Admin grants it); everyone else gets 403 (Mike, 2026-10-19).
 const router = express.Router({ mergeParams: true });
 router.use(authenticate, requireFeature('bank_draws'));
 
@@ -138,8 +139,8 @@ router.put('/projection', (req, res) => {
 
 // POST /class-alias - confirm that the project's QuickBooks class, whose name does not
 // match the address (e.g. "1253 Milverton" for 2153 Milverton), is this property; any
-// class carrying that name then counts here. DELETE undoes it. Super Admin and
-// Operations Manager only; the Finance figures are re-read from QuickBooks right away.
+// class carrying that name then counts here. DELETE undoes it. Super Admin only; the
+// Finance figures are re-read from QuickBooks right away.
 async function resync(req, project, res) {
   try {
     await syncBankDraws({ source: `class alias ${project.id}`, userId: req.user.id, force: true });

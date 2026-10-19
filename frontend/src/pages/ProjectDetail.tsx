@@ -42,7 +42,7 @@ import ScopeDocumentPanel from '../components/ScopeDocumentPanel';
 
 // Loaded only when the Documents & Agreements tab is opened.
 const ProjectAgreementsWorkspace = lazy(() => import('./Agreements').then(module => ({ default: module.AgreementsWorkspace })));
-// Loaded only when the Finance tab is opened (Super Admin / Operations Manager / granted users).
+// Loaded only when the Finance tab is opened (Super Admin, or users a Super Admin granted).
 const ProjectBankDraws = lazy(() => import('../components/BankDrawsTab'));
 
 // Drag payload for moving an already-attached photo between punch list items.

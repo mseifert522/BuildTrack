@@ -177,25 +177,33 @@ const REPORTS = {
 
   const realReports = quickBooks.projectFinanceReports;
   try {
-    // Who may see Bank Draws
+    // Who may see the financial tabs: Super Admin by default, others only when a Super Admin grants it
     assert.equal((await call('/api/feature-access/me', 'GET', 'sa')).body.access.bank_draws, true);
-    assert.equal((await call('/api/feature-access/me', 'GET', 'om')).body.access.bank_draws, true);
+    assert.equal((await call('/api/feature-access/me', 'GET', 'om')).body.access.bank_draws, false, 'operations managers need a grant');
+    assert.equal((await call('/api/projects/p-wis/bank-draws', 'GET', 'om')).status, 403);
+    assert.equal((await call('/api/feature-access/bank_draws', 'GET', 'om')).status, 403, 'only a Super Admin manages access');
+    assert.equal((await call('/api/feature-access/bank_draws/pm', 'PUT', 'om')).status, 403, 'an operations manager cannot grant');
+    assert.equal((await call('/api/feature-access/me', 'GET', 'om')).body.can_manage, false);
     assert.equal((await call('/api/feature-access/me', 'GET', 'pm')).body.access.bank_draws, false, 'project managers do not get Bank Draws by role');
     assert.equal((await call('/api/projects/p-wis/bank-draws', 'GET', 'pm')).status, 403);
     assert.equal((await call('/api/projects/p-wis/bank-draws', 'GET', 'ct')).status, 403);
     assert.equal((await call('/api/projects/p-wis/bank-draws', 'GET', null)).status, 401);
     assert.equal((await call('/api/projects/p-wis/bank-draws/sync', 'POST', 'pm')).status, 403);
-    assert.equal((await call('/api/feature-access/bank_draws', 'GET', 'pm')).status, 403, 'only SA/OM manage access');
+    assert.equal((await call('/api/feature-access/bank_draws', 'GET', 'pm')).status, 403, 'only a Super Admin manages access');
     assert.equal((await call('/api/feature-access/bank_draws/pm2', 'PUT', 'pm')).status, 403);
-    assert.equal((await call('/api/feature-access/bank_draws/ct', 'PUT', 'om')).status, 400, 'contractors can never be given access');
-    assert.equal((await call('/api/feature-access/bank_draws/sa', 'PUT', 'om')).status, 400);
-    const granted = await call('/api/feature-access/bank_draws/pm', 'PUT', 'om');
+    assert.equal((await call('/api/feature-access/bank_draws/ct', 'PUT', 'sa')).status, 400, 'contractors can never be given access');
+    assert.equal((await call('/api/feature-access/bank_draws/sa', 'PUT', 'sa')).status, 400, 'a Super Admin has it by role');
+    const omGrant = await call('/api/feature-access/bank_draws/om', 'PUT', 'sa');
+    assert.equal(omGrant.status, 200, 'a Super Admin can let an operations manager in');
+    assert.equal((await call('/api/feature-access/me', 'GET', 'om')).body.access.bank_draws, true);
+    assert.equal((await call('/api/feature-access/bank_draws/pm', 'PUT', 'om')).status, 403, 'a granted operations manager still cannot grant');
+    const granted = await call('/api/feature-access/bank_draws/pm', 'PUT', 'sa');
     assert.equal(granted.status, 200);
     assert.equal(granted.body.users.find(u => u.user_id === 'pm').granted, true);
     assert.equal((await call('/api/feature-access/me', 'GET', 'pm')).body.access.bank_draws, true);
     assert.equal((await call('/api/projects/p-wis/bank-draws', 'GET', 'pm')).status, 200, 'an assigned user sees the tab');
     assert.equal((await call('/api/projects/p-wis/bank-draws', 'GET', 'pm2')).status, 403);
-    assert.equal(db.prepare("SELECT COUNT(*) n FROM activity_log WHERE action='feature_access_granted'").get().n, 1);
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM activity_log WHERE action='feature_access_granted'").get().n, 2);
 
     // Before any sync
     let res = await call('/api/projects/p-wis/bank-draws');
@@ -228,7 +236,8 @@ const REPORTS = {
     assert.equal((await call('/api/projects/p-mil/bank-draws')).body.finance.match.status, 'number_differs');
     // Confirm "1253 Milverton" as 2153 Milverton (SA/OM only), then undo.
     assert.equal((await call('/api/projects/p-mil/bank-draws/class-alias', 'POST', 'pm')).status, 403, 'an assigned user cannot change class matching');
-    res = await call('/api/projects/p-mil/bank-draws/class-alias', 'POST', 'om');
+    assert.equal((await call('/api/projects/p-mil/bank-draws/class-alias', 'POST', 'om')).status, 403, 'only a Super Admin confirms classes');
+    res = await call('/api/projects/p-mil/bank-draws/class-alias', 'POST', 'sa');
     assert.equal(res.status, 200);
     assert.equal(res.body.finance.match.status, 'confirmed_alias');
     assert.deepEqual(res.body.finance.match.aliases, ['1253 milverton']);

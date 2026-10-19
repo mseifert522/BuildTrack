@@ -9,9 +9,9 @@ import '../styles/bank-draws.css';
 // Finance tab (Mike, 2026-10-19; named "Bank Draws" until the same afternoon). Each
 // project's own construction-loan draws from QuickBooks account 1130 (Funds in Escrow /
 // Holdbacks) allocated by the project's class, the manually entered potential sale
-// (less ~3.5% closing costs), then the project's financing (Balance Sheet) and Profit & Loss for that
-// class, each in its own block. Super Admin, Operations Manager and users granted
-// access only - the backend refuses everyone else, project managers included.
+// (less the realtor commission and closing costs), then the project's financing (Balance
+// Sheet) and Profit & Loss for that class, each in its own block. Super Admin, and users a
+// Super Admin granted, only - the backend refuses everyone else.
 
 type RegisterRow = {
   id: string;
@@ -173,7 +173,7 @@ function Block({ step, title, subtitle, children }: { step: number; title: strin
 // The project's QuickBooks class. A class whose name does not match the address can be
 // confirmed as this property (Mike, 2026-10-19: 2153 Milverton is recorded in QuickBooks
 // as "1253 Milverton" - same class, same project); entries under either name then count
-// here. Confirming / undoing is for Super Admins and Operations Managers.
+// here. Confirming / undoing is for Super Admins.
 function ClassMatch({ finance, project, canConfirm, onUpdated }: {
   finance: BankDrawPayload['finance'];
   project: BankDrawPayload['project'];
@@ -215,7 +215,7 @@ function ClassMatch({ finance, project, canConfirm, onUpdated }: {
         <AlertTriangle className="h-3.5 w-3.5" />
         <span>
           QuickBooks class “{className}” does not match this project’s address. It is linked by class ID.
-          {canConfirm ? ' If it is the same property, confirm it and entries under either name will count here.' : ' A Super Admin or Operations Manager can confirm it is the same property.'}
+          {canConfirm ? ' If it is the same property, confirm it and entries under either name will count here.' : ' A Super Admin can confirm it is the same property.'}
           {canConfirm && (
             <button type="button" className="bt-bd-btn bt-bd-match__action" onClick={() => void change('post')} disabled={busy}>
               {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />} This is the same property
@@ -269,7 +269,7 @@ function AccessManager({ onClose }: { onClose: () => void }) {
   };
   const roleLabel = (role: string) => ({ super_admin: 'Super Admin', operations_manager: 'Operations Manager', project_manager: 'Project Manager' } as Record<string, string>)[role] || role.replace(/_/g, ' ');
   return (
-    <Modal isOpen onClose={onClose} title="Who can see Finance" description="Super Admins and Operations Managers always can. Give anyone else access here." size="lg">
+    <Modal isOpen onClose={onClose} title="Who can see the financial tabs" description="Only Super Admins see Finance automatically. Give an Operations Manager, or anyone else, access here." size="lg">
       {!data ? (
         <div className="flex items-center justify-center gap-2 py-8 text-sm text-gray-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
       ) : (
