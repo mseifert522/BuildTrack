@@ -428,7 +428,7 @@ function projectBankDraws(projectId, db = getDb()) {
   const snapshot = db.prepare('SELECT * FROM project_finance_snapshots WHERE project_id = ?').get(projectId);
   const financeSummaryJson = snapshot ? parseJson(snapshot.summary_json, null) : null;
   const input = db.prepare(`
-    SELECT i.potential_sale_price, i.closing_cost_pct, i.updated_at, u.name AS updated_by_name
+    SELECT i.potential_sale_price, i.commission_pct, i.closing_costs_amount, i.updated_at, u.name AS updated_by_name
     FROM project_finance_inputs i LEFT JOIN users u ON u.id = i.updated_by
     WHERE i.project_id = ?
   `).get(projectId);
@@ -463,25 +463,34 @@ function projectBankDraws(projectId, db = getDb()) {
 }
 
 // Potential sale (Mike, 2026-10-19): a manually entered "what the house could sell
-// for", less closing costs (roughly 3.5% unless changed for the property). Against the
-// class's balance sheet: paying off what is owed (net of the holdback the lender still
-// holds) leaves the cash back at sale; the net proceeds over what is invested in the
-// property is the projected profit. Pure; exported for tests.
-const DEFAULT_CLOSING_COST_PCT = 3.5;
+// for", less the realtor commission (3% standard, adjustable per property) and the
+// closing costs entered in dollars. Against the class's balance sheet: paying off what
+// is owed (net of the holdback the lender still holds) leaves the cash back at sale;
+// the net proceeds over what is invested in the property is the projected profit.
+// Pure; exported for tests.
+const DEFAULT_COMMISSION_PCT = 3;
 
 function saleProjection(input, summary) {
-  const price = input && input.potential_sale_price !== null && input.potential_sale_price !== undefined ? Number(input.potential_sale_price) : null;
-  const pct = input && Number.isFinite(Number(input.closing_cost_pct)) ? Number(input.closing_cost_pct) : DEFAULT_CLOSING_COST_PCT;
-  const empty = { potential_sale_price: null, closing_cost_pct: pct, closing_costs: null, net_proceeds: null, loan_payoff: null, cash_back: null, invested: null, projected_profit: null };
+  const num = value => (value === null || value === undefined || value === '' ? null : Number(value));
+  const price = input ? num(input.potential_sale_price) : null;
+  const commissionPct = input && Number.isFinite(num(input.commission_pct)) ? num(input.commission_pct) : DEFAULT_COMMISSION_PCT;
+  const closingCosts = input && Number.isFinite(num(input.closing_costs_amount)) ? r2(num(input.closing_costs_amount)) : 0;
+  const empty = {
+    potential_sale_price: null, commission_pct: commissionPct, commission: null, closing_costs: closingCosts,
+    selling_costs: null, net_proceeds: null, loan_payoff: null, cash_back: null, invested: null, projected_profit: null,
+  };
   if (price === null || !Number.isFinite(price)) return empty;
-  const closingCosts = r2(price * pct / 100);
-  const netProceeds = r2(price - closingCosts);
+  const commission = r2(price * commissionPct / 100);
+  const sellingCosts = r2(commission + closingCosts);
+  const netProceeds = r2(price - sellingCosts);
   const loanPayoff = summary ? r2(summary.net_debt_after_escrow) : null;
   const invested = summary ? r2(summary.invested) : null;
   return {
     potential_sale_price: r2(price),
-    closing_cost_pct: pct,
+    commission_pct: commissionPct,
+    commission,
     closing_costs: closingCosts,
+    selling_costs: sellingCosts,
     net_proceeds: netProceeds,
     loan_payoff: loanPayoff,
     cash_back: loanPayoff === null ? null : r2(netProceeds - loanPayoff),
@@ -491,7 +500,7 @@ function saleProjection(input, summary) {
 }
 
 module.exports = {
-  DEFAULT_CLOSING_COST_PCT,
+  DEFAULT_COMMISSION_PCT,
   HOLDBACK_ACCOUNT,
   addressKey,
   saleProjection,

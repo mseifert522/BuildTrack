@@ -3257,18 +3257,32 @@ function initializeSchema() {
       unmatched_count INTEGER
     );
 
-    -- Finance tab manual figures (Mike, 2026-10-19): what the house could sell for and
-    -- the closing-cost percentage taken off it (3.5% unless changed). Kept out of the
-    -- projects table on purpose: project rows reach project managers, Finance must not.
+    -- Finance tab manual figures (Mike, 2026-10-19): what the house could sell for, the
+    -- realtor commission % (3% standard, adjustable) and closing costs entered in dollars.
+    -- closing_cost_pct is the first version's single 3.5% figure, no longer used.
+    -- Kept out of the projects table on purpose: project rows reach project managers,
+    -- Finance must not.
     CREATE TABLE IF NOT EXISTS project_finance_inputs (
       project_id TEXT PRIMARY KEY,
       potential_sale_price REAL,
       closing_cost_pct REAL NOT NULL DEFAULT 3.5,
+      commission_pct REAL,
+      closing_costs_amount REAL,
       updated_by TEXT,
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
       FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
     );
+  `);
+
+  // Commission + closing costs replaced the single closing-cost % the same day. A row
+  // saved at the old 3.5% default gets the 3% standard commission; a custom % stays.
+  try { db.exec('ALTER TABLE project_finance_inputs ADD COLUMN commission_pct REAL'); } catch (_) { /* already exists */ }
+  try { db.exec('ALTER TABLE project_finance_inputs ADD COLUMN closing_costs_amount REAL'); } catch (_) { /* already exists */ }
+  db.exec(`
+    UPDATE project_finance_inputs
+    SET commission_pct = CASE WHEN closing_cost_pct = 3.5 THEN 3 ELSE closing_cost_pct END
+    WHERE commission_pct IS NULL
   `);
 
   try {

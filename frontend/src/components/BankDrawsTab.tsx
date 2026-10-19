@@ -51,8 +51,10 @@ type FinanceSummary = {
 
 type Projection = {
   potential_sale_price: number | null;
-  closing_cost_pct: number;
-  closing_costs: number | null;
+  commission_pct: number;
+  commission: number | null;
+  closing_costs: number;
+  selling_costs: number | null;
   net_proceeds: number | null;
   loan_payoff: number | null;
   cash_back: number | null;
@@ -66,7 +68,7 @@ type MatchStatus = 'exact' | 'number_differs' | 'mismatch' | 'auto_linked' | 'un
 
 type BankDrawPayload = {
   project: { id: string; address: string; job_name: string; quickbooks_class_id: string | null; quickbooks_class_name: string | null; arv?: number | null };
-  default_closing_cost_pct: number;
+  default_commission_pct: number;
   projection: Projection;
   linked: boolean;
   quickbooks: { connected: boolean; last_synced_at: string | null; status: string; error: string | null; stale: boolean };
@@ -259,21 +261,26 @@ function AccessManager({ onClose }: { onClose: () => void }) {
   );
 }
 
-// Potential sale (Mike, 2026-10-19): "what the house could sell for minus closing costs,
-// roughly 3.5% for each property". Entered by hand; the figures below it come from the
-// class's balance sheet. The server computes every line (services/bankDraws.js).
+// Potential sale (Mike, 2026-10-19): "what the house could sell for minus closing
+// costs", then "allow user to adjust ... 3% for realtor commission standard and then
+// manually add closing costs". Entered by hand; the payoff and profit lines come from
+// the class's balance sheet. The server computes every line (services/bankDraws.js).
 function PotentialSale({ projectId, data, onSaved }: { projectId: string; data: BankDrawPayload; onSaved: (next: BankDrawPayload) => void }) {
   const p = data.projection;
-  const defaultPct = data.default_closing_cost_pct ?? 3.5;
+  const defaultPct = data.default_commission_pct ?? 3;
   const [editing, setEditing] = useState(false);
   const [price, setPrice] = useState('');
   const [pct, setPct] = useState('');
+  const [closing, setClosing] = useState('');
   const [saving, setSaving] = useState(false);
   const arv = Number(data.project.arv) > 0 ? Number(data.project.arv) : null;
+  const moneyInput = (next: string) => /^[0-9,]*\.?[0-9]{0,2}$/.test(next);
+  const toNumber = (value: string) => Number(String(value).replace(/[^0-9.]/g, ''));
 
   const startEdit = (prefill?: number | null) => {
     setPrice(prefill !== undefined && prefill !== null ? String(prefill) : p.potential_sale_price !== null ? String(p.potential_sale_price) : '');
-    setPct(String(p.closing_cost_pct ?? defaultPct));
+    setPct(String(p.commission_pct ?? defaultPct));
+    setClosing(p.closing_costs ? String(p.closing_costs) : '');
     setEditing(true);
   };
   const save = async (clear = false) => {
@@ -281,51 +288,56 @@ function PotentialSale({ projectId, data, onSaved }: { projectId: string; data: 
     try {
       const res = await api.put<BankDrawPayload>(`/projects/${projectId}/bank-draws/projection`, {
         potential_sale_price: clear ? '' : price,
-        closing_cost_pct: pct === '' ? defaultPct : pct,
+        commission_pct: pct === '' ? defaultPct : pct,
+        closing_costs: clear ? '' : closing,
       });
       onSaved(res.data);
       setEditing(false);
-      toast.success(clear ? 'Potential sales price cleared' : 'Potential sales price saved');
+      toast.success(clear ? 'Potential sales price cleared' : 'Potential sale saved');
     } catch (err: any) {
-      toast.error(err?.response?.data?.error || 'The potential sales price could not be saved.');
+      toast.error(err?.response?.data?.error || 'The potential sale could not be saved.');
     } finally {
       setSaving(false);
     }
   };
 
   if (editing) {
-    const priceNum = Number(String(price).replace(/[^0-9.]/g, ''));
+    const priceNum = toNumber(price);
     const pctNum = pct === '' ? defaultPct : Number(pct);
-    const valid = price !== '' && Number.isFinite(priceNum) && Number.isFinite(pctNum) && pctNum >= 0 && pctNum <= 20;
-    const closing = valid ? Math.round(priceNum * pctNum) / 100 : null;
+    const closingNum = closing === '' ? 0 : toNumber(closing);
+    const valid = price !== '' && Number.isFinite(priceNum) && Number.isFinite(pctNum) && pctNum >= 0 && pctNum <= 10 && Number.isFinite(closingNum);
+    const commission = valid ? Math.round(priceNum * pctNum) / 100 : null;
     return (
+      // data-autosave="off": the app-wide draft saver keys drafts per form, not per
+      // project, so it could restore one house's unsaved figures into another's.
       <form className="bt-bd-proj-form" onSubmit={event => { event.preventDefault(); if (valid) void save(); }}>
-        {/* data-autosave="off": the app-wide draft saver keys drafts per form, not per
-            project, so it could restore one house's unsaved price into another's. */}
         <label className="bt-bd-field">
           <span>Potential sales price</span>
           <span className="bt-bd-money">
             <span className="bt-bd-money__sign" aria-hidden="true">$</span>
-            <input
-              type="text"
-              inputMode="decimal"
-              autoComplete="off"
-              data-autosave="off"
-              value={price}
-              placeholder="0.00"
-              onChange={event => { const next = event.currentTarget.value; if (/^[0-9,]*\.?[0-9]{0,2}$/.test(next)) setPrice(next); }}
-              className="bt-bd-input bt-bd-input--money"
-            />
+            <input type="text" inputMode="decimal" autoComplete="off" data-autosave="off" value={price} placeholder="0.00"
+              onChange={event => { const next = event.currentTarget.value; if (moneyInput(next)) setPrice(next); }}
+              className="bt-bd-input bt-bd-input--money" />
           </span>
         </label>
         <label className="bt-bd-field">
-          <span>Closing costs (%)</span>
-          <input type="number" inputMode="decimal" step="0.1" min="0" max="20" autoComplete="off" data-autosave="off" value={pct} onChange={event => setPct(event.currentTarget.value)} className="bt-bd-input" />
+          <span>Realtor commission (%)</span>
+          <input type="number" inputMode="decimal" step="0.25" min="0" max="10" autoComplete="off" data-autosave="off" value={pct}
+            onChange={event => setPct(event.currentTarget.value)} className="bt-bd-input" />
+        </label>
+        <label className="bt-bd-field">
+          <span>Closing costs</span>
+          <span className="bt-bd-money">
+            <span className="bt-bd-money__sign" aria-hidden="true">$</span>
+            <input type="text" inputMode="decimal" autoComplete="off" data-autosave="off" value={closing} placeholder="0.00"
+              onChange={event => { const next = event.currentTarget.value; if (moneyInput(next)) setClosing(next); }}
+              className="bt-bd-input bt-bd-input--money" />
+          </span>
         </label>
         <p className="bt-bd-proj-preview" aria-live="polite">
-          {valid && closing !== null
-            ? <>Closing costs {usd(closing)} · Net sale proceeds <strong>{usd(priceNum - closing)}</strong></>
-            : 'Enter the price the house could sell for. Closing costs default to 3.5%.'}
+          {valid && commission !== null
+            ? <>Commission {usd(commission)} + closing costs {usd(closingNum)} · Net sale proceeds <strong>{usd(priceNum - commission - closingNum)}</strong></>
+            : `Enter the price the house could sell for. The realtor commission is ${defaultPct}% unless you change it; add the closing costs in dollars.`}
         </p>
         <div className="bt-bd-proj-actions">
           <button type="submit" className="bt-bd-btn bt-bd-btn--primary" disabled={!valid || saving}>
@@ -343,7 +355,7 @@ function PotentialSale({ projectId, data, onSaved }: { projectId: string; data: 
   if (p.potential_sale_price === null) {
     return (
       <div className="bt-bd-empty bt-bd-proj-start">
-        <p>No potential sales price yet. Enter what this house could sell for — BuildTrack takes {p.closing_cost_pct ?? defaultPct}% off for closing costs and shows what comes back after the loans are paid.</p>
+        <p>No potential sales price yet. Enter what this house could sell for — BuildTrack takes off the realtor commission ({p.commission_pct ?? defaultPct}% standard, adjustable) and the closing costs you add, and shows what comes back after the loans are paid.</p>
         <div className="bt-bd-proj-actions is-centered">
           <button type="button" className="bt-bd-btn bt-bd-btn--primary" onClick={() => startEdit()}>
             <PencilLine className="h-4 w-4" /> Add potential sales price
@@ -362,8 +374,8 @@ function PotentialSale({ projectId, data, onSaved }: { projectId: string; data: 
     <>
       <div className="bt-bd-kpis">
         <Kpi tone="in" icon={<Tag className="h-3.5 w-3.5" />} label="Potential sales price" value={usd(p.potential_sale_price)} note="Entered by hand" />
-        <Kpi tone="out" label={`Closing costs (${p.closing_cost_pct}%)`} value={usd(p.closing_costs)} note="Taken off the sales price" />
-        <Kpi tone="due" label="Net sale proceeds" value={usd(p.net_proceeds)} note="Sales price minus closing costs" />
+        <Kpi tone="out" label="Commission + closing costs" value={usd(p.selling_costs)} note={`${p.commission_pct}% commission ${usd(p.commission)} + closing costs ${usd(p.closing_costs)}`} />
+        <Kpi tone="due" label="Net sale proceeds" value={usd(p.net_proceeds)} note="Sales price minus commission and closing costs" />
         <Kpi tone={hasBooks ? ((p.projected_profit || 0) >= 0 ? 'good' : 'bad') : 'plain'} icon={<TrendingUp className="h-3.5 w-3.5" />} label="Projected profit" value={hasBooks ? usd(p.projected_profit) : '—'} note={hasBooks ? `Net proceeds minus ${usd(p.invested)} invested` : 'Needs the QuickBooks balance sheet'} />
       </div>
       <div className="bt-bd-tablewrap">
@@ -371,7 +383,8 @@ function PotentialSale({ projectId, data, onSaved }: { projectId: string; data: 
           <thead><tr><th scope="col">Potential sale</th><th scope="col" className="bt-bd-num">Amount</th></tr></thead>
           <tbody>
             <tr className="bt-bd-stmt__line"><td>Potential sales price</td><td className="bt-bd-num">{usd(p.potential_sale_price)}</td></tr>
-            <tr className="bt-bd-stmt__line"><td>Less closing costs ({p.closing_cost_pct}%)</td><td className="bt-bd-num is-negative">{usd(-(p.closing_costs || 0))}</td></tr>
+            <tr className="bt-bd-stmt__line"><td>Less realtor commission ({p.commission_pct}%)</td><td className="bt-bd-num is-negative">{usd(-(p.commission || 0))}</td></tr>
+            <tr className="bt-bd-stmt__line"><td>Less closing costs{p.closing_costs ? '' : ' (none entered)'}</td><td className={`bt-bd-num${p.closing_costs ? ' is-negative' : ''}`}>{usd(-(p.closing_costs || 0))}</td></tr>
             <tr className="bt-bd-stmt__total"><td>Net sale proceeds</td><td className="bt-bd-num">{usd(p.net_proceeds)}</td></tr>
             {hasBooks && (
               <>
@@ -555,7 +568,7 @@ export default function BankDrawsTab({ projectId, canManageAccess }: { projectId
         )}
       </Block>
 
-      <Block step={2} title="Potential sale" subtitle="Entered by hand · what the house could sell for, less closing costs">
+      <Block step={2} title="Potential sale" subtitle="Entered by hand · what the house could sell for, less the realtor commission and closing costs">
         <PotentialSale projectId={projectId} data={data} onSaved={setData} />
       </Block>
 

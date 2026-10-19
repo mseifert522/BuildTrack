@@ -273,7 +273,7 @@ html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-stmt td.is-negative { c
 /* Potential sale (2026-10-19) */
 .bt-bd-proj-form {
   display: grid;
-  grid-template-columns: minmax(0, 280px) minmax(0, 170px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 240px) minmax(0, 190px) minmax(0, 220px) minmax(0, 1fr);
   align-items: end;
   gap: 12px 14px;
   padding: 16px;
@@ -312,6 +312,10 @@ html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-btn--primary { backgrou
 html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-btn--primary:hover:not(:disabled) { background: var(--theme-accent) !important; filter: brightness(1.08); }
 html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-btn.is-danger { color: var(--theme-danger) !important; }
 html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+@media (max-width: 1180px) {
+  .bt-bd-proj-form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .bt-bd-proj-preview { grid-column: 1 / -1; padding-bottom: 0; }
+}
 @media (max-width: 760px) {
   .bt-bd-proj-form { grid-template-columns: minmax(0, 1fr); }
 }
