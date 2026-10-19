@@ -3176,7 +3176,7 @@ function initializeSchema() {
     -- every project's Scope of Work tab. The newest row is the one on screen; older
     -- rows are earlier versions. Files live in uploads/scope-documents/, which is
     -- never served statically - only via /api/projects/:id/scope-document.
-    CREATE TABLE IF NOT EXISTS project_scope_documents (
+    CREATE TABLE IF NOT EXISTS project_scope_pdfs (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
       original_name TEXT NOT NULL,
@@ -3189,8 +3189,8 @@ function initializeSchema() {
       FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
     );
 
-    CREATE INDEX IF NOT EXISTS idx_project_scope_documents_project
-      ON project_scope_documents(project_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_project_scope_pdfs_project
+      ON project_scope_pdfs(project_id, created_at DESC);
 
     -- Per-user access to restricted tabs (Mike, 2026-10-19). 'bank_draws': Super
     -- Admin and Operations Manager always; anyone else only with a row here.

@@ -68,7 +68,7 @@ function scopeCounts(db, projectId) {
 function listPayload(db, req, project) {
   const versions = db.prepare(`
     SELECT d.id, d.original_name, d.size_bytes, d.created_at, u.name AS uploaded_by_name
-    FROM project_scope_documents d
+    FROM project_scope_pdfs d
     LEFT JOIN users u ON u.id = d.uploaded_by
     WHERE d.project_id = ?
     ORDER BY datetime(d.created_at) DESC, d.rowid DESC
@@ -163,7 +163,7 @@ router.post('/', (req, res, next) => {
     const originalName = displayName(file.originalname);
     const storagePath = path.posix.join(STORAGE_DIR, project.id, path.basename(file.path));
     db.prepare(`
-      INSERT INTO project_scope_documents (id, project_id, original_name, size_bytes, sha256, storage_path, uploaded_by)
+      INSERT INTO project_scope_pdfs (id, project_id, original_name, size_bytes, sha256, storage_path, uploaded_by)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(id, project.id, originalName, file.size, sha256, storagePath, req.user.id);
     logActivity({
@@ -221,7 +221,7 @@ router.get('/generated.pdf', async (req, res) => {
 });
 
 function loadDocument(db, project, documentId) {
-  return db.prepare('SELECT * FROM project_scope_documents WHERE id = ? AND project_id = ?').get(documentId, project.id);
+  return db.prepare('SELECT * FROM project_scope_pdfs WHERE id = ? AND project_id = ?').get(documentId, project.id);
 }
 
 function documentPath(doc) {
@@ -265,7 +265,7 @@ router.delete('/:documentId', (req, res) => {
   const db = getDb();
   const doc = loadDocument(db, project, req.params.documentId);
   if (!doc) return res.status(404).json({ error: 'Scope of work file not found' });
-  db.prepare('DELETE FROM project_scope_documents WHERE id = ?').run(doc.id);
+  db.prepare('DELETE FROM project_scope_pdfs WHERE id = ?').run(doc.id);
   const filePath = documentPath(doc);
   if (filePath) fs.rm(filePath, { force: true }, () => {});
   logActivity({
