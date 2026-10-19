@@ -181,7 +181,7 @@ export default function ConsolidatedFinances() {
   const ttm = data.period?.ttm_start && data.period?.end ? `${formatDateOnly(data.period.ttm_start)} – ${formatDateOnly(data.period.end)}` : 'the last 12 months';
 
   return (
-    <div className="bt-bd bt-cf">
+    <div className="bt-desktop-page bt-bd bt-cf mx-auto max-w-[1500px] p-4 md:p-6">
       <div className="bt-bd-intro">
         <div className="min-w-0">
           <p className="bt-bd-eyebrow"><Landmark className="h-3.5 w-3.5" /> Consolidated Finances · QuickBooks</p>
