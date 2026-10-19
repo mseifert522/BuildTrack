@@ -320,6 +320,24 @@ html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-btn:disabled { opacity:
   .bt-bd-proj-form { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* Approximate funds to be returned (2026-10-19) */
+.bt-bd-return { border-radius: 12px; border: 1px solid #2458ba; overflow: hidden; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-return {
+  background: color-mix(in srgb, var(--theme-accent) 7%, var(--theme-surface)) !important;
+  border-color: color-mix(in srgb, var(--theme-accent) 55%, var(--theme-border)) !important;
+}
+.bt-bd-return__head { padding: 14px 16px 8px; }
+.bt-bd-return__title { margin: 0; font-size: 12.5px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-return__title { color: var(--theme-accent) !important; }
+.bt-bd-return__sub { margin: 4px 0 0; max-width: 90ch; font-size: 12.5px; line-height: 1.5; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-return__sub { color: var(--theme-muted) !important; }
+.bt-bd-return__hint { display: block; margin-top: 2px; font-size: 11.5px; font-weight: 500; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-return__hint { color: var(--theme-muted) !important; }
+.bt-bd-return__table td { padding: 9px 16px; vertical-align: top; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-return__table td { background: transparent !important; }
+.bt-bd-return__total td { padding-top: 12px; padding-bottom: 12px; font-size: 18px; font-weight: 800; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-return__total td { background: var(--theme-selected) !important; }
+
 /* Access manager */
 .bt-bd-access ul { margin: 0 0 18px; padding: 0; list-style: none; }
 .bt-bd-access__heading { margin: 0 0 6px; font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }

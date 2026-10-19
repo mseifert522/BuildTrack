@@ -467,7 +467,9 @@ function projectBankDraws(projectId, db = getDb()) {
 // closing costs entered in dollars. Against the class's balance sheet: paying off what
 // is owed (net of the holdback the lender still holds) leaves the cash back at sale;
 // the net proceeds over what is invested in the property is the projected profit.
-// Pure; exported for tests.
+// "Approximate funds to be returned" (Mike, 2026-10-19) = cash in the project
+// (invested minus what the loans take back at payoff) + projected profit, which is the
+// same number as the cash back at sale. Pure; exported for tests.
 const DEFAULT_COMMISSION_PCT = 3;
 
 function saleProjection(input, summary) {
@@ -475,17 +477,21 @@ function saleProjection(input, summary) {
   const price = input ? num(input.potential_sale_price) : null;
   const commissionPct = input && Number.isFinite(num(input.commission_pct)) ? num(input.commission_pct) : DEFAULT_COMMISSION_PCT;
   const closingCosts = input && Number.isFinite(num(input.closing_costs_amount)) ? r2(num(input.closing_costs_amount)) : 0;
+  const loanPayoff = summary ? r2(summary.net_debt_after_escrow) : null;
+  const invested = summary ? r2(summary.invested) : null;
+  // Cash in the project needs only the balance sheet, so it shows before a price is entered.
+  const cashIn = loanPayoff === null || invested === null ? null : r2(invested - loanPayoff);
   const empty = {
     potential_sale_price: null, commission_pct: commissionPct, commission: null, closing_costs: closingCosts,
-    selling_costs: null, net_proceeds: null, loan_payoff: null, cash_back: null, invested: null, projected_profit: null,
+    selling_costs: null, net_proceeds: null, loan_payoff: loanPayoff, cash_back: null, invested, cash_in: cashIn,
+    projected_profit: null,
   };
   if (price === null || !Number.isFinite(price)) return empty;
   const commission = r2(price * commissionPct / 100);
   const sellingCosts = r2(commission + closingCosts);
   const netProceeds = r2(price - sellingCosts);
-  const loanPayoff = summary ? r2(summary.net_debt_after_escrow) : null;
-  const invested = summary ? r2(summary.invested) : null;
   return {
+    cash_in: cashIn,
     potential_sale_price: r2(price),
     commission_pct: commissionPct,
     commission,

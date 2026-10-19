@@ -60,6 +60,7 @@ type Projection = {
   cash_back: number | null;
   invested: number | null;
   projected_profit: number | null;
+  cash_in: number | null;
   updated_at: string | null;
   updated_by_name: string | null;
 };
@@ -392,7 +393,7 @@ function PotentialSale({ projectId, data, onSaved }: { projectId: string; data: 
                   <td>Less loans &amp; payables paid off at sale{fin ? ` (owed ${usd(fin.total_liabilities)}, less ${usd(fin.escrow_balance)} still in escrow)` : ''}</td>
                   <td className="bt-bd-num is-negative">{usd(-(p.loan_payoff || 0))}</td>
                 </tr>
-                <tr className="bt-bd-stmt__grand"><td>Cash back at sale</td><td className={`bt-bd-num${(p.cash_back || 0) < 0 ? ' is-negative' : ''}`}>{usd(p.cash_back)}</td></tr>
+                <tr className="bt-bd-stmt__grand"><td>Approximate funds to be returned (cash back at sale)</td><td className={`bt-bd-num${(p.cash_back || 0) < 0 ? ' is-negative' : ''}`}>{usd(p.cash_back)}</td></tr>
                 <tr className="bt-bd-stmt__line"><td>Total invested in the property (balance sheet)</td><td className="bt-bd-num">{usd(p.invested)}</td></tr>
                 <tr className="bt-bd-stmt__grand"><td>Projected profit (net sale proceeds minus invested)</td><td className={`bt-bd-num${(p.projected_profit || 0) < 0 ? ' is-negative' : ''}`}>{usd(p.projected_profit)}</td></tr>
               </>
@@ -405,6 +406,40 @@ function PotentialSale({ projectId, data, onSaved }: { projectId: string; data: 
         <button type="button" className="bt-bd-btn" onClick={() => startEdit()}><PencilLine className="h-4 w-4" /> Edit</button>
       </div>
     </>
+  );
+}
+
+// Approximate funds to be returned (Mike, 2026-10-19): "at the bottom under the
+// liabilities ... approximate funds including profit in cash to be returned", i.e. how
+// much money should come back from the project after expenses. Cash in the project
+// (invested less what the lenders take back at payoff) plus the projected profit from
+// the potential sale = the cash back at sale. Figures come from the server.
+function FundsReturned({ p }: { p: Projection }) {
+  if (p.cash_in === null) return null;
+  const priced = p.potential_sale_price !== null && p.projected_profit !== null && p.cash_back !== null;
+  return (
+    <section className="bt-bd-return" aria-labelledby="bt-bd-return-title">
+      <div className="bt-bd-return__head">
+        <p id="bt-bd-return-title" className="bt-bd-return__title">Approximate funds to be returned</p>
+        <p className="bt-bd-return__sub">The money expected back from this project after the house sells, the loans are paid off, and the commission and closing costs are paid: your cash in the project plus the profit.</p>
+      </div>
+      <table className="bt-bd-stmt bt-bd-return__table">
+        <tbody>
+          <tr className="bt-bd-stmt__line">
+            <td>Cash in the project<span className="bt-bd-return__hint">Invested {usd(p.invested)}, less {usd(p.loan_payoff)} paid off to the lenders at sale</span></td>
+            <td className="bt-bd-num">{usd(p.cash_in)}</td>
+          </tr>
+          <tr className="bt-bd-stmt__line">
+            <td>Plus projected profit<span className="bt-bd-return__hint">{priced ? `At the ${usd(p.potential_sale_price)} potential sale, after ${usd(p.selling_costs)} commission and closing costs` : 'Enter a potential sales price in section 2 to include the profit'}</span></td>
+            <td className={`bt-bd-num${priced && (p.projected_profit || 0) < 0 ? ' is-negative' : ''}`}>{priced ? usd(p.projected_profit) : '—'}</td>
+          </tr>
+          <tr className="bt-bd-stmt__grand bt-bd-return__total">
+            <td>Approximate funds to be returned</td>
+            <td className={`bt-bd-num${priced && (p.cash_back || 0) < 0 ? ' is-negative' : ''}`}>{priced ? usd(p.cash_back) : '—'}</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
   );
 }
 
@@ -589,6 +624,7 @@ export default function BankDrawsTab({ projectId, canManageAccess }: { projectId
                 <tbody><StatementRows nodes={finance.balance_sheet.sections} /></tbody>
               </table>
             </div>
+            <FundsReturned p={data.projection} />
           </>
         )}
       </Block>

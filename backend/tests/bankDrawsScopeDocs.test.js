@@ -254,6 +254,8 @@ const REPORTS = {
     assert.equal(pr.cash_back, 277755);
     assert.equal(pr.invested, 28121.79);
     assert.equal(pr.projected_profit, 262878.21);
+    assert.equal(pr.cash_in, 14876.79, "invested 28,121.79 less 13,245 paid off");
+    assert.equal(Math.round((pr.cash_in + pr.projected_profit) * 100) / 100, pr.cash_back, "funds returned = cash in + profit");
     assert.equal(pr.updated_by_name, 'Project');
     const logged = db.prepare("SELECT project_id, details FROM activity_log WHERE action = 'finance_projection_updated' ORDER BY created_at DESC LIMIT 1").get();
     assert.equal(logged.project_id, null, 'not in the contractor-readable project activity');
@@ -265,6 +267,7 @@ const REPORTS = {
     assert.equal(pr.net_proceeds, 288500);
     pr = (await put('sa', { potential_sale_price: '' })).body.projection;
     assert.equal(pr.potential_sale_price, null, 'blank clears it');
+    assert.equal(pr.cash_in, 14876.79, 'cash in shows without a sales price');
     assert.equal(pr.commission_pct, 3);
     assert.equal(pr.net_proceeds, null);
     const unsynced = (await call('/api/projects/p-new/bank-draws/projection', 'PUT', 'sa', { potential_sale_price: 100000, closing_costs: 1500 })).body.projection;
