@@ -54,6 +54,12 @@ html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-eyebrow { color: var(--
 html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-match { color: var(--theme-success) !important; }
 html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-match.is-warn { color: var(--theme-warning) !important; }
 html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-match :where(svg) { color: inherit !important; }
+.bt-bd-match__action { display: inline-flex; margin: 8px 0 0; min-height: 32px; font-size: 12px; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-match__action { color: var(--theme-text) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-match__action :where(svg) { color: var(--theme-success) !important; }
+.bt-bd-match__undo { margin-left: 8px; padding: 0; border: 0; background: none; font-size: 12px; font-weight: 650; text-decoration: underline; cursor: pointer; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-match__undo { background: none !important; color: var(--theme-muted) !important; }
+.bt-bd-match > span { display: block; }
 
 .bt-bd-sync { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; flex-shrink: 0; }
 .bt-bd-sync__status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }

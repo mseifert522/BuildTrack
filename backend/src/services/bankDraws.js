@@ -76,17 +76,32 @@ function relatedClassIds(cls, classes) {
 }
 
 // Pure: decide each project's class (link, verify, or auto-match by address).
-function matchProjectClasses(projects, classes) {
+// aliasesByProject: projectId -> Set of normalized class names confirmed as the same
+// property (project_class_aliases). A linked project also takes in, besides its unit
+// classes, any other class named for its own address (a correctly named twin, e.g.
+// "2153 Milverton" next to the mistyped "1253 Milverton") and any confirmed alias -
+// so entries under either name count toward the one project.
+function matchProjectClasses(projects, classes, aliasesByProject = new Map()) {
   const byId = new Map(classes.map(c => [c.id, c]));
-  const propertyClasses = classes.filter(c => c.active && !/\(deleted/i.test(c.name) && addressKey(c.name));
+  const isDeleted = c => /\(deleted/i.test(c.name);
+  const propertyClasses = classes.filter(c => c.active && !isDeleted(c) && addressKey(c.name));
   const claimed = new Set(projects.map(p => String(p.quickbooks_class_id || '').trim()).filter(Boolean));
   return projects.map(project => {
     const keys = projectKeys(project);
+    const aliases = aliasesByProject.get(project.id) || new Set();
     const linkedId = String(project.quickbooks_class_id || '').trim();
     if (linkedId) {
       const cls = byId.get(linkedId);
       if (!cls) return { projectId: project.id, classId: linkedId, status: 'class_missing', className: project.quickbooks_class_name || null };
-      return { projectId: project.id, classId: cls.id, className: cls.name, status: compareKeys(keys, addressKey(cls.name)), relatedIds: relatedClassIds(cls, classes) };
+      let status = compareKeys(keys, addressKey(cls.name));
+      if (status !== 'exact' && aliases.has(normalize(cls.name))) status = 'confirmed_alias';
+      const extras = classes.filter(c => c.id !== cls.id && !claimed.has(c.id) && c.active !== false && !isDeleted(c)
+        && (compareKeys(keys, addressKey(c.name)) === 'exact' || aliases.has(normalize(c.name))));
+      const relatedIds = [...new Set([
+        ...relatedClassIds(cls, classes),
+        ...extras.flatMap(c => [c.id, ...relatedClassIds(c, classes)]),
+      ])].filter(id => id !== cls.id);
+      return { projectId: project.id, classId: cls.id, className: cls.name, status, relatedIds, aliasNames: [...aliases] };
     }
     const exact = propertyClasses.filter(c => !claimed.has(c.id) && compareKeys(keys, addressKey(c.name)) === 'exact');
     // "171 Davis Unit A" belongs to "171 Davis": keep the property class, not its units.
@@ -297,7 +312,12 @@ async function runSync(source, userId) {
       throw new Error(`QuickBooks account ${HOLDBACK_ACCOUNT} (Funds in Escrow / Holdbacks) was not found.`);
     }
     const projects = db.prepare('SELECT id, address, job_name, quickbooks_class_id, quickbooks_class_name FROM projects').all();
-    const matches = matchProjectClasses(projects, data.classes);
+    const aliasesByProject = new Map();
+    for (const row of db.prepare('SELECT project_id, alias_key FROM project_class_aliases').all()) {
+      if (!aliasesByProject.has(row.project_id)) aliasesByProject.set(row.project_id, new Set());
+      aliasesByProject.get(row.project_id).add(row.alias_key);
+    }
+    const matches = matchProjectClasses(projects, data.classes, aliasesByProject);
     const syncedAt = new Date().toISOString();
     const { lines, unmatched } = buildDrawLines(data, matches, syncedAt);
     const classNameById = new Map(data.classes.map(c => [c.id, c.name]));
@@ -309,7 +329,7 @@ async function runSync(source, userId) {
         project_id: m.projectId,
         class_id: m.classId,
         class_names: JSON.stringify(classIds.map(id => classNameById.get(id) || id)),
-        match_json: JSON.stringify({ status: m.status, class_name: m.className || null, candidates: m.candidates || [] }),
+        match_json: JSON.stringify({ status: m.status, class_name: m.className || null, candidates: m.candidates || [], aliases: m.aliasNames || [] }),
         balance_sheet_json: JSON.stringify({ sections: balanceSheet.sections, found: balanceSheet.found }),
         profit_loss_json: JSON.stringify({ sections: profitLoss.sections, found: profitLoss.found }),
         summary_json: JSON.stringify(balanceSheet.found ? financeSummary(balanceSheet, profitLoss) : null),
@@ -506,6 +526,7 @@ function saleProjection(input, summary) {
 }
 
 module.exports = {
+  normalizeClassName: normalize,
   DEFAULT_COMMISSION_PCT,
   HOLDBACK_ACCOUNT,
   addressKey,

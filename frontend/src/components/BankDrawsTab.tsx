@@ -65,7 +65,7 @@ type Projection = {
   updated_by_name: string | null;
 };
 
-type MatchStatus = 'exact' | 'number_differs' | 'mismatch' | 'auto_linked' | 'unlinked' | 'ambiguous' | 'class_missing';
+type MatchStatus = 'exact' | 'number_differs' | 'mismatch' | 'auto_linked' | 'confirmed_alias' | 'unlinked' | 'ambiguous' | 'class_missing';
 
 type BankDrawPayload = {
   project: { id: string; address: string; job_name: string; quickbooks_class_id: string | null; quickbooks_class_name: string | null; arv?: number | null };
@@ -87,7 +87,7 @@ type BankDrawPayload = {
   finance: {
     class_id: string | null;
     class_names: string[];
-    match: { status: MatchStatus; class_name: string | null; candidates?: string[] };
+    match: { status: MatchStatus; class_name: string | null; candidates?: string[]; aliases?: string[] };
     summary: FinanceSummary | null;
     balance_sheet: { sections: StatementNode[]; found: boolean };
     profit_loss: { sections: StatementNode[]; found: boolean };
@@ -170,9 +170,35 @@ function Block({ step, title, subtitle, children }: { step: number; title: strin
   );
 }
 
-function ClassMatch({ finance, project }: { finance: BankDrawPayload['finance']; project: BankDrawPayload['project'] }) {
+// The project's QuickBooks class. A class whose name does not match the address can be
+// confirmed as this property (Mike, 2026-10-19: 2153 Milverton is recorded in QuickBooks
+// as "1253 Milverton" - same class, same project); entries under either name then count
+// here. Confirming / undoing is for Super Admins and Operations Managers.
+function ClassMatch({ finance, project, canConfirm, onUpdated }: {
+  finance: BankDrawPayload['finance'];
+  project: BankDrawPayload['project'];
+  canConfirm: boolean;
+  onUpdated: (next: BankDrawPayload) => void;
+}) {
+  const [busy, setBusy] = useState(false);
   const match = finance?.match;
   const className = match?.class_name || project.quickbooks_class_name;
+  const change = async (method: 'post' | 'delete') => {
+    setBusy(true);
+    try {
+      const res = method === 'post'
+        ? await api.post<BankDrawPayload>(`/projects/${project.id}/bank-draws/class-alias`, { class_name: className })
+        : await api.delete<BankDrawPayload>(`/projects/${project.id}/bank-draws/class-alias`, { data: { class_name: className } });
+      onUpdated(res.data);
+      toast.success(method === 'post' ? `“${className}” confirmed as this property` : 'Confirmation removed');
+    } catch (err: any) {
+      const body = err?.response?.data as BankDrawPayload & { error?: string } | undefined;
+      if (body?.register) onUpdated(body);
+      toast.error(body?.error || 'The QuickBooks class could not be updated.');
+    } finally {
+      setBusy(false);
+    }
+  };
   if (!match || match.status === 'unlinked' || match.status === 'ambiguous' || !className) {
     return (
       <p className="bt-bd-match is-warn">
@@ -185,14 +211,36 @@ function ClassMatch({ finance, project }: { finance: BankDrawPayload['finance'];
   const extra = (finance?.class_names || []).slice(1);
   if (match.status === 'number_differs' || match.status === 'mismatch') {
     return (
-      <p className="bt-bd-match is-warn" title="Linked by QuickBooks class ID">
+      <div className="bt-bd-match is-warn" title="Linked by QuickBooks class ID">
         <AlertTriangle className="h-3.5 w-3.5" />
-        QuickBooks class “{className}” — the class name does not match this project’s address. Linked by class ID; please correct the name in QuickBooks.
-      </p>
+        <span>
+          QuickBooks class “{className}” does not match this project’s address. It is linked by class ID.
+          {canConfirm ? ' If it is the same property, confirm it and entries under either name will count here.' : ' A Super Admin or Operations Manager can confirm it is the same property.'}
+          {canConfirm && (
+            <button type="button" className="bt-bd-btn bt-bd-match__action" onClick={() => void change('post')} disabled={busy}>
+              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />} This is the same property
+            </button>
+          )}
+        </span>
+      </div>
     );
   }
   if (match.status === 'class_missing') {
     return <p className="bt-bd-match is-warn"><AlertTriangle className="h-3.5 w-3.5" /> The linked QuickBooks class no longer exists.</p>;
+  }
+  if (match.status === 'confirmed_alias') {
+    const address = (project.address || project.job_name || '').split(',')[0];
+    return (
+      <div className="bt-bd-match">
+        <CheckCircle2 className="h-3.5 w-3.5" />
+        <span>
+          QuickBooks class “{className}”{extra.length ? ` + ${extra.join(', ')}` : ''} · confirmed as {address} (the class name in QuickBooks is spelled differently). Entries recorded under either name count here.
+          {canConfirm && (
+            <button type="button" className="bt-bd-match__undo" onClick={() => void change('delete')} disabled={busy}>Undo</button>
+          )}
+        </span>
+      </div>
+    );
   }
   return (
     <p className="bt-bd-match">
@@ -506,7 +554,7 @@ export default function BankDrawsTab({ projectId, canManageAccess }: { projectId
         <div className="min-w-0">
           <p className="bt-bd-eyebrow"><Landmark className="h-3.5 w-3.5" /> Finance · QuickBooks</p>
           <h3 className="bt-bd-title">{data.project.address || data.project.job_name}</h3>
-          <ClassMatch finance={finance} project={data.project} />
+          <ClassMatch finance={finance} project={data.project} canConfirm={canManageAccess} onUpdated={setData} />
         </div>
         <div className="bt-bd-sync">
           <span className="bt-bd-sync__status" aria-live="polite">

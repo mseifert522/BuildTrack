@@ -3275,6 +3275,23 @@ function initializeSchema() {
     );
   `);
 
+  // QuickBooks class names confirmed as the same property (Mike, 2026-10-19: "the
+  // correct class is 2153 Milverton but could also be recorded by mistake as 1253
+  // Milverton ... this is the same class and project"). alias_key = normalized class
+  // name; any QuickBooks class with that name counts toward the project in Finance.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS project_class_aliases (
+      project_id TEXT NOT NULL,
+      alias_key TEXT NOT NULL,
+      label TEXT NOT NULL,
+      confirmed_by TEXT,
+      confirmed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (project_id, alias_key),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (confirmed_by) REFERENCES users(id) ON DELETE SET NULL
+    )
+  `);
+
   // Commission + closing costs replaced the single closing-cost % the same day. A row
   // saved at the old 3.5% default gets the 3% standard commission; a custom % stays.
   try { db.exec('ALTER TABLE project_finance_inputs ADD COLUMN commission_pct REAL'); } catch (_) { /* already exists */ }

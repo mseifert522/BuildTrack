@@ -1,10 +1,10 @@
 const express = require('express');
 const { getDb } = require('../db/schema');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, authorize } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
 const { logDataAccess } = require('../utils/dataAccessAudit');
-const { requireFeature } = require('../utils/featureAccess');
-const { DEFAULT_COMMISSION_PCT, isStale, projectBankDraws, syncBankDraws, syncState } = require('../services/bankDraws');
+const { GRANT_MANAGER_ROLES, requireFeature } = require('../utils/featureAccess');
+const { DEFAULT_COMMISSION_PCT, normalizeClassName, isStale, projectBankDraws, syncBankDraws, syncState } = require('../services/bankDraws');
 
 // /api/projects/:projectId/bank-draws - the project's Finance tab (named "Bank Draws"
 // until 2026-10-19): construction-loan draws from QuickBooks, the class's statements,
@@ -134,6 +134,62 @@ router.put('/projection', (req, res) => {
   }
   res.set('Cache-Control', 'no-store');
   res.json(payload(project));
+});
+
+// POST /class-alias - confirm that the project's QuickBooks class, whose name does not
+// match the address (e.g. "1253 Milverton" for 2153 Milverton), is this property; any
+// class carrying that name then counts here. DELETE undoes it. Super Admin and
+// Operations Manager only; the Finance figures are re-read from QuickBooks right away.
+async function resync(req, project, res) {
+  try {
+    await syncBankDraws({ source: `class alias ${project.id}`, userId: req.user.id, force: true });
+  } catch (_) {
+    res.set('Cache-Control', 'no-store');
+    return res.status(502).json({ ...payload(project), error: 'Saved. QuickBooks did not answer, so the figures update on the next refresh.' });
+  }
+  res.set('Cache-Control', 'no-store');
+  return res.json(payload(project));
+}
+
+router.post('/class-alias', authorize(...GRANT_MANAGER_ROLES), async (req, res) => {
+  const project = loadProject(req, res);
+  if (!project) return;
+  const label = String(req.body?.class_name || project.quickbooks_class_name || '').trim().slice(0, 120);
+  const key = normalizeClassName(label);
+  if (!key) return res.status(400).json({ error: 'This project is not linked to a QuickBooks class yet.' });
+  const db = getDb();
+  const result = db.prepare(`
+    INSERT INTO project_class_aliases (project_id, alias_key, label, confirmed_by) VALUES (?, ?, ?, ?)
+    ON CONFLICT(project_id, alias_key) DO NOTHING
+  `).run(project.id, key, label, req.user.id);
+  if (result.changes) {
+    logActivity({
+      userId: req.user.id,
+      action: 'quickbooks_class_confirmed',
+      entityType: 'project',
+      entityId: project.id,
+      details: { class_name: label, project: project.job_name || project.address },
+    });
+  }
+  return resync(req, project, res);
+});
+
+router.delete('/class-alias', authorize(...GRANT_MANAGER_ROLES), async (req, res) => {
+  const project = loadProject(req, res);
+  if (!project) return;
+  const label = String(req.body?.class_name || req.query?.class_name || project.quickbooks_class_name || '').trim();
+  const key = normalizeClassName(label);
+  const result = getDb().prepare('DELETE FROM project_class_aliases WHERE project_id = ? AND alias_key = ?').run(project.id, key);
+  if (result.changes) {
+    logActivity({
+      userId: req.user.id,
+      action: 'quickbooks_class_unconfirmed',
+      entityType: 'project',
+      entityId: project.id,
+      details: { class_name: label, project: project.job_name || project.address },
+    });
+  }
+  return resync(req, project, res);
 });
 
 module.exports = router;

@@ -99,6 +99,14 @@ const REPORTS = {
   const byProject = Object.fromEntries(matches.map(m => [m.projectId, m]));
   assert.equal(byProject['p-wis'].status, 'exact');
   assert.equal(byProject['p-mil'].status, 'number_differs', 'QuickBooks spells 2153 Milverton as 1253');
+  // Confirmed alias + a correctly named twin class: both count toward the one project.
+  const withTwin = [...CLASSES, { id: '23', name: '2153 Milverton', fullName: '2153 Milverton', parentId: null, active: true }];
+  const aliasMatches = bankDraws.matchProjectClasses(projectsFixture, withTwin, new Map([['p-mil', new Set(['1253 milverton'])]]));
+  const mil = aliasMatches.find(m => m.projectId === 'p-mil');
+  assert.equal(mil.status, 'confirmed_alias');
+  assert.equal(mil.classId, '2', 'the existing link is kept');
+  assert.deepEqual(mil.relatedIds, ['23'], 'the correctly named class is taken in too');
+  assert.equal(bankDraws.matchProjectClasses(projectsFixture, withTwin).find(m => m.projectId === 'p-mil').relatedIds.includes('23'), true, 'a class named for the address counts even before confirming');
   assert.equal(byProject['p-dav'].status, 'auto_linked');
   assert.equal(byProject['p-dav'].classId, '7', 'the property class wins over its unit class');
   assert.deepEqual(byProject['p-dav'].relatedIds, ['71']);
@@ -218,6 +226,19 @@ const REPORTS = {
     assert.equal(db.prepare("SELECT quickbooks_class_id FROM projects WHERE id='p-dav'").get().quickbooks_class_id, '7', 'linked by address');
     assert.equal(db.prepare("SELECT quickbooks_class_id FROM projects WHERE id='p-mil'").get().quickbooks_class_id, '2', 'an existing link is never changed');
     assert.equal((await call('/api/projects/p-mil/bank-draws')).body.finance.match.status, 'number_differs');
+    // Confirm "1253 Milverton" as 2153 Milverton (SA/OM only), then undo.
+    assert.equal((await call('/api/projects/p-mil/bank-draws/class-alias', 'POST', 'pm')).status, 403, 'an assigned user cannot change class matching');
+    res = await call('/api/projects/p-mil/bank-draws/class-alias', 'POST', 'om');
+    assert.equal(res.status, 200);
+    assert.equal(res.body.finance.match.status, 'confirmed_alias');
+    assert.deepEqual(res.body.finance.match.aliases, ['1253 milverton']);
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM activity_log WHERE action = 'quickbooks_class_confirmed'").get().n, 1);
+    res = await call('/api/projects/p-mil/bank-draws/class-alias', 'POST', 'sa');
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM project_class_aliases WHERE project_id = 'p-mil'").get().n, 1, 'confirming twice is harmless');
+    res = await call('/api/projects/p-mil/bank-draws/class-alias', 'DELETE', 'sa');
+    assert.equal(res.body.finance.match.status, 'number_differs');
+    res = await call('/api/projects/p-mil/bank-draws/class-alias', 'POST', 'sa');
+    assert.equal(res.body.finance.match.status, 'confirmed_alias');
     assert.equal(db.prepare("SELECT COUNT(*) n FROM activity_log WHERE action='quickbooks_class_matched'").get().n, 2);
 
     // QuickBooks failure keeps the last copy
