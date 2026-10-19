@@ -42,13 +42,13 @@ import ScopeDocumentPanel from '../components/ScopeDocumentPanel';
 
 // Loaded only when the Documents & Agreements tab is opened.
 const ProjectAgreementsWorkspace = lazy(() => import('./Agreements').then(module => ({ default: module.AgreementsWorkspace })));
-// Loaded only when the Bank Draws tab is opened (Super Admin / Operations Manager / granted users).
+// Loaded only when the Finance tab is opened (Super Admin / Operations Manager / granted users).
 const ProjectBankDraws = lazy(() => import('../components/BankDrawsTab'));
 
 // Drag payload for moving an already-attached photo between punch list items.
 const PUNCH_PHOTO_DRAG_MIME = 'application/x-bt-punch-photo';
 
-type Tab = 'overview' | 'details' | 'progress-history' | 'construction-plan' | 'project-timeline' | 'quotes' | 'punch-list' | 'photos' | 'invoices' | 'notes' | 'team' | 'texts' | 'agreements' | 'bank-draws';
+type Tab = 'overview' | 'details' | 'progress-history' | 'construction-plan' | 'project-timeline' | 'quotes' | 'punch-list' | 'photos' | 'invoices' | 'notes' | 'team' | 'texts' | 'agreements' | 'finance';
 
 type ProjectCalendarEvent = {
   id: string;
@@ -902,7 +902,7 @@ export default function ProjectDetail() {
   const [tab, setTab] = useState<Tab>(() => {
     try {
       const h = window.location.hash.replace('#', '') as Tab;
-      const valid: Tab[] = ['overview', 'details', 'progress-history', 'construction-plan', 'project-timeline', 'quotes', 'punch-list', 'photos', 'invoices', 'notes', 'team', 'texts', 'agreements', 'bank-draws'];
+      const valid: Tab[] = ['overview', 'details', 'progress-history', 'construction-plan', 'project-timeline', 'quotes', 'punch-list', 'photos', 'invoices', 'notes', 'team', 'texts', 'agreements', 'finance'];
       return valid.includes(h) ? h : 'notes';
     } catch {
       return 'notes';
@@ -910,7 +910,7 @@ export default function ProjectDetail() {
   });
   const [showEdit, setShowEdit] = useState(false);
   const [addVendorOpen, setAddVendorOpen] = useState(false);
-  // Bank Draws is shown only to roles/users the server allows (null = not known yet).
+  // Finance is shown only to roles/users the server allows (null = not known yet).
   const [bankDrawAccess, setBankDrawAccess] = useState<{ allowed: boolean; canManage: boolean } | null>(null);
   const [showAssign, setShowAssign] = useState(false);
   const [allUsers, setAllUsers] = useState<any[]>([]);
@@ -1013,9 +1013,9 @@ export default function ProjectDetail() {
     return () => { cancelled = true; };
   }, [user?.id, user?.role]);
 
-  // A #bank-draws link opened by someone without access falls back to Notes.
+  // A #finance link opened by someone without access falls back to Notes.
   useEffect(() => {
-    if (tab === 'bank-draws' && bankDrawAccess && !bankDrawAccess.allowed) setTab('notes');
+    if (tab === 'finance' && bankDrawAccess && !bankDrawAccess.allowed) setTab('notes');
   }, [tab, bankDrawAccess]);
 
   useEffect(() => {
@@ -1034,7 +1034,9 @@ export default function ProjectDetail() {
         '#assigned-contractors': 'team',
         '#notes': 'notes',
         '#agreements': 'agreements',
-        '#bank-draws': 'bank-draws',
+        '#finance': 'finance',
+        // Links from before the tab was renamed ("Bank Draws", 2026-10-19).
+        '#bank-draws': 'finance',
     };
     if (hashTabMap[location.hash]) setTab(hashTabMap[location.hash]);
   }, [location.hash]);
@@ -1638,8 +1640,9 @@ export default function ProjectDetail() {
     { id: 'texts', label: 'Text Contractors', icon: MessageSquare },
     // Executed contracts / signed agreements (Mike, 2026-10-01) - management only.
     ...(canAssign ? [{ id: 'agreements' as Tab, label: 'Documents & Agreements', icon: FileSignature }] : []),
-    // QuickBooks 1130 draws + class financials (Mike, 2026-10-19) - never shown to project managers.
-    ...(bankDrawAccess?.allowed ? [{ id: 'bank-draws' as Tab, label: 'Bank Draws', icon: Landmark }] : []),
+    // Finance (Mike, 2026-10-19; was "Bank Draws"): QuickBooks 1130 draws, potential sale and
+    // class financials - never shown to project managers.
+    ...(bankDrawAccess?.allowed ? [{ id: 'finance' as Tab, label: 'Finance', icon: Landmark }] : []),
   ];
 
   const updateFieldWorkTask = async (taskId: string, patch: Record<string, any>) => {
@@ -2567,8 +2570,8 @@ export default function ProjectDetail() {
           </Suspense>
         )}
 
-        {tab === 'bank-draws' && bankDrawAccess?.allowed && (
-          <Suspense fallback={<Loading message="Loading bank draws..." />}>
+        {tab === 'finance' && bankDrawAccess?.allowed && (
+          <Suspense fallback={<Loading message="Loading finance..." />}>
             <ProjectBankDraws projectId={id!} canManageAccess={bankDrawAccess.canManage} />
           </Suspense>
         )}

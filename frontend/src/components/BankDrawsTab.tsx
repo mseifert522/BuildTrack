@@ -1,14 +1,16 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, ArrowDownLeft, ArrowUpRight, CheckCircle2, ExternalLink, Landmark, Loader2, RefreshCw, Scale, ShieldCheck, TrendingUp, Users } from 'lucide-react';
+import { AlertTriangle, ArrowDownLeft, ArrowUpRight, CheckCircle2, ExternalLink, Landmark, Loader2, PencilLine, RefreshCw, Scale, ShieldCheck, Tag, TrendingUp, Users } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../lib/api';
 import { formatDateOnly, formatEasternRelative } from '../lib/time';
 import { Modal } from './ui';
+import CurrencyInput from './CurrencyInput';
 import '../styles/bank-draws.css';
 
-// Bank Draws tab (Mike, 2026-10-19). Each project's own construction-loan draws from
-// QuickBooks account 1130 (Funds in Escrow / Holdbacks) allocated by the project's
-// class, then the project's financing (Balance Sheet) and Profit & Loss for that
+// Finance tab (Mike, 2026-10-19; named "Bank Draws" until the same afternoon). Each
+// project's own construction-loan draws from QuickBooks account 1130 (Funds in Escrow /
+// Holdbacks) allocated by the project's class, the manually entered potential sale
+// (less ~3.5% closing costs), then the project's financing (Balance Sheet) and Profit & Loss for that
 // class, each in its own block. Super Admin, Operations Manager and users granted
 // access only - the backend refuses everyone else, project managers included.
 
@@ -48,10 +50,25 @@ type FinanceSummary = {
   net_income: number | null;
 };
 
+type Projection = {
+  potential_sale_price: number | null;
+  closing_cost_pct: number;
+  closing_costs: number | null;
+  net_proceeds: number | null;
+  loan_payoff: number | null;
+  cash_back: number | null;
+  invested: number | null;
+  projected_profit: number | null;
+  updated_at: string | null;
+  updated_by_name: string | null;
+};
+
 type MatchStatus = 'exact' | 'number_differs' | 'mismatch' | 'auto_linked' | 'unlinked' | 'ambiguous' | 'class_missing';
 
 type BankDrawPayload = {
-  project: { id: string; address: string; job_name: string; quickbooks_class_id: string | null; quickbooks_class_name: string | null };
+  project: { id: string; address: string; job_name: string; quickbooks_class_id: string | null; quickbooks_class_name: string | null; arv?: number | null };
+  default_closing_cost_pct: number;
+  projection: Projection;
   linked: boolean;
   quickbooks: { connected: boolean; last_synced_at: string | null; status: string; error: string | null; stale: boolean };
   summary: {
@@ -202,7 +219,7 @@ function AccessManager({ onClose }: { onClose: () => void }) {
   };
   const roleLabel = (role: string) => ({ super_admin: 'Super Admin', operations_manager: 'Operations Manager', project_manager: 'Project Manager' } as Record<string, string>)[role] || role.replace(/_/g, ' ');
   return (
-    <Modal isOpen onClose={onClose} title="Who can see Bank Draws" description="Super Admins and Operations Managers always can. Give anyone else access here." size="lg">
+    <Modal isOpen onClose={onClose} title="Who can see Finance" description="Super Admins and Operations Managers always can. Give anyone else access here." size="lg">
       {!data ? (
         <div className="flex items-center justify-center gap-2 py-8 text-sm text-gray-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
       ) : (
@@ -240,6 +257,128 @@ function AccessManager({ onClose }: { onClose: () => void }) {
         </div>
       )}
     </Modal>
+  );
+}
+
+// Potential sale (Mike, 2026-10-19): "what the house could sell for minus closing costs,
+// roughly 3.5% for each property". Entered by hand; the figures below it come from the
+// class's balance sheet. The server computes every line (services/bankDraws.js).
+function PotentialSale({ projectId, data, onSaved }: { projectId: string; data: BankDrawPayload; onSaved: (next: BankDrawPayload) => void }) {
+  const p = data.projection;
+  const defaultPct = data.default_closing_cost_pct ?? 3.5;
+  const [editing, setEditing] = useState(false);
+  const [price, setPrice] = useState('');
+  const [pct, setPct] = useState('');
+  const [saving, setSaving] = useState(false);
+  const arv = Number(data.project.arv) > 0 ? Number(data.project.arv) : null;
+
+  const startEdit = (prefill?: number | null) => {
+    setPrice(prefill !== undefined && prefill !== null ? String(prefill) : p.potential_sale_price !== null ? String(p.potential_sale_price) : '');
+    setPct(String(p.closing_cost_pct ?? defaultPct));
+    setEditing(true);
+  };
+  const save = async (clear = false) => {
+    setSaving(true);
+    try {
+      const res = await api.put<BankDrawPayload>(`/projects/${projectId}/bank-draws/projection`, {
+        potential_sale_price: clear ? '' : price,
+        closing_cost_pct: pct === '' ? defaultPct : pct,
+      });
+      onSaved(res.data);
+      setEditing(false);
+      toast.success(clear ? 'Potential sales price cleared' : 'Potential sales price saved');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'The potential sales price could not be saved.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (editing) {
+    const priceNum = Number(String(price).replace(/[^0-9.]/g, ''));
+    const pctNum = pct === '' ? defaultPct : Number(pct);
+    const valid = price !== '' && Number.isFinite(priceNum) && Number.isFinite(pctNum) && pctNum >= 0 && pctNum <= 20;
+    const closing = valid ? Math.round(priceNum * pctNum) / 100 : null;
+    return (
+      <form className="bt-bd-proj-form" onSubmit={event => { event.preventDefault(); if (valid) void save(); }}>
+        <label className="bt-bd-field">
+          <span>Potential sales price</span>
+          <CurrencyInput value={price} onChange={setPrice} placeholder="0.00" className="bt-bd-input" />
+        </label>
+        <label className="bt-bd-field is-narrow">
+          <span>Closing costs (%)</span>
+          <input type="number" inputMode="decimal" step="0.1" min="0" max="20" value={pct} onChange={event => setPct(event.currentTarget.value)} className="bt-bd-input" />
+        </label>
+        <p className="bt-bd-proj-preview" aria-live="polite">
+          {valid && closing !== null
+            ? <>Closing costs {usd(closing)} · Net sale proceeds <strong>{usd(priceNum - closing)}</strong></>
+            : 'Enter the price the house could sell for. Closing costs default to 3.5%.'}
+        </p>
+        <div className="bt-bd-proj-actions">
+          <button type="submit" className="bt-bd-btn bt-bd-btn--primary" disabled={!valid || saving}>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Save
+          </button>
+          <button type="button" className="bt-bd-btn" onClick={() => setEditing(false)} disabled={saving}>Cancel</button>
+          {p.potential_sale_price !== null && (
+            <button type="button" className="bt-bd-btn is-danger" onClick={() => void save(true)} disabled={saving}>Clear</button>
+          )}
+        </div>
+      </form>
+    );
+  }
+
+  if (p.potential_sale_price === null) {
+    return (
+      <div className="bt-bd-empty bt-bd-proj-start">
+        <p>No potential sales price yet. Enter what this house could sell for — BuildTrack takes {p.closing_cost_pct ?? defaultPct}% off for closing costs and shows what comes back after the loans are paid.</p>
+        <div className="bt-bd-proj-actions is-centered">
+          <button type="button" className="bt-bd-btn bt-bd-btn--primary" onClick={() => startEdit()}>
+            <PencilLine className="h-4 w-4" /> Add potential sales price
+          </button>
+          {arv !== null && (
+            <button type="button" className="bt-bd-btn" onClick={() => startEdit(arv)}>Start from the ARV ({usd(arv)})</button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const hasBooks = p.loan_payoff !== null && p.invested !== null;
+  const fin = data.finance?.summary || null;
+  return (
+    <>
+      <div className="bt-bd-kpis">
+        <Kpi tone="in" icon={<Tag className="h-3.5 w-3.5" />} label="Potential sales price" value={usd(p.potential_sale_price)} note="Entered by hand" />
+        <Kpi tone="out" label={`Closing costs (${p.closing_cost_pct}%)`} value={usd(p.closing_costs)} note="Taken off the sales price" />
+        <Kpi tone="due" label="Net sale proceeds" value={usd(p.net_proceeds)} note="Sales price minus closing costs" />
+        <Kpi tone={hasBooks ? ((p.projected_profit || 0) >= 0 ? 'good' : 'bad') : 'plain'} icon={<TrendingUp className="h-3.5 w-3.5" />} label="Projected profit" value={hasBooks ? usd(p.projected_profit) : '—'} note={hasBooks ? `Net proceeds minus ${usd(p.invested)} invested` : 'Needs the QuickBooks balance sheet'} />
+      </div>
+      <div className="bt-bd-tablewrap">
+        <table className="bt-bd-stmt">
+          <thead><tr><th scope="col">Potential sale</th><th scope="col" className="bt-bd-num">Amount</th></tr></thead>
+          <tbody>
+            <tr className="bt-bd-stmt__line"><td>Potential sales price</td><td className="bt-bd-num">{usd(p.potential_sale_price)}</td></tr>
+            <tr className="bt-bd-stmt__line"><td>Less closing costs ({p.closing_cost_pct}%)</td><td className="bt-bd-num is-negative">{usd(-(p.closing_costs || 0))}</td></tr>
+            <tr className="bt-bd-stmt__total"><td>Net sale proceeds</td><td className="bt-bd-num">{usd(p.net_proceeds)}</td></tr>
+            {hasBooks && (
+              <>
+                <tr className="bt-bd-stmt__line">
+                  <td>Less loans &amp; payables paid off at sale{fin ? ` (owed ${usd(fin.total_liabilities)}, less ${usd(fin.escrow_balance)} still in escrow)` : ''}</td>
+                  <td className="bt-bd-num is-negative">{usd(-(p.loan_payoff || 0))}</td>
+                </tr>
+                <tr className="bt-bd-stmt__grand"><td>Cash back at sale</td><td className={`bt-bd-num${(p.cash_back || 0) < 0 ? ' is-negative' : ''}`}>{usd(p.cash_back)}</td></tr>
+                <tr className="bt-bd-stmt__line"><td>Total invested in the property (balance sheet)</td><td className="bt-bd-num">{usd(p.invested)}</td></tr>
+                <tr className="bt-bd-stmt__grand"><td>Projected profit (net sale proceeds minus invested)</td><td className={`bt-bd-num${(p.projected_profit || 0) < 0 ? ' is-negative' : ''}`}>{usd(p.projected_profit)}</td></tr>
+              </>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <div className="bt-bd-proj-meta">
+        <span>{p.updated_by_name ? `Entered by ${p.updated_by_name}` : 'Entered'}{p.updated_at ? ` · ${formatEasternRelative(p.updated_at)}` : ''}{hasBooks ? '' : ' · payoff and profit appear once QuickBooks has a balance sheet for this class'}</span>
+        <button type="button" className="bt-bd-btn" onClick={() => startEdit()}><PencilLine className="h-4 w-4" /> Edit</button>
+      </div>
+    </>
   );
 }
 
@@ -281,16 +420,16 @@ export default function BankDrawsTab({ projectId, canManageAccess }: { projectId
           void sync(false);
         }
       })
-      .catch(err => { if (!cancelled) setLoadError(err?.response?.status === 403 ? 'You do not have access to Bank Draws.' : 'Bank Draws could not be loaded.'); })
+      .catch(err => { if (!cancelled) setLoadError(err?.response?.status === 403 ? 'You do not have access to Finance.' : 'Finance could not be loaded.'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [projectId, sync]);
 
   if (loading) {
-    return <div className="bt-bd-loading"><Loader2 className="h-5 w-5 animate-spin" /> Loading bank draws…</div>;
+    return <div className="bt-bd-loading"><Loader2 className="h-5 w-5 animate-spin" /> Loading finance…</div>;
   }
   if (loadError || !data) {
-    return <div className="bt-bd-loading">{loadError || 'Bank Draws could not be loaded.'}</div>;
+    return <div className="bt-bd-loading">{loadError || 'Finance could not be loaded.'}</div>;
   }
 
   const { summary, register, finance, quickbooks } = data;
@@ -304,7 +443,7 @@ export default function BankDrawsTab({ projectId, canManageAccess }: { projectId
     <div className="bt-bd">
       <div className="bt-bd-intro">
         <div className="min-w-0">
-          <p className="bt-bd-eyebrow"><Landmark className="h-3.5 w-3.5" /> Bank Draws · QuickBooks</p>
+          <p className="bt-bd-eyebrow"><Landmark className="h-3.5 w-3.5" /> Finance · QuickBooks</p>
           <h3 className="bt-bd-title">{data.project.address || data.project.job_name}</h3>
           <ClassMatch finance={finance} project={data.project} />
         </div>
@@ -332,7 +471,7 @@ export default function BankDrawsTab({ projectId, canManageAccess }: { projectId
         <p className="bt-bd-banner is-warn"><AlertTriangle className="h-4 w-4" /> The last QuickBooks update failed: {quickbooks.error} Showing the last copy BuildTrack saved.</p>
       )}
 
-      <Block step={1} title="Construction loan draws" subtitle={`QuickBooks account 1130 · Funds in Escrow / Holdbacks · class ${className}`}>
+      <Block step={1} title="Bank draws" subtitle={`QuickBooks account 1130 · Funds in Escrow / Holdbacks · class ${className}`}>
         <div className="bt-bd-kpis">
           <Kpi tone="in" icon={<ArrowDownLeft className="h-3.5 w-3.5" />} label="In · holdback set aside" value={usd(summary.holdback_funded)} note="Held by the lender at closing" />
           <Kpi tone="out" icon={<ArrowUpRight className="h-3.5 w-3.5" />} label="Out · drawn to the project" value={usd(summary.drawn)} note={`${summary.draw_count} draw${summary.draw_count === 1 ? '' : 's'}${summary.escrow_adjustments ? ` · ${usd(Math.abs(summary.escrow_adjustments))} adjustments` : ''}`} />
@@ -403,7 +542,11 @@ export default function BankDrawsTab({ projectId, canManageAccess }: { projectId
         )}
       </Block>
 
-      <Block step={2} title="Project financing" subtitle={`Balance sheet for class ${className} · as of ${shortDate(finance?.period?.end)} · line by line from QuickBooks`}>
+      <Block step={2} title="Potential sale" subtitle="Entered by hand · what the house could sell for, less closing costs">
+        <PotentialSale projectId={projectId} data={data} onSaved={setData} />
+      </Block>
+
+      <Block step={3} title="Project financing" subtitle={`Balance sheet for class ${className} · as of ${shortDate(finance?.period?.end)} · line by line from QuickBooks`}>
         {!finance?.balance_sheet?.found || !fin ? (
           <p className="bt-bd-empty">{neverSynced ? 'Loading from QuickBooks…' : `QuickBooks has no balance sheet entries for class ${className}.`}</p>
         ) : (
@@ -424,7 +567,7 @@ export default function BankDrawsTab({ projectId, canManageAccess }: { projectId
         )}
       </Block>
 
-      <Block step={3} title="Profit & Loss" subtitle={`Class ${className} · life to date, ${shortDate(finance?.period?.start)} – ${shortDate(finance?.period?.end)} · line by line from QuickBooks`}>
+      <Block step={4} title="Profit & Loss" subtitle={`Class ${className} · life to date, ${shortDate(finance?.period?.start)} – ${shortDate(finance?.period?.end)} · line by line from QuickBooks`}>
         {!finance?.profit_loss?.found || !fin ? (
           <p className="bt-bd-empty">
             {neverSynced ? 'Loading from QuickBooks…' : `No income or expenses have been booked to class ${className} yet. While a house is being renovated, its costs are carried on the balance sheet above until it sells.`}

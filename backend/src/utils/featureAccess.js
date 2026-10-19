@@ -2,11 +2,13 @@ const { getDb } = require('../db/schema');
 
 // Restricted tabs (Mike, 2026-10-19). The listed roles always have access; anyone else
 // needs a user_feature_access row granted by a Super Admin or Operations Manager.
-// Contractors never do. Project managers do NOT get Bank Draws from their role.
+// Contractors never do. Project managers do NOT get Finance from their role.
+// 'bank_draws' is the project Finance tab (renamed from "Bank Draws" the same day;
+// the key stays so grants keep working).
 const FEATURES = Object.freeze({
   bank_draws: Object.freeze({
     key: 'bank_draws',
-    label: 'Bank Draws',
+    label: 'Finance',
     roles: Object.freeze(['super_admin', 'operations_manager']),
   }),
 });

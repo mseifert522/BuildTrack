@@ -228,6 +228,42 @@ const REPORTS = {
     assert.equal(res.body.summary.drawn, 24545, 'the saved draws are still returned');
     assert.equal(res.body.quickbooks.error, 'QuickBooks is down');
 
+    // Potential sale (manual, Finance tab)
+    res = await call('/api/projects/p-wis/bank-draws', 'GET', 'sa');
+    assert.equal(res.body.projection.potential_sale_price, null);
+    assert.equal(res.body.projection.closing_cost_pct, 3.5, 'closing costs default to 3.5%');
+    assert.equal(res.body.default_closing_cost_pct, 3.5);
+    assert.equal((await call('/api/projects/p-wis/bank-draws/projection', 'PUT', 'ct', { potential_sale_price: 1 })).status, 403);
+    assert.equal((await call('/api/projects/p-wis/bank-draws/projection', 'PUT', 'pm2', { potential_sale_price: 1 })).status, 403);
+    assert.equal((await call('/api/projects/p-wis/bank-draws/projection', 'PUT', 'sa', { potential_sale_price: 'abc' })).status, 400);
+    assert.equal((await call('/api/projects/p-wis/bank-draws/projection', 'PUT', 'sa', { potential_sale_price: -5 })).status, 400);
+    assert.equal((await call('/api/projects/p-wis/bank-draws/projection', 'PUT', 'sa', { potential_sale_price: 1000, closing_cost_pct: 25 })).status, 400);
+    res = await call('/api/projects/p-wis/bank-draws/projection', 'PUT', 'pm', { potential_sale_price: '$300,000' });
+    assert.equal(res.status, 200, 'a user assigned to the tab can enter it');
+    let pr = res.body.projection;
+    assert.equal(pr.potential_sale_price, 300000);
+    assert.equal(pr.closing_cost_pct, 3.5);
+    assert.equal(pr.closing_costs, 10500);
+    assert.equal(pr.net_proceeds, 289500);
+    assert.equal(pr.loan_payoff, 13245, 'owed 30,000 less 16,755 still in escrow');
+    assert.equal(pr.cash_back, 276255);
+    assert.equal(pr.invested, 28121.79);
+    assert.equal(pr.projected_profit, 261378.21);
+    assert.equal(pr.updated_by_name, 'Project');
+    const logged = db.prepare("SELECT project_id, details FROM activity_log WHERE action = 'finance_projection_updated' ORDER BY created_at DESC LIMIT 1").get();
+    assert.equal(logged.project_id, null, 'not in the contractor-readable project activity');
+    assert.equal(/300000|10500/.test(logged.details), false, 'no amounts in the audit trail');
+    pr = (await call('/api/projects/p-wis/bank-draws/projection', 'PUT', 'sa', { potential_sale_price: 300000, closing_cost_pct: 3 })).body.projection;
+    assert.equal(pr.closing_costs, 9000);
+    assert.equal(pr.net_proceeds, 291000);
+    pr = (await call('/api/projects/p-wis/bank-draws/projection', 'PUT', 'sa', { potential_sale_price: '' })).body.projection;
+    assert.equal(pr.potential_sale_price, null, 'blank clears it');
+    assert.equal(pr.closing_cost_pct, 3.5);
+    assert.equal(pr.net_proceeds, null);
+    const unsynced = (await call('/api/projects/p-new/bank-draws/projection', 'PUT', 'sa', { potential_sale_price: 100000 })).body.projection;
+    assert.equal(unsynced.net_proceeds, 96500);
+    assert.equal(unsynced.cash_back, null, 'no balance sheet, no payoff figure');
+
     // Revoke
     assert.equal((await call('/api/feature-access/bank_draws/pm', 'DELETE', 'sa')).status, 200);
     assert.equal((await call('/api/projects/p-wis/bank-draws', 'GET', 'pm')).status, 403);

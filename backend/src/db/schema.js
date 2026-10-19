@@ -3256,6 +3256,19 @@ function initializeSchema() {
       line_count INTEGER,
       unmatched_count INTEGER
     );
+
+    -- Finance tab manual figures (Mike, 2026-10-19): what the house could sell for and
+    -- the closing-cost percentage taken off it (3.5% unless changed). Kept out of the
+    -- projects table on purpose: project rows reach project managers, Finance must not.
+    CREATE TABLE IF NOT EXISTS project_finance_inputs (
+      project_id TEXT PRIMARY KEY,
+      potential_sale_price REAL,
+      closing_cost_pct REAL NOT NULL DEFAULT 3.5,
+      updated_by TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+    );
   `);
 
   try {

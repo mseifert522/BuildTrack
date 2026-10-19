@@ -312,7 +312,7 @@ async function runSync(source, userId) {
         match_json: JSON.stringify({ status: m.status, class_name: m.className || null, candidates: m.candidates || [] }),
         balance_sheet_json: JSON.stringify({ sections: balanceSheet.sections, found: balanceSheet.found }),
         profit_loss_json: JSON.stringify({ sections: profitLoss.sections, found: profitLoss.found }),
-        summary_json: JSON.stringify(financeSummary(balanceSheet, profitLoss)),
+        summary_json: JSON.stringify(balanceSheet.found ? financeSummary(balanceSheet, profitLoss) : null),
         period_start: data.period.start,
         period_end: data.period.end,
         synced_at: syncedAt,
@@ -426,7 +426,18 @@ function projectBankDraws(projectId, db = getDb()) {
   const holdbackFunded = sum(row => row.kind === 'holdback_funded');
   const drawn = r2(-sum(row => row.kind === 'draw'));
   const snapshot = db.prepare('SELECT * FROM project_finance_snapshots WHERE project_id = ?').get(projectId);
+  const financeSummaryJson = snapshot ? parseJson(snapshot.summary_json, null) : null;
+  const input = db.prepare(`
+    SELECT i.potential_sale_price, i.closing_cost_pct, i.updated_at, u.name AS updated_by_name
+    FROM project_finance_inputs i LEFT JOIN users u ON u.id = i.updated_by
+    WHERE i.project_id = ?
+  `).get(projectId);
   return {
+    projection: {
+      ...saleProjection(input, financeSummaryJson),
+      updated_at: input?.updated_at || null,
+      updated_by_name: input?.updated_by_name || null,
+    },
     summary: {
       holdback_funded: holdbackFunded,
       drawn,
@@ -442,7 +453,7 @@ function projectBankDraws(projectId, db = getDb()) {
       class_id: snapshot.class_id,
       class_names: parseJson(snapshot.class_names, []),
       match: parseJson(snapshot.match_json, { status: 'unlinked' }),
-      summary: parseJson(snapshot.summary_json, null),
+      summary: financeSummaryJson,
       balance_sheet: parseJson(snapshot.balance_sheet_json, { sections: [], found: false }),
       profit_loss: parseJson(snapshot.profit_loss_json, { sections: [], found: false }),
       period: { start: snapshot.period_start, end: snapshot.period_end },
@@ -451,9 +462,39 @@ function projectBankDraws(projectId, db = getDb()) {
   };
 }
 
+// Potential sale (Mike, 2026-10-19): a manually entered "what the house could sell
+// for", less closing costs (roughly 3.5% unless changed for the property). Against the
+// class's balance sheet: paying off what is owed (net of the holdback the lender still
+// holds) leaves the cash back at sale; the net proceeds over what is invested in the
+// property is the projected profit. Pure; exported for tests.
+const DEFAULT_CLOSING_COST_PCT = 3.5;
+
+function saleProjection(input, summary) {
+  const price = input && input.potential_sale_price !== null && input.potential_sale_price !== undefined ? Number(input.potential_sale_price) : null;
+  const pct = input && Number.isFinite(Number(input.closing_cost_pct)) ? Number(input.closing_cost_pct) : DEFAULT_CLOSING_COST_PCT;
+  const empty = { potential_sale_price: null, closing_cost_pct: pct, closing_costs: null, net_proceeds: null, loan_payoff: null, cash_back: null, invested: null, projected_profit: null };
+  if (price === null || !Number.isFinite(price)) return empty;
+  const closingCosts = r2(price * pct / 100);
+  const netProceeds = r2(price - closingCosts);
+  const loanPayoff = summary ? r2(summary.net_debt_after_escrow) : null;
+  const invested = summary ? r2(summary.invested) : null;
+  return {
+    potential_sale_price: r2(price),
+    closing_cost_pct: pct,
+    closing_costs: closingCosts,
+    net_proceeds: netProceeds,
+    loan_payoff: loanPayoff,
+    cash_back: loanPayoff === null ? null : r2(netProceeds - loanPayoff),
+    invested,
+    projected_profit: invested === null ? null : r2(netProceeds - invested),
+  };
+}
+
 module.exports = {
+  DEFAULT_CLOSING_COST_PCT,
   HOLDBACK_ACCOUNT,
   addressKey,
+  saleProjection,
   buildDrawLines,
   classifyLine,
   financeSummary,

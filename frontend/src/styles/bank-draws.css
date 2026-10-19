@@ -270,6 +270,48 @@ html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-stmt__total.is-top td {
 html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-stmt__grand td { background: var(--theme-selected) !important; }
 html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-stmt td.is-negative { color: var(--theme-danger) !important; }
 
+/* Potential sale (2026-10-19) */
+.bt-bd-proj-form {
+  display: grid;
+  grid-template-columns: minmax(0, 280px) minmax(0, 170px) minmax(0, 1fr);
+  align-items: end;
+  gap: 12px 14px;
+  padding: 16px;
+  border-radius: 11px;
+  border: 1px solid #e0e5ec;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-proj-form { background: var(--theme-raised) !important; border-color: var(--theme-border) !important; }
+.bt-bd-field { display: flex; min-width: 0; flex-direction: column; gap: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-field > span { color: var(--theme-muted) !important; }
+.bt-bd-input {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  border-radius: 9px;
+  border: 1px solid #cfd6df;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: 0;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+.bt-bd-proj-preview { margin: 0; padding-bottom: 11px; font-size: 13px; line-height: 1.5; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-proj-preview { color: var(--theme-muted) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-proj-preview strong { color: var(--theme-text) !important; }
+.bt-bd-proj-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
+.bt-bd-proj-actions.is-centered { justify-content: center; margin-top: 14px; }
+.bt-bd-proj-start p { margin: 0 auto; max-width: 70ch; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-proj-start p { color: var(--theme-muted) !important; }
+.bt-bd-proj-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-proj-meta > span { color: var(--theme-muted) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-btn--primary { background: var(--theme-accent) !important; border-color: var(--theme-accent) !important; color: var(--theme-onaccent) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-btn--primary:hover:not(:disabled) { background: var(--theme-accent) !important; filter: brightness(1.08); }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-btn.is-danger { color: var(--theme-danger) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+@media (max-width: 760px) {
+  .bt-bd-proj-form { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* Access manager */
 .bt-bd-access ul { margin: 0 0 18px; padding: 0; list-style: none; }
 .bt-bd-access__heading { margin: 0 0 6px; font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
