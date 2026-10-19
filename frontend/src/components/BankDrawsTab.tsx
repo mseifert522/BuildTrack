@@ -63,12 +63,18 @@ type Projection = {
   cash_in: number | null;
   updated_at: string | null;
   updated_by_name: string | null;
+  sale_profit: number | null;
+  is_rental: boolean;
+  rental_income: number | null;
+  rental_expenses: number | null;
+  rental_net: number | null;
+  total_cash_in: number | null;
 };
 
 type MatchStatus = 'exact' | 'number_differs' | 'mismatch' | 'auto_linked' | 'confirmed_alias' | 'unlinked' | 'ambiguous' | 'class_missing';
 
 type BankDrawPayload = {
-  project: { id: string; address: string; job_name: string; quickbooks_class_id: string | null; quickbooks_class_name: string | null; arv?: number | null };
+  project: { id: string; address: string; job_name: string; status?: string | null; quickbooks_class_id: string | null; quickbooks_class_name: string | null; arv?: number | null };
   default_commission_pct: number;
   projection: Projection;
   linked: boolean;
@@ -425,7 +431,7 @@ function PotentialSale({ projectId, data, onSaved }: { projectId: string; data: 
         <Kpi tone="in" icon={<Tag className="h-3.5 w-3.5" />} label="Potential sales price" value={usd(p.potential_sale_price)} note="Entered by hand" />
         <Kpi tone="out" label="Commission + closing costs" value={usd(p.selling_costs)} note={`${p.commission_pct}% commission ${usd(p.commission)} + closing costs ${usd(p.closing_costs)}`} />
         <Kpi tone="due" label="Net sale proceeds" value={usd(p.net_proceeds)} note="Sales price minus commission and closing costs" />
-        <Kpi tone={hasBooks ? ((p.projected_profit || 0) >= 0 ? 'good' : 'bad') : 'plain'} icon={<TrendingUp className="h-3.5 w-3.5" />} label="Projected profit" value={hasBooks ? usd(p.projected_profit) : '—'} note={hasBooks ? `Net proceeds minus ${usd(p.invested)} invested` : 'Needs the QuickBooks balance sheet'} />
+        <Kpi tone={hasBooks ? ((p.projected_profit || 0) >= 0 ? 'good' : 'bad') : 'plain'} icon={<TrendingUp className="h-3.5 w-3.5" />} label="Projected profit" value={hasBooks ? usd(p.projected_profit) : '—'} note={hasBooks ? (p.is_rental && p.rental_net !== null ? `Sale ${usd(p.sale_profit)} + rental to date ${usd(p.rental_net)}` : `Net proceeds minus ${usd(p.invested)} invested`) : 'Needs the QuickBooks balance sheet'} />
       </div>
       <div className="bt-bd-tablewrap">
         <table className="bt-bd-stmt">
@@ -443,7 +449,18 @@ function PotentialSale({ projectId, data, onSaved }: { projectId: string; data: 
                 </tr>
                 <tr className="bt-bd-stmt__grand"><td>Approximate funds to be returned (cash back at sale)</td><td className={`bt-bd-num${(p.cash_back || 0) < 0 ? ' is-negative' : ''}`}>{usd(p.cash_back)}</td></tr>
                 <tr className="bt-bd-stmt__line"><td>Total invested in the property (balance sheet)</td><td className="bt-bd-num">{usd(p.invested)}</td></tr>
-                <tr className="bt-bd-stmt__grand"><td>Projected profit (net sale proceeds minus invested)</td><td className={`bt-bd-num${(p.projected_profit || 0) < 0 ? ' is-negative' : ''}`}>{usd(p.projected_profit)}</td></tr>
+                {p.is_rental && p.rental_net !== null ? (
+                  // Long-term holding (Mike, 2026-10-19): rent and every expense on the class,
+                  // all QuickBooks history, are part of the projected profit.
+                  <>
+                    <tr className="bt-bd-stmt__total"><td>Profit on the sale (net sale proceeds minus invested)</td><td className={`bt-bd-num${(p.sale_profit || 0) < 0 ? ' is-negative' : ''}`}>{usd(p.sale_profit)}</td></tr>
+                    <tr className="bt-bd-stmt__line"><td>Plus rental income to date (all QuickBooks history)</td><td className="bt-bd-num">{usd(p.rental_income)}</td></tr>
+                    <tr className="bt-bd-stmt__line"><td>Less every expense on the class to date (maintenance, interest, taxes, insurance, utilities…)</td><td className="bt-bd-num is-negative">{usd(-(p.rental_expenses || 0))}</td></tr>
+                    <tr className="bt-bd-stmt__grand"><td>Projected profit (sale + rent less expenses to date)</td><td className={`bt-bd-num${(p.projected_profit || 0) < 0 ? ' is-negative' : ''}`}>{usd(p.projected_profit)}</td></tr>
+                  </>
+                ) : (
+                  <tr className="bt-bd-stmt__grand"><td>Projected profit (net sale proceeds minus invested)</td><td className={`bt-bd-num${(p.projected_profit || 0) < 0 ? ' is-negative' : ''}`}>{usd(p.projected_profit)}</td></tr>
+                )}
               </>
             )}
           </tbody>
@@ -465,6 +482,9 @@ function PotentialSale({ projectId, data, onSaved }: { projectId: string; data: 
 function FundsReturned({ p }: { p: Projection }) {
   if (p.cash_in === null) return null;
   const priced = p.potential_sale_price !== null && p.projected_profit !== null && p.cash_back !== null;
+  // A long-term holding's rent and expenses to date have already gone through the bank:
+  // losses the company covered are more cash in; net rent received is cash already back.
+  const rental = p.is_rental && p.rental_net !== null;
   return (
     <section className="bt-bd-return" aria-labelledby="bt-bd-return-title">
       <div className="bt-bd-return__head">
@@ -474,11 +494,23 @@ function FundsReturned({ p }: { p: Projection }) {
       <table className="bt-bd-stmt bt-bd-return__table">
         <tbody>
           <tr className="bt-bd-stmt__line">
-            <td>Cash in the project<span className="bt-bd-return__hint">Invested {usd(p.invested)}, less {usd(p.loan_payoff)} paid off to the lenders at sale</span></td>
+            <td>Cash in the {rental ? 'property' : 'project'}<span className="bt-bd-return__hint">Invested {usd(p.invested)}, less {usd(p.loan_payoff)} paid off to the lenders at sale</span></td>
             <td className="bt-bd-num">{usd(p.cash_in)}</td>
           </tr>
+          {rental && (
+            <>
+              <tr className="bt-bd-stmt__line">
+                <td>{(p.rental_net || 0) < 0 ? 'Plus rental losses the company covered' : 'Less rent already received, after expenses'}<span className="bt-bd-return__hint">Rent collected {usd(p.rental_income)} less every expense {usd(p.rental_expenses)} since the first QuickBooks entry</span></td>
+                <td className="bt-bd-num">{usd(-(p.rental_net || 0))}</td>
+              </tr>
+              <tr className="bt-bd-stmt__total">
+                <td>Total cash in the project</td>
+                <td className={`bt-bd-num${(p.total_cash_in || 0) < 0 ? ' is-negative' : ''}`}>{usd(p.total_cash_in)}</td>
+              </tr>
+            </>
+          )}
           <tr className="bt-bd-stmt__line">
-            <td>Plus projected profit<span className="bt-bd-return__hint">{priced ? `At the ${usd(p.potential_sale_price)} potential sale, after ${usd(p.selling_costs)} commission and closing costs` : 'Enter a potential sales price in section 2 to include the profit'}</span></td>
+            <td>Plus projected profit<span className="bt-bd-return__hint">{priced ? (rental ? `Sale ${usd(p.sale_profit)} plus rent less expenses to date ${usd(p.rental_net)}` : `At the ${usd(p.potential_sale_price)} potential sale, after ${usd(p.selling_costs)} commission and closing costs`) : 'Enter a potential sales price in section 2 to include the profit'}</span></td>
             <td className={`bt-bd-num${priced && (p.projected_profit || 0) < 0 ? ' is-negative' : ''}`}>{priced ? usd(p.projected_profit) : '—'}</td>
           </tr>
           <tr className="bt-bd-stmt__grand bt-bd-return__total">
@@ -587,6 +619,9 @@ export default function BankDrawsTab({ projectId, canManageAccess }: { projectId
           <Kpi tone="due" icon={<Scale className="h-3.5 w-3.5" />} label="Outstanding in escrow" value={usd(summary.holdback_remaining)} note="Still available to draw" />
           <Kpi label="Last draw" value={summary.last_draw_date ? shortDate(summary.last_draw_date) : '—'} note={summary.last_draw_amount !== null ? usd(summary.last_draw_amount) : 'No draws yet'} />
         </div>
+        {data.project.status === 'long_term_holding' && summary.draw_count > 0 && Math.abs(summary.holdback_remaining) < 0.01 && (
+          <p className="bt-bd-banner is-ok"><CheckCircle2 className="h-4 w-4" /> Construction loan closed out: the whole holdback has been drawn and nothing is held back by the lender. The current loans are listed under Project financing.</p>
+        )}
         {pct !== null && (
           <div className="bt-bd-progress" role="img" aria-label={`${pct}% of the holdback drawn`}>
             <div className="bt-bd-progress__bar"><span style={{ width: `${pct}%` }} /></div>
@@ -677,7 +712,7 @@ export default function BankDrawsTab({ projectId, canManageAccess }: { projectId
         )}
       </Block>
 
-      <Block step={4} title="Profit & Loss" subtitle={`Class ${className} · life to date, ${shortDate(finance?.period?.start)} – ${shortDate(finance?.period?.end)} · line by line from QuickBooks`}>
+      <Block step={4} title="Profit & Loss" subtitle={`Class ${className} · all QuickBooks history to ${shortDate(finance?.period?.end)} · line by line${data.project.status === 'long_term_holding' ? ' · as a long-term holding, this rent and every expense count toward the projected profit' : ''}`}>
         {!finance?.profit_loss?.found || !fin ? (
           <p className="bt-bd-empty">
             {neverSynced ? 'Loading from QuickBooks…' : `No income or expenses have been booked to class ${className} yet. While a house is being renovated, its costs are carried on the balance sheet above until it sells.`}

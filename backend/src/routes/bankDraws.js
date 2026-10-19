@@ -20,7 +20,7 @@ const MAX_CLOSING_COSTS = 10000000;
 
 function loadProject(req, res) {
   const project = getDb().prepare(`
-    SELECT id, address, job_name, quickbooks_class_id, quickbooks_class_name, arv
+    SELECT id, address, job_name, status, quickbooks_class_id, quickbooks_class_name, arv
     FROM projects WHERE id = ?
   `).get(req.params.projectId);
   if (!project) res.status(404).json({ error: 'Project not found' });

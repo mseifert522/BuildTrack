@@ -34,6 +34,11 @@ type Row = {
   projected_profit: number | null;
   coming_back: number | null;
   priced: boolean;
+  sale_profit: number | null;
+  rental_income: number | null;
+  rental_expenses: number | null;
+  rental_net: number | null;
+  total_cash_in: number | null;
 };
 type Totals = {
   count: number;
@@ -45,6 +50,10 @@ type Totals = {
   projected_profit: number;
   coming_back: number;
   carried_interest: number;
+  sale_profit: number;
+  rental_income: number;
+  rental_expenses: number;
+  rental_net: number;
   priced_count: number;
   unpriced: { name: string; project_id: string | null }[];
   monthly: Monthly;
@@ -200,8 +209,8 @@ export default function ConsolidatedFinances() {
       <div className="bt-bd-kpis bt-cf-kpis">
         <Kpi tone="in" icon={<Wallet className="h-3.5 w-3.5" />} label="Money outstanding" value={usd(t.cash_in)} note={`Company cash in ${t.count} properties: ${usd(t.invested)} invested, less loans paid off at sale`} />
         <Kpi tone="bad" icon={<Scale className="h-3.5 w-3.5" />} label="Loans outstanding" value={usd(t.loans_owed)} note={`All loans & payables on the properties · ${usd(t.escrow)} holdback still in escrow`} />
-        <Kpi tone="due" icon={<TrendingUp className="h-3.5 w-3.5" />} label="Profit potential" value={usd(t.projected_profit)} note={`${t.priced_count} of ${t.count} properties have a potential sales price`} />
-        <Kpi tone="good" icon={<ArrowDownLeft className="h-3.5 w-3.5" />} label="Coming back at sale" value={usd(t.coming_back)} note={`Equity ${usd(t.cash_in)} + profit ${usd(t.projected_profit)}`} />
+        <Kpi tone="due" icon={<TrendingUp className="h-3.5 w-3.5" />} label="Profit potential" value={usd(t.projected_profit)} note={`${t.priced_count} of ${t.count} properties priced${rentals.rows.length ? ' · rentals include rent and every expense to date' : ''}`} />
+        <Kpi tone="good" icon={<ArrowDownLeft className="h-3.5 w-3.5" />} label="Coming back at sale" value={usd(t.coming_back)} note="Cash back after loans, commission and closing costs (equity where no price is entered)" />
       </div>
 
       <Block step={1} title="All properties" subtitle="Projects and rentals from QuickBooks, by class · cash in = invested less what the lenders take back at payoff (net of escrow)">
@@ -257,7 +266,7 @@ export default function ConsolidatedFinances() {
               <Kpi tone="in" label="Equity in rentals" value={usd(rentals.totals.cash_in)} note={`${usd(rentals.totals.invested)} invested`} />
               <Kpi tone="bad" label="Loans on rentals" value={usd(rentals.totals.loans_owed)} note="Mortgages and other loans booked to the rentals" />
               <Kpi tone="out" label="Interest paid per month" value={usd(rentals.totals.monthly?.interest)} note={`Rent ${usd(rentals.totals.monthly?.income)} per month`} />
-              <Kpi tone={(rentals.totals.monthly?.net || 0) >= 0 ? 'good' : 'bad'} label="Net per month" value={usd(rentals.totals.monthly?.net)} note={`After ${usd(rentals.totals.monthly?.expenses)} expenses incl. interest`} />
+              <Kpi tone={(rentals.totals.rental_net || 0) >= 0 ? 'good' : 'bad'} label="Rent less expenses, to date" value={usd(rentals.totals.rental_net)} note={`Rent ${usd(rentals.totals.rental_income)} − every expense ${usd(rentals.totals.rental_expenses)}, all QuickBooks history`} />
             </div>
             <div className="bt-bd-tablewrap">
               <table className="bt-bd-register bt-cf-table">
@@ -270,6 +279,8 @@ export default function ConsolidatedFinances() {
                     <th scope="col" className="bt-bd-num">Interest / mo</th>
                     <th scope="col" className="bt-bd-num">Expenses / mo</th>
                     <th scope="col" className="bt-bd-num">Net / mo</th>
+                    <th scope="col" className="bt-bd-num">Rent less expenses to date</th>
+                    <th scope="col" className="bt-bd-num">Projected profit</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -285,12 +296,14 @@ export default function ConsolidatedFinances() {
                       <td className="bt-bd-num is-out">{usd(row.monthly?.interest)}</td>
                       <td className="bt-bd-num">{usd(row.monthly?.expenses)}</td>
                       <td className={`bt-bd-num bt-bd-strong${neg(row.monthly?.net ?? null)}`}>{usd(row.monthly?.net)}</td>
+                      <td className={`bt-bd-num${neg(row.rental_net)}`}>{usd(row.rental_net)}</td>
+                      <td className={`bt-bd-num bt-bd-strong${neg(row.projected_profit)}`}>{row.priced ? usd(row.projected_profit) : <span className="bt-cf-missing">no price</span>}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            <p className="bt-cf-note">Monthly figures are QuickBooks P&amp;L totals for the period divided by 12. Mortgage principal payments are not expenses, so they are not in “net per month”.</p>
+            <p className="bt-cf-note">Monthly figures are QuickBooks P&amp;L totals for the period divided by 12; mortgage principal payments are not expenses, so they are not in “net per month”. For a long-term holding the projected profit is the profit on the sale plus all rent collected less every expense on the class (maintenance, interest, taxes, insurance, utilities) since the first QuickBooks entry.</p>
           </>
         )}
       </Block>

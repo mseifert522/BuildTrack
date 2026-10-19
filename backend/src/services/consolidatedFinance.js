@@ -13,7 +13,7 @@ const r2 = n => Math.round(Number(n || 0) * 100) / 100;
 const sum = (rows, pick) => r2(rows.reduce((total, row) => total + Number(pick(row) || 0), 0));
 
 function rowFor(group, input) {
-  const projection = saleProjection(group.project_id ? input : null, group.summary);
+  const projection = saleProjection(group.project_id ? input : null, group.summary, { rental: group.type === 'rental' });
   const priced = projection.potential_sale_price !== null && projection.projected_profit !== null;
   const summary = group.summary || null;
   return {
@@ -40,8 +40,14 @@ function rowFor(group, input) {
     selling_costs: projection.selling_costs,
     projected_profit: priced ? projection.projected_profit : null,
     funds_returned: priced ? projection.cash_back : null,
-    // Equity (cash in) always comes back at a sale; profit only where a price is entered.
-    coming_back: group.cash_in === null ? null : r2(group.cash_in + (priced ? projection.projected_profit : 0)),
+    sale_profit: priced ? projection.sale_profit : null,
+    rental_income: projection.rental_income,
+    rental_expenses: projection.rental_expenses,
+    rental_net: projection.rental_net,
+    total_cash_in: projection.total_cash_in,
+    // What comes back when it sells: the cash back at sale where a price is entered; the
+    // equity (cash in) otherwise. A rental's past rent and expenses are already banked.
+    coming_back: priced ? projection.cash_back : group.cash_in,
     priced,
   };
 }
@@ -56,6 +62,10 @@ function totalsFor(rows) {
     cash_in: sum(rows, r => r.cash_in),
     equity: sum(rows, r => r.equity),
     projected_profit: sum(rows, r => r.projected_profit),
+    sale_profit: sum(rows, r => r.sale_profit),
+    rental_income: sum(rows, r => r.rental_income),
+    rental_expenses: sum(rows, r => r.rental_expenses),
+    rental_net: sum(rows, r => r.rental_net),
     coming_back: sum(rows, r => r.coming_back),
     carried_interest: sum(rows, r => r.carried_interest),
     priced_count: rows.filter(r => r.priced).length,

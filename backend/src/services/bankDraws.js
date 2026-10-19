@@ -16,7 +16,9 @@ const { logActivity } = require('../utils/audit');
 // negative = holdback down (drawn into the bank) - QuickBooks' Increase / Decrease.
 
 const HOLDBACK_ACCOUNT = '1130';
-const LEDGER_START = '2015-01-01';
+// Far enough back for all of New Urban Development's QuickBooks history (Mike: rental
+// income "going all the way back as far as QuickBooks is on record").
+const LEDGER_START = '2005-01-01';
 const DEFAULT_MAX_AGE_MS = 3 * 60 * 1000;
 const MIN_RESYNC_MS = 20 * 1000;
 const DIRECTIONS = new Set(['n', 's', 'e', 'w', 'north', 'south', 'east', 'west', 'ne', 'nw', 'se', 'sw']);
@@ -457,9 +459,10 @@ function projectBankDraws(projectId, db = getDb()) {
     FROM project_finance_inputs i LEFT JOIN users u ON u.id = i.updated_by
     WHERE i.project_id = ?
   `).get(projectId);
+  const projectStatus = db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId)?.status || null;
   return {
     projection: {
-      ...saleProjection(input, financeSummaryJson),
+      ...saleProjection(input, financeSummaryJson, { rental: isLongTermHolding(projectStatus) }),
       updated_at: input?.updated_at || null,
       updated_by_name: input?.updated_by_name || null,
     },
@@ -592,10 +595,21 @@ function buildConsolidatedGroups(reports, matches, projects) {
 // the net proceeds over what is invested in the property is the projected profit.
 // "Approximate funds to be returned" (Mike, 2026-10-19) = cash in the project
 // (invested minus what the loans take back at payoff) + projected profit, which is the
-// same number as the cash back at sale. Pure; exported for tests.
+// same number as the cash back at sale.
+// Long-term holdings (BuildTrack status Long Term Holding, e.g. 171 Davis; Mike
+// 2026-10-19): the projected profit also takes in all the rent collected and every
+// expense on the class - maintenance, interest, taxes, insurance, utilities, everything -
+// since the first QuickBooks entry (the class's life-to-date P&L). That rent and those
+// expenses have already gone through the bank, so for a rental:
+//   total cash in       = cash in the property - rental net to date
+//   projected profit    = profit on the sale + rental net to date
+//   funds to be returned = total cash in + projected profit = cash back at sale.
+// Pure; exported for tests.
 const DEFAULT_COMMISSION_PCT = 3;
 
-function saleProjection(input, summary) {
+const isLongTermHolding = status => status === 'long_term_holding';
+
+function saleProjection(input, summary, { rental = false } = {}) {
   const num = value => (value === null || value === undefined || value === '' ? null : Number(value));
   const price = input ? num(input.potential_sale_price) : null;
   const commissionPct = input && Number.isFinite(num(input.commission_pct)) ? num(input.commission_pct) : DEFAULT_COMMISSION_PCT;
@@ -604,16 +618,28 @@ function saleProjection(input, summary) {
   const invested = summary ? r2(summary.invested) : null;
   // Cash in the project needs only the balance sheet, so it shows before a price is entered.
   const cashIn = loanPayoff === null || invested === null ? null : r2(invested - loanPayoff);
+  const hasRentalBooks = rental && summary && summary.net_income !== null && summary.net_income !== undefined;
+  const rentalIncome = hasRentalBooks ? r2(summary.income) : null;
+  const rentalNet = hasRentalBooks ? r2(summary.net_income) : null;
+  const rentalFields = {
+    is_rental: Boolean(rental),
+    rental_income: rentalIncome,
+    rental_expenses: hasRentalBooks ? r2(rentalIncome - rentalNet) : null,
+    rental_net: rentalNet,
+    total_cash_in: cashIn === null ? null : r2(cashIn - (rentalNet || 0)),
+  };
   const empty = {
     potential_sale_price: null, commission_pct: commissionPct, commission: null, closing_costs: closingCosts,
     selling_costs: null, net_proceeds: null, loan_payoff: loanPayoff, cash_back: null, invested, cash_in: cashIn,
-    projected_profit: null,
+    sale_profit: null, projected_profit: null, ...rentalFields,
   };
   if (price === null || !Number.isFinite(price)) return empty;
   const commission = r2(price * commissionPct / 100);
   const sellingCosts = r2(commission + closingCosts);
   const netProceeds = r2(price - sellingCosts);
+  const saleProfit = invested === null ? null : r2(netProceeds - invested);
   return {
+    ...rentalFields,
     cash_in: cashIn,
     potential_sale_price: r2(price),
     commission_pct: commissionPct,
@@ -624,11 +650,13 @@ function saleProjection(input, summary) {
     loan_payoff: loanPayoff,
     cash_back: loanPayoff === null ? null : r2(netProceeds - loanPayoff),
     invested,
-    projected_profit: invested === null ? null : r2(netProceeds - invested),
+    sale_profit: saleProfit,
+    projected_profit: saleProfit === null ? null : r2(saleProfit + (rentalNet || 0)),
   };
 }
 
 module.exports = {
+  isLongTermHolding,
   buildConsolidatedGroups,
   relatedClassIds,
   normalizeClassName: normalize,

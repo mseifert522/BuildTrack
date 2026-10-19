@@ -150,6 +150,26 @@ const REPORTS = {
   assert.equal(davisPl.sections.some(n => n.kind === 'total' && n.group === 'NetOtherIncome'), false, 'zero subtotals are hidden');
   assert.equal(davisPl.sections.some(n => n.kind === 'total' && n.group === 'NetIncome'), true);
 
+  // Long-term holding: rent and every expense to date count in the projected profit.
+  const rentalSummary = { invested: 32000, net_debt_after_escrow: 1575, income: 1250, net_income: 850 };
+  const rp = bankDraws.saleProjection({ potential_sale_price: 40000, commission_pct: 3 }, rentalSummary, { rental: true });
+  assert.equal(rp.commission, 1200);
+  assert.equal(rp.net_proceeds, 38800);
+  assert.equal(rp.sale_profit, 6800);
+  assert.equal(rp.rental_income, 1250);
+  assert.equal(rp.rental_expenses, 400, 'everything on the class: income less net');
+  assert.equal(rp.rental_net, 850);
+  assert.equal(rp.projected_profit, 7650, 'sale profit + rental net to date');
+  assert.equal(rp.cash_back, 37225);
+  assert.equal(rp.total_cash_in, 29575, 'cash in the property less rent already banked');
+  assert.equal(Math.round((rp.total_cash_in + rp.projected_profit) * 100) / 100, rp.cash_back);
+  const flip = bankDraws.saleProjection({ potential_sale_price: 40000, commission_pct: 3 }, rentalSummary);
+  assert.equal(flip.projected_profit, 6800, 'a flip ignores rental figures');
+  assert.equal(flip.rental_net, null);
+  const unpricedRental = bankDraws.saleProjection(null, rentalSummary, { rental: true });
+  assert.equal(unpricedRental.rental_net, 850, 'rental figures show before a price is entered');
+  assert.equal(unpricedRental.projected_profit, null);
+
   assert.deepEqual(classifyUploadPath(path.resolve(process.env.UPLOADS_PATH), '/scope-documents/p-wis/x.pdf')?.kind, 'blocked');
 
   // ---- routes ---------------------------------------------------------------
@@ -354,6 +374,21 @@ const REPORTS = {
     assert.deepEqual(cons.loans_by_account.map(l => [l.account, l.amount]), [['2020 Bridge Loans Due <12 Months', 30000], ['2080 Tenant Security Deposits', 1575]]);
     assert.equal(cons.rentals.totals.monthly.interest, 500);
     assert.equal((await call('/api/finance/consolidated/sync', 'POST', 'pm2')).status, 403);
+    // Price 171 Davis (a long-term holding): its rent and expenses join the projected profit.
+    let davisTab = (await call('/api/projects/p-dav/bank-draws/projection', 'PUT', 'sa', { potential_sale_price: 40000 })).body;
+    assert.equal(davisTab.project.status, 'long_term_holding');
+    assert.equal(davisTab.projection.is_rental, true);
+    assert.equal(davisTab.projection.sale_profit, 6800);
+    assert.equal(davisTab.projection.rental_net, 850);
+    assert.equal(davisTab.projection.projected_profit, 7650);
+    assert.equal(davisTab.projection.cash_back, 37225);
+    assert.equal(davisTab.projection.total_cash_in, 29575);
+    cons = (await call('/api/finance/consolidated', 'GET', 'sa')).body;
+    assert.equal(cons.totals.projected_profit, 270528.21, 'Wisconsin 262,878.21 + Davis 7,650');
+    assert.equal(cons.totals.coming_back, 314980, 'cash back at sale: Wisconsin 277,755 + Davis 37,225');
+    assert.equal(cons.rentals.totals.rental_net, 850);
+    assert.equal(cons.rentals.rows[0].sale_profit, 6800);
+    assert.equal(cons.projects.rows[0].rental_net, null, 'flips carry no rental figures');
 
     // Revoke
     assert.equal((await call('/api/feature-access/bank_draws/pm', 'DELETE', 'sa')).status, 200);

@@ -106,6 +106,12 @@ html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-banner.is-warn {
   color: var(--theme-text) !important;
 }
 html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-banner.is-warn > svg { color: var(--theme-warning) !important; }
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-banner.is-ok {
+  background: color-mix(in srgb, var(--theme-success) 10%, var(--theme-surface)) !important;
+  border-color: color-mix(in srgb, var(--theme-success) 45%, var(--theme-border)) !important;
+  color: var(--theme-text) !important;
+}
+html[data-bt-scheme] body #root .bt-desktop-shell .bt-bd-banner.is-ok > svg { color: var(--theme-success) !important; }
 
 /* The three blocks */
 .bt-bd-block {
