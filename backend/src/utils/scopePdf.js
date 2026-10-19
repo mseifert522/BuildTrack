@@ -66,6 +66,21 @@ function scopeLines(text) {
     .filter(Boolean);
 }
 
+// Line items in the scope: a section's own line items when it has any, else the lines
+// of its scope text; plus line items not assigned to a section. The PDF and the tab's
+// caption both count with this.
+function scopeLineTotal(scopes, items) {
+  const scopeIds = new Set(scopes.map(scope => String(scope.id)));
+  const linked = new Map();
+  let loose = 0;
+  for (const item of items) {
+    const key = String(item.project_scope_id || '');
+    if (scopeIds.has(key)) linked.set(key, (linked.get(key) || 0) + 1);
+    else loose += 1;
+  }
+  return scopes.reduce((sum, scope) => sum + (linked.get(String(scope.id)) || scopeLines(scope.scope_of_work).length), 0) + loose;
+}
+
 function generateScopeOfWorkPDF({ project, scopes, items, generatedAt = new Date() }) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'LETTER', margins: { top: 54, bottom: 64, left: 58, right: 58 }, bufferPages: true, info: {
@@ -113,10 +128,7 @@ function generateScopeOfWorkPDF({ project, scopes, items, generatedAt = new Date
     }
     const scopeIds = new Set(scopes.map(scope => String(scope.id)));
     const looseItems = items.filter(item => !scopeIds.has(String(item.project_scope_id || '')));
-    const lineTotal = scopes.reduce((sum, scope) => {
-      const linked = items.filter(item => String(item.project_scope_id || '') === String(scope.id)).length;
-      return sum + (linked || scopeLines(scope.scope_of_work).length);
-    }, 0) + looseItems.length;
+    const lineTotal = scopeLineTotal(scopes, items);
     doc.moveDown(0.5);
     doc.font('Helvetica').fontSize(9).fillColor(MUTED).text(
       `Prepared ${easternDate(generatedAt, true)} (New York time)  |  ${scopes.length} scope section${scopes.length === 1 ? '' : 's'}  |  ${lineTotal} line item${lineTotal === 1 ? '' : 's'}`,
@@ -211,4 +223,4 @@ function generateScopeOfWorkPDF({ project, scopes, items, generatedAt = new Date
   });
 }
 
-module.exports = { generateScopeOfWorkPDF, pdfText, scopeLines };
+module.exports = { generateScopeOfWorkPDF, pdfText, scopeLines, scopeLineTotal };

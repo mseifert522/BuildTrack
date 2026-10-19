@@ -7,7 +7,7 @@ const { getDb } = require('../db/schema');
 const { authenticate, PROJECT_MANAGE_ROLES, UPPER_MANAGEMENT_ROLES } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
 const { logDataAccess } = require('../utils/dataAccessAudit');
-const { generateScopeOfWorkPDF } = require('../utils/scopePdf');
+const { generateScopeOfWorkPDF, scopeLineTotal } = require('../utils/scopePdf');
 
 // /api/projects/:projectId/scope-document - the Scope of Work PDF at the top of every
 // project's Scope of Work tab (Mike, 2026-10-19). Management uploads the official PDF
@@ -60,9 +60,9 @@ function contentDisposition(type, filename) {
 }
 
 function scopeCounts(db, projectId) {
-  const scopes = db.prepare('SELECT COUNT(*) AS n FROM project_scopes WHERE project_id = ?').get(projectId).n;
-  const lines = db.prepare('SELECT COUNT(*) AS n FROM construction_plan_items WHERE project_id = ?').get(projectId).n;
-  return { scopes, lines };
+  const scopes = db.prepare('SELECT id, scope_of_work FROM project_scopes WHERE project_id = ?').all(projectId);
+  const items = db.prepare('SELECT project_scope_id FROM construction_plan_items WHERE project_id = ?').all(projectId);
+  return { scopes: scopes.length, lines: scopeLineTotal(scopes, items) };
 }
 
 function listPayload(db, req, project) {
