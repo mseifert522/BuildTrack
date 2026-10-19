@@ -267,7 +267,11 @@ router.delete('/:documentId', (req, res) => {
   if (!doc) return res.status(404).json({ error: 'Scope of work file not found' });
   db.prepare('DELETE FROM project_scope_pdfs WHERE id = ?').run(doc.id);
   const filePath = documentPath(doc);
-  if (filePath) fs.rm(filePath, { force: true }, () => {});
+  try {
+    if (filePath) fs.rmSync(filePath, { force: true });
+  } catch (err) {
+    console.error('[ScopeDocument] Could not remove file:', err.message);
+  }
   logActivity({
     userId: req.user.id,
     projectId: project.id,
