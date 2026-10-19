@@ -2947,6 +2947,8 @@ router.get('/oauth/callback', async (req, res) => {
   `).get(state);
   if (!savedState) return res.status(400).send('QuickBooks authorization state expired or invalid.');
 
+  if (state.startsWith('ft1:')) return financeCompanies.complete(req, res, db, savedState);
+
   try {
     const token = await tokenRequest({
       grant_type: 'authorization_code',
@@ -4142,3 +4144,6 @@ router.financeTrackerQuery = async function financeTrackerQuery(query) {
   const connection = ftGetConnection(db);
   return qboQuery(db, connection, q);
 };
+
+const financeCompanies = require('../services/financeCompanies')({ getDb, qboConfig, qboEnvironment, qboApiBase, redirectUri, tokenRequest, encryptSecret, addSeconds, qboRequest, qboQuery, logActivity });
+router.financeCompanies = financeCompanies;

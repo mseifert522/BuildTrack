@@ -26,6 +26,23 @@ function authorizeFinanceTracker(req, res, next) {
 
 router.use(authorizeFinanceTracker);
 
+// Company-specific accounting access; tokens remain in this service.
+router.get('/companies', (_req, res) => res.json({ companies: quickBooksRoutes.financeCompanies.list() }));
+router.post('/companies/connect', (req, res) => {
+  try {
+    res.json(quickBooksRoutes.financeCompanies.connect(req.body?.tenantId, req.body?.companyName));
+  } catch (_error) {
+    res.status(400).json({ error: 'Unable to start company authorization. Check entity and app configuration.' });
+  }
+});
+router.get('/companies/:tenantId/reports', async (req, res) => {
+  try {
+    res.json(await quickBooksRoutes.financeCompanies.reports(req.params.tenantId, Number(req.query.year)));
+  } catch (_error) {
+    res.status(502).json({ error: 'Company reports are unavailable. Verify its QuickBooks authorization.' });
+  }
+});
+
 router.get('/projects', (_req, res) => {
   const db = getDb();
   const projects = db.prepare(`
