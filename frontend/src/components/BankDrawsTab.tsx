@@ -12,6 +12,9 @@ import '../styles/bank-draws.css';
 // (less the realtor commission and closing costs), then the project's financing (Balance
 // Sheet) and Profit & Loss for that class, each in its own block. Super Admin, and users a
 // Super Admin granted, only - the backend refuses everyone else.
+// Rentals (Long Term Holding, e.g. 171 Davis; Mike 2026-10-20): no draws, no profit and
+// loss, no projected profit - only the potential sale less commission and selling
+// expenses, less what is owed = the equity / cash return in total, then what is owed.
 
 type RegisterRow = {
   id: string;
@@ -65,6 +68,7 @@ type Projection = {
   updated_by_name: string | null;
   sale_profit: number | null;
   is_rental: boolean;
+  equity_cash_return: number | null;
   rental_income: number | null;
   rental_expenses: number | null;
   rental_net: number | null;
@@ -76,6 +80,7 @@ type MatchStatus = 'exact' | 'number_differs' | 'mismatch' | 'auto_linked' | 'co
 type BankDrawPayload = {
   project: { id: string; address: string; job_name: string; status?: string | null; quickbooks_class_id: string | null; quickbooks_class_name: string | null; arv?: number | null };
   default_commission_pct: number;
+  rental?: boolean;
   projection: Projection;
   linked: boolean;
   quickbooks: { connected: boolean; last_synced_at: string | null; status: string; error: string | null; stale: boolean };
@@ -248,10 +253,12 @@ function ClassMatch({ finance, project, canConfirm, onUpdated }: {
       </div>
     );
   }
+  // Unit / duplicate classes for the same address are one property for finances (Mike,
+  // 2026-10-20): name the property's class once; the others are listed on hover.
   return (
-    <p className="bt-bd-match">
+    <p className="bt-bd-match" title={extra.length ? `Also combined from QuickBooks: ${extra.join(', ')}` : undefined}>
       <CheckCircle2 className="h-3.5 w-3.5" />
-      QuickBooks class “{className}”{extra.length ? ` + ${extra.join(', ')}` : ''} · matched to this address{match.status === 'auto_linked' ? ' automatically' : ''}
+      QuickBooks class “{className}” · matched to this address{match.status === 'auto_linked' ? ' automatically' : ''}{extra.length ? ' · every class for this address combined into one' : ''}
     </p>
   );
 }
@@ -381,7 +388,7 @@ function PotentialSale({ projectId, data, onSaved }: { projectId: string; data: 
             onChange={event => setPct(event.currentTarget.value)} className="bt-bd-input" />
         </label>
         <label className="bt-bd-field">
-          <span>Closing costs</span>
+          <span>{p.is_rental ? 'Selling expenses (closing costs)' : 'Closing costs'}</span>
           <span className="bt-bd-money">
             <span className="bt-bd-money__sign" aria-hidden="true">$</span>
             <input type="text" inputMode="decimal" autoComplete="off" data-autosave="off" value={closing} placeholder="0.00"
@@ -420,6 +427,48 @@ function PotentialSale({ projectId, data, onSaved }: { projectId: string; data: 
           )}
         </div>
       </div>
+    );
+  }
+
+  if (p.is_rental) {
+    // A rental has no projected profit: sale price less commission and selling expenses,
+    // less what is owed, is the cash expected back - its equity / cash return in total.
+    const fin = data.finance?.summary || null;
+    const owedKnown = p.loan_payoff !== null;
+    const escrowHeld = fin && Math.abs(fin.escrow_balance || 0) >= 0.01 ? fin.escrow_balance : 0;
+    return (
+      <>
+        <div className="bt-bd-kpis">
+          <Kpi tone="in" icon={<Tag className="h-3.5 w-3.5" />} label="Potential sales price" value={usd(p.potential_sale_price)} note="Entered by hand" />
+          <Kpi tone="out" label="Commission + selling expenses" value={usd(p.selling_costs)} note={`${p.commission_pct}% commission ${usd(p.commission)} + selling expenses ${usd(p.closing_costs)}`} />
+          <Kpi tone="bad" icon={<Scale className="h-3.5 w-3.5" />} label="Currently owed" value={owedKnown ? usd(p.loan_payoff) : '—'} note={owedKnown ? 'Paid off or credited at sale (QuickBooks)' : 'Needs the QuickBooks balance sheet'} />
+          <Kpi tone={owedKnown ? ((p.equity_cash_return || 0) >= 0 ? 'good' : 'bad') : 'plain'} icon={<TrendingUp className="h-3.5 w-3.5" />} label="Equity / cash return in total" value={owedKnown ? usd(p.equity_cash_return) : '—'} note="Cash expected back to the company after the sale" />
+        </div>
+        <div className="bt-bd-tablewrap">
+          <table className="bt-bd-stmt">
+            <thead><tr><th scope="col">Potential sale of the rental</th><th scope="col" className="bt-bd-num">Amount</th></tr></thead>
+            <tbody>
+              <tr className="bt-bd-stmt__line"><td>Potential sales price</td><td className="bt-bd-num">{usd(p.potential_sale_price)}</td></tr>
+              <tr className="bt-bd-stmt__line"><td>Less realtor commission ({p.commission_pct}%)</td><td className="bt-bd-num is-negative">{usd(-(p.commission || 0))}</td></tr>
+              <tr className="bt-bd-stmt__line"><td>Less selling expenses (closing costs){p.closing_costs ? '' : ' (none entered)'}</td><td className={`bt-bd-num${p.closing_costs ? ' is-negative' : ''}`}>{usd(-(p.closing_costs || 0))}</td></tr>
+              <tr className="bt-bd-stmt__total"><td>Net sale proceeds</td><td className="bt-bd-num">{usd(p.net_proceeds)}</td></tr>
+              {owedKnown && (
+                <>
+                  <tr className="bt-bd-stmt__line">
+                    <td>Less what is currently owed{escrowHeld ? ` (${usd(fin?.total_liabilities)}, less ${usd(escrowHeld)} held in escrow)` : ''} · see “What is owed” below</td>
+                    <td className="bt-bd-num is-negative">{usd(-(p.loan_payoff || 0))}</td>
+                  </tr>
+                  <tr className="bt-bd-stmt__grand"><td>Equity / cash return in total (cash back to the company after the sale)</td><td className={`bt-bd-num${(p.equity_cash_return || 0) < 0 ? ' is-negative' : ''}`}>{usd(p.equity_cash_return)}</td></tr>
+                </>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div className="bt-bd-proj-meta">
+          <span>{p.updated_by_name ? `Entered by ${p.updated_by_name}` : 'Entered'}{p.updated_at ? ` · ${formatEasternRelative(p.updated_at)}` : ''} · rent and expenses (profit and loss) are kept separate and are not part of these figures</span>
+          <button type="button" className="bt-bd-btn" onClick={() => startEdit()}><PencilLine className="h-4 w-4" /> Edit</button>
+        </div>
+      </>
     );
   }
 
@@ -579,6 +628,9 @@ export default function BankDrawsTab({ projectId, canManageAccess }: { projectId
   const newestFirst = [...register].reverse();
   const neverSynced = !quickbooks.last_synced_at;
   const pct = summary.percent_drawn === null ? null : Math.round(summary.percent_drawn * 100);
+  // Rentals (Mike, 2026-10-20): no draws, no profit and loss - the potential sale, then
+  // what is owed. The server already leaves the draws and P&L out of a rental's payload.
+  const rental = Boolean(data.rental ?? data.projection.is_rental);
 
   return (
     <div className="bt-bd">
@@ -612,6 +664,7 @@ export default function BankDrawsTab({ projectId, canManageAccess }: { projectId
         <p className="bt-bd-banner is-warn"><AlertTriangle className="h-4 w-4" /> The last QuickBooks update failed: {quickbooks.error} Showing the last copy BuildTrack saved.</p>
       )}
 
+      {!rental && (
       <Block step={1} title="Bank draws" subtitle={`QuickBooks account 1130 · Funds in Escrow / Holdbacks · class ${className}`}>
         <div className="bt-bd-kpis">
           <Kpi tone="in" icon={<ArrowDownLeft className="h-3.5 w-3.5" />} label="In · holdback set aside" value={usd(summary.holdback_funded)} note="Held by the lender at closing" />
@@ -685,11 +738,38 @@ export default function BankDrawsTab({ projectId, canManageAccess }: { projectId
           </div>
         )}
       </Block>
+      )}
 
-      <Block step={2} title="Potential sale" subtitle="Entered by hand · what the house could sell for, less the realtor commission and closing costs">
+      <Block step={rental ? 1 : 2} title="Potential sale" subtitle={rental
+        ? 'Entered by hand · what the property could sell for, less the realtor commission and selling expenses, less what is owed = the equity / cash return in total'
+        : 'Entered by hand · what the house could sell for, less the realtor commission and closing costs'}>
         <PotentialSale projectId={projectId} data={data} onSaved={setData} />
       </Block>
 
+      {rental ? (
+        <Block step={2} title="What is owed" subtitle={`QuickBooks liabilities for ${className}${(finance?.class_names?.length || 0) > 1 ? ' (all classes for this address combined)' : ''} · as of ${shortDate(finance?.period?.end)} · paid off or credited at sale`}>
+          {!fin ? (
+            <p className="bt-bd-empty">{neverSynced ? 'Loading from QuickBooks…' : `QuickBooks has no balance sheet entries for class ${className}.`}</p>
+          ) : !finance?.balance_sheet?.found ? (
+            <p className="bt-bd-empty">Nothing is owed on this property in QuickBooks.</p>
+          ) : (
+            <>
+              <div className="bt-bd-kpis">
+                <Kpi tone="bad" icon={<Scale className="h-3.5 w-3.5" />} label="Currently owed" value={usd(fin.total_liabilities)} note="Every loan and deposit booked to this property" />
+                {Math.abs(fin.escrow_balance || 0) >= 0.01 && (
+                  <Kpi tone="due" icon={<ArrowDownLeft className="h-3.5 w-3.5" />} label="Held by the lender in escrow" value={usd(fin.escrow_balance)} note={`Paid off at sale ${usd(fin.net_debt_after_escrow)}`} />
+                )}
+              </div>
+              <div className="bt-bd-tablewrap">
+                <table className="bt-bd-stmt">
+                  <thead><tr><th scope="col">Owed (QuickBooks liabilities)</th><th scope="col" className="bt-bd-num">Balance</th></tr></thead>
+                  <tbody><StatementRows nodes={finance.balance_sheet.sections} /></tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </Block>
+      ) : (
       <Block step={3} title="Project financing" subtitle={`Balance sheet for class ${className} · as of ${shortDate(finance?.period?.end)} · line by line from QuickBooks`}>
         {!finance?.balance_sheet?.found || !fin ? (
           <p className="bt-bd-empty">{neverSynced ? 'Loading from QuickBooks…' : `QuickBooks has no balance sheet entries for class ${className}.`}</p>
@@ -711,8 +791,10 @@ export default function BankDrawsTab({ projectId, canManageAccess }: { projectId
           </>
         )}
       </Block>
+      )}
 
-      <Block step={4} title="Profit & Loss" subtitle={`Class ${className} · all QuickBooks history to ${shortDate(finance?.period?.end)} · line by line${data.project.status === 'long_term_holding' ? ' · as a long-term holding, this rent and every expense count toward the projected profit' : ''}`}>
+      {!rental && (
+      <Block step={4} title="Profit & Loss" subtitle={`Class ${className} · all QuickBooks history to ${shortDate(finance?.period?.end)} · line by line`}>
         {!finance?.profit_loss?.found || !fin ? (
           <p className="bt-bd-empty">
             {neverSynced ? 'Loading from QuickBooks…' : `No income or expenses have been booked to class ${className} yet. While a house is being renovated, its costs are carried on the balance sheet above until it sells.`}
@@ -734,6 +816,7 @@ export default function BankDrawsTab({ projectId, canManageAccess }: { projectId
           </>
         )}
       </Block>
+      )}
 
       {accessOpen && <AccessManager onClose={() => setAccessOpen(false)} />}
     </div>

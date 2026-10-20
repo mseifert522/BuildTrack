@@ -68,14 +68,27 @@ function compareKeys(projectKeyList, classKey) {
   return 'mismatch';
 }
 
-// Unit classes kept beside a property ("171 Davis Unit A") and true sub-classes
-// belong to the property's statements too.
+// Every class for the same address is one property for finances (Mike, 2026-10-20: "do
+// not separate by A, B, or C ... even if QuickBooks is showing separate classes,
+// consolidate it because it is one class"): unit classes ("171 Davis Unit A", "171 Davis
+// - Unit C", "171 Davis Apt 2", "171 Davis St Upper"...), any other class with the same
+// house number and street, and true sub-classes all count toward the property - classes
+// QuickBooks shows as "(deleted)" too, since entries can still sit on them.
 function relatedClassIds(cls, classes) {
   const base = normalize(cls.name);
+  const key = addressKey(cls.name);
+  const sameAddress = c => {
+    const other = key ? addressKey(c.name) : null;
+    return Boolean(other && other.number === key.number && other.street === key.street);
+  };
   return classes
-    .filter(c => c.id !== cls.id && (c.parentId === cls.id || (base && normalize(c.name).startsWith(`${base} unit `))))
+    .filter(c => c.id !== cls.id && (c.parentId === cls.id || (base && normalize(c.name).startsWith(`${base} unit `)) || sameAddress(c)))
     .map(c => c.id);
 }
+
+// Of several classes for one address, the property's class is the shortest name
+// ("171 Davis" over "171 Davis Unit A"); ties go to the lower id. The rest fold into it.
+const classLeadOrder = (a, b) => normalize(a.name).length - normalize(b.name).length || String(a.id).localeCompare(String(b.id));
 
 // Pure: decide each project's class (link, verify, or auto-match by address).
 // aliasesByProject: projectId -> Set of normalized class names confirmed as the same
@@ -106,8 +119,10 @@ function matchProjectClasses(projects, classes, aliasesByProject = new Map()) {
       return { projectId: project.id, classId: cls.id, className: cls.name, status, relatedIds, aliasNames: [...aliases] };
     }
     const exact = propertyClasses.filter(c => !claimed.has(c.id) && compareKeys(keys, addressKey(c.name)) === 'exact');
-    // "171 Davis Unit A" belongs to "171 Davis": keep the property class, not its units.
-    const candidates = exact.filter(c => !exact.some(other => other.id !== c.id && relatedClassIds(other, classes).includes(c.id)));
+    // "171 Davis Unit A" belongs to "171 Davis": keep the property class, not its units
+    // (every class for the address is one property; the shortest name leads).
+    const candidates = exact.filter(c => !exact.some(other => other.id !== c.id
+      && relatedClassIds(other, classes).includes(c.id) && classLeadOrder(other, c) < 0));
     if (candidates.length === 1) {
       const cls = candidates[0];
       claimed.add(cls.id);
@@ -460,13 +475,25 @@ function projectBankDraws(projectId, db = getDb()) {
     WHERE i.project_id = ?
   `).get(projectId);
   const projectStatus = db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId)?.status || null;
+  const rental = isLongTermHolding(projectStatus);
+  const finance = snapshot ? {
+    class_id: snapshot.class_id,
+    class_names: parseJson(snapshot.class_names, []),
+    match: parseJson(snapshot.match_json, { status: 'unlinked' }),
+    summary: financeSummaryJson,
+    balance_sheet: parseJson(snapshot.balance_sheet_json, { sections: [], found: false }),
+    profit_loss: parseJson(snapshot.profit_loss_json, { sections: [], found: false }),
+    period: { start: snapshot.period_start, end: snapshot.period_end },
+    synced_at: snapshot.synced_at,
+  } : null;
   return {
+    rental,
     projection: {
-      ...saleProjection(input, financeSummaryJson, { rental: isLongTermHolding(projectStatus) }),
+      ...saleProjection(input, financeSummaryJson, { rental }),
       updated_at: input?.updated_at || null,
       updated_by_name: input?.updated_by_name || null,
     },
-    summary: {
+    summary: rental ? { ...EMPTY_DRAW_SUMMARY } : {
       holdback_funded: holdbackFunded,
       drawn,
       escrow_adjustments: sum(row => row.kind === 'escrow_adjustment'),
@@ -476,17 +503,8 @@ function projectBankDraws(projectId, db = getDb()) {
       last_draw_amount: draws.length ? draws[draws.length - 1].decrease : null,
       percent_drawn: holdbackFunded > 0 ? Math.min(1, Math.max(0, drawn / holdbackFunded)) : null,
     },
-    register,
-    finance: snapshot ? {
-      class_id: snapshot.class_id,
-      class_names: parseJson(snapshot.class_names, []),
-      match: parseJson(snapshot.match_json, { status: 'unlinked' }),
-      summary: financeSummaryJson,
-      balance_sheet: parseJson(snapshot.balance_sheet_json, { sections: [], found: false }),
-      profit_loss: parseJson(snapshot.profit_loss_json, { sections: [], found: false }),
-      period: { start: snapshot.period_start, end: snapshot.period_end },
-      synced_at: snapshot.synced_at,
-    } : null,
+    register: rental ? [] : register,
+    finance: rental ? rentalFinanceView(finance) : finance,
   };
 }
 
@@ -564,14 +582,15 @@ function buildConsolidatedGroups(reports, matches, projects) {
   }
   // Address-named classes with a balance that no BuildTrack project claims.
   const isDeleted = c => /\(deleted/i.test(c.name);
-  const candidates = classes.filter(c => !claimed.has(c.id) && !isDeleted(c) && addressKey(c.name));
-  const units = new Set(candidates.flatMap(c => relatedClassIds(c, classes)));
+  // One group per address: the shortest class name leads and every other class for the
+  // address (units, twins) folds in, so a property never shows up split.
+  const candidates = classes.filter(c => !claimed.has(c.id) && !isDeleted(c) && addressKey(c.name)).sort(classLeadOrder);
   for (const cls of candidates) {
-    if (units.has(cls.id) || claimed.has(cls.id)) continue;
+    if (claimed.has(cls.id)) continue;
     const classIds = [cls.id, ...relatedClassIds(cls, classes).filter(id => !claimed.has(id))];
+    classIds.forEach(id => claimed.add(id));
     const figures = groupFigures(reports, classIds);
     if (!figures.has_balance) continue;
-    classIds.forEach(id => claimed.add(id));
     groups.push({
       key: `class:${cls.id}`,
       project_id: null,
@@ -596,14 +615,12 @@ function buildConsolidatedGroups(reports, matches, projects) {
 // "Approximate funds to be returned" (Mike, 2026-10-19) = cash in the project
 // (invested minus what the loans take back at payoff) + projected profit, which is the
 // same number as the cash back at sale.
-// Long-term holdings (BuildTrack status Long Term Holding, e.g. 171 Davis; Mike
-// 2026-10-19): the projected profit also takes in all the rent collected and every
-// expense on the class - maintenance, interest, taxes, insurance, utilities, everything -
-// since the first QuickBooks entry (the class's life-to-date P&L). That rent and those
-// expenses have already gone through the bank, so for a rental:
-//   total cash in       = cash in the property - rental net to date
-//   projected profit    = profit on the sale + rental net to date
-//   funds to be returned = total cash in + projected profit = cash back at sale.
+// Rentals - long-term holdings, BuildTrack status Long Term Holding, e.g. 171 Davis
+// (Mike, 2026-10-20, replacing the 10-19 rent-and-expenses version): a rental has no
+// projected profit. It shows only the potential sale less the commission and selling
+// (closing) costs, less what is currently owed, and that is its "equity / cash return in
+// total" - the cash expected back to the company after the sale. Profit and loss (rent,
+// expenses), invested and cash-in figures are kept out of a rental's numbers entirely.
 // Pure; exported for tests.
 const DEFAULT_COMMISSION_PCT = 3;
 
@@ -614,46 +631,65 @@ function saleProjection(input, summary, { rental = false } = {}) {
   const price = input ? num(input.potential_sale_price) : null;
   const commissionPct = input && Number.isFinite(num(input.commission_pct)) ? num(input.commission_pct) : DEFAULT_COMMISSION_PCT;
   const closingCosts = input && Number.isFinite(num(input.closing_costs_amount)) ? r2(num(input.closing_costs_amount)) : 0;
+  // What is currently owed: every liability on the class, net of any holdback the lender
+  // still holds (it comes off the payoff).
   const loanPayoff = summary ? r2(summary.net_debt_after_escrow) : null;
-  const invested = summary ? r2(summary.invested) : null;
+  // A rental carries no invested / cash-in / profit figures (see above).
+  const invested = summary && !rental ? r2(summary.invested) : null;
   // Cash in the project needs only the balance sheet, so it shows before a price is entered.
   const cashIn = loanPayoff === null || invested === null ? null : r2(invested - loanPayoff);
-  const hasRentalBooks = rental && summary && summary.net_income !== null && summary.net_income !== undefined;
-  const rentalIncome = hasRentalBooks ? r2(summary.income) : null;
-  const rentalNet = hasRentalBooks ? r2(summary.net_income) : null;
-  const rentalFields = {
-    is_rental: Boolean(rental),
-    rental_income: rentalIncome,
-    rental_expenses: hasRentalBooks ? r2(rentalIncome - rentalNet) : null,
-    rental_net: rentalNet,
-    total_cash_in: cashIn === null ? null : r2(cashIn - (rentalNet || 0)),
-  };
+  const pnlFree = { rental_income: null, rental_expenses: null, rental_net: null, total_cash_in: null };
   const empty = {
+    is_rental: Boolean(rental),
     potential_sale_price: null, commission_pct: commissionPct, commission: null, closing_costs: closingCosts,
     selling_costs: null, net_proceeds: null, loan_payoff: loanPayoff, cash_back: null, invested, cash_in: cashIn,
-    sale_profit: null, projected_profit: null, ...rentalFields,
+    sale_profit: null, projected_profit: null, equity_cash_return: null, ...pnlFree,
   };
   if (price === null || !Number.isFinite(price)) return empty;
   const commission = r2(price * commissionPct / 100);
   const sellingCosts = r2(commission + closingCosts);
   const netProceeds = r2(price - sellingCosts);
+  const cashBack = loanPayoff === null ? null : r2(netProceeds - loanPayoff);
   const saleProfit = invested === null ? null : r2(netProceeds - invested);
   return {
-    ...rentalFields,
-    cash_in: cashIn,
+    ...empty,
     potential_sale_price: r2(price),
-    commission_pct: commissionPct,
     commission,
-    closing_costs: closingCosts,
     selling_costs: sellingCosts,
     net_proceeds: netProceeds,
-    loan_payoff: loanPayoff,
-    cash_back: loanPayoff === null ? null : r2(netProceeds - loanPayoff),
-    invested,
-    sale_profit: saleProfit,
-    projected_profit: saleProfit === null ? null : r2(saleProfit + (rentalNet || 0)),
+    cash_back: cashBack,
+    sale_profit: rental ? null : saleProfit,
+    projected_profit: rental ? null : saleProfit,
+    // A rental's bottom line: the total cash expected back after the sale.
+    equity_cash_return: rental ? cashBack : null,
   };
 }
+
+// Rentals show no construction draws (Mike, 2026-10-20: "there are no more draws coming
+// from any banks" - 171 Davis's 2025 holdback was set aside 07-29 and drawn in full
+// 08-19 on a bridge loan since paid off) and no profit and loss; their balance sheet is
+// cut to what is owed. The 1130 lines stay in QuickBooks and in the synced table; they are
+// simply not part of a rental's Finance tab.
+function rentalFinanceView(finance) {
+  if (!finance) return finance;
+  const liabilities = findSection(finance.balance_sheet?.sections, n => n.group === 'Liabilities' || /^liabilities$/i.test(n.title));
+  const summary = finance.summary || null;
+  return {
+    ...finance,
+    summary: summary ? {
+      total_liabilities: summary.total_liabilities,
+      escrow_balance: summary.escrow_balance,
+      net_debt_after_escrow: summary.net_debt_after_escrow,
+    } : null,
+    balance_sheet: { found: Boolean(liabilities), sections: liabilities ? [liabilities] : [] },
+    profit_loss: { found: false, sections: [] },
+  };
+}
+
+const EMPTY_DRAW_SUMMARY = {
+  holdback_funded: 0, drawn: 0, escrow_adjustments: 0, holdback_remaining: 0,
+  draw_count: 0, last_draw_date: null, last_draw_amount: null, percent_drawn: null,
+};
 
 module.exports = {
   isLongTermHolding,

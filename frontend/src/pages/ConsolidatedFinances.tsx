@@ -9,11 +9,13 @@ import '../styles/bank-draws.css';
 // Consolidated Finances (Mike, 2026-10-19): "the combined amount of money outstanding,
 // combined amount of loans and combined profit potential and combined money that should
 // be coming back into the company upon the sale of the property, including equity",
-// with rentals such as 171 Davis (equity, loans, interest paid monthly) - every New
-// Urban Development project and rental, from QuickBooks. Super Admin, or users a Super
-// Admin granted. Figures come from the server (services/consolidatedFinance.js).
+// every New Urban Development project and rental, from QuickBooks. Super Admin, or users
+// a Super Admin granted. Figures come from the server (services/consolidatedFinance.js).
+// Rentals (Mike, 2026-10-20): only the potential sale price less commission and selling
+// expenses, and what is owed, giving the equity / cash return in total - no projected
+// profit, no rent or expenses (profit and loss is separate), no invested or cash-in.
+// Every QuickBooks class for one address (171 Davis, Unit A, Unit B...) is one property.
 
-type Monthly = { income: number; expenses: number; interest: number; net: number } | null;
 type Row = {
   key: string;
   project_id: string | null;
@@ -24,39 +26,40 @@ type Row = {
   sold: boolean;
   invested: number | null;
   loans_owed: number | null;
+  net_debt: number | null;
   escrow: number | null;
   equity: number | null;
   cash_in: number | null;
   carried_interest: number;
   loans: { account: string; amount: number }[];
-  monthly: Monthly;
   potential_sale_price: number | null;
+  commission: number | null;
+  selling_costs: number | null;
+  net_proceeds: number | null;
   projected_profit: number | null;
+  equity_cash_return: number | null;
   coming_back: number | null;
   priced: boolean;
   sale_profit: number | null;
-  rental_income: number | null;
-  rental_expenses: number | null;
-  rental_net: number | null;
-  total_cash_in: number | null;
 };
 type Totals = {
   count: number;
   invested: number;
   loans_owed: number;
+  net_debt: number;
   escrow: number;
   cash_in: number;
   equity: number;
   projected_profit: number;
+  potential_sale_price: number;
+  selling_costs: number;
+  net_proceeds: number;
+  equity_cash_return: number;
   coming_back: number;
   carried_interest: number;
   sale_profit: number;
-  rental_income: number;
-  rental_expenses: number;
-  rental_net: number;
   priced_count: number;
-  unpriced: { name: string; project_id: string | null }[];
-  monthly: Monthly;
+  unpriced: { name: string; project_id: string | null; rental?: boolean }[];
 };
 type Payload = {
   quickbooks: { connected: boolean; last_synced_at: string | null; error: string | null; stale: boolean; has_snapshot: boolean };
@@ -100,36 +103,52 @@ function Block({ step, title, subtitle, children }: { step: number; title: strin
 
 const neg = (value: number | null) => (value !== null && value < 0 ? ' is-negative' : '');
 
+// One property per address: name its class once, list any unit / twin classes on hover.
+function classLine(row: Row) {
+  if (!row.in_buildtrack) return { text: 'In QuickBooks, not in BuildTrack', title: undefined };
+  const [first, ...rest] = row.class_names;
+  return {
+    text: `QuickBooks: ${first || row.name}${rest.length ? ' · all classes for this address combined' : ''}`,
+    title: rest.length ? `Also combined: ${rest.join(', ')}` : undefined,
+  };
+}
+
+// A rental has no invested / escrow / cash-in / projected-profit figures: those cells stay
+// blank and its "coming back" is its equity / cash return in total.
+const rentalBlank = <span className="bt-cf-missing" title="Rentals show only the sale price less commission and selling expenses, and what is owed">—</span>;
+
 function PropertyRow({ row }: { row: Row }) {
+  const rental = row.type === 'rental';
+  const cls = classLine(row);
   return (
     <tr>
       <td>
         {row.project_id
           ? <Link to={`/projects/${row.project_id}#finance`} className="bt-cf-link">{row.name}<ExternalLink className="h-3 w-3" /></Link>
           : <span className="bt-cf-name">{row.name}</span>}
-        <span className="bt-bd-sub">{row.in_buildtrack ? `QuickBooks: ${row.class_names.join(', ')}` : 'In QuickBooks, not in BuildTrack'}</span>
+        <span className="bt-bd-sub" title={cls.title}>{cls.text}</span>
       </td>
-      <td className="bt-bd-num">{usd(row.invested)}</td>
+      <td className="bt-bd-num">{rental ? rentalBlank : usd(row.invested)}</td>
       <td className="bt-bd-num">{usd(row.loans_owed)}</td>
-      <td className="bt-bd-num">{usd(row.escrow)}</td>
-      <td className={`bt-bd-num bt-bd-strong${neg(row.cash_in)}`}>{usd(row.cash_in)}</td>
+      <td className="bt-bd-num">{rental ? rentalBlank : usd(row.escrow)}</td>
+      <td className={`bt-bd-num bt-bd-strong${neg(row.cash_in)}`}>{rental ? rentalBlank : usd(row.cash_in)}</td>
       <td className="bt-bd-num">{row.potential_sale_price !== null ? usd(row.potential_sale_price) : <span className="bt-cf-missing">not entered</span>}</td>
-      <td className={`bt-bd-num${neg(row.projected_profit)}`}>{usd(row.projected_profit)}</td>
-      <td className={`bt-bd-num bt-bd-strong${neg(row.coming_back)}`}>{usd(row.coming_back)}</td>
+      <td className={`bt-bd-num${neg(row.projected_profit)}`}>{rental ? rentalBlank : usd(row.projected_profit)}</td>
+      <td className={`bt-bd-num bt-bd-strong${neg(row.coming_back)}`}>{rental && !row.priced ? <span className="bt-cf-missing">no price</span> : usd(row.coming_back)}</td>
     </tr>
   );
 }
 
-function SubtotalRow({ label, totals, grand = false }: { label: string; totals: Totals; grand?: boolean }) {
+function SubtotalRow({ label, totals, grand = false, rental = false }: { label: string; totals: Totals; grand?: boolean; rental?: boolean }) {
   return (
     <tr className={grand ? 'bt-cf-grand' : 'bt-cf-subtotal'}>
       <td>{label}</td>
-      <td className="bt-bd-num">{usd(totals.invested)}</td>
+      <td className="bt-bd-num">{rental ? rentalBlank : usd(totals.invested)}</td>
       <td className="bt-bd-num">{usd(totals.loans_owed)}</td>
-      <td className="bt-bd-num">{usd(totals.escrow)}</td>
-      <td className={`bt-bd-num${neg(totals.cash_in)}`}>{usd(totals.cash_in)}</td>
+      <td className="bt-bd-num">{rental ? rentalBlank : usd(totals.escrow)}</td>
+      <td className={`bt-bd-num${neg(totals.cash_in)}`}>{rental ? rentalBlank : usd(totals.cash_in)}</td>
       <td className="bt-bd-num">{totals.priced_count} of {totals.count} priced</td>
-      <td className={`bt-bd-num${neg(totals.projected_profit)}`}>{usd(totals.projected_profit)}</td>
+      <td className={`bt-bd-num${neg(totals.projected_profit)}`}>{rental ? rentalBlank : usd(totals.projected_profit)}</td>
       <td className={`bt-bd-num${neg(totals.coming_back)}`}>{usd(totals.coming_back)}</td>
     </tr>
   );
@@ -178,7 +197,7 @@ export default function ConsolidatedFinances() {
 
   const t = data.totals;
   const rentals = data.rentals;
-  const ttm = data.period?.ttm_start && data.period?.end ? `${formatDateOnly(data.period.ttm_start)} – ${formatDateOnly(data.period.end)}` : 'the last 12 months';
+  const projectTotals = data.projects.totals;
 
   return (
     <div className="bt-desktop-page bt-bd bt-cf mx-auto max-w-[1500px] p-4 md:p-6">
@@ -207,10 +226,10 @@ export default function ConsolidatedFinances() {
       )}
 
       <div className="bt-bd-kpis bt-cf-kpis">
-        <Kpi tone="in" icon={<Wallet className="h-3.5 w-3.5" />} label="Money outstanding" value={usd(t.cash_in)} note={`Company cash in ${t.count} properties: ${usd(t.invested)} invested, less loans paid off at sale`} />
-        <Kpi tone="bad" icon={<Scale className="h-3.5 w-3.5" />} label="Loans outstanding" value={usd(t.loans_owed)} note={`All loans & payables on the properties · ${usd(t.escrow)} holdback still in escrow`} />
-        <Kpi tone="due" icon={<TrendingUp className="h-3.5 w-3.5" />} label="Profit potential" value={usd(t.projected_profit)} note={`${t.priced_count} of ${t.count} properties priced${rentals.rows.length ? ' · rentals include rent and every expense to date' : ''}`} />
-        <Kpi tone="good" icon={<ArrowDownLeft className="h-3.5 w-3.5" />} label="Coming back at sale" value={usd(t.coming_back)} note="Cash back after loans, commission and closing costs (equity where no price is entered)" />
+        <Kpi tone="in" icon={<Wallet className="h-3.5 w-3.5" />} label="Money outstanding" value={usd(t.cash_in)} note={`Company cash in ${projectTotals.count} project${projectTotals.count === 1 ? '' : 's'}: ${usd(t.invested)} invested, less loans paid off at sale${rentals.rows.length ? ' · rentals count by sale price and what is owed only' : ''}`} />
+        <Kpi tone="bad" icon={<Scale className="h-3.5 w-3.5" />} label="Loans outstanding" value={usd(t.loans_owed)} note={`All loans & payables on the properties, rentals included · ${usd(t.escrow)} holdback still in escrow`} />
+        <Kpi tone="due" icon={<TrendingUp className="h-3.5 w-3.5" />} label="Profit potential" value={usd(t.projected_profit)} note={`${projectTotals.priced_count} of ${projectTotals.count} projects priced${rentals.rows.length ? ' · rentals have no projected profit (their equity / cash return is in Coming back)' : ''}`} />
+        <Kpi tone="good" icon={<ArrowDownLeft className="h-3.5 w-3.5" />} label="Coming back at sale" value={usd(t.coming_back)} note={`Projects: cash back after loans, commission and closing costs (equity where no price is entered)${rentals.rows.length ? ` · rentals: equity / cash return ${usd(rentals.totals.equity_cash_return)}` : ''}`} />
       </div>
 
       <Block step={1} title="All properties" subtitle="Projects and rentals from QuickBooks, by class · cash in = invested less what the lenders take back at payoff (net of escrow)">
@@ -236,7 +255,7 @@ export default function ConsolidatedFinances() {
                 <Fragment key={section.label}>
                   <tr className="bt-cf-group"><td colSpan={8}>{section.icon}{section.label} ({section.part.rows.length})</td></tr>
                   {section.part.rows.map(row => <PropertyRow key={row.key} row={row} />)}
-                  <SubtotalRow label={`${section.label} total`} totals={section.part.totals} />
+                  <SubtotalRow label={`${section.label} total`} totals={section.part.totals} rental={section.part === rentals} />
                 </Fragment>
               ))}
             </tbody>
@@ -249,7 +268,7 @@ export default function ConsolidatedFinances() {
           <p className="bt-cf-note">
             No potential sales price yet for {t.unpriced.map((u, i) => (
               <Fragment key={u.name}>{i > 0 ? ', ' : ''}{u.project_id ? <Link to={`/projects/${u.project_id}#finance`} className="bt-cf-link is-inline">{u.name}</Link> : u.name}</Fragment>
-            ))}. Their equity is counted in “coming back”; their profit is added once a price is entered on the project’s Finance tab.
+            ))}. A project’s equity is counted in “coming back” and its profit is added once a price is entered on its Finance tab; a rental counts once it is priced.
           </p>
         )}
         {t.carried_interest > 0 && (
@@ -257,53 +276,65 @@ export default function ConsolidatedFinances() {
         )}
       </Block>
 
-      <Block step={2} title="Rentals" subtitle={`Held properties such as 171 Davis · equity and loans today, monthly figures averaged over ${ttm} from the QuickBooks P&L`}>
+      <Block step={2} title="Rentals" subtitle="Held properties such as 171 Davis · potential sale price, less commission and selling expenses, less what is owed = equity / cash return in total">
         {rentals.rows.length === 0 ? (
           <p className="bt-bd-empty">No rentals. A property shows here when its BuildTrack status is Long Term Holding.</p>
         ) : (
           <>
             <div className="bt-bd-kpis">
-              <Kpi tone="in" label="Equity in rentals" value={usd(rentals.totals.cash_in)} note={`${usd(rentals.totals.invested)} invested`} />
-              <Kpi tone="bad" label="Loans on rentals" value={usd(rentals.totals.loans_owed)} note="Mortgages and other loans booked to the rentals" />
-              <Kpi tone="out" label="Interest paid per month" value={usd(rentals.totals.monthly?.interest)} note={`Rent ${usd(rentals.totals.monthly?.income)} per month`} />
-              <Kpi tone={(rentals.totals.rental_net || 0) >= 0 ? 'good' : 'bad'} label="Rent less expenses, to date" value={usd(rentals.totals.rental_net)} note={`Rent ${usd(rentals.totals.rental_income)} − every expense ${usd(rentals.totals.rental_expenses)}, all QuickBooks history`} />
+              <Kpi tone="in" label="Potential sale price" value={usd(rentals.totals.potential_sale_price)} note={`${rentals.totals.priced_count} of ${rentals.totals.count} rental${rentals.totals.count === 1 ? '' : 's'} priced`} />
+              <Kpi tone="out" label="Commission + selling expenses" value={usd(rentals.totals.selling_costs)} note={`Net sale proceeds ${usd(rentals.totals.net_proceeds)}`} />
+              <Kpi tone="bad" icon={<Scale className="h-3.5 w-3.5" />} label="Currently owed" value={usd(rentals.totals.net_debt)} note="Loans and deposits paid off or credited at sale" />
+              <Kpi tone={rentals.totals.equity_cash_return >= 0 ? 'good' : 'bad'} icon={<ArrowDownLeft className="h-3.5 w-3.5" />} label="Equity / cash return in total" value={usd(rentals.totals.equity_cash_return)} note="Cash expected back to the company after the sale" />
             </div>
             <div className="bt-bd-tablewrap">
               <table className="bt-bd-register bt-cf-table">
                 <thead>
                   <tr>
                     <th scope="col">Rental</th>
-                    <th scope="col" className="bt-bd-num">Loans owed</th>
-                    <th scope="col" className="bt-bd-num">Equity</th>
-                    <th scope="col" className="bt-bd-num">Rent / mo</th>
-                    <th scope="col" className="bt-bd-num">Interest / mo</th>
-                    <th scope="col" className="bt-bd-num">Expenses / mo</th>
-                    <th scope="col" className="bt-bd-num">Net / mo</th>
-                    <th scope="col" className="bt-bd-num">Rent less expenses to date</th>
-                    <th scope="col" className="bt-bd-num">Projected profit</th>
+                    <th scope="col" className="bt-bd-num">Potential sale price</th>
+                    <th scope="col" className="bt-bd-num">Commission</th>
+                    <th scope="col" className="bt-bd-num">Selling expenses</th>
+                    <th scope="col" className="bt-bd-num">Net sale proceeds</th>
+                    <th scope="col" className="bt-bd-num">Currently owed</th>
+                    <th scope="col" className="bt-bd-num">Equity / cash return (total)</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rentals.rows.map(row => (
-                    <tr key={row.key}>
-                      <td>
-                        {row.project_id ? <Link to={`/projects/${row.project_id}#finance`} className="bt-cf-link">{row.name}<ExternalLink className="h-3 w-3" /></Link> : row.name}
-                        <span className="bt-bd-sub">{row.loans.map(l => `${l.account}: ${usd(l.amount)}`).join(' · ') || 'No loans'}</span>
-                      </td>
-                      <td className="bt-bd-num">{usd(row.loans_owed)}</td>
-                      <td className={`bt-bd-num bt-bd-strong${neg(row.cash_in)}`}>{usd(row.cash_in)}</td>
-                      <td className="bt-bd-num">{usd(row.monthly?.income)}</td>
-                      <td className="bt-bd-num is-out">{usd(row.monthly?.interest)}</td>
-                      <td className="bt-bd-num">{usd(row.monthly?.expenses)}</td>
-                      <td className={`bt-bd-num bt-bd-strong${neg(row.monthly?.net ?? null)}`}>{usd(row.monthly?.net)}</td>
-                      <td className={`bt-bd-num${neg(row.rental_net)}`}>{usd(row.rental_net)}</td>
-                      <td className={`bt-bd-num bt-bd-strong${neg(row.projected_profit)}`}>{row.priced ? usd(row.projected_profit) : <span className="bt-cf-missing">no price</span>}</td>
-                    </tr>
-                  ))}
+                  {rentals.rows.map(row => {
+                    const cls = classLine(row);
+                    const sellingExpenses = row.selling_costs !== null && row.commission !== null ? row.selling_costs - row.commission : null;
+                    return (
+                      <tr key={row.key}>
+                        <td>
+                          {row.project_id ? <Link to={`/projects/${row.project_id}#finance`} className="bt-cf-link">{row.name}<ExternalLink className="h-3 w-3" /></Link> : row.name}
+                          <span className="bt-bd-sub" title={cls.title}>{row.loans.map(l => `${l.account}: ${usd(l.amount)}`).join(' · ') || 'Nothing owed'}{cls.title ? ' · all classes for this address combined' : ''}</span>
+                        </td>
+                        <td className="bt-bd-num">{row.potential_sale_price !== null ? usd(row.potential_sale_price) : <span className="bt-cf-missing">not entered</span>}</td>
+                        <td className="bt-bd-num is-out">{usd(row.commission)}</td>
+                        <td className="bt-bd-num is-out">{usd(sellingExpenses)}</td>
+                        <td className="bt-bd-num">{usd(row.net_proceeds)}</td>
+                        <td className="bt-bd-num is-out">{usd(row.net_debt)}</td>
+                        <td className={`bt-bd-num bt-bd-strong${neg(row.equity_cash_return)}`}>{row.priced ? usd(row.equity_cash_return) : <span className="bt-cf-missing">no price</span>}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
+                {rentals.rows.length > 1 && (
+                  <tfoot>
+                    <tr className="bt-cf-subtotal">
+                      <td>Rentals total</td>
+                      <td className="bt-bd-num">{usd(rentals.totals.potential_sale_price)}</td>
+                      <td className="bt-bd-num" colSpan={2}>{usd(rentals.totals.selling_costs)}</td>
+                      <td className="bt-bd-num">{usd(rentals.totals.net_proceeds)}</td>
+                      <td className="bt-bd-num">{usd(rentals.totals.net_debt)}</td>
+                      <td className={`bt-bd-num${neg(rentals.totals.equity_cash_return)}`}>{usd(rentals.totals.equity_cash_return)}</td>
+                    </tr>
+                  </tfoot>
+                )}
               </table>
             </div>
-            <p className="bt-cf-note">Monthly figures are QuickBooks P&amp;L totals for the period divided by 12; mortgage principal payments are not expenses, so they are not in “net per month”. For a long-term holding the projected profit is the profit on the sale plus all rent collected less every expense on the class (maintenance, interest, taxes, insurance, utilities) since the first QuickBooks entry.</p>
+            <p className="bt-cf-note">Rentals have no projected profit. Equity / cash return in total = potential sale price − realtor commission − selling expenses − what is currently owed (every loan and deposit on the property’s QuickBooks classes, all units combined) — the cash expected back to the company after the sale. Rent and expenses (profit and loss) are kept separate and are not part of these figures.</p>
           </>
         )}
       </Block>

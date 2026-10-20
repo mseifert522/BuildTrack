@@ -150,25 +150,45 @@ const REPORTS = {
   assert.equal(davisPl.sections.some(n => n.kind === 'total' && n.group === 'NetOtherIncome'), false, 'zero subtotals are hidden');
   assert.equal(davisPl.sections.some(n => n.kind === 'total' && n.group === 'NetIncome'), true);
 
-  // Long-term holding: rent and every expense to date count in the projected profit.
+  // Rentals (Mike, 2026-10-20): no projected profit - the potential sale less commission
+  // and selling expenses, less what is owed, is the equity / cash return in total. No
+  // profit-and-loss, invested or cash-in figures.
   const rentalSummary = { invested: 32000, net_debt_after_escrow: 1575, income: 1250, net_income: 850 };
-  const rp = bankDraws.saleProjection({ potential_sale_price: 40000, commission_pct: 3 }, rentalSummary, { rental: true });
+  const rp = bankDraws.saleProjection({ potential_sale_price: 40000, commission_pct: 3, closing_costs_amount: 500 }, rentalSummary, { rental: true });
+  assert.equal(rp.is_rental, true);
   assert.equal(rp.commission, 1200);
-  assert.equal(rp.net_proceeds, 38800);
-  assert.equal(rp.sale_profit, 6800);
-  assert.equal(rp.rental_income, 1250);
-  assert.equal(rp.rental_expenses, 400, 'everything on the class: income less net');
-  assert.equal(rp.rental_net, 850);
-  assert.equal(rp.projected_profit, 7650, 'sale profit + rental net to date');
-  assert.equal(rp.cash_back, 37225);
-  assert.equal(rp.total_cash_in, 29575, 'cash in the property less rent already banked');
-  assert.equal(Math.round((rp.total_cash_in + rp.projected_profit) * 100) / 100, rp.cash_back);
+  assert.equal(rp.selling_costs, 1700, 'commission + selling expenses');
+  assert.equal(rp.net_proceeds, 38300);
+  assert.equal(rp.loan_payoff, 1575, 'what is currently owed');
+  assert.equal(rp.cash_back, 36725);
+  assert.equal(rp.equity_cash_return, 36725, 'sale price - commission - selling expenses - owed');
+  for (const field of ['sale_profit', 'projected_profit', 'invested', 'cash_in', 'rental_income', 'rental_expenses', 'rental_net', 'total_cash_in']) {
+    assert.equal(rp[field], null, `a rental carries no ${field}`);
+  }
   const flip = bankDraws.saleProjection({ potential_sale_price: 40000, commission_pct: 3 }, rentalSummary);
-  assert.equal(flip.projected_profit, 6800, 'a flip ignores rental figures');
+  assert.equal(flip.projected_profit, 6800, 'a project keeps its projected profit');
+  assert.equal(flip.cash_in, 30425);
+  assert.equal(flip.equity_cash_return, null, 'only rentals have an equity / cash return');
   assert.equal(flip.rental_net, null);
   const unpricedRental = bankDraws.saleProjection(null, rentalSummary, { rental: true });
-  assert.equal(unpricedRental.rental_net, 850, 'rental figures show before a price is entered');
+  assert.equal(unpricedRental.loan_payoff, 1575, 'what is owed shows before a price is entered');
+  assert.equal(unpricedRental.equity_cash_return, null);
+  assert.equal(unpricedRental.rental_net, null);
   assert.equal(unpricedRental.projected_profit, null);
+
+  // Every class for one address is one property (Mike, 2026-10-20: "do not separate by
+  // A, B, or C"), however QuickBooks spells the unit; a different street is not.
+  const unitClasses = [
+    { id: '7', name: '171 Davis', parentId: null }, { id: '71', name: '171 Davis Unit A', parentId: null },
+    { id: '72', name: '171 Davis - Unit C', parentId: null }, { id: '73', name: '171 Davis St Apt 2', parentId: null },
+    { id: '74', name: '171 Davis Unit B (deleted)', parentId: null }, { id: '8', name: '172 Davis', parentId: null },
+    { id: '9', name: '171 Davison', parentId: null },
+  ];
+  assert.deepEqual(bankDraws.relatedClassIds(unitClasses[0], unitClasses).sort(), ['71', '72', '73', '74'], 'deleted unit classes still count (entries can sit on them)');
+  const unitMatch = bankDraws.matchProjectClasses([{ id: 'p-u', address: '171 Davis St, Wyandotte, MI', job_name: '171 Davis', quickbooks_class_id: null }], unitClasses.map(c => ({ ...c, active: true })));
+  assert.equal(unitMatch[0].status, 'auto_linked', 'units do not make the match ambiguous');
+  assert.equal(unitMatch[0].classId, '7', 'the shortest class name leads');
+  assert.deepEqual([...unitMatch[0].relatedIds].sort(), ['71', '72', '73', '74']);
 
   assert.deepEqual(classifyUploadPath(path.resolve(process.env.UPLOADS_PATH), '/scope-documents/p-wis/x.pdf')?.kind, 'blocked');
 
@@ -356,39 +376,65 @@ const REPORTS = {
     assert.deepEqual(cons.projects.rows.map(r => r.name), ['2811 Wisconsin'], 'only properties with a balance sheet are combined');
     assert.deepEqual(cons.rentals.rows.map(r => r.name), ['171 Davis']);
     const davisRow = cons.rentals.rows[0];
-    assert.deepEqual(davisRow.class_names, ['171 Davis', '171 Davis Unit A']);
-    assert.equal(davisRow.monthly.income, 1050, '12,600 rent over 12 months');
-    assert.equal(davisRow.monthly.interest, 500, '6,000 interest over 12 months');
-    assert.equal(davisRow.monthly.expenses, 700);
-    assert.equal(davisRow.monthly.net, 350);
-    assert.equal(davisRow.cash_in, 30425, 'invested 32,000 less 1,575 owed');
+    assert.deepEqual(davisRow.class_names, ['171 Davis', '171 Davis Unit A'], 'every class for the address is one property');
+    for (const field of ['monthly', 'cash_in', 'invested', 'escrow', 'equity', 'projected_profit', 'sale_profit', 'coming_back']) {
+      assert.equal(davisRow[field], null, `an unpriced rental shows no ${field}`);
+    }
+    assert.equal(davisRow.loans_owed, 1575, 'what is owed still shows');
     assert.equal(cons.totals.count, 2);
-    assert.equal(cons.totals.invested, 60121.79);
-    assert.equal(cons.totals.loans_owed, 31575);
+    assert.equal(cons.totals.invested, 28121.79, 'projects only: a rental adds no invested');
+    assert.equal(cons.totals.loans_owed, 31575, 'loans owed include the rental');
     assert.equal(cons.totals.escrow, 16755);
-    assert.equal(cons.totals.cash_in, 45301.79);
+    assert.equal(cons.totals.cash_in, 14876.79, 'projects only');
     assert.equal(cons.totals.projected_profit, 262878.21, 'Wisconsin priced at 300,000');
-    assert.equal(cons.totals.coming_back, 308180, 'equity of every property + profit where priced');
+    assert.equal(cons.totals.coming_back, 277755, 'an unpriced rental adds nothing yet');
     assert.equal(cons.totals.priced_count, 1);
-    assert.deepEqual(cons.totals.unpriced.map(u => u.name), ['171 Davis']);
+    assert.deepEqual(cons.totals.unpriced.map(u => [u.name, u.rental]), [['171 Davis', true]]);
     assert.deepEqual(cons.loans_by_account.map(l => [l.account, l.amount]), [['2020 Bridge Loans Due <12 Months', 30000], ['2080 Tenant Security Deposits', 1575]]);
-    assert.equal(cons.rentals.totals.monthly.interest, 500);
+    assert.equal(cons.rentals.totals.equity_cash_return, 0);
     assert.equal((await call('/api/finance/consolidated/sync', 'POST', 'pm2')).status, 403);
-    // Price 171 Davis (a long-term holding): its rent and expenses join the projected profit.
-    let davisTab = (await call('/api/projects/p-dav/bank-draws/projection', 'PUT', 'sa', { potential_sale_price: 40000 })).body;
+    // 171 Davis's paid-off 2025 construction holdback (set aside 07-29, drawn in full 08-19)
+    // must not show on the rental: no draws, no P&L, the balance sheet cut to what is owed.
+    const drawRow = (id, kind, date, amount, payee) => db.prepare(`INSERT INTO project_bank_draw_lines
+      (id, project_id, qbo_class_id, account_number, account_name, kind, txn_date, txn_type, txn_id, doc_number, payee, memo, split_account, amount, sort_index, synced_at)
+      VALUES (?, 'p-dav', '7', '1130', 'Funds in Escrow', ?, ?, 'Deposit', ?, '', ?, '171 Davis', '', ?, 0, datetime('now'))`).run(id, kind, date, id, payee, amount);
+    drawRow('dav-hb', 'holdback_funded', '2025-07-29', 47692, null);
+    drawRow('dav-d1', 'draw', '2025-08-19', -47692, 'Builders Finance');
+    // Price 171 Davis (a rental): sale price less commission and selling expenses, less owed.
+    let davisTab = (await call('/api/projects/p-dav/bank-draws/projection', 'PUT', 'sa', { potential_sale_price: 40000, closing_costs: 500 })).body;
     assert.equal(davisTab.project.status, 'long_term_holding');
+    assert.equal(davisTab.rental, true);
     assert.equal(davisTab.projection.is_rental, true);
-    assert.equal(davisTab.projection.sale_profit, 6800);
-    assert.equal(davisTab.projection.rental_net, 850);
-    assert.equal(davisTab.projection.projected_profit, 7650);
-    assert.equal(davisTab.projection.cash_back, 37225);
-    assert.equal(davisTab.projection.total_cash_in, 29575);
+    assert.equal(davisTab.projection.selling_costs, 1700);
+    assert.equal(davisTab.projection.loan_payoff, 1575);
+    assert.equal(davisTab.projection.equity_cash_return, 36725);
+    assert.equal(davisTab.projection.cash_back, 36725);
+    for (const field of ['projected_profit', 'sale_profit', 'rental_net', 'total_cash_in', 'invested', 'cash_in']) {
+      assert.equal(davisTab.projection[field], null, `the rental tab carries no ${field}`);
+    }
+    assert.deepEqual(davisTab.register, [], 'no draws on a rental');
+    assert.equal(davisTab.summary.holdback_funded, 0);
+    assert.equal(davisTab.summary.draw_count, 0);
+    assert.equal(davisTab.finance.profit_loss.found, false, 'no profit and loss on a rental');
+    assert.deepEqual(Object.keys(davisTab.finance.summary).sort(), ['escrow_balance', 'net_debt_after_escrow', 'total_liabilities']);
+    assert.equal(davisTab.finance.balance_sheet.sections.length, 1, 'only what is owed');
+    assert.match(davisTab.finance.balance_sheet.sections[0].title, /liabilities/i);
+    assert.equal((await call('/api/projects/p-dav/bank-draws', 'GET', 'sa')).body.register.length, 0, 'the GET agrees');
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM project_bank_draw_lines WHERE project_id = 'p-dav'").get().n, 2, 'the QuickBooks lines are kept, only not shown');
     cons = (await call('/api/finance/consolidated', 'GET', 'sa')).body;
-    assert.equal(cons.totals.projected_profit, 270528.21, 'Wisconsin 262,878.21 + Davis 7,650');
-    assert.equal(cons.totals.coming_back, 314980, 'cash back at sale: Wisconsin 277,755 + Davis 37,225');
-    assert.equal(cons.rentals.totals.rental_net, 850);
-    assert.equal(cons.rentals.rows[0].sale_profit, 6800);
-    assert.equal(cons.projects.rows[0].rental_net, null, 'flips carry no rental figures');
+    assert.equal(cons.totals.projected_profit, 262878.21, 'a rental adds no profit');
+    assert.equal(cons.totals.coming_back, 314480, 'Wisconsin cash back 277,755 + Davis equity / cash return 36,725');
+    assert.equal(cons.rentals.totals.equity_cash_return, 36725);
+    assert.equal(cons.rentals.totals.potential_sale_price, 40000);
+    assert.equal(cons.rentals.totals.selling_costs, 1700);
+    assert.equal(cons.rentals.totals.net_proceeds, 38300);
+    assert.equal(cons.rentals.totals.net_debt, 1575);
+    assert.equal(cons.rentals.rows[0].sale_profit, null);
+    assert.equal(cons.rentals.rows[0].projected_profit, null);
+    assert.equal(cons.projects.rows[0].equity_cash_return, null, 'projects keep their profit, not an equity / cash return');
+    assert.equal(cons.projects.rows[0].projected_profit, 262878.21);
+    // A project (not a rental) still shows its draws.
+    assert.equal((await call('/api/projects/p-wis/bank-draws', 'GET', 'sa')).body.register.length, 4);
 
     // Revoke
     assert.equal((await call('/api/feature-access/bank_draws/pm', 'DELETE', 'sa')).status, 200);
