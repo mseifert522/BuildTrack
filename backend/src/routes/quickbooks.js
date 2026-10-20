@@ -17,7 +17,9 @@ const ACCOUNTING_SCOPE = 'com.intuit.quickbooks.accounting';
 const TOKEN_URL = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer';
 const AUTH_URL = 'https://appcenter.intuit.com/connect/oauth2';
 const MINOR_VERSION = '75';
-const AUTO_SYNC_DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
+// The full re-read is now only the authoritative reconcile (deletions, vendors, PDFs);
+// changes arrive through the change checks below. QBO_AUTO_SYNC_INTERVAL_MS overrides.
+const AUTO_SYNC_DEFAULT_INTERVAL_MS = 30 * 60 * 1000;
 const DEFAULT_EXCLUDED_BILL_VENDORS = ['great lakes mortgage fund'];
 const PAYMENT_APPROVAL_STATUS = 'approved_for_payment';
 const PAYMENT_APPROVAL_DEFAULT_STATUS = 'not_approved';
@@ -49,24 +51,42 @@ const qboTokenRefreshInFlight = new Map();
 // backoff, and every request has a timeout so a hung call cannot stall the sync.
 const QBO_REQUEST_LANES = new Map();
 const QBO_RATE_LIMIT_RETRIES = 3;
-const FAST_CHECK_DEFAULT_INTERVAL_MS = 15 * 1000;
+// Event-driven sync (2026-10-20, Mike: "sync immediately when something happens; don't
+// burn compute checking every 15 seconds"). Intuit meters read calls per app, so
+// BuildTrack asks QuickBooks one change-feed (CDC) question - "what changed since last
+// time?" - only when (1) Intuit's webhook says a company changed, (2) someone opens the
+// Invoice Center, or (3) a slow safety net fires. A change reaching BuildTrack also
+// pings Finance Tracker, which pulls only then.
+const CHANGE_CHECK_DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
+const FINANCE_CHANGE_CHECK_DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
 const FAST_CHECK_OVERLAP_MS = 2 * 60 * 1000;
 const FAST_CHECK_FIRST_LOOKBACK_MS = 10 * 60 * 1000;
+const CHANGE_CHECK_ON_VIEW_STALE_MS = 20 * 1000;
+const CHANGE_CHECK_ON_VIEW_WAIT_MS = 4 * 1000;
+const WEBHOOK_CHECK_DEBOUNCE_MS = 3 * 1000;
+const WEBHOOK_UNVERIFIED_MIN_GAP_MS = 30 * 1000;
+const FT_NOTIFY_DEBOUNCE_MS = 15 * 1000;
+const FT_NOTIFY_MAX_WAIT_MS = 60 * 1000;
 const BILL_PDF_SCAN_DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
-let activeFastCheckPromise = null;
-let fastCheckCursor = null;
+const BILL_PDF_SCAN_DEBOUNCE_MS = 5 * 1000;
+let activeFastCheckPromise = null; // New Urban's in-flight check; the full sync waits for it
+const changeCheckInFlight = new Map(); // connection id -> in-flight check
+const changeCheckCursors = new Map(); // connection id -> changedSince for its next check
+const changeCheckStates = new Map(); // connection id -> status shown on /quickbooks/status
+const changeCheckRequests = new Map(); // connection id -> { timer, lastRunAt } (webhook debounce)
+const seenCdcKeys = new Map(); // connection id -> entity versions already counted as changes
 let lastQuickBooksChangeAt = null;
 let billPdfScanRequested = true;
 let lastBillPdfScanAt = 0;
+let billPdfScanTimer = null;
 const handledCdcDeletes = new Set();
-const fastCheckState = {
-  enabled: false,
-  interval_ms: 0,
-  last_at: null,
-  last_status: null,
-  last_error: null,
-  last_changes: 0,
+const fastCheckConfig = { enabled: false, interval_ms: 0, finance_interval_ms: 0 };
+const webhookState = { received: 0, rejected: 0, last_received_at: null, last_verified: null, last_realms: [] };
+const financeTrackerNotify = {
+  timer: null, firstQueuedAt: 0, realms: new Set(), sending: false,
+  sent: 0, last_at: null, last_status: null, last_error: null, last_realms: [],
 };
+let webhookEventsPrunedAt = 0;
 
 function qboEnvironment() {
   return String(process.env.QBO_ENVIRONMENT || process.env.QUICKBOOKS_ENVIRONMENT || 'production').toLowerCase() === 'sandbox'
@@ -1833,8 +1853,9 @@ function upsertBillsAndPayments(db, connection, bills, payments) {
   write();
   if (changedBills || changedPayments) {
     lastQuickBooksChangeAt = new Date().toISOString();
-    // New or edited bills may carry a new invoice PDF; the next full sync looks for it.
-    if (changedBills) billPdfScanRequested = true;
+    // New or edited bills may carry a new invoice PDF: look for it shortly (a full sync
+    // in progress clears the request by scanning itself).
+    if (changedBills) requestBillPdfScan();
   }
   return { matched, ignored, markedPaidFromQueue, paidFromQueue, newBills, changedBills, changedPayments, nowPaid };
 }
@@ -2861,19 +2882,35 @@ async function recheckPaymentQueueAgainstQuickBooks() {
   }
 }
 
-// ── Fast change check (2026-10-20) ───────────────────────────────────────────
-// The full sync re-reads every bill, payment, vendor and attachment once a minute, so
-// a payment recorded in QuickBooks could take up to a minute to reach BuildTrack.
-// This asks QuickBooks' change feed (CDC) for just the bills and bill payments edited
-// since the last check - one small request - and writes them through the same path
-// as the full sync. The full sync stays the authoritative reconcile (deletions,
-// vendors, PDFs); a deletion seen here triggers it immediately.
+// ── Event-driven change checks (2026-10-20) ─────────────────────────────────
+// One CDC request per company returns every bill, bill payment, vendor, attachment and
+// accounting transaction edited since the previous check. New Urban's bills, payments
+// and vendors are written through the same path as the full sync; any change at all
+// (for New Urban or a Finance-hub company) pings Finance Tracker. The full sync stays
+// the authoritative reconcile; a deletion seen here triggers it at once.
+function backgroundQuickBooksWorkEnabled() {
+  // The blue-green GREEN runs with the auto sync off: it must not check, scan or ping.
+  return !(process.env.QBO_AUTO_SYNC_ENABLED === 'false' || process.env.QUICKBOOKS_AUTO_SYNC_ENABLED === 'false');
+}
+
+function envIntervalMs(names, fallback, minimumMs) {
+  for (const name of names) {
+    const raw = process.env[name];
+    if (raw === undefined || String(raw).trim() === '') continue;
+    const requested = Number(raw);
+    if (!Number.isFinite(requested) || requested <= 0) return 0;
+    return Math.max(minimumMs, requested);
+  }
+  return fallback;
+}
+
+// Safety-net interval for New Urban (webhooks and the Invoice Center trigger checks at once).
 function getFastCheckIntervalMs() {
-  const raw = process.env.QBO_FAST_CHECK_INTERVAL_MS;
-  if (raw === undefined || String(raw).trim() === '') return FAST_CHECK_DEFAULT_INTERVAL_MS;
-  const requested = Number(raw);
-  if (!Number.isFinite(requested) || requested <= 0) return 0;
-  return Math.max(10 * 1000, requested);
+  return envIntervalMs(['QBO_CHANGE_CHECK_INTERVAL_MS', 'QBO_FAST_CHECK_INTERVAL_MS'], CHANGE_CHECK_DEFAULT_INTERVAL_MS, 10 * 1000);
+}
+
+function getFinanceChangeCheckIntervalMs() {
+  return envIntervalMs(['QBO_FINANCE_CHANGE_CHECK_INTERVAL_MS'], FINANCE_CHANGE_CHECK_DEFAULT_INTERVAL_MS, 60 * 1000);
 }
 
 function cdcEntities(payload, entityName) {
@@ -2890,93 +2927,293 @@ function isCdcDeleted(entity) {
   return String(entity?.status || '').toLowerCase() === 'deleted';
 }
 
-async function fastCheckQuickBooksChanges() {
-  if (activeFastCheckPromise) return activeFastCheckPromise;
-  // A full sync is re-reading everything right now; it covers this tick.
-  if (activeSyncPromise) return { skipped: true, reason: 'full_sync_running' };
+// FT_TXN_ENTITIES is declared further down; these run after the module has loaded.
+function primaryCdcEntityNames() {
+  return ['Bill', 'BillPayment', 'Vendor', 'Attachable', ...FT_TXN_ENTITIES];
+}
 
-  activeFastCheckPromise = (async () => {
+function financeCdcEntityNames() {
+  return ['Bill', 'BillPayment', ...FT_TXN_ENTITIES];
+}
+
+function loadChangeCheckConnection(db, connectionId) {
+  if (connectionId === 'primary') return getActiveConnection(db);
+  return db.prepare("SELECT * FROM quickbooks_connections WHERE id = ? AND id LIKE 'finance:%' AND is_active = 1").get(connectionId);
+}
+
+function changeCheckState(connectionId) {
+  if (!changeCheckStates.has(connectionId)) {
+    changeCheckStates.set(connectionId, {
+      last_at: null, last_status: null, last_error: null, last_changes: 0, last_trigger: null, checks: 0,
+    });
+  }
+  return changeCheckStates.get(connectionId);
+}
+
+// The 2-minute overlap returns recent rows again; count each version once so one edit
+// pings Finance Tracker once.
+function countUnseenChanges(connectionId, typedRows) {
+  let seen = seenCdcKeys.get(connectionId);
+  if (!seen) {
+    seen = new Set();
+    seenCdcKeys.set(connectionId, seen);
+  }
+  let unseen = 0;
+  for (const [type, row] of typedRows) {
+    const key = `${type}:${row.Id}:${row.SyncToken ?? ''}:${row.MetaData?.LastUpdatedTime ?? ''}:${row.status ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unseen += 1;
+  }
+  if (seen.size > 5000) seen.clear();
+  return unseen;
+}
+
+async function fastCheckQuickBooksChanges(connectionId = 'primary', trigger = 'safety_net') {
+  const isPrimary = connectionId === 'primary';
+  if (changeCheckInFlight.has(connectionId)) return changeCheckInFlight.get(connectionId);
+  // A full sync is re-reading New Urban right now; it covers this check.
+  if (isPrimary && activeSyncPromise) return { skipped: true, reason: 'full_sync_running' };
+
+  const check = (async () => {
     const db = getDb();
     if (!qboConfig().configured) return { skipped: true, reason: 'missing_credentials' };
-    const connection = getActiveConnection(db);
+    const connection = loadChangeCheckConnection(db, connectionId);
     if (!connection) return { skipped: true, reason: 'not_connected' };
 
     const startedAt = Date.now();
     // Overlapping windows: anything QuickBooks stamped in the last couple of minutes is
     // read again, so clock skew or a write racing the previous check cannot slip by.
-    const since = fastCheckCursor || new Date(startedAt - FAST_CHECK_FIRST_LOOKBACK_MS).toISOString();
+    const since = changeCheckCursors.get(connectionId) || new Date(startedAt - FAST_CHECK_FIRST_LOOKBACK_MS).toISOString();
+    const entityNames = isPrimary ? primaryCdcEntityNames() : financeCdcEntityNames();
     const payload = await qboRequest(
       db,
       connection,
-      `/v3/company/${encodeURIComponent(connection.realm_id)}/cdc?entities=Bill,BillPayment&changedSince=${encodeURIComponent(since)}`
+      `/v3/company/${encodeURIComponent(connection.realm_id)}/cdc?entities=${entityNames.join(',')}&changedSince=${encodeURIComponent(since)}`
     );
-    const billRows = cdcEntities(payload, 'Bill');
-    const paymentRows = cdcEntities(payload, 'BillPayment');
-    const bills = billRows.filter(bill => bill?.Id && !isCdcDeleted(bill));
-    const payments = paymentRows.filter(payment => payment?.Id && !isCdcDeleted(payment));
-    const newlyDeleted = [...billRows.map(row => ['Bill', row]), ...paymentRows.map(row => ['BillPayment', row])]
-      .filter(([, row]) => row?.Id && isCdcDeleted(row))
-      .map(([type, row]) => `${type}:${row.Id}`)
-      .filter(key => !handledCdcDeletes.has(key));
-    if (handledCdcDeletes.size > 500) handledCdcDeletes.clear();
-    for (const key of newlyDeleted) handledCdcDeletes.add(key);
+    const byType = Object.fromEntries(entityNames.map(name => [name, cdcEntities(payload, name).filter(row => row?.Id)]));
+    const typedRows = entityNames.flatMap(name => byType[name].map(row => [name, row]));
+    const accountingChanges = countUnseenChanges(connectionId, typedRows);
 
     let result = { changedBills: 0, changedPayments: 0, nowPaid: 0, paidFromQueue: [], markedPaidFromQueue: 0 };
-    if (bills.length || payments.length) {
-      result = upsertBillsAndPayments(db, connection, bills, payments);
-      logPaidFromQueue(result.paidFromQueue, 'fast check');
-    }
-    fastCheckCursor = new Date(startedAt - FAST_CHECK_OVERLAP_MS).toISOString();
-    const changes = result.changedBills + result.changedPayments;
-    if (changes) {
-      console.log(`[QBO] Fast check: ${result.changedBills} bill(s) and ${result.changedPayments} bill payment(s) changed in QuickBooks${result.nowPaid ? `; ${result.nowPaid} bill(s) now paid` : ''}`);
-      const actorUserId = connection.connected_by || paymentQueueAutomationUserId(db);
-      if (actorUserId) {
-        logActivity({
-          userId: actorUserId,
-          action: 'quickbooks_sync_completed',
-          entityType: 'quickbooks_connection',
-          entityId: connection.realm_id,
-          details: {
-            source: 'fast_check',
-            changed_bills: result.changedBills,
-            changed_bill_payments: result.changedPayments,
-            bills_now_paid: result.nowPaid,
-            marked_paid_from_friday_queue: result.markedPaidFromQueue,
-            ...(result.paidFromQueue.length ? { paid_from_friday_queue: result.paidFromQueue.slice(0, 25) } : {}),
-            ...(newlyDeleted.length ? { deleted_in_quickbooks: newlyDeleted.slice(0, 25) } : {}),
-          },
-        });
+    let vendorsChanged = 0;
+    let attachablesChanged = 0;
+    let newlyDeleted = [];
+    if (isPrimary) {
+      const bills = byType.Bill.filter(bill => !isCdcDeleted(bill));
+      const payments = byType.BillPayment.filter(payment => !isCdcDeleted(payment));
+      newlyDeleted = [...byType.Bill.map(row => ['Bill', row]), ...byType.BillPayment.map(row => ['BillPayment', row])]
+        .filter(([, row]) => isCdcDeleted(row))
+        .map(([type, row]) => `${type}:${row.Id}`)
+        .filter(key => !handledCdcDeletes.has(key));
+      if (handledCdcDeletes.size > 500) handledCdcDeletes.clear();
+      for (const key of newlyDeleted) handledCdcDeletes.add(key);
+
+      if (bills.length || payments.length) {
+        result = upsertBillsAndPayments(db, connection, bills, payments);
+        logPaidFromQueue(result.paidFromQueue, trigger === 'webhook' ? 'webhook' : 'fast check');
+      }
+      const vendors = byType.Vendor.filter(vendor => !isCdcDeleted(vendor));
+      if (vendors.length) {
+        upsertQuickBooksVendors(db, connection, vendors);
+        vendorsChanged = vendors.length;
+      }
+      attachablesChanged = byType.Attachable.filter(attachable => !isCdcDeleted(attachable)).length;
+      if (attachablesChanged) requestBillPdfScan();
+
+      const changes = result.changedBills + result.changedPayments;
+      if (changes) {
+        console.log(`[QBO] Fast check: ${result.changedBills} bill(s) and ${result.changedPayments} bill payment(s) changed in QuickBooks${result.nowPaid ? `; ${result.nowPaid} bill(s) now paid` : ''} (${trigger})`);
+        const actorUserId = connection.connected_by || paymentQueueAutomationUserId(db);
+        if (actorUserId) {
+          logActivity({
+            userId: actorUserId,
+            action: 'quickbooks_sync_completed',
+            entityType: 'quickbooks_connection',
+            entityId: connection.realm_id,
+            details: {
+              source: 'fast_check',
+              trigger,
+              changed_bills: result.changedBills,
+              changed_bill_payments: result.changedPayments,
+              bills_now_paid: result.nowPaid,
+              marked_paid_from_friday_queue: result.markedPaidFromQueue,
+              ...(result.paidFromQueue.length ? { paid_from_friday_queue: result.paidFromQueue.slice(0, 25) } : {}),
+              ...(newlyDeleted.length ? { deleted_in_quickbooks: newlyDeleted.slice(0, 25) } : {}),
+            },
+          });
+        }
       }
     }
+    changeCheckCursors.set(connectionId, new Date(startedAt - FAST_CHECK_OVERLAP_MS).toISOString());
+    if (accountingChanges) notifyFinanceTracker(connection.realm_id);
     return {
+      connection_id: connectionId,
+      trigger,
       checked_at: new Date(startedAt).toISOString(),
       since,
-      bills: bills.length,
-      bill_payments: payments.length,
+      entities_returned: typedRows.length,
+      accounting_changes: accountingChanges,
+      bills: byType.Bill.length,
+      bill_payments: byType.BillPayment.length,
       changed_bills: result.changedBills,
       changed_bill_payments: result.changedPayments,
       bills_now_paid: result.nowPaid,
+      vendors_changed: vendorsChanged,
+      attachables_changed: attachablesChanged,
       deleted_seen: newlyDeleted.length,
     };
   })();
 
+  changeCheckInFlight.set(connectionId, check);
+  if (isPrimary) activeFastCheckPromise = check;
+  const state = changeCheckState(connectionId);
   try {
-    const result = await activeFastCheckPromise;
+    const result = await check;
     if (!result?.skipped) {
-      fastCheckState.last_at = result.checked_at;
-      fastCheckState.last_status = 'success';
-      fastCheckState.last_error = null;
-      fastCheckState.last_changes = result.changed_bills + result.changed_bill_payments;
+      state.last_at = result.checked_at;
+      state.last_status = 'success';
+      state.last_error = null;
+      state.last_changes = result.accounting_changes;
+      state.last_trigger = trigger;
+      state.checks += 1;
     }
     return result;
   } catch (err) {
-    fastCheckState.last_at = new Date().toISOString();
-    fastCheckState.last_status = 'failed';
-    fastCheckState.last_error = err.message || 'QuickBooks change check failed';
+    state.last_at = new Date().toISOString();
+    state.last_status = 'failed';
+    state.last_error = err.message || 'QuickBooks change check failed';
+    state.last_trigger = trigger;
     throw err;
   } finally {
-    activeFastCheckPromise = null;
+    changeCheckInFlight.delete(connectionId);
+    if (isPrimary) activeFastCheckPromise = null;
+  }
+}
+
+// Webhook bursts (Intuit sends one notification per edit) collapse into one check a
+// few seconds later. An event arriving while a check runs gets a fresh check after it.
+function requestChangeCheck(connectionId, { trigger = 'webhook', delayMs = WEBHOOK_CHECK_DEBOUNCE_MS, minGapMs = 0 } = {}) {
+  if (!backgroundQuickBooksWorkEnabled()) return false;
+  let request = changeCheckRequests.get(connectionId);
+  if (!request) {
+    request = { timer: null, lastRunAt: 0 };
+    changeCheckRequests.set(connectionId, request);
+  }
+  if (request.timer) return true;
+  const waitMs = Math.max(delayMs, request.lastRunAt + minGapMs - Date.now());
+  request.timer = setTimeout(async () => {
+    request.timer = null;
+    const running = changeCheckInFlight.get(connectionId);
+    if (running) await running.catch(() => null);
+    if (connectionId === 'primary' && activeSyncPromise) await activeSyncPromise.catch(() => null);
+    request.lastRunAt = Date.now();
+    try {
+      const result = await fastCheckQuickBooksChanges(connectionId, trigger);
+      if (connectionId === 'primary' && result?.deleted_seen) {
+        // Only the full Bill query can tell which bills are gone.
+        await syncQuickBooksBills({ source: 'auto' }).catch(err => console.error('[QBO] Sync after a QuickBooks deletion failed:', err.message));
+      }
+    } catch (err) {
+      console.warn(`[QBO] Change check (${trigger}) failed for ${connectionId}:`, err.message);
+    }
+  }, waitMs);
+  request.timer.unref?.();
+  return true;
+}
+
+// Opening or refreshing the Invoice Center asks QuickBooks what changed, once per
+// CHANGE_CHECK_ON_VIEW_STALE_MS, and waits briefly so the page shows it.
+async function refreshQuickBooksBeforeView() {
+  if (!backgroundQuickBooksWorkEnabled()) return;
+  const lastAt = Date.parse(changeCheckStates.get('primary')?.last_at || '') || 0;
+  if (Date.now() - lastAt < CHANGE_CHECK_ON_VIEW_STALE_MS) return;
+  const check = fastCheckQuickBooksChanges('primary', 'on_view')
+    .then(async result => {
+      if (result?.deleted_seen) await syncQuickBooksBills({ source: 'auto' }).catch(() => null);
+      return result;
+    })
+    .catch(() => null);
+  await Promise.race([check, new Promise(resolve => setTimeout(resolve, CHANGE_CHECK_ON_VIEW_WAIT_MS).unref?.())]);
+}
+
+function requestBillPdfScan() {
+  billPdfScanRequested = true;
+  if (billPdfScanTimer || !backgroundQuickBooksWorkEnabled() || process.env.QBO_BILL_PDF_SYNC_ON_BILL_SYNC === 'false') return;
+  billPdfScanTimer = setTimeout(async () => {
+    billPdfScanTimer = null;
+    if (!billPdfScanRequested) return; // a full sync scanned meanwhile
+    billPdfScanRequested = false;
+    lastBillPdfScanAt = Date.now();
+    try {
+      await syncQuickBooksBillPdfs({ scope: process.env.QBO_BILL_PDF_SYNC_SCOPE || 'missing', source: 'auto' });
+    } catch (err) {
+      billPdfScanRequested = true;
+      console.warn('[QBO] Bill PDF scan after a change failed:', err.message);
+    }
+  }, BILL_PDF_SCAN_DEBOUNCE_MS);
+  billPdfScanTimer.unref?.();
+}
+
+// ── Finance Tracker ping ─────────────────────────────────────────────────────
+// Finance Tracker used to pull every company's statements and New Urban's transactions
+// every minute. BuildTrack now tells it when a company changed (debounced), and its own
+// cron is only a slow safety net. Needs FINANCE_TRACKER_SYNC_URL + FINANCE_TRACKER_SYNC_KEY.
+function financeTrackerNotifyConfig() {
+  return {
+    url: String(process.env.FINANCE_TRACKER_SYNC_URL || '').trim(),
+    key: String(process.env.FINANCE_TRACKER_SYNC_KEY || '').trim(),
+  };
+}
+
+function notifyFinanceTracker(realmId) {
+  const { url, key } = financeTrackerNotifyConfig();
+  if (!url || !key || !backgroundQuickBooksWorkEnabled()) return false;
+  const n = financeTrackerNotify;
+  n.realms.add(String(realmId));
+  if (!n.firstQueuedAt) n.firstQueuedAt = Date.now();
+  if (n.timer) clearTimeout(n.timer);
+  const waitMs = Math.max(0, Math.min(FT_NOTIFY_DEBOUNCE_MS, n.firstQueuedAt + FT_NOTIFY_MAX_WAIT_MS - Date.now()));
+  n.timer = setTimeout(() => { flushFinanceTrackerNotify().catch(() => {}); }, waitMs);
+  n.timer.unref?.();
+  return true;
+}
+
+async function flushFinanceTrackerNotify() {
+  const n = financeTrackerNotify;
+  n.timer = null;
+  if (n.sending) {
+    // One ping at a time; whatever queued meanwhile goes right after it.
+    n.timer = setTimeout(() => { flushFinanceTrackerNotify().catch(() => {}); }, 5000);
+    n.timer.unref?.();
+    return;
+  }
+  const realms = Array.from(n.realms);
+  n.realms.clear();
+  n.firstQueuedAt = 0;
+  if (!realms.length) return;
+  const { url, key } = financeTrackerNotifyConfig();
+  n.sending = true;
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-sync-key': key },
+      body: JSON.stringify({ source: 'buildtrack', realms }),
+      signal: AbortSignal.timeout(120 * 1000),
+    });
+    const text = await response.text().catch(() => '');
+    n.last_status = response.ok ? 'ok' : `http_${response.status}`;
+    n.last_error = response.ok ? null : text.slice(0, 200);
+    if (!response.ok) console.warn(`[QBO] Finance Tracker ping answered ${response.status}`);
+  } catch (err) {
+    n.last_status = 'failed';
+    n.last_error = err.message || 'Finance Tracker ping failed';
+    console.warn('[QBO] Finance Tracker ping failed:', n.last_error);
+  } finally {
+    n.sent += 1;
+    n.last_at = new Date().toISOString();
+    n.last_realms = realms;
+    n.sending = false;
   }
 }
 
@@ -3145,19 +3382,23 @@ function markWebhookEvents(db, eventIds, status, error = null) {
 function recordWebhookEvents(db, payload) {
   const eventIds = [];
   const entityNames = new Set();
+  const realms = new Set();
+  // Intuit's CloudEvents format (mandatory from 2026-05-15) is a JSON array of events,
+  // one per change, each naming its company (intuitaccountid); the legacy format is
+  // { eventNotifications: [{ realmId, dataChangeEvent: { entities } }] }. Both accepted.
   const notifications = Array.isArray(payload)
     ? payload.map(event => {
-      const typeParts = String(event.type || '').split('.');
+      const typeParts = String(event?.type || '').split('.');
       const entityName = typeParts.length >= 3 ? typeParts[1] : '';
       return {
-        realmId: event.intuitaccountid || event.realmId || '',
-        entities: entityName ? [{ name: entityName, id: event.intuitentityid || event.id || null }] : [],
+        realmId: event?.intuitaccountid || event?.intuitrealmid || event?.realmId || event?.data?.realmId || '',
+        entities: entityName ? [{ name: entityName, id: event?.intuitentityid || event?.id || null }] : [],
         raw: event,
       };
     })
     : (Array.isArray(payload?.eventNotifications)
       ? payload.eventNotifications.map(notification => ({
-        realmId: notification.realmId || '',
+        realmId: notification?.realmId || '',
         entities: notification?.dataChangeEvent?.entities || [],
         raw: notification,
       }))
@@ -3170,6 +3411,7 @@ function recordWebhookEvents(db, payload) {
   const write = db.transaction(() => {
     for (const notification of notifications) {
       const realmId = String(notification.realmId || '');
+      if (/^\d+$/.test(realmId)) realms.add(realmId);
       const entities = notification.entities || [];
       entities.forEach(entity => entity?.name && entityNames.add(String(entity.name)));
       const eventPayload = JSON.stringify(notification.raw || notification);
@@ -3180,34 +3422,68 @@ function recordWebhookEvents(db, payload) {
     }
   });
   write();
-  return { eventIds, entityNames: Array.from(entityNames) };
+  return { eventIds, entityNames: Array.from(entityNames), realms: Array.from(realms) };
 }
 
+function pruneWebhookEvents(db) {
+  if (Date.now() - webhookEventsPrunedAt < 60 * 60 * 1000) return;
+  webhookEventsPrunedAt = Date.now();
+  db.prepare("DELETE FROM quickbooks_webhook_events WHERE julianday(received_at) < julianday('now', '-30 days')").run();
+}
+
+// POST /api/quickbooks/webhook - Intuit calls this when anything changes in a connected
+// company (registered in the Intuit developer portal). It answers at once and queues a
+// change check for that company; nothing in the payload is trusted beyond "this company
+// changed". With QBO_WEBHOOK_VERIFIER_TOKEN set, the intuit-signature HMAC is required;
+// until it is set, notifications are accepted but each company is checked at most every
+// WEBHOOK_UNVERIFIED_MIN_GAP_MS, so the URL can be registered before the token arrives.
 router.post('/webhook', async (req, res) => {
   let eventIds = [];
   try {
-    if (!webhookSignatureValid(req)) {
+    // server.js hands this route the raw bytes (express.raw): Intuit's CloudEvents
+    // notifications are application/cloudevents+json, which express.json() skips, and
+    // the HMAC must be computed over the exact bytes Intuit signed.
+    const raw = Buffer.isBuffer(req.body)
+      ? req.body
+      : (req.rawBody || Buffer.from(JSON.stringify(req.body || {})));
+    req.rawBody = raw;
+    let payload;
+    try {
+      payload = raw.length ? JSON.parse(raw.toString('utf8')) : {};
+    } catch (_) {
+      return res.status(400).json({ error: 'Invalid QuickBooks webhook payload' });
+    }
+    const verified = qboConfig().webhookConfigured;
+    if (verified && !webhookSignatureValid(req)) {
+      webhookState.rejected += 1;
       return res.status(401).json({ error: 'Invalid QuickBooks webhook signature' });
     }
 
     const db = getDb();
-    const recorded = recordWebhookEvents(db, req.body || {});
+    const recorded = recordWebhookEvents(db, payload);
     eventIds = recorded.eventIds;
-    const shouldSync = recorded.entityNames.some(name => ['bill', 'billpayment'].includes(String(name).toLowerCase()));
-    res.json({ ok: true, queued: shouldSync, events: eventIds.length });
+    webhookState.received += 1;
+    webhookState.last_received_at = new Date().toISOString();
+    webhookState.last_verified = verified;
+    webhookState.last_realms = recorded.realms;
+    res.json({ ok: true, events: eventIds.length });
 
-    if (shouldSync) {
-      setImmediate(async () => {
-        try {
-          await syncQuickBooksBills({ source: 'webhook' });
-          markWebhookEvents(getDb(), eventIds, 'processed');
-        } catch (err) {
-          markWebhookEvents(getDb(), eventIds, 'failed', err.message || 'QuickBooks webhook sync failed');
-        }
-      });
-    } else if (eventIds.length) {
-      markWebhookEvents(db, eventIds, 'ignored');
+    const primary = getActiveConnection(db);
+    const financeRows = db.prepare("SELECT id, realm_id FROM quickbooks_connections WHERE id LIKE 'finance:%' AND is_active = 1").all();
+    let queued = 0;
+    for (const realmId of recorded.realms) {
+      const connectionId = primary && String(primary.realm_id) === realmId
+        ? 'primary'
+        : financeRows.find(row => String(row.realm_id) === realmId)?.id;
+      if (!connectionId) continue;
+      if (requestChangeCheck(connectionId, { trigger: 'webhook', minGapMs: verified ? 0 : WEBHOOK_UNVERIFIED_MIN_GAP_MS })) queued += 1;
     }
+    if (!verified && !webhookState.unverified_warned) {
+      webhookState.unverified_warned = true;
+      console.warn('[QBO] Webhook received without QBO_WEBHOOK_VERIFIER_TOKEN set: accepted, rate-limited. Set the verifier token to require Intuit\'s signature.');
+    }
+    if (eventIds.length) markWebhookEvents(db, eventIds, queued ? 'queued' : 'ignored');
+    pruneWebhookEvents(db);
   } catch (err) {
     console.error('[QBO] Webhook failed:', err);
     if (eventIds.length) markWebhookEvents(getDb(), eventIds, 'failed', err.message || 'Webhook failed');
@@ -3335,10 +3611,25 @@ router.get('/status', authorize(...MANAGEMENT_ROLES), (req, res) => {
       last_sync_status: connection.last_sync_status,
       last_sync_error: connection.last_sync_error,
     } : null,
-    // When BuildTrack last saw a bill or bill payment change in QuickBooks, and how
-    // the 15-second change check is doing (its own heartbeat; not in the audit log).
+    // When BuildTrack last saw a bill or bill payment change in QuickBooks, how the
+    // event-driven change checks are doing (their own heartbeat; not in the audit log),
+    // whether Intuit's webhook is reaching BuildTrack, and the Finance Tracker pings.
     last_change_at: lastQuickBooksChangeAt,
-    fast_check: { ...fastCheckState },
+    fast_check: { ...fastCheckConfig, ...changeCheckState('primary') },
+    change_checks: Object.fromEntries(changeCheckStates),
+    webhook: {
+      url: `${appBaseUrl()}/api/quickbooks/webhook`,
+      verifier_configured: config.webhookConfigured,
+      ...webhookState,
+    },
+    finance_tracker_notify: {
+      configured: Boolean(financeTrackerNotifyConfig().url && financeTrackerNotifyConfig().key),
+      sent: financeTrackerNotify.sent,
+      last_at: financeTrackerNotify.last_at,
+      last_status: financeTrackerNotify.last_status,
+      last_error: financeTrackerNotify.last_error,
+      last_realms: financeTrackerNotify.last_realms,
+    },
     stats: statusSummary(db),
   });
 });
@@ -3517,7 +3808,15 @@ router.get('/bills/:qboId/attachments/:attachmentId', authorize(...QUICKBOOKS_AD
 
 // Read-only for project managers too — every bill mutation route keeps
 // QUICKBOOKS_ADMIN_ROLES.
-router.get('/bills', authorize(...QUICKBOOKS_ADMIN_ROLES, 'project_manager'), (req, res) => {
+// Opening the Invoice Center (load, focus, its visible-tab poll) asks QuickBooks what
+// changed first - at most every 20 s, waiting at most 4 s - instead of BuildTrack
+// polling QuickBooks around the clock.
+async function freshenBillsOnView(req, res, next) {
+  try { await refreshQuickBooksBeforeView(); } catch (_) { /* the list still loads */ }
+  next();
+}
+
+router.get('/bills', authorize(...QUICKBOOKS_ADMIN_ROLES, 'project_manager'), freshenBillsOnView, (req, res) => {
   const db = getDb();
   const status = String(req.query.status || '').toLowerCase();
   const unmatchedOnly = String(req.query.unmatched || '') === '1';
@@ -3994,34 +4293,46 @@ function startQuickBooksAutoSync() {
   setInterval(run, intervalMs);
   console.log(`[QBO] Automatic Bill sync enabled every ${Math.round(intervalMs / 1000)} seconds.`);
 
+  // The change-check SAFETY NET (webhooks and the Invoice Center trigger checks at once).
   // Shares the auto-sync kill switch above, so a blue-green GREEN never runs it.
   const fastMs = getFastCheckIntervalMs();
-  fastCheckState.enabled = fastMs > 0;
-  fastCheckState.interval_ms = fastMs;
-  if (!fastMs) {
-    console.log('[QBO] Fast change check disabled by environment.');
-    return;
-  }
-  let lastFastCheckError = '';
-  const fast = async () => {
+  const financeMs = getFinanceChangeCheckIntervalMs();
+  fastCheckConfig.enabled = fastMs > 0;
+  fastCheckConfig.interval_ms = fastMs;
+  fastCheckConfig.finance_interval_ms = financeMs;
+  const lastErrors = new Map();
+  const safetyCheck = async connectionId => {
     try {
-      const result = await fastCheckQuickBooksChanges();
-      if (!result?.skipped) lastFastCheckError = '';
-      if (result?.deleted_seen) {
+      const result = await fastCheckQuickBooksChanges(connectionId, 'safety_net');
+      if (!result?.skipped) lastErrors.delete(connectionId);
+      if (connectionId === 'primary' && result?.deleted_seen) {
         // Only the full Bill query can tell which bills are gone; run it now.
         await syncQuickBooksBills({ source: 'auto' }).catch(err => {
           console.error('[QBO] Sync after a QuickBooks deletion failed:', err.message);
         });
       }
     } catch (err) {
-      // Logged once per distinct error; the full sync and fast_check status still show it.
-      if (err.message !== lastFastCheckError) console.warn('[QBO] Fast change check failed:', err.message);
-      lastFastCheckError = err.message;
+      // Logged once per distinct error; /quickbooks/status shows the latest one.
+      if (err.message !== lastErrors.get(connectionId)) console.warn(`[QBO] Fast change check failed (${connectionId}):`, err.message);
+      lastErrors.set(connectionId, err.message);
     }
   };
-  setTimeout(fast, Math.min(20 * 1000, fastMs));
-  setInterval(fast, fastMs);
-  console.log(`[QBO] Fast change check enabled every ${Math.round(fastMs / 1000)} seconds.`);
+  if (fastMs) {
+    setTimeout(() => safetyCheck('primary'), Math.min(20 * 1000, fastMs));
+    setInterval(() => safetyCheck('primary'), fastMs);
+    console.log(`[QBO] Fast change check enabled every ${Math.round(fastMs / 1000)} seconds (safety net; QuickBooks webhooks and the Invoice Center trigger it at once).`);
+  } else {
+    console.log('[QBO] Fast change check safety net disabled by environment.');
+  }
+  if (financeMs) {
+    const financeChecks = async () => {
+      const ids = getDb().prepare("SELECT id FROM quickbooks_connections WHERE id LIKE 'finance:%' AND is_active = 1 ORDER BY id").all().map(row => row.id);
+      for (const id of ids) await safetyCheck(id);
+    };
+    setTimeout(financeChecks, Math.min(60 * 1000, financeMs)).unref?.();
+    setInterval(financeChecks, financeMs).unref?.();
+    console.log(`[QBO] Finance-hub company change check every ${Math.round(financeMs / 1000)} seconds (safety net).`);
+  }
 }
 
 function startQuickBooksPaymentQueueScheduler() {
@@ -4063,6 +4374,8 @@ router.__test = {
   acquireQboRequestSlot,
   cdcEntities,
   fastCheckQuickBooksChanges,
+  recordWebhookEvents,
+  requestChangeCheck,
   missingQuickBooksBillIds,
   paymentStatusForBill,
   queuedUnpaidQuickBooksBillIds,

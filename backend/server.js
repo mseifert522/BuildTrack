@@ -98,6 +98,10 @@ app.use(cors({
   credentials: true,
 }));
 const bodyLimit = process.env.REQUEST_BODY_LIMIT || process.env.INBOUND_EMAIL_JSON_LIMIT || '25mb';
+// QuickBooks webhooks get the exact bytes, whatever the content type: Intuit's CloudEvents
+// notifications are application/cloudevents+json (express.json() would skip them and
+// leave an empty body) and the intuit-signature HMAC covers the raw body.
+app.use('/api/quickbooks/webhook', express.raw({ type: () => true, limit: '2mb' }));
 app.use(express.json({
   limit: bodyLimit,
   verify: (req, _res, buf) => {
