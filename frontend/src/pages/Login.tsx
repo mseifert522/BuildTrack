@@ -315,9 +315,14 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
       completeLogin(res.data);
       toast.success('Signed in from this trusted device');
     } catch (err: any) {
-      localStorage.removeItem(DEVICE_TOKEN_KEY);
-      localStorage.removeItem(DEVICE_TRUSTED_UNTIL_KEY);
-      setTrustedDeviceReady(false);
+      // Only an authentication rejection invalidates device approval. A network
+      // failure, rate limit or server error must leave it available for retry.
+      // Another tab may also have saved a new approval while this request ran.
+      if (err.response?.status === 401 && getStoredDeviceToken() === device.token) {
+        localStorage.removeItem(DEVICE_TOKEN_KEY);
+        localStorage.removeItem(DEVICE_TRUSTED_UNTIL_KEY);
+      }
+      setTrustedDeviceReady(getTrustedDeviceState().available);
       toast.error(err.response?.data?.error || 'Trusted device sign-in failed');
     } finally {
       setTrustedDeviceLoading(false);
@@ -469,6 +474,8 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
   };
 
   const showMobileQuickAccessOnly = mobileLoginHost && quickAccessReady;
+  const oneTouchReady = quickAccessReady || (!mobileLoginHost && trustedDeviceReady);
+  const oneTouchLoading = quickAccessLoading || trustedDeviceLoading;
 
   const handleResendCode = async () => {
     try {
@@ -689,12 +696,12 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
             </form>
           ) : (
             <div className={showMobileQuickAccessOnly ? 'space-y-0' : forceMobileLogin ? 'space-y-2' : 'space-y-3'}>
-              {quickAccessReady && (
+              {oneTouchReady && (
                 <div className={showMobileQuickAccessOnly ? 'space-y-4 rounded-2xl bg-slate-950/20 p-5 text-center' : undefined}>
                   <button
                     type="button"
-                    onClick={handleMobileQuickAccessLogin}
-                    disabled={quickAccessLoading}
+                    onClick={quickAccessReady ? handleMobileQuickAccessLogin : handleTrustedDeviceLogin}
+                    disabled={oneTouchLoading}
                     className={`w-full ${showMobileQuickAccessOnly ? 'relative min-h-[108px] justify-center p-5 rounded-2xl text-center' : 'justify-between gap-3 text-left'} flex items-center ${forceMobileLogin && !showMobileQuickAccessOnly ? 'p-3 rounded-xl' : !showMobileQuickAccessOnly ? 'p-4 rounded-lg' : ''} transition-all disabled:opacity-60`}
                     style={{ background: 'linear-gradient(135deg, #F7B733, #D99D26)', color: '#06111F', boxShadow: '0 12px 28px rgba(217,157,38,0.28)' }}
                   >
@@ -705,11 +712,11 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
                       <span className={`${showMobileQuickAccessOnly ? 'text-left' : ''} min-w-0`}>
                         <span className={`block ${showMobileQuickAccessOnly ? 'text-lg whitespace-nowrap' : forceMobileLogin ? 'text-xs' : 'text-sm'} font-black`}>One Touch Access</span>
                         <span className={`block ${showMobileQuickAccessOnly ? 'mt-1 text-sm leading-snug' : forceMobileLogin ? 'text-[11px] leading-snug' : 'text-xs mt-0.5'}`} style={{ color: 'rgba(6,17,31,0.78)' }}>
-                          Continue as {quickAccessLabel}.
+                          {quickAccessReady ? `Continue as ${quickAccessLabel}.` : 'Continue on this trusted device.'}
                         </span>
                       </span>
                     </span>
-                    {quickAccessLoading ? (
+                    {oneTouchLoading ? (
                       <span className={`${showMobileQuickAccessOnly ? 'absolute right-5 top-1/2 -translate-y-1/2' : ''} w-5 h-5 rounded-full animate-spin flex-shrink-0`} style={{ border: '2px solid rgba(6,17,31,0.25)', borderTopColor: '#06111F' }} />
                     ) : (
                       <ArrowRight className={`${showMobileQuickAccessOnly ? 'absolute right-5 top-1/2 -translate-y-1/2 h-7 w-7' : 'w-5 h-5'} flex-shrink-0`} />
@@ -721,31 +728,6 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
                     </p>
                   )}
                 </div>
-              )}
-
-              {!mobileLoginHost && trustedDeviceReady && (
-                <button
-                  type="button"
-                  onClick={handleTrustedDeviceLogin}
-                  disabled={trustedDeviceLoading}
-                  className="w-full flex items-center justify-between gap-3 p-4 rounded-lg text-left transition-all disabled:opacity-60"
-                  style={{ background: '#111827', color: 'white', boxShadow: '0 10px 26px rgba(17,24,39,0.18)' }}
-                >
-                  <span className="flex items-center gap-3 min-w-0">
-                    <span className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(217,157,38,0.18)' }}>
-                      <ShieldCheck className="w-5 h-5" style={{ color: '#D99D26' }} />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-sm font-black">Continue on this trusted device</span>
-                      <span className="block text-xs mt-0.5" style={{ color: 'rgba(255,255,255,0.62)' }}>Open your approved BuildTrack session.</span>
-                    </span>
-                  </span>
-                  {trustedDeviceLoading ? (
-                    <span className="w-5 h-5 rounded-full animate-spin flex-shrink-0" style={{ border: '2px solid rgba(255,255,255,0.25)', borderTopColor: '#D99D26' }} />
-                  ) : (
-                    <ArrowRight className="w-5 h-5 flex-shrink-0" />
-                  )}
-                </button>
               )}
 
               {mobileLoginHost && !showMobileQuickAccessOnly && (
