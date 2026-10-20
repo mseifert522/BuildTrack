@@ -40,6 +40,34 @@ let paymentQueueSchedulerStarted = false;
 let paymentQueueSchedulerRunning = false;
 const qboTokenRefreshInFlight = new Map();
 
+// ── QuickBooks request lane + fast change check (2026-10-20) ────────────────
+// Every QuickBooks API call in this process (bill sync, the fast change check, queue
+// re-checks, Verify, and the Finance Tracker service feeds) shares one lane per
+// company. Finance Tracker used to burst 8+ requests at once against New Urban's
+// company, Intuit answered 429, and a 429 on the bill sync cost that minute's whole
+// sync. Requests over the limit now wait their turn, a 429 is retried after a short
+// backoff, and every request has a timeout so a hung call cannot stall the sync.
+const QBO_REQUEST_LANES = new Map();
+const QBO_RATE_LIMIT_RETRIES = 3;
+const FAST_CHECK_DEFAULT_INTERVAL_MS = 15 * 1000;
+const FAST_CHECK_OVERLAP_MS = 2 * 60 * 1000;
+const FAST_CHECK_FIRST_LOOKBACK_MS = 10 * 60 * 1000;
+const BILL_PDF_SCAN_DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
+let activeFastCheckPromise = null;
+let fastCheckCursor = null;
+let lastQuickBooksChangeAt = null;
+let billPdfScanRequested = true;
+let lastBillPdfScanAt = 0;
+const handledCdcDeletes = new Set();
+const fastCheckState = {
+  enabled: false,
+  interval_ms: 0,
+  last_at: null,
+  last_status: null,
+  last_error: null,
+  last_changes: 0,
+};
+
 function qboEnvironment() {
   return String(process.env.QBO_ENVIRONMENT || process.env.QUICKBOOKS_ENVIRONMENT || 'production').toLowerCase() === 'sandbox'
     ? 'sandbox'
@@ -277,11 +305,13 @@ async function qboDownloadAttachment(db, connection, uri) {
   if (!/^https?:\/\//i.test(url)) {
     url = `${qboApiBase(connection.environment)}${url.startsWith('/') ? '' : '/'}${url}`;
   }
+  // The bill sync awaits PDF downloads, so a hung download must not hold it up.
   const response = await fetch(url, {
     headers: {
       Accept: 'application/pdf,*/*',
       Authorization: `Bearer ${accessToken}`,
     },
+    signal: AbortSignal.timeout(120 * 1000),
   });
   if (!response.ok) {
     const err = new Error(`QuickBooks attachment download failed (${response.status})`);
@@ -296,6 +326,7 @@ async function qboDownloadAttachment(db, connection, uri) {
       headers: {
         Accept: 'application/pdf,image/*,*/*',
       },
+      signal: AbortSignal.timeout(120 * 1000),
     });
     if (!fileResponse.ok) {
       const err = new Error(`QuickBooks attachment file download failed (${fileResponse.status})`);
@@ -754,27 +785,106 @@ async function refreshAccessToken(db, connection) {
   return accessToken;
 }
 
+function qboMaxConcurrentRequests() {
+  const requested = Number(process.env.QBO_MAX_CONCURRENT_REQUESTS || 4);
+  return Number.isFinite(requested) && requested >= 1 ? Math.floor(requested) : 4;
+}
+
+function qboRequestTimeoutMs(path) {
+  // Reports (balance sheet / P&L by class, general ledger) legitimately take longer.
+  const isReport = /\/reports\//.test(path);
+  const requested = Number(isReport ? process.env.QBO_REPORT_TIMEOUT_MS : process.env.QBO_REQUEST_TIMEOUT_MS);
+  if (Number.isFinite(requested) && requested >= 5000) return requested;
+  return isReport ? 180 * 1000 : 60 * 1000;
+}
+
+function qboRequestLabel(path) {
+  const query = /[?&]query=([^&]+)/.exec(path);
+  if (query) {
+    const entity = /FROM\s+(\w+)/i.exec(decodeURIComponent(query[1]));
+    return `${entity ? entity[1] : 'entity'} query`;
+  }
+  const report = /\/reports\/(\w+)/.exec(path);
+  if (report) return `${report[1]} report`;
+  if (/\/cdc\?/.test(path)) return 'change check';
+  return path.split('?')[0].split('/').slice(-2).join('/');
+}
+
+async function acquireQboRequestSlot(realmId) {
+  const key = String(realmId || 'default');
+  let lane = QBO_REQUEST_LANES.get(key);
+  if (!lane) {
+    lane = { active: 0, waiting: [] };
+    QBO_REQUEST_LANES.set(key, lane);
+  }
+  if (lane.active < qboMaxConcurrentRequests()) {
+    lane.active += 1;
+  } else {
+    // A finishing request hands its slot straight to the next waiter (FIFO).
+    await new Promise(resolve => lane.waiting.push(resolve));
+  }
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const next = lane.waiting.shift();
+    if (next) next();
+    else lane.active -= 1;
+  };
+}
+
+function qboRetryDelayMs(response, attempt) {
+  const retryAfter = Number(response?.headers?.get?.('retry-after'));
+  if (Number.isFinite(retryAfter) && retryAfter > 0) return Math.min(retryAfter * 1000, 30 * 1000);
+  return Math.min(30 * 1000, 2000 * (2 ** attempt)) + Math.floor(Math.random() * 500);
+}
+
 async function qboRequest(db, connection, path) {
-  const accessToken = await refreshAccessToken(db, connection);
   const separator = path.includes('?') ? '&' : '?';
   const url = `${qboApiBase(connection.environment)}${path}${separator}minorversion=${MINOR_VERSION}`;
-  const response = await fetch(url, {
-    headers: {
-      Accept: 'application/json',
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-  const text = await response.text();
-  let payload = {};
-  try { payload = text ? JSON.parse(text) : {}; } catch (_) { payload = { raw: text }; }
-  if (!response.ok) {
-    const fault = payload?.Fault?.Error?.[0];
-    const err = new Error(fault?.Message || fault?.Detail || `QuickBooks API request failed (${response.status})`);
-    err.statusCode = response.status;
-    err.details = payload;
-    throw err;
+  const timeoutMs = qboRequestTimeoutMs(path);
+  for (let attempt = 0; ; attempt += 1) {
+    // Per attempt: a 429 backoff can outlast the token's last minute.
+    const accessToken = await refreshAccessToken(db, connection);
+    const release = await acquireQboRequestSlot(connection.realm_id);
+    let response;
+    let text = '';
+    try {
+      response = await fetch(url, {
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      text = await response.text();
+    } catch (err) {
+      if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+        const timeoutErr = new Error(`QuickBooks did not answer the ${qboRequestLabel(path)} within ${Math.round(timeoutMs / 1000)} s`);
+        timeoutErr.statusCode = 504;
+        throw timeoutErr;
+      }
+      throw err;
+    } finally {
+      release();
+    }
+    if (response.status === 429 && attempt < QBO_RATE_LIMIT_RETRIES) {
+      const waitMs = qboRetryDelayMs(response, attempt);
+      console.warn(`[QBO] QuickBooks rate limit (429) on the ${qboRequestLabel(path)}; retrying in ${Math.round(waitMs / 1000)} s`);
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+      continue;
+    }
+    let payload = {};
+    try { payload = text ? JSON.parse(text) : {}; } catch (_) { payload = { raw: text }; }
+    if (!response.ok) {
+      const fault = payload?.Fault?.Error?.[0];
+      const err = new Error(fault?.Message || fault?.Detail || `QuickBooks API request failed (${response.status})`);
+      err.statusCode = response.status;
+      err.details = payload;
+      throw err;
+    }
+    return payload;
   }
-  return payload;
 }
 
 async function qboQuery(db, connection, query) {
@@ -1514,11 +1624,12 @@ function upsertBillsAndPayments(db, connection, bills, payments) {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
   `);
   const getExistingBillApproval = db.prepare(`
-    SELECT payment_approval_status, payment_status
+    SELECT payment_approval_status, payment_status, balance, sync_token
     FROM quickbooks_bills
     WHERE qbo_id = ?
     LIMIT 1
   `);
+  const getExistingPayment = db.prepare('SELECT sync_token FROM quickbooks_bill_payments WHERE qbo_id = ? LIMIT 1');
   const markBillReceiptHistorical = db.prepare(`
     UPDATE quickbooks_bills
     SET vendor_receipt_notify_status = 'historical'
@@ -1552,12 +1663,19 @@ function upsertBillsAndPayments(db, connection, bills, payments) {
   let matched = 0;
   let ignored = 0;
   let markedPaidFromQueue = 0;
+  // What actually differs from BuildTrack's copy (new rows, a new SyncToken, or a
+  // balance/status change). Re-writing an identical bill is not a change.
+  let changedBills = 0;
+  let changedPayments = 0;
+  let nowPaid = 0;
   const paidFromQueue = [];
   const newBills = [];
   const write = db.transaction(() => {
     if (deleteExcludedBills) deleteExcludedBills.run(...excludedVendors);
 
     for (const payment of payments) {
+      const existingPayment = getExistingPayment.get(String(payment.Id));
+      if (!existingPayment || String(existingPayment.sync_token || '') !== String(payment.SyncToken || '')) changedPayments += 1;
       upsertPayment.run(
         String(payment.Id),
         connection.realm_id,
@@ -1585,6 +1703,15 @@ function upsertBillsAndPayments(db, connection, bills, payments) {
       const paymentApprovalStatusAtSync = existingBillApproval?.payment_approval_status || PAYMENT_APPROVAL_DEFAULT_STATUS;
       const deletedFromBuildTrack = paymentApprovalStatusAtSync === PAYMENT_APPROVAL_DELETED_STATUS;
       const restoreDeletedPaidBill = shouldRestoreDeletedQuickBooksBill(paymentApprovalStatusAtSync, paymentStatus);
+      if (
+        !existingBillApproval
+        || existingBillApproval.payment_status !== paymentStatus
+        || normalizeMoney(existingBillApproval.balance) !== normalizeMoney(bill.Balance)
+        || String(existingBillApproval.sync_token || '') !== String(bill.SyncToken || '')
+      ) {
+        changedBills += 1;
+        if (paymentStatus === 'paid' && existingBillApproval && existingBillApproval.payment_status !== 'paid') nowPaid += 1;
+      }
       const classRef = primaryBillClassRef(bill);
       const project = findProjectForBill(db, bill, invoice, classRef);
       if (project && classRef) rememberProjectClass(db, project, classRef);
@@ -1704,7 +1831,12 @@ function upsertBillsAndPayments(db, connection, bills, payments) {
   });
 
   write();
-  return { matched, ignored, markedPaidFromQueue, paidFromQueue, newBills };
+  if (changedBills || changedPayments) {
+    lastQuickBooksChangeAt = new Date().toISOString();
+    // New or edited bills may carry a new invoice PDF; the next full sync looks for it.
+    if (changedBills) billPdfScanRequested = true;
+  }
+  return { matched, ignored, markedPaidFromQueue, paidFromQueue, newBills, changedBills, changedPayments, nowPaid };
 }
 
 function reconcileMissingQuickBooksBills(db, connection, bills) {
@@ -2613,7 +2745,11 @@ async function syncQuickBooksBillPdfs({ scope = 'open_missing', force = false, q
       }
     }
 
-    if (actorUserId) {
+    // Automatic scans that found nothing new are not audit events (they used to add a
+    // row every minute, 99% of the activity log). Manual runs are always recorded.
+    const pdfSyncDidSomething = summary.downloaded + summary.redownloaded + summary.updated > 0
+      || Object.keys(summary.skipped_reasons).length > 0;
+    if (actorUserId && (source !== 'auto' || pdfSyncDidSomething)) {
       logActivity({
         userId: actorUserId,
         action: 'quickbooks_bill_pdf_sync_completed',
@@ -2725,10 +2861,137 @@ async function recheckPaymentQueueAgainstQuickBooks() {
   }
 }
 
+// ── Fast change check (2026-10-20) ───────────────────────────────────────────
+// The full sync re-reads every bill, payment, vendor and attachment once a minute, so
+// a payment recorded in QuickBooks could take up to a minute to reach BuildTrack.
+// This asks QuickBooks' change feed (CDC) for just the bills and bill payments edited
+// since the last check - one small request - and writes them through the same path
+// as the full sync. The full sync stays the authoritative reconcile (deletions,
+// vendors, PDFs); a deletion seen here triggers it immediately.
+function getFastCheckIntervalMs() {
+  const raw = process.env.QBO_FAST_CHECK_INTERVAL_MS;
+  if (raw === undefined || String(raw).trim() === '') return FAST_CHECK_DEFAULT_INTERVAL_MS;
+  const requested = Number(raw);
+  if (!Number.isFinite(requested) || requested <= 0) return 0;
+  return Math.max(10 * 1000, requested);
+}
+
+function cdcEntities(payload, entityName) {
+  const rows = [];
+  for (const block of payload?.CDCResponse || []) {
+    for (const queryResponse of block?.QueryResponse || []) {
+      if (Array.isArray(queryResponse?.[entityName])) rows.push(...queryResponse[entityName]);
+    }
+  }
+  return rows;
+}
+
+function isCdcDeleted(entity) {
+  return String(entity?.status || '').toLowerCase() === 'deleted';
+}
+
+async function fastCheckQuickBooksChanges() {
+  if (activeFastCheckPromise) return activeFastCheckPromise;
+  // A full sync is re-reading everything right now; it covers this tick.
+  if (activeSyncPromise) return { skipped: true, reason: 'full_sync_running' };
+
+  activeFastCheckPromise = (async () => {
+    const db = getDb();
+    if (!qboConfig().configured) return { skipped: true, reason: 'missing_credentials' };
+    const connection = getActiveConnection(db);
+    if (!connection) return { skipped: true, reason: 'not_connected' };
+
+    const startedAt = Date.now();
+    // Overlapping windows: anything QuickBooks stamped in the last couple of minutes is
+    // read again, so clock skew or a write racing the previous check cannot slip by.
+    const since = fastCheckCursor || new Date(startedAt - FAST_CHECK_FIRST_LOOKBACK_MS).toISOString();
+    const payload = await qboRequest(
+      db,
+      connection,
+      `/v3/company/${encodeURIComponent(connection.realm_id)}/cdc?entities=Bill,BillPayment&changedSince=${encodeURIComponent(since)}`
+    );
+    const billRows = cdcEntities(payload, 'Bill');
+    const paymentRows = cdcEntities(payload, 'BillPayment');
+    const bills = billRows.filter(bill => bill?.Id && !isCdcDeleted(bill));
+    const payments = paymentRows.filter(payment => payment?.Id && !isCdcDeleted(payment));
+    const newlyDeleted = [...billRows.map(row => ['Bill', row]), ...paymentRows.map(row => ['BillPayment', row])]
+      .filter(([, row]) => row?.Id && isCdcDeleted(row))
+      .map(([type, row]) => `${type}:${row.Id}`)
+      .filter(key => !handledCdcDeletes.has(key));
+    if (handledCdcDeletes.size > 500) handledCdcDeletes.clear();
+    for (const key of newlyDeleted) handledCdcDeletes.add(key);
+
+    let result = { changedBills: 0, changedPayments: 0, nowPaid: 0, paidFromQueue: [], markedPaidFromQueue: 0 };
+    if (bills.length || payments.length) {
+      result = upsertBillsAndPayments(db, connection, bills, payments);
+      logPaidFromQueue(result.paidFromQueue, 'fast check');
+    }
+    fastCheckCursor = new Date(startedAt - FAST_CHECK_OVERLAP_MS).toISOString();
+    const changes = result.changedBills + result.changedPayments;
+    if (changes) {
+      console.log(`[QBO] Fast check: ${result.changedBills} bill(s) and ${result.changedPayments} bill payment(s) changed in QuickBooks${result.nowPaid ? `; ${result.nowPaid} bill(s) now paid` : ''}`);
+      const actorUserId = connection.connected_by || paymentQueueAutomationUserId(db);
+      if (actorUserId) {
+        logActivity({
+          userId: actorUserId,
+          action: 'quickbooks_sync_completed',
+          entityType: 'quickbooks_connection',
+          entityId: connection.realm_id,
+          details: {
+            source: 'fast_check',
+            changed_bills: result.changedBills,
+            changed_bill_payments: result.changedPayments,
+            bills_now_paid: result.nowPaid,
+            marked_paid_from_friday_queue: result.markedPaidFromQueue,
+            ...(result.paidFromQueue.length ? { paid_from_friday_queue: result.paidFromQueue.slice(0, 25) } : {}),
+            ...(newlyDeleted.length ? { deleted_in_quickbooks: newlyDeleted.slice(0, 25) } : {}),
+          },
+        });
+      }
+    }
+    return {
+      checked_at: new Date(startedAt).toISOString(),
+      since,
+      bills: bills.length,
+      bill_payments: payments.length,
+      changed_bills: result.changedBills,
+      changed_bill_payments: result.changedPayments,
+      bills_now_paid: result.nowPaid,
+      deleted_seen: newlyDeleted.length,
+    };
+  })();
+
+  try {
+    const result = await activeFastCheckPromise;
+    if (!result?.skipped) {
+      fastCheckState.last_at = result.checked_at;
+      fastCheckState.last_status = 'success';
+      fastCheckState.last_error = null;
+      fastCheckState.last_changes = result.changed_bills + result.changed_bill_payments;
+    }
+    return result;
+  } catch (err) {
+    fastCheckState.last_at = new Date().toISOString();
+    fastCheckState.last_status = 'failed';
+    fastCheckState.last_error = err.message || 'QuickBooks change check failed';
+    throw err;
+  } finally {
+    activeFastCheckPromise = null;
+  }
+}
+
+function billPdfScanIntervalMs() {
+  const requested = Number(process.env.QBO_BILL_PDF_SCAN_INTERVAL_MS || BILL_PDF_SCAN_DEFAULT_INTERVAL_MS);
+  return Number.isFinite(requested) && requested >= 60 * 1000 ? requested : BILL_PDF_SCAN_DEFAULT_INTERVAL_MS;
+}
+
 async function syncQuickBooksBills({ source = 'manual', userId = null } = {}) {
   if (activeSyncPromise) return activeSyncPromise;
 
   activeSyncPromise = (async () => {
+    // A change check mid-flight writes first, so this sync's older read lands after it
+    // and the next change check re-reads anything stamped in between.
+    if (activeFastCheckPromise) await activeFastCheckPromise.catch(() => null);
     const db = getDb();
     const config = qboConfig();
     if (!config.configured) {
@@ -2761,12 +3024,29 @@ async function syncQuickBooksBills({ source = 'manual', userId = null } = {}) {
       // is intentionally no longer called from the sync path.
       const vendorReceiptNotifications = { queued_new_bills: result.newBills.length, auto_send: 'disabled_manual_only' };
       let billPdfSync = null;
-      if (process.env.QBO_BILL_PDF_SYNC_ON_BILL_SYNC !== 'false') {
+      // The PDF scan reads every QuickBooks attachment record; it used to run every
+      // minute although the bills still missing a PDF have none in QuickBooks. It
+      // runs when bills changed, on manual syncs, and otherwise every few minutes.
+      const pdfScanDue = source !== 'auto'
+        || billPdfScanRequested
+        || Date.now() - lastBillPdfScanAt >= billPdfScanIntervalMs();
+      if (process.env.QBO_BILL_PDF_SYNC_ON_BILL_SYNC !== 'false' && pdfScanDue) {
+        billPdfScanRequested = false;
+        lastBillPdfScanAt = Date.now();
         billPdfSync = await syncQuickBooksBillPdfs({ scope: process.env.QBO_BILL_PDF_SYNC_SCOPE || 'missing', source, userId }).catch(err => {
+          billPdfScanRequested = true;
           console.warn('[QBO] Bill PDF sync skipped after bill sync:', err.message);
           return { skipped: true, reason: err.message || 'pdf_sync_failed' };
         });
       }
+      const pdfChanges = billPdfSync && !billPdfSync.skipped
+        ? (billPdfSync.downloaded || 0) + (billPdfSync.redownloaded || 0) + (billPdfSync.updated || 0)
+        : 0;
+      // The connection row's last_sync_at is the heartbeat. An automatic sync that
+      // changed nothing is not an audit event (two such rows a minute used to be 99%
+      // of the activity log and buried real events in the company audit trail).
+      const syncChangedSomething = result.changedBills + result.changedPayments + result.markedPaidFromQueue
+        + missingBillReconciliation.count + (vendorResult.profiles_created || 0) + pdfChanges > 0;
       db.prepare(`
         UPDATE quickbooks_connections
         SET company_name = COALESCE(?, company_name),
@@ -2776,7 +3056,7 @@ async function syncQuickBooksBills({ source = 'manual', userId = null } = {}) {
             updated_at = datetime('now')
         WHERE id = ?
       `).run(companyName || null, source === 'webhook' ? 'webhook_success' : 'success', connection.id);
-      if (userId || connection.connected_by) {
+      if ((userId || connection.connected_by) && (source !== 'auto' || syncChangedSomething)) {
         logActivity({
           userId: userId || connection.connected_by,
           action: source === 'webhook' ? 'quickbooks_webhook_sync_completed' : 'quickbooks_sync_completed',
@@ -2786,6 +3066,9 @@ async function syncQuickBooksBills({ source = 'manual', userId = null } = {}) {
             source,
             bills: bills.length,
             bill_payments: payments.length,
+            changed_bills: result.changedBills,
+            changed_bill_payments: result.changedPayments,
+            bills_now_paid: result.nowPaid,
             vendors: vendors.length,
             vendor_profiles_created: vendorResult.profiles_created,
             vendor_profiles_updated: vendorResult.profiles_updated,
@@ -2806,6 +3089,9 @@ async function syncQuickBooksBills({ source = 'manual', userId = null } = {}) {
         source,
         bills: bills.length,
         bill_payments: payments.length,
+        changed_bills: result.changedBills,
+        changed_bill_payments: result.changedPayments,
+        bills_now_paid: result.nowPaid,
         vendors: vendors.length,
         vendor_profiles_created: vendorResult.profiles_created,
         vendor_profiles_updated: vendorResult.profiles_updated,
@@ -3049,6 +3335,10 @@ router.get('/status', authorize(...MANAGEMENT_ROLES), (req, res) => {
       last_sync_status: connection.last_sync_status,
       last_sync_error: connection.last_sync_error,
     } : null,
+    // When BuildTrack last saw a bill or bill payment change in QuickBooks, and how
+    // the 15-second change check is doing (its own heartbeat; not in the audit log).
+    last_change_at: lastQuickBooksChangeAt,
+    fast_check: { ...fastCheckState },
     stats: statusSummary(db),
   });
 });
@@ -3703,6 +3993,35 @@ function startQuickBooksAutoSync() {
   setTimeout(run, Math.min(30 * 1000, intervalMs));
   setInterval(run, intervalMs);
   console.log(`[QBO] Automatic Bill sync enabled every ${Math.round(intervalMs / 1000)} seconds.`);
+
+  // Shares the auto-sync kill switch above, so a blue-green GREEN never runs it.
+  const fastMs = getFastCheckIntervalMs();
+  fastCheckState.enabled = fastMs > 0;
+  fastCheckState.interval_ms = fastMs;
+  if (!fastMs) {
+    console.log('[QBO] Fast change check disabled by environment.');
+    return;
+  }
+  let lastFastCheckError = '';
+  const fast = async () => {
+    try {
+      const result = await fastCheckQuickBooksChanges();
+      if (!result?.skipped) lastFastCheckError = '';
+      if (result?.deleted_seen) {
+        // Only the full Bill query can tell which bills are gone; run it now.
+        await syncQuickBooksBills({ source: 'auto' }).catch(err => {
+          console.error('[QBO] Sync after a QuickBooks deletion failed:', err.message);
+        });
+      }
+    } catch (err) {
+      // Logged once per distinct error; the full sync and fast_check status still show it.
+      if (err.message !== lastFastCheckError) console.warn('[QBO] Fast change check failed:', err.message);
+      lastFastCheckError = err.message;
+    }
+  };
+  setTimeout(fast, Math.min(20 * 1000, fastMs));
+  setInterval(fast, fastMs);
+  console.log(`[QBO] Fast change check enabled every ${Math.round(fastMs / 1000)} seconds.`);
 }
 
 function startQuickBooksPaymentQueueScheduler() {
@@ -3741,6 +4060,9 @@ router.sendScheduledPaymentQueueEmail = sendScheduledPaymentQueueEmail;
 router.syncQuickBooksBills = syncQuickBooksBills;
 router.syncQuickBooksBillPdfs = syncQuickBooksBillPdfs;
 router.__test = {
+  acquireQboRequestSlot,
+  cdcEntities,
+  fastCheckQuickBooksChanges,
   missingQuickBooksBillIds,
   paymentStatusForBill,
   queuedUnpaidQuickBooksBillIds,
