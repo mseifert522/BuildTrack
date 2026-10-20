@@ -1,0 +1,63 @@
+/* This branded sign-in control intentionally opts out of the global flat reset. */
+html body #root .bt-login-page .bt-one-touch-button {
+  padding: 18px;
+  border: 1px solid #b68d42;
+  border-radius: 16px;
+  background: linear-gradient(115deg, #0b1c33 0%, #153c60 68%, #22577a 100%) !important;
+  color: #ffffff;
+  box-shadow: 0 10px 24px rgba(11, 28, 51, 0.2), inset 0 1px 0 rgba(255, 225, 164, 0.18) !important;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+html body #root .bt-login-page .bt-one-touch-button:hover:not(:disabled) {
+  border-color: #f7c665;
+  box-shadow: 0 12px 28px rgba(11, 28, 51, 0.28), inset 0 1px 0 rgba(255, 225, 164, 0.3) !important;
+}
+
+html body #root .bt-login-page .bt-one-touch-button:focus-visible {
+  outline: 3px solid #b07817 !important;
+  outline-offset: 4px !important;
+}
+
+html body #root .bt-login-page .bt-one-touch-button:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+html body #root .bt-login-page .bt-one-touch-icon {
+  background: linear-gradient(145deg, #ffe1a0, #e5ad3f) !important;
+  color: #10243c;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.18) !important;
+}
+
+html body #root .bt-login-page .bt-one-touch-title {
+  color: #ffffff;
+  letter-spacing: 0.01em;
+}
+
+html body #root .bt-login-page .bt-one-touch-description {
+  color: #d3e3f2;
+}
+
+html body #root .bt-login-page .bt-one-touch-arrow {
+  background: rgba(247, 183, 51, 0.12);
+  color: #ffd780;
+  border: 1px solid rgba(247, 183, 51, 0.35);
+}
+
+@media (max-width: 420px) {
+  html body #root .bt-login-page .bt-one-touch-button {
+    padding: 14px;
+    gap: 8px;
+  }
+
+  html body #root .bt-login-page .bt-one-touch-title {
+    font-size: 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html body #root .bt-login-page .bt-one-touch-button {
+    transition: none;
+  }
+}

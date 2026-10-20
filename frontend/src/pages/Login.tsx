@@ -17,6 +17,7 @@ import api from '../lib/api';
 import { isMobileAppHost, mobilePath } from '../lib/appUrls';
 import { BUILDTRACK_TRUTH_ICON_SRC } from '../lib/branding';
 import toast from 'react-hot-toast';
+import '../styles/login.css';
 
 const DEVICE_TOKEN_KEY = 'bt_device_token';
 const DEVICE_TRUSTED_UNTIL_KEY = 'bt_device_trusted_until';
@@ -501,7 +502,7 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
 
   return (
     <div
-      className={forceMobileLogin ? 'bt-mobile-login-page flex items-start justify-center px-3 py-2 sm:px-5 sm:py-4' : 'min-h-screen flex'}
+      className={`bt-login-page ${forceMobileLogin ? 'bt-mobile-login-page flex items-start justify-center px-3 py-2 sm:px-5 sm:py-4' : 'min-h-screen flex'}`}
       style={{
         fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
         background: forceMobileLogin ? 'linear-gradient(180deg, #020617 0%, #07142A 48%, #0F172A 100%)' : undefined,
@@ -702,25 +703,26 @@ export default function Login({ initialMode = 'password', forceMobileLogin = fal
                     type="button"
                     onClick={quickAccessReady ? handleMobileQuickAccessLogin : handleTrustedDeviceLogin}
                     disabled={oneTouchLoading}
-                    className={`w-full ${showMobileQuickAccessOnly ? 'relative min-h-[108px] justify-center p-5 rounded-2xl text-center' : 'justify-between gap-3 text-left'} flex items-center ${forceMobileLogin && !showMobileQuickAccessOnly ? 'p-3 rounded-xl' : !showMobileQuickAccessOnly ? 'p-4 rounded-lg' : ''} transition-all disabled:opacity-60`}
-                    style={{ background: 'linear-gradient(135deg, #F7B733, #D99D26)', color: '#06111F', boxShadow: '0 12px 28px rgba(217,157,38,0.28)' }}
+                    className={`bt-one-touch-button w-full flex items-center justify-between gap-3 text-left ${showMobileQuickAccessOnly ? 'min-h-[108px]' : 'min-h-[80px]'}`}
                   >
-                    <span className={`flex items-center ${showMobileQuickAccessOnly ? 'justify-center gap-4' : 'gap-3'} min-w-0`}>
-                      <span className={`${showMobileQuickAccessOnly ? 'h-12 w-12' : forceMobileLogin ? 'h-8 w-8' : 'h-11 w-11'} rounded-lg flex items-center justify-center flex-shrink-0`} style={{ background: 'rgba(255,255,255,0.18)' }}>
-                        <Smartphone className={showMobileQuickAccessOnly ? 'h-5 w-5' : forceMobileLogin ? 'h-4 w-4' : 'h-5 w-5'} />
+                    <span className="flex items-center gap-3 min-w-0">
+                      <span className="bt-one-touch-icon h-11 w-11 rounded-xl flex items-center justify-center flex-shrink-0">
+                        <Smartphone className="h-5 w-5" />
                       </span>
-                      <span className={`${showMobileQuickAccessOnly ? 'text-left' : ''} min-w-0`}>
-                        <span className={`block ${showMobileQuickAccessOnly ? 'text-lg whitespace-nowrap' : forceMobileLogin ? 'text-xs' : 'text-sm'} font-black`}>One Touch Access</span>
-                        <span className={`block ${showMobileQuickAccessOnly ? 'mt-1 text-sm leading-snug' : forceMobileLogin ? 'text-[11px] leading-snug' : 'text-xs mt-0.5'}`} style={{ color: 'rgba(6,17,31,0.78)' }}>
+                      <span className="min-w-0">
+                        <span className="bt-one-touch-title block text-base font-black leading-snug">One Touch Access</span>
+                        <span className="bt-one-touch-description block mt-1 text-xs leading-snug">
                           {quickAccessReady ? `Continue as ${quickAccessLabel}.` : 'Continue on this trusted device.'}
                         </span>
                       </span>
                     </span>
-                    {oneTouchLoading ? (
-                      <span className={`${showMobileQuickAccessOnly ? 'absolute right-5 top-1/2 -translate-y-1/2' : ''} w-5 h-5 rounded-full animate-spin flex-shrink-0`} style={{ border: '2px solid rgba(6,17,31,0.25)', borderTopColor: '#06111F' }} />
-                    ) : (
-                      <ArrowRight className={`${showMobileQuickAccessOnly ? 'absolute right-5 top-1/2 -translate-y-1/2 h-7 w-7' : 'w-5 h-5'} flex-shrink-0`} />
-                    )}
+                    <span className="bt-one-touch-arrow h-8 w-8 rounded-full flex items-center justify-center flex-shrink-0" aria-hidden="true">
+                      {oneTouchLoading ? (
+                        <span className="w-4 h-4 rounded-full animate-spin" style={{ border: '2px solid rgba(247,183,51,0.25)', borderTopColor: '#F7B733' }} />
+                      ) : (
+                        <ArrowRight className="w-4 h-4" />
+                      )}
+                    </span>
                   </button>
                   {showMobileQuickAccessOnly && (
                     <p className="mx-auto max-w-[20rem] px-1 text-center text-sm leading-relaxed text-slate-100">
