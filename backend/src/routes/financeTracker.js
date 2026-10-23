@@ -16,10 +16,23 @@ function keysMatch(left, right) {
   return a.length === b.length && a.length > 0 && crypto.timingSafeEqual(a, b);
 }
 
+// Seifert Books has its own key (BOOKS_SERVICE_KEY, 2026-10-23) and reaches only the
+// company directory, company connect and the per-company read passthroughs.
+const BOOKS_ROUTES = [
+  /^\/companies$/,
+  /^\/companies\/connect$/,
+  /^\/companies\/[A-Za-z0-9_-]+\/(query|companyinfo|cdc|report\/[A-Za-z]+)$/,
+];
+
 function authorizeFinanceTracker(req, res, next) {
   const expected = String(process.env.FINANCE_TRACKER_SERVICE_KEY || '').trim();
-  if (!expected) return res.status(503).json({ error: 'Finance Tracker service access is not configured.' });
-  if (!keysMatch(suppliedKey(req), expected)) return res.status(401).json({ error: 'Unauthorized' });
+  const booksKey = String(process.env.BOOKS_SERVICE_KEY || '').trim();
+  if (!expected && !booksKey) return res.status(503).json({ error: 'Finance Tracker service access is not configured.' });
+  const supplied = suppliedKey(req);
+  if (!keysMatch(supplied, expected)) {
+    if (!keysMatch(supplied, booksKey)) return res.status(401).json({ error: 'Unauthorized' });
+    if (!BOOKS_ROUTES.some(route => route.test(req.path))) return res.status(403).json({ error: 'Not available to this key.' });
+  }
   res.setHeader('Cache-Control', 'no-store');
   return next();
 }
@@ -45,6 +58,25 @@ router.get('/companies/:tenantId/reports', async (req, res) => {
     res.status(502).json({ error: 'Company reports are unavailable. Verify its QuickBooks authorization.' });
   }
 });
+
+// Seifert Books import (2026-10-23): read-only passthroughs per connected company
+// (':tenant' = 'primary' for New Urban, else the Finance-hub tenant id). The answers are
+// QuickBooks' own JSON; see router.books* in routes/quickbooks.js.
+function booksRoute(read) {
+  return async (req, res) => {
+    try {
+      res.json(await read(req));
+    } catch (err) {
+      // Intuit refusing BuildTrack's token is an upstream failure, not this caller's key.
+      const status = [401, 403].includes(err.statusCode) ? 502 : (err.statusCode || 500);
+      res.status(status).json({ error: err.message || 'QuickBooks read failed.' });
+    }
+  };
+}
+router.get('/companies/:tenant/query', booksRoute(req => quickBooksRoutes.booksQuery(req.params.tenant, req.query.q)));
+router.get('/companies/:tenant/report/:name', booksRoute(req => quickBooksRoutes.booksReport(req.params.tenant, req.params.name, { ...req.query })));
+router.get('/companies/:tenant/companyinfo', booksRoute(req => quickBooksRoutes.booksCompanyInfo(req.params.tenant)));
+router.get('/companies/:tenant/cdc', booksRoute(req => quickBooksRoutes.booksChangeFeed(req.params.tenant, req.query.entities, req.query.since)));
 
 router.get('/projects', (_req, res) => {
   const db = getDb();

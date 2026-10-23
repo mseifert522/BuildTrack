@@ -116,7 +116,7 @@ const QBO_READ_CACHE_MAX_CHARS = 64 * 1024 * 1024;
 const QBO_MONTHLY_BLOCK_PROBE_DEFAULT_MS = 10 * 60 * 1000;
 const QBO_USAGE_FLUSH_MS = 60 * 1000;
 // Purposes that can wait for the cache or a slower beat; bills and the payment queue never do.
-const QBO_DEFERRABLE_PURPOSES = new Set(['finance_tracker', 'bank_draws', 'finance_change_check']);
+const QBO_DEFERRABLE_PURPOSES = new Set(['finance_tracker', 'bank_draws', 'finance_change_check', 'books_import']);
 // How many base intervals a background beat waits at each budget level (0 = not at all).
 const QBO_BUDGET_FACTORS = {
   full_sync: { normal: 1, economy: 2, reserve: 4 },
@@ -5224,3 +5224,78 @@ async function projectFinanceReportsLive(accountNumbers, startDate = '2015-01-01
     period: { start: startDate, end: endDate, ttm_start: ttmStartDate },
   };
 }
+
+// -- Seifert Books import (2026-10-23) ---------------------------------------------------
+// Seifert Books (books.seifertcapital.com) copies every QuickBooks company this app is
+// connected to. These back /api/service/finance-tracker/companies/:tenant/{query,report,
+// companyinfo,cdc}: one SELECT, one whitelisted report, CompanyInfo + Preferences, or the
+// change feed - reads only, and the tokens never leave BuildTrack. Tenant 'primary' is New
+// Urban; any other is a Finance-hub tenant id. Metered as 'books_import' and never cached
+// (one full copy, then change feeds); it yields to bills when the month's budget runs low.
+const BOOKS_PURPOSE = 'books_import';
+const BOOKS_REPORTS = new Set(['TrialBalance', 'BalanceSheet', 'ProfitAndLoss', 'GeneralLedger', 'AgedReceivables', 'AgedPayables']);
+
+function booksError(statusCode, message) {
+  const err = new Error(message);
+  err.statusCode = statusCode;
+  return err;
+}
+
+function booksConnection(db, tenant) {
+  const key = String(tenant || '');
+  if (!/^[a-zA-Z0-9_-]{1,100}$/.test(key)) throw booksError(400, 'Invalid company.');
+  const connection = key === 'primary'
+    ? db.prepare("SELECT * FROM quickbooks_connections WHERE id = 'primary' AND is_active = 1").get()
+    : db.prepare('SELECT * FROM quickbooks_connections WHERE id = ? AND is_active = 1').get(`finance:${key}`);
+  if (!connection) throw booksError(404, 'No connected QuickBooks company by that name.');
+  return connection;
+}
+
+router.booksQuery = (tenant, query) => withQboPurpose(BOOKS_PURPOSE, async () => {
+  const q = String(query || '').trim();
+  if (!/^select\s/i.test(q) || /;/.test(q)) throw booksError(400, 'Only a single SELECT statement is allowed.');
+  const db = getDb();
+  return qboQuery(db, booksConnection(db, tenant), q);
+});
+
+router.booksReport = (tenant, name, params = {}) => withQboPurpose(BOOKS_PURPOSE, async () => {
+  if (!BOOKS_REPORTS.has(String(name))) throw booksError(400, `Report must be one of: ${Array.from(BOOKS_REPORTS).join(', ')}.`);
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    // minorversion is BuildTrack's to set; anything not a plain name=value pair is dropped.
+    if (!/^[a-z_]{1,40}$/i.test(key) || key.toLowerCase() === 'minorversion' || typeof value !== 'string' || value.length > 500) continue;
+    search.append(key, value);
+  }
+  const db = getDb();
+  const connection = booksConnection(db, tenant);
+  const qs = search.toString();
+  return qboRequest(db, connection, `/v3/company/${encodeURIComponent(connection.realm_id)}/reports/${name}${qs ? `?${qs}` : ''}`);
+});
+
+router.booksCompanyInfo = tenant => withQboPurpose(BOOKS_PURPOSE, async () => {
+  const db = getDb();
+  const connection = booksConnection(db, tenant);
+  const realm = encodeURIComponent(connection.realm_id);
+  const info = await qboRequest(db, connection, `/v3/company/${realm}/companyinfo/${realm}`);
+  const preferences = await qboRequest(db, connection, `/v3/company/${realm}/preferences`);
+  return {
+    realmId: String(connection.realm_id),
+    companyName: connection.company_name,
+    CompanyInfo: info?.CompanyInfo || null,
+    Preferences: preferences?.Preferences || null,
+  };
+});
+
+router.booksChangeFeed = (tenant, entities, since) => withQboPurpose(BOOKS_PURPOSE, async () => {
+  const names = String(entities || '').split(',').map(name => name.trim()).filter(Boolean);
+  if (!names.length || names.length > 30 || names.some(name => !/^[A-Za-z]{2,40}$/.test(name))) {
+    throw booksError(400, 'entities must be a comma-separated list of QuickBooks entity names.');
+  }
+  const sinceMs = Date.parse(String(since || ''));
+  if (!Number.isFinite(sinceMs) || Date.now() - sinceMs > FT_TXN_CDC_MAX_LOOKBACK_MS || sinceMs > Date.now() + 60 * 1000) {
+    throw booksError(400, 'since must be an ISO time within the last 29 days.');
+  }
+  const db = getDb();
+  const connection = booksConnection(db, tenant);
+  return qboRequest(db, connection, `/v3/company/${encodeURIComponent(connection.realm_id)}/cdc?entities=${names.join(',')}&changedSince=${encodeURIComponent(new Date(sinceMs).toISOString())}`);
+});
