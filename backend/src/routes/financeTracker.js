@@ -25,6 +25,9 @@ function authorizeFinanceTracker(req, res, next) {
 }
 
 router.use(authorizeFinanceTracker);
+// Every QuickBooks read below is metered and answered from BuildTrack's read cache until
+// a change check sees that company change in QuickBooks (Intuit allowance, 2026-10-23).
+router.use((_req, _res, next) => quickBooksRoutes.withQboPurpose('finance_tracker', next, { cache: true }));
 
 // Company-specific accounting access; tokens remain in this service.
 router.get('/companies', (_req, res) => res.json({ companies: quickBooksRoutes.financeCompanies.list() }));

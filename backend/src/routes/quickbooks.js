@@ -4,6 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { AsyncLocalStorage } = require('async_hooks');
 const { getDb } = require('../db/schema');
 const { authenticate, authorize } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
@@ -19,7 +20,9 @@ const AUTH_URL = 'https://appcenter.intuit.com/connect/oauth2';
 const MINOR_VERSION = '75';
 // The full re-read is now only the authoritative reconcile (deletions, vendors, PDFs);
 // changes arrive through the change checks below. QBO_AUTO_SYNC_INTERVAL_MS overrides.
-const AUTO_SYNC_DEFAULT_INTERVAL_MS = 30 * 60 * 1000;
+// Hourly since 2026-10-23 (Intuit allowance, below): the 5-minute change check carries
+// every edit; this only catches deletions and anything a change feed cannot report.
+const AUTO_SYNC_DEFAULT_INTERVAL_MS = 60 * 60 * 1000;
 const DEFAULT_EXCLUDED_BILL_VENDORS = ['great lakes mortgage fund'];
 const PAYMENT_APPROVAL_STATUS = 'approved_for_payment';
 const PAYMENT_APPROVAL_DEFAULT_STATUS = 'not_approved';
@@ -61,13 +64,16 @@ const CHANGE_CHECK_DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
 const FINANCE_CHANGE_CHECK_DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
 const FAST_CHECK_OVERLAP_MS = 2 * 60 * 1000;
 const FAST_CHECK_FIRST_LOOKBACK_MS = 10 * 60 * 1000;
-const CHANGE_CHECK_ON_VIEW_STALE_MS = 20 * 1000;
+// Opening the Invoice Center (and its 60 s poll) asks QuickBooks at most this often;
+// was 20 s, which let one open tab spend ~3 change checks a minute. QBO_VIEW_CHECK_MIN_GAP_MS.
+const CHANGE_CHECK_ON_VIEW_MIN_GAP_MS = 2 * 60 * 1000;
 const CHANGE_CHECK_ON_VIEW_WAIT_MS = 4 * 1000;
 const WEBHOOK_CHECK_DEBOUNCE_MS = 3 * 1000;
 const WEBHOOK_UNVERIFIED_MIN_GAP_MS = 30 * 1000;
 const FT_NOTIFY_DEBOUNCE_MS = 15 * 1000;
 const FT_NOTIFY_MAX_WAIT_MS = 60 * 1000;
-const BILL_PDF_SCAN_DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
+// A changed attachment or bill asks for a scan at once; otherwise the full sync scans hourly.
+const BILL_PDF_SCAN_DEFAULT_INTERVAL_MS = 60 * 60 * 1000;
 const BILL_PDF_SCAN_DEBOUNCE_MS = 5 * 1000;
 let activeFastCheckPromise = null; // New Urban's in-flight check; the full sync waits for it
 const changeCheckInFlight = new Map(); // connection id -> in-flight check
@@ -87,6 +93,45 @@ const financeTrackerNotify = {
   sent: 0, last_at: null, last_status: null, last_error: null, last_realms: [],
 };
 let webhookEventsPrunedAt = 0;
+
+// ── Intuit API allowance (2026-10-23) ───────────────────────────────────────
+// Intuit's free Builder plan allows 500,000 read ("CorePlus") calls a month for the whole
+// developer workspace: this app (New Urban + the three Finance-hub companies) AND the NMR
+// portal's app. The month ran out on 2026-10-22 ~11:20 UTC - Finance Tracker had pulled
+// every company's statements and New Urban's feeds every minute until 10-20 - and Intuit
+// refused every read, for every company, until the month turns. Since then:
+//  - every Intuit call is counted per UTC month, company and purpose (table
+//    quickbooks_api_usage; /quickbooks/status -> api_usage);
+//  - Finance Tracker, Finance-hub and Bank Draws reads are answered from a cache until a
+//    change check sees that company change (or QBO_READ_CACHE_MAX_AGE_MS passes);
+//  - background pulls slow down when the month runs ahead of QBO_MONTHLY_CALL_BUDGET and
+//    stop for everything but bills near it;
+//  - Intuit's "monthly limit" answer pauses every call except one probe every
+//    QBO_MONTHLY_BLOCK_PROBE_MS, and work resumes by itself once a probe gets through.
+const QBO_DEFAULT_MONTHLY_CALL_BUDGET = 300000; // of Intuit's 500,000; the NMR portal draws on the rest
+const QBO_READ_CACHE_MAX_AGE_DEFAULT_MS = 2 * 60 * 60 * 1000;
+const QBO_READ_CACHE_CLOSED_PERIOD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const QBO_READ_CACHE_ECONOMY_FLOOR_MS = 30 * 60 * 1000;
+const QBO_READ_CACHE_MAX_CHARS = 64 * 1024 * 1024;
+const QBO_MONTHLY_BLOCK_PROBE_DEFAULT_MS = 10 * 60 * 1000;
+const QBO_USAGE_FLUSH_MS = 60 * 1000;
+// Purposes that can wait for the cache or a slower beat; bills and the payment queue never do.
+const QBO_DEFERRABLE_PURPOSES = new Set(['finance_tracker', 'bank_draws', 'finance_change_check']);
+// How many base intervals a background beat waits at each budget level (0 = not at all).
+const QBO_BUDGET_FACTORS = {
+  full_sync: { normal: 1, economy: 2, reserve: 4 },
+  change_check: { normal: 1, economy: 1, reserve: 3 },
+  finance_change_check: { normal: 1, economy: 4, reserve: 0 },
+  view: { normal: 1, economy: 2.5, reserve: 5 },
+};
+const qboContext = new AsyncLocalStorage(); // { purpose, cache } for calls made inside withQboPurpose
+const qboUsage = { db: null, tableReady: false, month: null, used: 0, pending: new Map(), timer: null, cacheHits: {} };
+const qboReadCache = new Map(); // `${realm}|${path}` -> { text, at }; Map order = least recently used first
+const qboReadInFlight = new Map(); // same key -> promise of the response text
+let qboReadCacheChars = 0;
+const realmChangedAt = new Map(); // realm id -> ms a change check (or full sync) last saw it change
+const qboBeatLastRun = new Map();
+let qboMonthlyBlock = null; // { since, last_probe_at, probes } while Intuit refuses reads
 
 function qboEnvironment() {
   return String(process.env.QBO_ENVIRONMENT || process.env.QUICKBOOKS_ENVIRONMENT || 'production').toLowerCase() === 'sandbox'
@@ -320,6 +365,7 @@ function quickBooksAttachmentFilePath(qboId, filename) {
 async function qboDownloadAttachment(db, connection, uri) {
   const value = String(uri || '').trim();
   if (!value) throw new Error('QuickBooks attachment has no download URI');
+  if (qboMonthlyBlockHolds()) throw qboMonthlyLimitError();
   const accessToken = await refreshAccessToken(db, connection);
   let url = value;
   if (!/^https?:\/\//i.test(url)) {
@@ -333,6 +379,7 @@ async function qboDownloadAttachment(db, connection, uri) {
     },
     signal: AbortSignal.timeout(120 * 1000),
   });
+  recordQboCall(db, connection, '/attachment/download', { rejected: response.status === 429 });
   if (!response.ok) {
     const err = new Error(`QuickBooks attachment download failed (${response.status})`);
     err.statusCode = response.status;
@@ -859,11 +906,267 @@ function qboRetryDelayMs(response, attempt) {
   return Math.min(30 * 1000, 2000 * (2 ** attempt)) + Math.floor(Math.random() * 500);
 }
 
+// ── Intuit API allowance: meter, budget, read cache, monthly-limit pause ─────
+function withQboPurpose(purpose, fn, { cache = false } = {}) {
+  return qboContext.run({ purpose, cache }, fn);
+}
+
+function qboPurpose() {
+  return qboContext.getStore()?.purpose || 'other';
+}
+
+function qboMonthlyBudget() {
+  const requested = Number(process.env.QBO_MONTHLY_CALL_BUDGET);
+  return Number.isFinite(requested) && requested >= 1000 ? Math.floor(requested) : QBO_DEFAULT_MONTHLY_CALL_BUDGET;
+}
+
+// Creates the meter table on first use and loads this month's count once per month.
+function qboUsageReady(db) {
+  if (!db) return false;
+  qboUsage.db = db;
+  if (!qboUsage.tableReady) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS quickbooks_api_usage (
+        month TEXT NOT NULL,
+        connection_id TEXT NOT NULL,
+        purpose TEXT NOT NULL,
+        label TEXT NOT NULL,
+        calls INTEGER NOT NULL DEFAULT 0,
+        rejected INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (month, connection_id, purpose, label)
+      )
+    `);
+    qboUsage.tableReady = true;
+  }
+  const month = new Date().toISOString().slice(0, 7);
+  if (qboUsage.month !== month) {
+    flushQboUsage();
+    qboUsage.month = month;
+    qboUsage.used = db.prepare('SELECT COALESCE(SUM(calls - rejected), 0) AS n FROM quickbooks_api_usage WHERE month = ?').get(month).n;
+  }
+  return true;
+}
+
+// Counts one Intuit call (rejected = Intuit refused it). Never throws: the meter must not
+// break the call it measures. Counts reach the table within QBO_USAGE_FLUSH_MS.
+function recordQboCall(db, connection, path, { rejected = false } = {}) {
+  try {
+    if (!qboUsageReady(db)) return;
+    const connectionId = connection?.id || 'unknown';
+    const purpose = qboPurpose();
+    const label = qboRequestLabel(path);
+    const key = [qboUsage.month, connectionId, purpose, label].join('|');
+    const entry = qboUsage.pending.get(key) || { month: qboUsage.month, connectionId, purpose, label, calls: 0, rejected: 0 };
+    entry.calls += 1;
+    if (rejected) entry.rejected += 1;
+    else qboUsage.used += 1;
+    qboUsage.pending.set(key, entry);
+    if (!qboUsage.timer) {
+      qboUsage.timer = setTimeout(() => {
+        qboUsage.timer = null;
+        try { flushQboUsage(); } catch (err) { console.warn('[QBO] API usage meter flush failed:', err.message); }
+      }, QBO_USAGE_FLUSH_MS);
+      qboUsage.timer.unref?.();
+    }
+  } catch (err) {
+    console.warn('[QBO] API usage meter failed:', err.message);
+  }
+}
+
+function flushQboUsage() {
+  if (!qboUsage.pending.size || !qboUsage.db) return;
+  const entries = Array.from(qboUsage.pending.values());
+  qboUsage.pending.clear();
+  const upsert = qboUsage.db.prepare(`
+    INSERT INTO quickbooks_api_usage (month, connection_id, purpose, label, calls, rejected, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(month, connection_id, purpose, label) DO UPDATE SET
+      calls = calls + excluded.calls,
+      rejected = rejected + excluded.rejected,
+      updated_at = excluded.updated_at
+  `);
+  qboUsage.db.transaction(rows => {
+    for (const row of rows) upsert.run(row.month, row.connectionId, row.purpose, row.label, row.calls, row.rejected);
+  })(entries);
+}
+
+// normal: on pace for the month. economy: ahead of pace, so Finance Tracker / Bank Draws
+// reads and the Finance-hub checks slow down. reserve: 90% of the budget is gone, so only
+// bills, the payment queue and the Invoice Center still reach QuickBooks.
+function qboBudgetState(db = qboUsage.db) {
+  try { qboUsageReady(db); } catch (_) { /* the counts below are then this process's own */ }
+  const budget = qboMonthlyBudget();
+  const now = new Date();
+  const monthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+  const monthEnd = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
+  const elapsed = Math.max((now.getTime() - monthStart) / (monthEnd - monthStart), 0.001);
+  const used = qboUsage.used;
+  const onPace = budget * elapsed;
+  const level = used >= budget * 0.9 ? 'reserve' : used > onPace + budget * 0.02 ? 'economy' : 'normal';
+  return {
+    month: qboUsage.month || now.toISOString().slice(0, 7),
+    budget,
+    used,
+    on_pace: Math.round(onPace),
+    projected_month_end: Math.round(used / elapsed),
+    level,
+  };
+}
+
+function qboBudgetFactor(kind, level = qboBudgetState().level) {
+  return QBO_BUDGET_FACTORS[kind]?.[level] ?? 1;
+}
+
+// The background timers keep their base interval; at a slower budget level a beat runs
+// only every Nth tick (factor 0 = not at all). The 1 s slack only folds two timers that
+// fire together into one run.
+function qboBeatDue(name, baseMs, factor) {
+  if (!factor) return false;
+  const last = qboBeatLastRun.get(name) || 0;
+  if (Date.now() - last < baseMs * (factor - 1) + 1000) return false;
+  qboBeatLastRun.set(name, Date.now());
+  return true;
+}
+
+function qboBudgetReservedError() {
+  const err = new Error('QuickBooks report reads are paused for the rest of the month: BuildTrack has used 90% of its Intuit API budget (QBO_MONTHLY_CALL_BUDGET) and keeps the rest for bills.');
+  err.statusCode = 429;
+  err.code = 'QBO_BUDGET_RESERVED';
+  return err;
+}
+
+function qboMonthlyBlockProbeMs() {
+  return envIntervalMs(['QBO_MONTHLY_BLOCK_PROBE_MS'], QBO_MONTHLY_BLOCK_PROBE_DEFAULT_MS, 5 * 1000) || QBO_MONTHLY_BLOCK_PROBE_DEFAULT_MS;
+}
+
+// True while Intuit refuses reads and the next probe is not due yet.
+function qboMonthlyBlockHolds() {
+  return Boolean(qboMonthlyBlock && Date.now() - qboMonthlyBlock.last_probe_at < qboMonthlyBlockProbeMs());
+}
+
+function isQboMonthlyLimitAnswer(status, text) {
+  return status === 429 && /monthly limit|Block All CorePlus/i.test(String(text || ''));
+}
+
+function qboMonthlyLimitError() {
+  const err = new Error("QuickBooks is paused: Intuit's monthly API allowance for this app is used up (free Builder plan, 500,000 reads a month). BuildTrack resumes by itself as soon as Intuit lifts the block - when the allowance resets with the new month, or at once if the plan is upgraded.");
+  err.statusCode = 429;
+  err.code = 'QBO_MONTHLY_LIMIT';
+  return err;
+}
+
+function markQboRealmChanged(realmId) {
+  if (realmId) realmChangedAt.set(String(realmId), Date.now());
+}
+
+function qboReadCacheMaxAgeMs(path) {
+  // A statement whose period ended before this year changes only through back-dated
+  // entries, and a change check reports those too.
+  const end = /[?&]end_date=(\d{4})-/.exec(path);
+  if (end && Number(end[1]) < new Date().getUTCFullYear()) return QBO_READ_CACHE_CLOSED_PERIOD_MAX_AGE_MS;
+  return envIntervalMs(['QBO_READ_CACHE_MAX_AGE_MS'], QBO_READ_CACHE_MAX_AGE_DEFAULT_MS, 60 * 1000) || QBO_READ_CACHE_MAX_AGE_DEFAULT_MS;
+}
+
+function readQboCache(key, realmId, path, level) {
+  const entry = qboReadCache.get(key);
+  if (!entry) return null;
+  const age = Date.now() - entry.at;
+  const changed = (realmChangedAt.get(String(realmId)) || 0) >= entry.at;
+  const fresh = level === 'reserve'
+    || (level === 'economy' && age < QBO_READ_CACHE_ECONOMY_FLOOR_MS)
+    || (!changed && age < qboReadCacheMaxAgeMs(path) * (level === 'economy' ? 4 : 1));
+  if (!fresh) return null;
+  qboReadCache.delete(key);
+  qboReadCache.set(key, entry);
+  const purpose = qboPurpose();
+  qboUsage.cacheHits[purpose] = (qboUsage.cacheHits[purpose] || 0) + 1;
+  return JSON.parse(entry.text);
+}
+
+// `at` is when the request was SENT, so a change seen while it was in flight still counts.
+function writeQboCache(key, text, at) {
+  const old = qboReadCache.get(key);
+  if (old) {
+    qboReadCacheChars -= old.text.length;
+    qboReadCache.delete(key);
+  }
+  if (text.length > QBO_READ_CACHE_MAX_CHARS / 4) return;
+  qboReadCache.set(key, { text, at });
+  qboReadCacheChars += text.length;
+  for (const [oldestKey, oldest] of qboReadCache) {
+    if (qboReadCacheChars <= QBO_READ_CACHE_MAX_CHARS) break;
+    qboReadCache.delete(oldestKey);
+    qboReadCacheChars -= oldest.text.length;
+  }
+}
+
+function qboApiUsageSummary(db) {
+  try {
+    qboUsageReady(db);
+    flushQboUsage();
+    const state = qboBudgetState(db);
+    const grouped = column => db.prepare(`
+      SELECT ${column} AS name, SUM(calls) AS calls, SUM(rejected) AS rejected
+      FROM quickbooks_api_usage
+      WHERE month = ?
+      GROUP BY ${column}
+      ORDER BY calls DESC
+    `).all(state.month);
+    return {
+      ...state,
+      intuit_monthly_limit: 500000,
+      by_purpose: grouped('purpose'),
+      by_company: grouped('connection_id'),
+      cache: { entries: qboReadCache.size, chars: qboReadCacheChars, hits: { ...qboUsage.cacheHits } },
+      monthly_limit_block: qboMonthlyBlock
+        ? { since: qboMonthlyBlock.since, probes: qboMonthlyBlock.probes, probe_interval_ms: qboMonthlyBlockProbeMs() }
+        : null,
+    };
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
+// Every QuickBooks read goes through here. Inside withQboPurpose(..., { cache: true })
+// (Finance Tracker, Finance-hub companies, Bank Draws) an answer is reused until a change
+// check sees that company change, and identical reads in flight share one request.
 async function qboRequest(db, connection, path) {
+  const context = qboContext.getStore();
+  const level = qboBudgetState(db).level;
+  if (!context?.cache) {
+    if (level === 'reserve' && QBO_DEFERRABLE_PURPOSES.has(context?.purpose)) throw qboBudgetReservedError();
+    return qboRequestLive(db, connection, path);
+  }
+  const key = `${connection.realm_id}|${path}`;
+  const cached = readQboCache(key, connection.realm_id, path, level);
+  if (cached) return cached;
+  if (!qboReadInFlight.has(key)) {
+    if (level === 'reserve') throw qboBudgetReservedError();
+    const sentAt = Date.now();
+    const request = qboRequestLive(db, connection, path).then(payload => {
+      const text = JSON.stringify(payload);
+      writeQboCache(key, text, sentAt);
+      return text;
+    });
+    qboReadInFlight.set(key, request);
+    request.catch(() => null).finally(() => qboReadInFlight.delete(key));
+  }
+  return JSON.parse(await qboReadInFlight.get(key));
+}
+
+async function qboRequestLive(db, connection, path) {
   const separator = path.includes('?') ? '&' : '?';
   const url = `${qboApiBase(connection.environment)}${path}${separator}minorversion=${MINOR_VERSION}`;
   const timeoutMs = qboRequestTimeoutMs(path);
   for (let attempt = 0; ; attempt += 1) {
+    // While Intuit refuses reads for the month, one call per probe interval tests whether
+    // the block lifted; every other call fails at once instead of joining a retry storm.
+    if (qboMonthlyBlock) {
+      if (qboMonthlyBlockHolds()) throw qboMonthlyLimitError();
+      qboMonthlyBlock.last_probe_at = Date.now();
+      qboMonthlyBlock.probes += 1;
+    }
     // Per attempt: a 429 backoff can outlast the token's last minute.
     const accessToken = await refreshAccessToken(db, connection);
     const release = await acquireQboRequestSlot(connection.realm_id);
@@ -879,6 +1182,7 @@ async function qboRequest(db, connection, path) {
       });
       text = await response.text();
     } catch (err) {
+      recordQboCall(db, connection, path); // a call that timed out may still have counted
       if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
         const timeoutErr = new Error(`QuickBooks did not answer the ${qboRequestLabel(path)} within ${Math.round(timeoutMs / 1000)} s`);
         timeoutErr.statusCode = 504;
@@ -887,6 +1191,21 @@ async function qboRequest(db, connection, path) {
       throw err;
     } finally {
       release();
+    }
+    if (isQboMonthlyLimitAnswer(response.status, text)) {
+      // Retrying cannot help until Intuit lifts the block.
+      recordQboCall(db, connection, path, { rejected: true });
+      if (!qboMonthlyBlock) {
+        qboMonthlyBlock = { since: new Date().toISOString(), last_probe_at: Date.now(), probes: 0 };
+        console.warn(`[QBO] Intuit's monthly API allowance is used up (Builder plan): QuickBooks calls paused, one probe every ${Math.round(qboMonthlyBlockProbeMs() / 1000)} s.`);
+      }
+      qboMonthlyBlock.last_probe_at = Date.now();
+      throw qboMonthlyLimitError();
+    }
+    recordQboCall(db, connection, path, { rejected: response.status === 429 });
+    if (qboMonthlyBlock && response.status !== 429) {
+      console.log(`[QBO] Intuit's monthly API allowance is available again: QuickBooks calls resumed (paused since ${qboMonthlyBlock.since}).`);
+      qboMonthlyBlock = null;
     }
     if (response.status === 429 && attempt < QBO_RATE_LIMIT_RETRIES) {
       const waitMs = qboRetryDelayMs(response, attempt);
@@ -2696,7 +3015,7 @@ function getAutoSyncIntervalMs() {
 async function syncQuickBooksBillPdfs({ scope = 'open_missing', force = false, qboIds = [], source = 'manual', userId = null } = {}) {
   if (activeBillPdfSyncPromise) return activeBillPdfSyncPromise;
 
-  activeBillPdfSyncPromise = (async () => {
+  activeBillPdfSyncPromise = withQboPurpose('bill_pdfs', async () => {
     const db = getDb();
     const config = qboConfig();
     if (!config.configured) {
@@ -2780,7 +3099,7 @@ async function syncQuickBooksBillPdfs({ scope = 'open_missing', force = false, q
       });
     }
     return summary;
-  })();
+  });
 
   try {
     return await activeBillPdfSyncPromise;
@@ -2805,9 +3124,10 @@ function logPaidFromQueue(paidFromQueue, source) {
 // for two minutes and look like the sync was broken. This re-reads ONLY the
 // queued bills (one QBO query, plus recent bill payments when any turned up
 // paid) whenever someone opens or returns to the queue. One in-flight check is
-// shared by every caller and results are reused for a few seconds, so open
-// tabs cannot hammer QuickBooks.
-const PAYMENT_QUEUE_RECHECK_MIN_INTERVAL_MS = 10 * 1000;
+// shared by every caller and results are reused for two minutes (was 10 s; the
+// Invoice Center polls every 60 s), so open tabs cannot hammer QuickBooks.
+// QBO_QUEUE_RECHECK_MIN_GAP_MS overrides.
+const PAYMENT_QUEUE_RECHECK_MIN_GAP_MS = 2 * 60 * 1000;
 const PAYMENT_QUEUE_RECHECK_PAYMENT_LOOKBACK_DAYS = 3;
 let paymentQueueRecheckPromise = null;
 let paymentQueueRecheckLast = null;
@@ -2827,12 +3147,13 @@ function queuedUnpaidQuickBooksBillIds(db) {
 
 async function recheckPaymentQueueAgainstQuickBooks() {
   if (paymentQueueRecheckPromise) return paymentQueueRecheckPromise;
-  if (paymentQueueRecheckLast && Date.now() - paymentQueueRecheckLast.at < PAYMENT_QUEUE_RECHECK_MIN_INTERVAL_MS) {
+  const minGapMs = envIntervalMs(['QBO_QUEUE_RECHECK_MIN_GAP_MS'], PAYMENT_QUEUE_RECHECK_MIN_GAP_MS, 5 * 1000) * qboBudgetFactor('view');
+  if (paymentQueueRecheckLast && Date.now() - paymentQueueRecheckLast.at < minGapMs) {
     // Bills that check found paid were already announced to whoever triggered it.
     return { ...paymentQueueRecheckLast.result, now_paid: [], cached: true };
   }
 
-  paymentQueueRecheckPromise = (async () => {
+  paymentQueueRecheckPromise = withQboPurpose('payment_queue', async () => {
     const db = getDb();
     if (!qboConfig().configured) return { skipped: true, reason: 'missing_credentials' };
     const connection = getActiveConnection(db);
@@ -2871,7 +3192,7 @@ async function recheckPaymentQueueAgainstQuickBooks() {
       now_paid: result.paidFromQueue,
       checked_at: checkedAt,
     };
-  })();
+  });
 
   try {
     const result = await paymentQueueRecheckPromise;
@@ -2975,7 +3296,8 @@ async function fastCheckQuickBooksChanges(connectionId = 'primary', trigger = 's
   // A full sync is re-reading New Urban right now; it covers this check.
   if (isPrimary && activeSyncPromise) return { skipped: true, reason: 'full_sync_running' };
 
-  const check = (async () => {
+  const purpose = isPrimary ? (trigger === 'on_view' ? 'invoice_center' : 'change_check') : 'finance_change_check';
+  const check = withQboPurpose(purpose, async () => {
     const db = getDb();
     if (!qboConfig().configured) return { skipped: true, reason: 'missing_credentials' };
     const connection = loadChangeCheckConnection(db, connectionId);
@@ -3046,7 +3368,11 @@ async function fastCheckQuickBooksChanges(connectionId = 'primary', trigger = 's
       }
     }
     changeCheckCursors.set(connectionId, new Date(startedAt - FAST_CHECK_OVERLAP_MS).toISOString());
-    if (accountingChanges) notifyFinanceTracker(connection.realm_id);
+    if (accountingChanges) {
+      // Before the ping, so the pull it triggers misses the stale cached reads.
+      markQboRealmChanged(connection.realm_id);
+      notifyFinanceTracker(connection.realm_id);
+    }
     return {
       connection_id: connectionId,
       trigger,
@@ -3063,7 +3389,7 @@ async function fastCheckQuickBooksChanges(connectionId = 'primary', trigger = 's
       attachables_changed: attachablesChanged,
       deleted_seen: newlyDeleted.length,
     };
-  })();
+  });
 
   changeCheckInFlight.set(connectionId, check);
   if (isPrimary) activeFastCheckPromise = check;
@@ -3122,12 +3448,13 @@ function requestChangeCheck(connectionId, { trigger = 'webhook', delayMs = WEBHO
   return true;
 }
 
-// Opening or refreshing the Invoice Center asks QuickBooks what changed, once per
-// CHANGE_CHECK_ON_VIEW_STALE_MS, and waits briefly so the page shows it.
+// Opening or refreshing the Invoice Center asks QuickBooks what changed, at most once per
+// CHANGE_CHECK_ON_VIEW_MIN_GAP_MS, and waits briefly so the page shows it.
 async function refreshQuickBooksBeforeView() {
   if (!backgroundQuickBooksWorkEnabled()) return;
   const lastAt = Date.parse(changeCheckStates.get('primary')?.last_at || '') || 0;
-  if (Date.now() - lastAt < CHANGE_CHECK_ON_VIEW_STALE_MS) return;
+  const minGapMs = envIntervalMs(['QBO_VIEW_CHECK_MIN_GAP_MS'], CHANGE_CHECK_ON_VIEW_MIN_GAP_MS, 5 * 1000) * qboBudgetFactor('view');
+  if (Date.now() - lastAt < minGapMs) return;
   const check = fastCheckQuickBooksChanges('primary', 'on_view')
     .then(async result => {
       if (result?.deleted_seen) await syncQuickBooksBills({ source: 'auto' }).catch(() => null);
@@ -3225,7 +3552,7 @@ function billPdfScanIntervalMs() {
 async function syncQuickBooksBills({ source = 'manual', userId = null } = {}) {
   if (activeSyncPromise) return activeSyncPromise;
 
-  activeSyncPromise = (async () => {
+  activeSyncPromise = withQboPurpose(source === 'manual' ? 'manual' : 'bill_sync', async () => {
     // A change check mid-flight writes first, so this sync's older read lands after it
     // and the next change check re-reads anything stamped in between.
     if (activeFastCheckPromise) await activeFastCheckPromise.catch(() => null);
@@ -3284,6 +3611,7 @@ async function syncQuickBooksBills({ source = 'manual', userId = null } = {}) {
       // of the activity log and buried real events in the company audit trail).
       const syncChangedSomething = result.changedBills + result.changedPayments + result.markedPaidFromQueue
         + missingBillReconciliation.count + (vendorResult.profiles_created || 0) + pdfChanges > 0;
+      if (syncChangedSomething) markQboRealmChanged(connection.realm_id);
       db.prepare(`
         UPDATE quickbooks_connections
         SET company_name = COALESCE(?, company_name),
@@ -3344,7 +3672,8 @@ async function syncQuickBooksBills({ source = 'manual', userId = null } = {}) {
         stats: statusSummary(db),
       };
     } catch (err) {
-      console.error('[QBO] Sync failed:', err);
+      if (err.code === 'QBO_MONTHLY_LIMIT') console.warn('[QBO] Sync skipped:', err.message);
+      else console.error('[QBO] Sync failed:', err);
       db.prepare(`
         UPDATE quickbooks_connections
         SET last_sync_at = datetime('now'),
@@ -3355,7 +3684,7 @@ async function syncQuickBooksBills({ source = 'manual', userId = null } = {}) {
       `).run(err.message || 'QuickBooks sync failed', connection.id);
       throw err;
     }
-  })();
+  });
 
   try {
     return await activeSyncPromise;
@@ -3630,6 +3959,9 @@ router.get('/status', authorize(...MANAGEMENT_ROLES), (req, res) => {
       last_error: financeTrackerNotify.last_error,
       last_realms: financeTrackerNotify.last_realms,
     },
+    // Intuit calls this month by purpose and company, the budget pace, the read cache and
+    // whether Intuit's monthly limit is blocking reads right now (2026-10-23).
+    api_usage: qboApiUsageSummary(db),
     stats: statusSummary(db),
   });
 });
@@ -4263,7 +4595,8 @@ router.post('/payment-queue/recheck', authorize(...QUICKBOOKS_ADMIN_ROLES), asyn
     res.json({ ...result, stats: statusSummary(getDb()) });
   } catch (err) {
     console.error('[QBO] Payment queue re-check failed:', err.message);
-    res.status(502).json({ error: 'Could not reach QuickBooks to re-check the payment queue. The automatic sync keeps trying every minute.' });
+    if (err.code === 'QBO_MONTHLY_LIMIT') return res.status(429).json({ error: err.message });
+    res.status(502).json({ error: 'Could not reach QuickBooks to re-check the payment queue. The change check keeps trying every few minutes.' });
   }
 });
 
@@ -4274,8 +4607,17 @@ function startQuickBooksAutoSync() {
     return;
   }
   autoSyncStarted = true;
+  try {
+    const budget = qboBudgetState(getDb());
+    console.log(`[QBO] Intuit API budget: ${budget.used} of ${budget.budget} calls used in ${budget.month} (${budget.level}).`);
+  } catch (err) {
+    console.warn('[QBO] Intuit API meter unavailable:', err.message);
+  }
   const intervalMs = getAutoSyncIntervalMs();
   const run = async () => {
+    // Ahead of the month's Intuit budget the reconcile runs every 2nd (economy) or 4th
+    // (reserve) beat; the change checks below still carry every edit.
+    if (!qboBeatDue('full_sync', intervalMs, qboBudgetFactor('full_sync'))) return;
     try {
       const result = await syncQuickBooksBills({ source: 'auto' });
       if (result?.skipped) {
@@ -4318,14 +4660,18 @@ function startQuickBooksAutoSync() {
     }
   };
   if (fastMs) {
-    setTimeout(() => safetyCheck('primary'), Math.min(20 * 1000, fastMs));
-    setInterval(() => safetyCheck('primary'), fastMs);
+    const primaryCheck = () => {
+      if (qboBeatDue('change_check', fastMs, qboBudgetFactor('change_check'))) safetyCheck('primary');
+    };
+    setTimeout(primaryCheck, Math.min(20 * 1000, fastMs));
+    setInterval(primaryCheck, fastMs);
     console.log(`[QBO] Fast change check enabled every ${Math.round(fastMs / 1000)} seconds (safety net; QuickBooks webhooks and the Invoice Center trigger it at once).`);
   } else {
     console.log('[QBO] Fast change check safety net disabled by environment.');
   }
   if (financeMs) {
     const financeChecks = async () => {
+      if (!qboBeatDue('finance_change_check', financeMs, qboBudgetFactor('finance_change_check'))) return;
       const ids = getDb().prepare("SELECT id FROM quickbooks_connections WHERE id LIKE 'finance:%' AND is_active = 1 ORDER BY id").all().map(row => row.id);
       for (const id of ids) await safetyCheck(id);
     };
@@ -4370,6 +4716,7 @@ router.startQuickBooksPaymentQueueScheduler = startQuickBooksPaymentQueueSchedul
 router.sendScheduledPaymentQueueEmail = sendScheduledPaymentQueueEmail;
 router.syncQuickBooksBills = syncQuickBooksBills;
 router.syncQuickBooksBillPdfs = syncQuickBooksBillPdfs;
+router.withQboPurpose = withQboPurpose;
 router.__test = {
   acquireQboRequestSlot,
   cdcEntities,
@@ -4390,6 +4737,8 @@ module.exports = router;
 // Finance Tracker consumes QBO through THIS module only — one Intuit client,
 // one token-refresh path. These back /api/service/finance-tracker/*.
 const FT_TXN_ENTITIES = ['Purchase', 'Deposit', 'JournalEntry', 'Invoice', 'Payment', 'Transfer', 'VendorCredit', 'CreditMemo'];
+// Intuit's change feed reaches back 30 days.
+const FT_TXN_CDC_MAX_LOOKBACK_MS = 29 * 24 * 60 * 60 * 1000;
 
 function ftGetConnection(db) {
   const connection = db.prepare("SELECT * FROM quickbooks_connections WHERE id = 'primary' AND is_active = 1").get();
@@ -4404,6 +4753,20 @@ function ftGetConnection(db) {
 router.financeTrackerTransactionsSince = async function financeTrackerTransactionsSince(sinceIso) {
   const db = getDb();
   const connection = ftGetConnection(db);
+  // One change-feed request answers what the eight per-entity queries below did
+  // (2026-10-23, Intuit allowance). Its cursor moves every pull, so it is not cached.
+  const sinceMs = Date.parse(sinceIso);
+  if (Number.isFinite(sinceMs) && Date.now() - sinceMs < FT_TXN_CDC_MAX_LOOKBACK_MS) {
+    const payload = await withQboPurpose('finance_tracker', () => qboRequest(
+      db,
+      connection,
+      `/v3/company/${encodeURIComponent(connection.realm_id)}/cdc?entities=${FT_TXN_ENTITIES.join(',')}&changedSince=${encodeURIComponent(new Date(sinceMs).toISOString())}`
+    ));
+    return Object.fromEntries(FT_TXN_ENTITIES.map(entity => [
+      entity,
+      cdcEntities(payload, entity).filter(row => row?.Id && !isCdcDeleted(row)),
+    ]));
+  }
   const out = {};
   for (const entity of FT_TXN_ENTITIES) {
     const payload = await qboQuery(db, connection, `SELECT * FROM ${entity} WHERE Metadata.LastUpdatedTime >= '${sinceIso}' STARTPOSITION 1 MAXRESULTS 1000`);
@@ -4792,7 +5155,15 @@ router.financeCompanies = financeCompanies;
 // Classification and statement parsing live in services/bankDraws.js.
 const BANK_DRAW_LEDGER_COLUMNS = 'tx_date,txn_type,doc_num,name,memo,klass_name,split_acc,debt_amt,credit_amt';
 
-router.projectFinanceReports = async function projectFinanceReports(accountNumbers, startDate = '2015-01-01') {
+// Bank Draws and Consolidated Finances re-read these whenever a page finds its copy older
+// than a few minutes; the read cache answers until New Urban changes (2026-10-23).
+router.projectFinanceReports = (accountNumbers, startDate) => withQboPurpose(
+  'bank_draws',
+  () => projectFinanceReportsLive(accountNumbers, startDate),
+  { cache: true }
+);
+
+async function projectFinanceReportsLive(accountNumbers, startDate = '2015-01-01') {
   const db = getDb();
   const connection = ftGetConnection(db);
   const realm = encodeURIComponent(connection.realm_id);
@@ -4852,4 +5223,4 @@ router.projectFinanceReports = async function projectFinanceReports(accountNumbe
     profitLossTtm,
     period: { start: startDate, end: endDate, ttm_start: ttmStartDate },
   };
-};
+}
