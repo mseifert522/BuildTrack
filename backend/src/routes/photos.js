@@ -9,6 +9,7 @@ const { logActivity } = require('../utils/audit');
 const { recordWorkItemEvent } = require('../utils/workItemEvents');
 const { convertHeicUploadToJpeg } = require('../utils/mediaConversion');
 const { getClientIp } = require('../utils/requestIp');
+const videoNormalization = require('../services/videoNormalization');
 
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
@@ -131,6 +132,7 @@ function removeStoredPhotoFiles(photo, projectId) {
     photo.storage_path,
     photo.stored_file_name,
     photo.thumbnail_path,
+    photo.video_original_path,
   ].filter(Boolean);
 
   for (const candidate of new Set(candidates)) {
@@ -1003,6 +1005,8 @@ async function handleProjectMediaUpload(req, res) {
         label: sharedLabel,
       },
     });
+    // Videos are straightened and made browser-safe in the background.
+    videoNormalization.enqueueVideos(uploadedPhotoIds);
     res.status(201).json({ uploaded: inserted.length, batch_id: batchId, photos: inserted });
   } catch (err) {
     cleanupUploadedFiles(req.files);
@@ -1554,6 +1558,35 @@ router.put('/:id/markup', uploadMarkupImage, (req, res) => {
     console.error('Failed to save photo markup:', err);
     res.status(500).json({ error: 'Failed to save photo markup' });
   }
+});
+
+// POST /api/projects/:projectId/photos/:id/video-rotate {degrees: 90|180|270}
+// Manual fallback when the automatic orientation got a video wrong: re-encodes from
+// the original upload, turned a further `degrees` clockwise from how it shows now.
+router.post('/:id/video-rotate', (req, res) => {
+  const db = getDb();
+  const photo = db.prepare(`
+    SELECT *
+    FROM photos
+    WHERE id = ? AND project_id = ? AND ${activePhotoSql('photos')}
+  `).get(req.params.id, req.params.projectId);
+  if (!photo || !videoNormalization.isVideoRow(photo)) return res.status(404).json({ error: 'Video not found' });
+  if (req.user.role === 'contractor' && photo.uploaded_by !== req.user.id) {
+    return res.status(403).json({ error: 'You can only turn videos you uploaded.' });
+  }
+  const degrees = videoNormalization.normalizeRotation(req.body?.degrees);
+  if (!degrees) return res.status(400).json({ error: 'degrees must be 90, 180 or 270' });
+
+  const rotation = videoNormalization.requestRotation(photo.id, degrees);
+  logActivity({
+    userId: req.user.id,
+    projectId: req.params.projectId,
+    action: 'project_video_rotated',
+    entityType: 'photo',
+    entityId: photo.id,
+    details: { degrees, rotation },
+  });
+  res.json({ photo: getPhotoWithNote(db, req.params.projectId, photo.id, req.user) });
 });
 
 // DELETE /api/projects/:projectId/photos/:id/markup - remove the overlay (keeps the original).

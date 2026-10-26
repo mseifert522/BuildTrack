@@ -21,6 +21,7 @@ const fieldWorkRoutes = require('./src/routes/fieldWork');
 const calendarRoutes = require('./src/routes/calendar');
 const { startCalendarReminderScheduler } = require('./src/services/calendarReminderScheduler');
 const { startActivityRetentionScheduler } = require('./src/services/activityRetentionScheduler');
+const videoNormalization = require('./src/services/videoNormalization');
 const { createUploadsGate, isInlineSafeUpload } = require('./src/middleware/uploadsGate');
 const documentRoutes = require('./src/routes/documents');
 const contractorOnboardingRoutes = require('./src/routes/contractorOnboarding');
@@ -412,6 +413,8 @@ async function start() {
       startActivityRetentionScheduler();
       // The AI reads every agreement and quote document and checks how it is filed.
       documentReviewService.start();
+      // Straightens and re-encodes uploaded videos so they play upright everywhere.
+      videoNormalization.start();
       if (typeof quickBooksRoutes.startQuickBooksAutoSync === 'function') {
         quickBooksRoutes.startQuickBooksAutoSync();
       }

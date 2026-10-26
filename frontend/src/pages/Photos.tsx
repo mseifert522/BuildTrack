@@ -11,6 +11,7 @@ import { getProgressMediaKind } from '../lib/progressMedia';
 import { uploadProjectMedia } from '../lib/projectMediaUpload';
 import VoiceTextarea from '../components/VoiceTextarea';
 import PhotoMarkupModal from '../components/PhotoMarkupModal';
+import VideoPlayer from '../components/VideoPlayer';
 
 type PhotoView = 'general' | 'progress' | 'scope';
 
@@ -586,7 +587,7 @@ export default function Photos() {
         // lightbox from opening a second copy when the enlarged photo is clicked.
         <div className="fixed inset-0 z-[1200] bg-black/90 flex items-center justify-center p-4" data-no-image-lightbox="true" onClick={() => setLightbox(null)}>
           {lightbox.isVideo ? (
-            <video src={lightbox.src} controls autoPlay className="max-w-full max-h-full rounded-lg" onClick={e => e.stopPropagation()} />
+            <VideoPlayer src={lightbox.src} autoPlay className="h-[85vh] w-full max-w-6xl rounded-lg" />
           ) : (
             <img src={lightbox.src} alt="" className="max-w-full max-h-full object-contain rounded-lg" onClick={e => e.stopPropagation()} />
           )}
@@ -672,7 +673,7 @@ function PhotoDescriptionModal({
           <div className="overflow-hidden rounded-lg border border-white/10 bg-black">
             <div className="aspect-square">
               {mediaKind === 'video' ? (
-                <video src={src} className="h-full w-full object-cover" controls />
+                <VideoPlayer src={src} className="h-full w-full" />
               ) : mediaKind === 'image' ? (
                 <img src={src} alt={photo.original_name || 'Project picture'} className="h-full w-full object-cover" />
               ) : (

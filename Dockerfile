@@ -10,7 +10,7 @@ RUN npm run build
 
 # Stage 2: Production (Debian slim for glibc compatibility with native modules)
 FROM node:20-slim AS production
-RUN apt-get update && apt-get install -y --no-install-recommends wget sqlite3 && \
+RUN apt-get update && apt-get install -y --no-install-recommends wget sqlite3 ffmpeg && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app/backend

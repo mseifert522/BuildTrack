@@ -2404,6 +2404,14 @@ function initializeSchema() {
   try { db.exec(`ALTER TABLE photos ADD COLUMN markup_json TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE photos ADD COLUMN markup_drawn_at TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE photos ADD COLUMN markup_drawn_by TEXT`); } catch (_) { /* already exists */ }
+  // Video normalization (services/videoNormalization.js): queue state + the untouched upload.
+  try { db.exec(`ALTER TABLE photos ADD COLUMN video_status TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN video_original_path TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN video_rotation INTEGER`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN video_orientation_source TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN video_processed_at TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE photos ADD COLUMN video_error TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_photos_video_status ON photos(video_status) WHERE video_status IS NOT NULL`); } catch (_) { /* best-effort */ }
   try { db.exec(`UPDATE photos SET updated_at = COALESCE(updated_at, created_at, datetime('now')) WHERE updated_at IS NULL`); } catch (_) { /* best-effort */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_photos_project_type_taken ON photos(project_id, photo_type, taken_at, created_at)`); } catch (_) { /* best-effort */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_photos_note_taken ON photos(note_id, taken_at, created_at)`); } catch (_) { /* best-effort */ }

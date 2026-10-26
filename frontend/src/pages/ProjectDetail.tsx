@@ -32,6 +32,7 @@ import {
 import { getProgressMediaKind, isVideoMedia } from '../lib/progressMedia';
 import { MAX_MEDIA_FILE_MB, uploadProjectMedia } from '../lib/projectMediaUpload';
 import PhotoMarkupModal from '../components/PhotoMarkupModal';
+import VideoPlayer from '../components/VideoPlayer';
 import PunchBulkAddModal from '../components/PunchBulkAddModal';
 import PunchListSendModal from '../components/PunchListSendModal';
 import AddVendorModal from '../components/AddVendorModal';
@@ -83,6 +84,9 @@ type ProgressLightboxItem = {
   name?: string;
   meta?: string;
   noteText?: string;
+  photoId?: string;
+  projectId?: string;
+  videoStatus?: string | null;
 };
 
 type ProgressLightboxState = {
@@ -342,6 +346,9 @@ const buildProgressLightboxItems = (projectId: string, photos: any[]): ProgressL
       id: progressPhotoKey(photo),
       src: progressPhotoSrc(projectId, photo),
       isVideo: getProgressMediaKind(photo) === 'video',
+      photoId: photo.id,
+      projectId,
+      videoStatus: photo.video_status || null,
       name: photo.original_name || photo.filename || 'Progress picture',
       meta: [
         photo.uploader_name || null,
@@ -8578,6 +8585,7 @@ function ProgressMediaLightbox({
 }) {
   const activeItem = state?.items[state.index] || null;
   const itemCount = state?.items.length || 0;
+  const [rotating, setRotating] = useState(false);
 
   const move = useCallback((direction: -1 | 1) => {
     onChange(current => {
@@ -8591,12 +8599,31 @@ function ProgressMediaLightbox({
     if (!state) return;
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === 'Escape') onChange(null);
+      // Arrow keys inside the video player seek the video, not the picture list.
+      if (event.target instanceof Element && event.target.closest('[data-video-player]')) return;
       if (event.key === 'ArrowLeft') move(-1);
       if (event.key === 'ArrowRight') move(1);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [move, onChange, state]);
+
+  const rotateVideo = async (degrees: 90 | 270) => {
+    if (!activeItem?.photoId || !activeItem.projectId) return;
+    setRotating(true);
+    try {
+      await api.post(`/projects/${activeItem.projectId}/photos/${activeItem.photoId}/video-rotate`, { degrees });
+      onChange(current => current && {
+        ...current,
+        items: current.items.map(item => (item.photoId === activeItem.photoId ? { ...item, videoStatus: 'queued' } : item)),
+      });
+      toast.success('Turning the video - it updates in a few minutes');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Could not turn the video');
+    } finally {
+      setRotating(false);
+    }
+  };
 
   if (!state || !activeItem) return null;
 
@@ -8634,13 +8661,22 @@ function ProgressMediaLightbox({
 
         <div className="relative flex min-h-0 flex-1 items-center justify-center bg-black">
           {activeItem.isVideo ? (
-            <video key={activeItem.src} src={activeItem.src} controls autoPlay className="max-h-full max-w-full object-contain" />
+            <VideoPlayer
+              key={activeItem.src}
+              src={activeItem.src}
+              autoPlay
+              className="h-full w-full"
+              processing={activeItem.videoStatus === 'queued' || activeItem.videoStatus === 'processing'}
+              onRotate={activeItem.photoId ? rotateVideo : undefined}
+              rotating={rotating}
+            />
           ) : (
             <img key={activeItem.src} src={activeItem.src} alt={activeItem.name || 'Progress picture'} className="max-h-full max-w-full object-contain" />
           )}
 
           {activeItem.noteText && (
-            <div className="absolute bottom-4 left-4 right-4 max-h-36 overflow-y-auto rounded-xl border border-amber-300/40 bg-slate-950/90 p-3 shadow-2xl backdrop-blur">
+            // Over a video it sits at the top: at the bottom it covered the play controls.
+            <div className={`absolute left-4 right-4 max-h-36 ${activeItem.isVideo ? 'top-4' : 'bottom-4'} overflow-y-auto rounded-xl border border-amber-300/40 bg-slate-950/90 p-3 shadow-2xl backdrop-blur`}>
               <p className="text-[11px] font-black uppercase tracking-wide text-amber-300">Picture description</p>
               <p className="mt-1 whitespace-pre-wrap text-sm font-semibold leading-6 text-white">{activeItem.noteText}</p>
             </div>
@@ -8742,7 +8778,7 @@ function PhotoNoteModal({
           <div className="overflow-hidden rounded-lg border border-white/10 bg-black">
             <div className="aspect-square">
               {mediaKind === 'video' ? (
-                <video src={src} className="h-full w-full object-cover" controls />
+                <VideoPlayer src={src} className="h-full w-full" />
               ) : mediaKind === 'image' ? (
                 <img src={src} alt={photo.original_name || 'Project picture'} className="h-full w-full object-cover" />
               ) : (

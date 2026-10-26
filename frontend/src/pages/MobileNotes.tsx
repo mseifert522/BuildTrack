@@ -18,6 +18,7 @@ import { notifyMobileDataChanged } from '../lib/mobileEvents';
 import { uploadProjectMedia } from '../lib/projectMediaUpload';
 import Avatar from '../components/Avatar';
 import VoiceTextarea from '../components/VoiceTextarea';
+import VideoPlayer from '../components/VideoPlayer';
 
 interface NotePhoto {
   id: string;
@@ -135,6 +136,7 @@ export default function MobileNotes() {
 
   const [projectAddress, setProjectAddress] = useState('');
   const [notes, setNotes] = useState<Note[]>([]);
+  const [playingVideo, setPlayingVideo] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -654,10 +656,10 @@ export default function MobileNotes() {
                                     return (
                                       <div key={photo.id} className="relative aspect-square rounded-xl overflow-hidden" style={{ background: 'rgba(0,0,0,0.12)' }}>
                                         {isVideo ? (
-                                          <>
+                                          <button type="button" className="block w-full h-full" onClick={() => setPlayingVideo(src)} aria-label="Play video">
                                             <video src={src} className="w-full h-full object-cover" muted playsInline preload="metadata" />
                                             <PlayCircle className="absolute inset-0 m-auto w-7 h-7 text-white drop-shadow" />
-                                          </>
+                                          </button>
                                         ) : (
                                           <img src={src} alt={photo.original_name || 'Progress picture'} className="w-full h-full object-cover" loading="lazy" />
                                         )}
@@ -888,6 +890,21 @@ export default function MobileNotes() {
           </button>
         </div>
       </div>
+      {playingVideo && (
+        <div className="fixed inset-0 z-[320] flex flex-col bg-black" onClick={() => setPlayingVideo(null)}>
+          <div className="flex justify-end p-3">
+            <button
+              type="button"
+              onClick={() => setPlayingVideo(null)}
+              className="rounded-full px-4 py-2 text-sm font-bold text-white"
+              style={{ background: 'rgba(255,255,255,0.15)' }}
+            >
+              Close
+            </button>
+          </div>
+          <VideoPlayer src={playingVideo} autoPlay className="min-h-0 w-full flex-1" />
+        </div>
+      )}
     </div>
   );
 }

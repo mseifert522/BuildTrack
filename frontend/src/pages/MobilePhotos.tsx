@@ -38,6 +38,7 @@ import { MOBILE_DATA_CHANGED_EVENT, notifyMobileDataChanged } from '../lib/mobil
 import { uploadProjectMedia } from '../lib/projectMediaUpload';
 import VoiceTextarea from '../components/VoiceTextarea';
 import PhotoMarkupModal from '../components/PhotoMarkupModal';
+import VideoPlayer from '../components/VideoPlayer';
 
 interface Project {
   id: string;
@@ -2171,7 +2172,7 @@ export default function MobilePhotos() {
       {lightbox && (
         <div onClick={() => setLightbox(null)} style={{ position: 'fixed', inset: 0, zIndex: 260, background: 'rgba(0,0,0,0.95)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           {lightbox.isVideo ? (
-            <video src={lightbox.src} controls autoPlay style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 8 }} onClick={event => event.stopPropagation()} />
+            <VideoPlayer src={lightbox.src} autoPlay className="h-[calc(100dvh-80px)] w-full" />
           ) : (
             <img src={lightbox.src} alt="Project photo" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
           )}
