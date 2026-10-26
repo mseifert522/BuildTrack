@@ -4204,3 +4204,80 @@ a.bg-blue-600:hover {
     grid-template-columns: minmax(130px, 0.7fr) minmax(170px, 1fr) minmax(240px, 1.4fr) minmax(130px, 0.68fr) auto;
   }
 }
+
+/* Invoice inbox agent - what the AI read off an emailed invoice (2026-10-26). */
+.bt-invoice-ai-panel {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  border: 1px solid #374151;
+  border-radius: 7px;
+  background: #0A0F14;
+  padding: 12px 14px;
+}
+
+.bt-invoice-ai-panel-head,
+.bt-invoice-ai-item-head,
+.bt-invoice-ai-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.bt-invoice-ai-panel-head {
+  justify-content: space-between;
+}
+
+.bt-invoice-ai-notes {
+  margin: 0;
+  color: #C4CAD2;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.bt-invoice-ai-item {
+  display: grid;
+  gap: 6px;
+  border-top: 1px solid #1F2937;
+  padding-top: 8px;
+}
+
+.bt-invoice-ai-item-head strong {
+  color: #F3F4F6;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.bt-invoice-ai-status {
+  border-radius: 999px;
+  border: 1px solid #4B5563;
+  padding: 2px 8px;
+  color: #E5E7EB;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.bt-invoice-ai-item.is-filed .bt-invoice-ai-status,
+.bt-invoice-ai-item.is-filed_by_office .bt-invoice-ai-status {
+  border-color: rgba(52, 211, 153, 0.5);
+  color: #A7F3D0;
+}
+
+.bt-invoice-ai-item.is-needs_project .bt-invoice-ai-status,
+.bt-invoice-ai-item.is-needs_review .bt-invoice-ai-status {
+  border-color: rgba(251, 191, 36, 0.55);
+  color: #FDE68A;
+}
+
+.bt-invoice-ai-item.is-not_invoice .bt-invoice-ai-reason,
+.bt-invoice-ai-item.is-duplicate .bt-invoice-ai-reason {
+  color: #9CA3AF;
+}
+
+.bt-invoice-ai-reason {
+  margin: 0;
+  color: #FDE68A;
+  font-size: 12px;
+  line-height: 1.5;
+}

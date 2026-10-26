@@ -51,6 +51,12 @@ function invoiceAttachmentRoot() {
   return path.resolve(process.env.UPLOADS_PATH || './uploads', 'invoice-attachments');
 }
 
+// Emailed invoices are filed under a staff login; the vendor is who billed us.
+function emailVendorAsContractor(invoice) {
+  if (invoice.source !== 'email' || !String(invoice.vendor_name || '').trim()) return {};
+  return { contractor_name: invoice.vendor_name, contractor_email: invoice.vendor_email || null };
+}
+
 function canAccessInvoice(invoice, user) {
   return user.role !== 'contractor' || invoice.contractor_id === user.id;
 }
@@ -497,7 +503,8 @@ router.get('/', authorizeProjectAccess, (req, res) => {
     const lineItems = lineItemsByInvoice.get(invoice.id) || [];
     return {
       ...invoice,
-      source_label: invoice.quickbooks_bill_id ? 'BuildTrack + QuickBooks' : 'BuildTrack',
+      ...emailVendorAsContractor(invoice),
+      source_label: invoice.quickbooks_bill_id ? 'BuildTrack + QuickBooks' : (invoice.ai_filed ? 'Email - AI filed' : 'BuildTrack'),
       detail_url: `/projects/${req.params.projectId}/invoices/${invoice.id}`,
       linked_work_count: linkedWorkCount,
       payment_hold_count: holds.length,
@@ -626,7 +633,7 @@ router.get('/:id', authorizeProjectAccess, (req, res) => {
       attachment_count: attachments.length,
     },
   });
-  res.json({ ...invoice, line_items: lineItems, linked_work_items: linkedWorkItems, payment_holds: paymentHolds, attachments });
+  res.json({ ...invoice, ...emailVendorAsContractor(invoice), line_items: lineItems, linked_work_items: linkedWorkItems, payment_holds: paymentHolds, attachments });
 });
 
 router.post('/:id/attachments', authorizeProjectAccess, invoiceAttachmentUpload.array('attachments', 10), (req, res) => {

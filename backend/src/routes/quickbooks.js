@@ -10,6 +10,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { logActivity } = require('../utils/audit');
 const { isEmailConfigured, sendApprovedPayNotificationEmail, sendContractorInvoiceReceivedEmail } = require('../utils/email');
 const { ensureBillHasInvoiceNumber, invDisplay } = require('../utils/invoiceNumbers');
+const { looseVendorKey } = require('../utils/vendorDirectory');
 
 const router = express.Router();
 const MANAGEMENT_ROLES = ['super_admin', 'operations_manager', 'project_manager', 'admin_assistant'];
@@ -1644,13 +1645,39 @@ function findInvoiceForBill(db, bill) {
   );
 
   if (!candidates.length) return null;
+  // BuildTrack's own number (NUD-1557) is unique; a vendor's invoice number is only
+  // unique per vendor (Snyders #2055 is not ELT #2055), so it must agree on the vendor.
+  const ownNumber = candidates.find(row => doc && normalizeDoc(row.invoice_number) === doc);
+  if (ownNumber) return ownNumber;
   const exactDoc = candidates.find(row => (
-    normalizeDoc(row.external_invoice_number) === doc
-    || normalizeDoc(row.invoice_number) === doc
-    || normalizeDoc(row.quickbooks_doc_number) === doc
+    (normalizeDoc(row.external_invoice_number) === doc || normalizeDoc(row.quickbooks_doc_number) === doc)
+    && invoiceVendorAgrees(db, row, bill)
   ));
   if (exactDoc) return exactDoc;
-  return candidates.length === 1 ? candidates[0] : null;
+  const sameVendor = candidates.filter(row => invoiceVendorAgrees(db, row, bill));
+  return sameVendor.length === 1 && candidates.length === 1 ? sameVendor[0] : null;
+}
+
+// Does the BuildTrack invoice name the same vendor as the QuickBooks bill? Invoices
+// with no vendor on them (contractor app invoices) cannot disagree.
+function invoiceVendorAgrees(db, invoice, bill) {
+  const billVendorId = String(bill.VendorRef?.value || '').trim();
+  const billKey = looseVendorKey(bill.VendorRef?.name);
+  const names = [invoice.vendor_name, invoice.quickbooks_vendor_name];
+  if (invoice.quickbooks_vendor_id && billVendorId && String(invoice.quickbooks_vendor_id) === billVendorId) return true;
+  if (invoice.vendor_profile_id) {
+    const profile = db.prepare(`
+      SELECT vendor_name, quickbooks_vendor_id, quickbooks_display_name, quickbooks_company_name, quickbooks_print_on_check_name
+      FROM contractor_profiles WHERE id = ?
+    `).get(invoice.vendor_profile_id);
+    if (profile) {
+      if (profile.quickbooks_vendor_id && billVendorId && String(profile.quickbooks_vendor_id) === billVendorId) return true;
+      names.push(profile.vendor_name, profile.quickbooks_display_name, profile.quickbooks_company_name, profile.quickbooks_print_on_check_name);
+    }
+  }
+  const keys = names.map(looseVendorKey).filter(Boolean);
+  if (!keys.length || !billKey) return true;
+  return keys.includes(billKey);
 }
 
 function billLinkedTxnJson(bill) {
@@ -4717,6 +4744,7 @@ router.sendScheduledPaymentQueueEmail = sendScheduledPaymentQueueEmail;
 router.syncQuickBooksBills = syncQuickBooksBills;
 router.syncQuickBooksBillPdfs = syncQuickBooksBillPdfs;
 router.withQboPurpose = withQboPurpose;
+router.findInvoiceForBill = findInvoiceForBill;
 router.__test = {
   acquireQboRequestSlot,
   cdcEntities,

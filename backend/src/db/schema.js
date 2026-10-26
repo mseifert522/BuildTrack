@@ -2499,6 +2499,55 @@ function initializeSchema() {
 	  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_invoices_source_attachment ON invoices(source_intake_id, source_attachment_id)`); } catch (_) { /* best-effort */ }
 	  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_invoices_quickbooks_bill ON invoices(quickbooks_bill_id)`); } catch (_) { /* best-effort */ }
 	  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_invoices_quickbooks_doc ON invoices(quickbooks_doc_number, quickbooks_payment_status)`); } catch (_) { /* best-effort */ }
+	  // Invoice inbox agent (2026-10-26): what the AI read off an emailed invoice.
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN category TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN invoice_type TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN vendor_profile_id TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN vendor_invoice_date TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN vendor_due_date TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN ai_filed INTEGER NOT NULL DEFAULT 0`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoice_email_intake ADD COLUMN ai_attempts INTEGER NOT NULL DEFAULT 0`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoice_email_intake ADD COLUMN ai_error TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_invoice_email_intake_provider_msg ON invoice_email_intake(provider_message_id)`); } catch (_) { /* best-effort */ }
+	  try {
+	    db.exec(`
+	      CREATE TABLE IF NOT EXISTS invoice_inbox_items (
+	        id TEXT PRIMARY KEY,
+	        intake_id TEXT NOT NULL,
+	        item_index INTEGER NOT NULL DEFAULT 0,
+	        source_attachment_id TEXT,
+	        source_attachment_name TEXT,
+	        status TEXT NOT NULL CHECK(status IN ('filed','needs_project','needs_review','duplicate','filed_by_office','not_invoice')),
+	        document_kind TEXT,
+	        document_sha256 TEXT,
+	        reason TEXT,
+	        vendor_profile_id TEXT,
+	        vendor_name TEXT,
+	        vendor_created INTEGER NOT NULL DEFAULT 0,
+	        invoice_number TEXT,
+	        invoice_key TEXT,
+	        invoice_date TEXT,
+	        due_date TEXT,
+	        invoice_type TEXT,
+	        category TEXT,
+	        total REAL,
+	        property_address TEXT,
+	        job_reference TEXT,
+	        project_id TEXT,
+	        invoice_id TEXT,
+	        duplicate_of TEXT,
+	        summary TEXT,
+	        read_json TEXT,
+	        notified_at TEXT,
+	        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	        FOREIGN KEY (intake_id) REFERENCES invoice_email_intake(id) ON DELETE CASCADE
+	      );
+	      CREATE INDEX IF NOT EXISTS idx_invoice_inbox_items_intake ON invoice_inbox_items(intake_id, item_index);
+	      CREATE INDEX IF NOT EXISTS idx_invoice_inbox_items_key ON invoice_inbox_items(invoice_key);
+	      CREATE INDEX IF NOT EXISTS idx_invoice_inbox_items_sha ON invoice_inbox_items(document_sha256);
+	    `);
+	  } catch (_) { /* best-effort */ }
 	  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_quickbooks_vendors_display_name ON quickbooks_vendors(display_name, company_name)`); } catch (_) { /* best-effort */ }
 	  try { db.exec(`ALTER TABLE quickbooks_bills ADD COLUMN qbo_class_id TEXT`); } catch (_) { /* already exists */ }
 	  try { db.exec(`ALTER TABLE quickbooks_bills ADD COLUMN qbo_class_name TEXT`); } catch (_) { /* already exists */ }

@@ -9759,6 +9759,7 @@ type ProjectInvoiceRow = {
   id: string;
   source?: string | null;
   source_label?: string | null;
+  category?: string | null;
   invoice_number?: string | null;
   external_invoice_number?: string | null;
   contractor_id?: string | null;
@@ -9795,6 +9796,15 @@ function formatInvoiceMoney(value: any) {
 
 function invoiceStatusLabel(status?: string | null) {
   return String(status || 'draft').replace(/_/g, ' ');
+}
+
+// Emailed invoices are filed under a staff login; group them (with the same vendor's
+// QuickBooks bills) by the vendor named on them.
+function projectInvoiceContractorKey(invoice: ProjectInvoiceRow) {
+  if ((invoice.source === 'email' || invoice.source === 'quickbooks') && invoice.contractor_name) {
+    return `vendor:${invoice.contractor_name.trim().toLowerCase()}`;
+  }
+  return String(invoice.contractor_id || '').trim();
 }
 
 function projectInvoiceSourceLabel(invoice: ProjectInvoiceRow) {
@@ -9835,7 +9845,7 @@ function InvoicesTab({ projectId, user, project }: { projectId: string; user: an
   const contractorOptions = useMemo(() => {
     const rows = new Map<string, string>();
     invoices.forEach(invoice => {
-      const id = String(invoice.contractor_id || '').trim();
+      const id = projectInvoiceContractorKey(invoice);
       const name = String(invoice.contractor_name || invoice.contractor_email || 'Unknown contractor').trim();
       if (id && !rows.has(id)) rows.set(id, name);
     });
@@ -9846,7 +9856,7 @@ function InvoicesTab({ projectId, user, project }: { projectId: string; user: an
 
   const visibleInvoices = useMemo(() => {
     if (selectedContractorId === 'all') return invoices;
-    return invoices.filter(invoice => String(invoice.contractor_id || '') === selectedContractorId);
+    return invoices.filter(invoice => projectInvoiceContractorKey(invoice) === selectedContractorId);
   }, [invoices, selectedContractorId]);
 
   const visibleTotal = useMemo(
@@ -9977,6 +9987,11 @@ function InvoicesTab({ projectId, user, project }: { projectId: string; user: an
                       <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-black uppercase tracking-wide ${isQuickBooksInvoice ? 'border-cyan-300/45 bg-cyan-400/10 text-cyan-100' : 'border-indigo-300/45 bg-indigo-400/10 text-indigo-100'}`}>
                         {sourceLabel}
                       </span>
+                      {invoice.category && (
+                        <span className="shrink-0 rounded-full border border-amber-300/45 bg-amber-400/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-amber-100">
+                          {invoice.category}
+                        </span>
+                      )}
                       {showBillId && <span>Bill {quickBooksBillId}</span>}
                     </div>
                     {Number(invoice.payment_hold_count || 0) > 0 && (

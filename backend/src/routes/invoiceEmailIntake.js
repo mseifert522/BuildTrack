@@ -531,17 +531,68 @@ authenticatedRouter.get('/', (req, res) => {
     LIMIT ?
   `).all(...params);
 
+  // What the invoice inbox agent found in each email (one row per invoice).
+  const aiItemsByIntake = new Map();
+  if (rows.length) {
+    const placeholders = rows.map(() => '?').join(',');
+    db.prepare(`
+      SELECT a.id, a.intake_id, a.item_index, a.status, a.reason, a.vendor_profile_id, a.vendor_name, a.vendor_created,
+             a.invoice_number, a.invoice_date, a.due_date, a.invoice_type, a.category, a.total,
+             a.property_address, a.job_reference, a.project_id, a.invoice_id, a.notified_at,
+             a.source_attachment_name, p.address AS project_address, i.invoice_number AS bt_invoice_number
+      FROM invoice_inbox_items a
+      LEFT JOIN projects p ON p.id = a.project_id
+      LEFT JOIN invoices i ON i.id = a.invoice_id
+      WHERE a.intake_id IN (${placeholders})
+      ORDER BY a.intake_id, a.item_index
+    `).all(...rows.map(row => row.id)).forEach(item => {
+      const items = aiItemsByIntake.get(item.intake_id) || [];
+      items.push(item);
+      aiItemsByIntake.set(item.intake_id, items);
+    });
+  }
+
   res.json(rows.map(row => {
     const attachments = parseStoredAttachments(row.attachments_json);
     const filedAttachments = attachments.filter(item => item.filed_invoice_id);
+    const { agent_result_json: _read, ...rest } = row;
     return {
-      ...row,
+      ...rest,
       body_preview: stripHtml(row.text_body || row.html_body || row.extracted_summary || '').slice(0, 3000),
       attachments,
       filed_attachment_count: filedAttachments.length,
       unfiled_attachment_count: Math.max(attachments.length - filedAttachments.length, 0),
+      ai_items: aiItemsByIntake.get(row.id) || [],
     };
   }));
+});
+
+authenticatedRouter.get('/ai-status', (_req, res) => {
+  const db = getDb();
+  const counts = db.prepare('SELECT status, COUNT(*) AS n FROM invoice_inbox_items GROUP BY status').all()
+    .reduce((acc, row) => ({ ...acc, [row.status]: row.n }), {});
+  res.json({ ...require('../services/invoiceInboxAgent').statusSummary(), counts });
+});
+
+// Read one email again with the AI (invoices it already filed stay filed).
+authenticatedRouter.post('/:id/ai-reread', async (req, res) => {
+  const db = getDb();
+  const intake = db.prepare('SELECT id FROM invoice_email_intake WHERE id = ?').get(req.params.id);
+  if (!intake) return res.status(404).json({ error: 'Inbound invoice email not found' });
+  try {
+    const result = await require('../services/invoiceInboxAgent').rereadIntake(intake.id);
+    logActivity({
+      userId: req.user.id,
+      action: 'invoice_email_ai_reread',
+      entityType: 'invoice_email_intake',
+      entityId: intake.id,
+      details: { result: result.status, outcomes: result.outcomes || null },
+    });
+    res.json({ message: 'Read again', result });
+  } catch (err) {
+    console.error('[INBOUND INVOICE] AI re-read failed:', err.message);
+    res.status(500).json({ error: 'The AI could not read this email again' });
+  }
 });
 
 authenticatedRouter.get('/assignment-options', (req, res) => {
@@ -698,6 +749,22 @@ authenticatedRouter.post('/:id/file', (req, res) => {
         intake.id
       );
 
+      // Keep the AI's read: its category, and its open items now count as filed.
+      db.prepare(`
+        UPDATE invoices
+        SET category = COALESCE(category, (
+          SELECT category FROM invoice_inbox_items
+          WHERE intake_id = ? AND category IS NOT NULL
+          ORDER BY item_index LIMIT 1
+        ))
+        WHERE id = ?
+      `).run(intake.id, invoiceId);
+      db.prepare(`
+        UPDATE invoice_inbox_items
+        SET status = 'filed_by_office', invoice_id = COALESCE(invoice_id, ?), project_id = ?, updated_at = datetime('now')
+        WHERE intake_id = ? AND status IN ('needs_project','needs_review')
+      `).run(invoiceId, projectId, intake.id);
+
       logActivity({
         userId: req.user.id,
         projectId,
@@ -834,4 +901,4 @@ authenticatedRouter.get('/:id/attachments/:attachmentId', (req, res) => {
   res.download(filePath, attachment.original_name);
 });
 
-module.exports = { publicRouter, authenticatedRouter, storeInboundInvoice };
+module.exports = { publicRouter, authenticatedRouter, storeInboundInvoice, uploadRoot };

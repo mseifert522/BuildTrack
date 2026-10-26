@@ -268,6 +268,8 @@ interface InvoiceEmailItem {
   text_body?: string | null;
   html_body?: string | null;
   agent_status?: string;
+  provider?: string | null;
+  agent_model?: string | null;
   extracted_vendor?: string | null;
   extracted_invoice_number?: string | null;
   extracted_amount?: number | null;
@@ -276,6 +278,28 @@ interface InvoiceEmailItem {
   match_confidence?: number | null;
   matched_project_address?: string | null;
   matched_project_job_name?: string | null;
+  agent_notes?: string | null;
+  ai_error?: string | null;
+  ai_items?: InvoiceInboxAiItem[];
+}
+
+// One invoice the invoice inbox agent found in an email (invoice_inbox_items).
+interface InvoiceInboxAiItem {
+  id: string;
+  status: 'filed' | 'needs_project' | 'needs_review' | 'duplicate' | 'filed_by_office' | 'not_invoice' | string;
+  reason?: string | null;
+  vendor_name?: string | null;
+  vendor_created?: number | null;
+  invoice_number?: string | null;
+  invoice_date?: string | null;
+  invoice_type?: string | null;
+  category?: string | null;
+  total?: number | null;
+  project_id?: string | null;
+  project_address?: string | null;
+  invoice_id?: string | null;
+  bt_invoice_number?: string | null;
+  source_attachment_name?: string | null;
 }
 
 interface AssignmentTask {
@@ -425,6 +449,78 @@ const emailStatusClass: Record<string, string> = {
   filed: 'bg-emerald-50 text-emerald-700 border-emerald-100',
   ignored: 'bg-gray-100 text-gray-600 border-gray-200',
 };
+
+function aiAgentStatusLabel(item: InvoiceEmailItem) {
+  const status = item.agent_status;
+  // Emails from the old intake (before the AI) until someone has the AI read them.
+  if (item.provider !== 'gmail-imap' && !item.agent_model) {
+    return status === 'filed' || status === 'ignored' ? status : 'before AI';
+  }
+  if (status === 'pending') return 'AI reading';
+  if (status === 'filed') return 'AI filed';
+  if (status === 'needs_review') return 'AI: needs a person';
+  if (status === 'ignored') return 'AI: not an invoice';
+  return String(status || '').replace(/_/g, ' ');
+}
+
+const AI_ITEM_LABELS: Record<string, string> = {
+  filed: 'Filed by AI',
+  needs_project: 'Project not identified',
+  needs_review: 'Needs a person',
+  duplicate: 'Duplicate - not added',
+  filed_by_office: 'Filed by office',
+  not_invoice: 'Estimate / not an invoice',
+};
+
+const AI_INVOICE_TYPE_LABELS: Record<string, string> = {
+  labor: 'Labor',
+  materials: 'Materials',
+  labor_and_materials: 'Labor & materials',
+  equipment_rental: 'Equipment rental',
+  permit_or_fee: 'Permit / fee',
+  utility: 'Utility',
+  professional_service: 'Professional service',
+  other: 'Other',
+};
+
+function InvoiceAiReadPanel({ item, busy, onReread }: { item: InvoiceEmailItem; busy: boolean; onReread: () => void }) {
+  const aiItems = item.ai_items || [];
+  return (
+    <div className="bt-invoice-ai-panel">
+      <div className="bt-invoice-ai-panel-head">
+        <span className="bt-invoice-attachments-label">AI read</span>
+        <button type="button" onClick={onReread} disabled={busy} className="bt-invoice-refresh">
+          <RefreshCw className={`w-3.5 h-3.5 ${busy ? 'animate-spin' : ''}`} />
+          {busy ? 'Reading...' : 'Re-read with AI'}
+        </button>
+      </div>
+      {/* Each invoice below carries its own reason; the summary is for emails without any. */}
+      {!aiItems.length ? <p className="bt-invoice-ai-notes">{item.agent_notes || 'Not read by the AI yet.'}</p> : null}
+      {aiItems.map(ai => (
+        <div key={ai.id} className={`bt-invoice-ai-item is-${ai.status}`}>
+          <div className="bt-invoice-ai-item-head">
+            <span className="bt-invoice-ai-status">{AI_ITEM_LABELS[ai.status] || ai.status}</span>
+            <strong>{ai.vendor_name || 'Vendor not read'}</strong>
+            {ai.vendor_created ? <span className="bt-invoice-soft-chip">New vendor added</span> : null}
+          </div>
+          <div className="bt-invoice-ai-facts">
+            {ai.invoice_number ? <span className="bt-invoice-soft-chip">Invoice #{ai.invoice_number}</span> : null}
+            {ai.total !== null && ai.total !== undefined ? <span className="bt-invoice-soft-chip">{money(ai.total)}</span> : null}
+            {ai.category ? <span className="bt-invoice-soft-chip">{ai.category}</span> : null}
+            {ai.invoice_type ? <span className="bt-invoice-soft-chip">{AI_INVOICE_TYPE_LABELS[ai.invoice_type] || ai.invoice_type}</span> : null}
+            {ai.project_address ? <span className="bt-invoice-soft-chip">{ai.project_address}</span> : null}
+            {ai.bt_invoice_number && ai.project_id && ai.invoice_id ? (
+              <Link to={`/projects/${ai.project_id}/invoices/${ai.invoice_id}`} className="bt-invoice-soft-chip">
+                {ai.bt_invoice_number}
+              </Link>
+            ) : null}
+          </div>
+          {ai.reason ? <p className="bt-invoice-ai-reason">{ai.reason}</p> : null}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 const QUICKBOOKS_PANEL_ROLES = ['super_admin', 'operations_manager'];
 const QUICKBOOKS_BILLS_PATH = '/quickbooks/bills?limit=1000';
@@ -823,6 +919,7 @@ export default function Invoices() {
   const [assignmentOptions, setAssignmentOptions] = useState<Record<string, AssignmentOptions>>({});
   const [filingEmailId, setFilingEmailId] = useState<string | null>(null);
   const [ignoringEmailId, setIgnoringEmailId] = useState<string | null>(null);
+  const [rereadingEmailId, setRereadingEmailId] = useState<string | null>(null);
   const [attachmentPreview, setAttachmentPreview] = useState<AttachmentPreviewState | null>(null);
   const [attachmentPreviewUrl, setAttachmentPreviewUrl] = useState('');
   const [attachmentPreviewLoading, setAttachmentPreviewLoading] = useState(false);
@@ -1027,6 +1124,27 @@ export default function Invoices() {
       setEmailBoxLoading(false);
     }
   };
+
+  const rereadEmailWithAi = async (item: InvoiceEmailItem) => {
+    if (rereadingEmailId) return;
+    setRereadingEmailId(item.id);
+    try {
+      await api.post(`/invoices/email-intake/${item.id}/ai-reread`);
+      toast.success('The AI read this email again');
+      await Promise.all([load(), loadEmailBox()]);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'The AI could not read this email again');
+    } finally {
+      setRereadingEmailId(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!isAdminRole(user?.role || '')) return;
+    void loadEmailBox();
+    // loadEmailBox reads the current filter; reload when it changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [emailBoxStatus, user?.role]);
 
   const markEmailNotInvoice = async (item: InvoiceEmailItem) => {
     if (item.status === 'ignored' || ignoringEmailId) return;
@@ -2667,7 +2785,7 @@ export default function Invoices() {
           </section>
         )}
 
-        {false && isAdminRole(user?.role || '') && (
+        {isAdminRole(user?.role || '') && (
           <section className="bt-invoice-section">
             <div className="bt-invoice-section-header">
               <div className="flex items-start gap-3">
@@ -2678,7 +2796,7 @@ export default function Invoices() {
                   <p className="text-xs font-black uppercase tracking-wide text-blue-700">Auto invoice intake</p>
                   <h2 className="text-lg font-black text-gray-900">Incoming invoices from email</h2>
                   <p className="text-sm text-gray-600">
-                    Auto-refreshes from invoices@newurbandev.com. File each invoice to a project and scope task before payment review.
+                    The AI reads every email sent to invoices@newurbandev.com, adds new vendors and files each invoice to its project. Invoices it could not file (no clear job / project) wait here for assignment.
                   </p>
                 </div>
               </div>
@@ -2733,7 +2851,7 @@ export default function Invoices() {
                         <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-black ${emailStatusClass[item.status] || emailStatusClass.new}`}>
                           {item.status === 'new' ? 'needs assignment' : item.status}
                         </span>
-                        {item.agent_status ? <span className="bt-invoice-soft-chip">{item.agent_status.replace(/_/g, ' ')}</span> : null}
+                        {item.agent_status ? <span className="bt-invoice-soft-chip">{aiAgentStatusLabel(item)}</span> : null}
                       </div>
                       <div className="bt-invoice-email-row-cell">
                         <span>Sent from</span>
@@ -2782,7 +2900,7 @@ export default function Invoices() {
                                     {item.status === 'new' ? 'needs assignment' : item.status}
                                   </span>
                                   <span className="text-xs font-semibold text-slate-300">{formatEmailDate(item.received_at)}</span>
-                                  {item.agent_status ? <span className="bt-invoice-soft-chip">{item.agent_status.replace(/_/g, ' ')}</span> : null}
+                                  {item.agent_status ? <span className="bt-invoice-soft-chip">{aiAgentStatusLabel(item)}</span> : null}
                                 </div>
                                 <p className="bt-invoice-origin-title">{item.subject || '(no subject)'}</p>
                               </div>
@@ -2800,6 +2918,11 @@ export default function Invoices() {
                                 </button>
                               )}
                             </div>
+                            <InvoiceAiReadPanel
+                              item={item}
+                              busy={rereadingEmailId === item.id}
+                              onReread={() => void rereadEmailWithAi(item)}
+                            />
                             <div className="bt-invoice-sender-panel">
                               <div>
                                 <span>Contractor / sender</span>

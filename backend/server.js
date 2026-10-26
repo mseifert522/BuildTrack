@@ -41,6 +41,8 @@ const bankDrawRoutes = require('./src/routes/bankDraws');
 const featureAccessRoutes = require('./src/routes/featureAccess');
 const financeConsolidatedRoutes = require('./src/routes/financeConsolidated');
 const documentReviewService = require('./src/services/documentReview');
+const invoiceEmailIntake = require('./src/routes/invoiceEmailIntake');
+const invoiceInboxAgent = require('./src/services/invoiceInboxAgent');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -193,9 +195,8 @@ app.use('/api/text-messages', textMessageRoutes);
 app.use('/api/inbound/invoices', (_req, res) => {
   res.status(410).json({ error: 'Email invoice intake has been removed. Use mobile app invoices or QuickBooks bills.' });
 });
-app.use('/api/invoices/email-intake', (_req, res) => {
-  res.status(410).json({ error: 'Email invoice intake has been removed. Use mobile app invoices or QuickBooks bills.' });
-});
+// invoices@ is read by the invoice inbox agent; this is the office review queue.
+app.use('/api/invoices/email-intake', invoiceEmailIntake.authenticatedRouter);
 app.use('/api/documents', documentRoutes);
 app.use('/api/contractor-onboarding', contractorOnboardingRoutes);
 app.use('/api/vendor-setup', vendorSetupRoutes);
@@ -415,6 +416,8 @@ async function start() {
       documentReviewService.start();
       // Straightens and re-encodes uploaded videos so they play upright everywhere.
       videoNormalization.start();
+      // Reads every email to invoices@, adds vendors, files invoices to their project.
+      invoiceInboxAgent.start();
       if (typeof quickBooksRoutes.startQuickBooksAutoSync === 'function') {
         quickBooksRoutes.startQuickBooksAutoSync();
       }

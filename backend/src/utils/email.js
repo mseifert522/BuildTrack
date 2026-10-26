@@ -995,6 +995,77 @@ async function sendVendorClarificationEmail({
   return { to };
 }
 
+// The office inbox that hears about emailed invoices the AI could not file.
+function invoiceInboxNotifyRecipient() {
+  return String(process.env.INVOICE_INBOX_NOTIFY_EMAIL || NUD_COMPANY.email).trim();
+}
+
+// An invoice arrived at invoices@ but the AI did not file it (Mike, 2026-10-26):
+// the job / project is not clearly marked on it (never guessed), or something
+// else stopped it. `items` are the invoices found in that one email.
+async function sendInvoiceInboxReviewEmail({ email, items, link, attachments = [] }) {
+  const to = invoiceInboxNotifyRecipient();
+  if (!to) throw new Error('Missing office email');
+  const transporter = createTransporter();
+  const money = value => (value === null || value === undefined || value === ''
+    ? null
+    : `$${Number(value || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+  const row = (label, value) => (value
+    ? `<p style="font-size:13px; color:#374151; margin:0 0 6px;"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</p>`
+    : '');
+  const projectMissing = items.some(item => item.status === 'needs_project');
+  const first = items[0] || {};
+  const heading = projectMissing ? 'Job / project could not be identified' : 'Invoice needs review';
+  const intro = projectMissing
+    ? 'An invoice arrived at invoices@newurbandev.com, but the job number / project is not clearly marked on it. BuildTrack does not guess, so it was <strong style="color:#111827;">not filed to a project</strong>.'
+    : 'An invoice arrived at invoices@newurbandev.com, but BuildTrack could not file it automatically.';
+
+  const cards = items.map(item => `
+    <div style="background:#F9FAFB; border:1px solid #E5E7EB; border-radius:12px; padding:16px; margin-bottom:14px;">
+      <div style="background:#FFFBEB; border:1px solid #FDE68A; border-radius:10px; padding:10px 12px; margin-bottom:12px;">
+        <p style="font-size:13px; color:#78350F; font-weight:700; line-height:1.5; margin:0;">${escapeHtml(item.reason || 'Needs a person to review.')}</p>
+      </div>
+      ${row('Vendor', item.vendorName || '(not readable)')}
+      ${row('Vendor invoice #', item.invoiceNumber)}
+      ${row('Amount', money(item.total))}
+      ${row('Invoice date', item.invoiceDate)}
+      ${row('Category', item.category)}
+      ${row('Type of invoice', item.invoiceType)}
+      ${row('Job / property printed on the invoice', item.propertyRead || item.jobReference || 'none')}
+      ${row('Read from', item.sourceName)}
+    </div>
+  `).join('');
+
+  const html = emailWrapper(`
+    <h2 style="color:#111827; font-size:20px; font-weight:800; margin:0 0 8px;">${escapeHtml(heading)}</h2>
+    <p style="color:#6B7280; font-size:14px; line-height:1.6; margin:0 0 18px;">${intro}</p>
+    ${cards}
+    <div style="border:1px solid #E5E7EB; border-radius:12px; padding:14px 16px; margin-bottom:18px;">
+      <p style="font-size:12px; color:#374151; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin:0 0 8px;">Original email</p>
+      ${row('From', [email.fromName, email.fromEmail ? `<${email.fromEmail}>` : ''].filter(Boolean).join(' '))}
+      ${row('Subject', email.subject || '(no subject)')}
+      ${row('Received', email.receivedAt)}
+    </div>
+    <p style="color:#374151; font-size:14px; line-height:1.6; margin:0 0 18px;">
+      ${attachments.length ? 'The invoice is attached. ' : ''}To file it, open <strong>Invoices &rarr; Incoming invoices from email</strong> in BuildTrack and assign it to the correct project.
+    </p>
+    <p style="margin:0 0 4px;">
+      <a href="${escapeHtml(absoluteUrl(link || '/invoices'))}" style="display:inline-block; background:#D99D26; color:#111827; font-weight:800; font-size:14px; text-decoration:none; padding:11px 18px; border-radius:10px;">Open the invoice inbox in BuildTrack</a>
+    </p>
+  `);
+
+  const amount = money(first.total);
+  const subjectTail = [first.vendorName, amount].filter(Boolean).join(', ');
+  await sendBrandedMail(transporter, {
+    from: process.env.EMAIL_FROM || brandedFrom(),
+    to,
+    subject: `${projectMissing ? 'Invoice received - job / project could not be identified' : 'Invoice received - needs review'}${subjectTail ? ` (${subjectTail})` : ''}`,
+    html,
+    attachments,
+  });
+  return { to };
+}
+
 // Email / Send Punch List: one contractor's punch list for one property.
 // `items` carry title/description/notes/priority/status/due_date and
 // photos[{ url }] (signed, expiring /uploads links, at most a dozen per item).
@@ -1370,4 +1441,6 @@ module.exports = {
   sendQuoteApprovedEmail,
   sendVendorClarificationEmail,
   vendorClarificationRecipient,
+  sendInvoiceInboxReviewEmail,
+  invoiceInboxNotifyRecipient,
 };

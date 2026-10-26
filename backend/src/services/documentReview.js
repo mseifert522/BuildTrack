@@ -1254,5 +1254,7 @@ module.exports = {
   resolveVendor,
   resolveProject,
   sameAddress,
+  // shared with services/invoiceInboxAgent.js (same "same property" rule)
+  addressKey,
   setClientFactoryForTests,
 };
