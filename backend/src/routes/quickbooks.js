@@ -1610,6 +1610,12 @@ function rememberProjectClass(db, project, classRef) {
 function findInvoiceForBill(db, bill) {
   const qboId = String(bill.Id || '').trim();
   if (!qboId) return null;
+  // The invoice monitor's link wins: it knows a bill is one half / part of an emailed invoice.
+  const linked = db.prepare(`
+    SELECT i.* FROM invoice_qbo_links l JOIN invoices i ON i.id = l.invoice_id
+    WHERE l.qbo_bill_id = ? ORDER BY l.created_at LIMIT 1
+  `).get(qboId);
+  if (linked) return linked;
   const existing = db.prepare('SELECT * FROM invoices WHERE quickbooks_bill_id = ? LIMIT 1').get(qboId);
   if (existing) return existing;
 
@@ -2026,6 +2032,8 @@ function upsertBillsAndPayments(db, connection, bills, payments) {
     WHERE id = ?
   `);
 
+  const splitLinkCount = db.prepare('SELECT COUNT(*) AS n FROM invoice_qbo_links WHERE invoice_id = ?');
+
   let matched = 0;
   let ignored = 0;
   let markedPaidFromQueue = 0;
@@ -2141,7 +2149,9 @@ function upsertBillsAndPayments(db, connection, bills, payments) {
         deleteBillLines.run(String(bill.Id));
         continue;
       }
-      if (invoice) {
+      // An invoice entered as several bills (halves, parts, class splits) carries no
+      // single bill's fields; the invoice monitor keeps its parts and paid status.
+      if (invoice && splitLinkCount.get(invoice.id).n <= 1) {
         updateInvoice.run(
           String(bill.Id),
           normalizeMoney(bill.Balance),
@@ -2202,6 +2212,8 @@ function upsertBillsAndPayments(db, connection, bills, payments) {
     // New or edited bills may carry a new invoice PDF: look for it shortly (a full sync
     // in progress clears the request by scanning itself).
     if (changedBills) requestBillPdfScan();
+    // New / edited / paid bills: the invoice monitor checks them against the emailed invoices.
+    require('../services/invoiceReconciliation').kick('quickbooks');
   }
   return { matched, ignored, markedPaidFromQueue, paidFromQueue, newBills, changedBills, changedPayments, nowPaid };
 }
@@ -2241,6 +2253,8 @@ function reconcileMissingQuickBooksBills(db, connection, bills) {
   db.transaction(() => {
     for (const qboId of missingIds) updateMissing.run(PAYMENT_APPROVAL_DELETED_STATUS, qboId);
   })();
+  // A bill an emailed invoice was entered as may be among them.
+  require('../services/invoiceReconciliation').kick('quickbooks_deleted');
 
   return {
     count: missingIds.length,

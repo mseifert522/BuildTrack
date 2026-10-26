@@ -4281,3 +4281,234 @@ a.bg-blue-600:hover {
   font-size: 12px;
   line-height: 1.5;
 }
+
+/* Invoice monitor - emailed invoices vs QuickBooks, issues and the feed (2026-10-26). */
+.bt-monitor-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.bt-monitor-stat {
+  display: grid;
+  gap: 2px;
+  border: 1px solid #374151;
+  border-radius: 7px;
+  background: #0A0F14;
+  padding: 10px 12px;
+}
+
+.bt-monitor-stat strong {
+  color: #F3F4F6;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.bt-monitor-stat span {
+  color: #9CA3AF;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.bt-monitor-stat.is-hot {
+  border-color: rgba(251, 191, 36, 0.55);
+}
+
+.bt-monitor-stat.is-hot strong {
+  color: #FDE68A;
+}
+
+.bt-monitor-error {
+  margin: 0 0 10px;
+  color: #FCA5A5;
+  font-size: 12px;
+}
+
+.bt-monitor-list {
+  display: grid;
+  gap: 10px;
+}
+
+.bt-monitor-issue,
+.bt-monitor-invoice {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #374151;
+  border-radius: 7px;
+  background: #0A0F14;
+  padding: 12px 14px;
+}
+
+.bt-monitor-issue.is-alert {
+  border-color: rgba(248, 113, 113, 0.55);
+}
+
+.bt-monitor-issue.is-warning {
+  border-color: rgba(251, 191, 36, 0.5);
+}
+
+.bt-monitor-issue-head,
+.bt-monitor-invoice-head,
+.bt-monitor-issue-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.bt-monitor-issue-head strong {
+  color: #F3F4F6;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.bt-monitor-issue.is-alert .bt-monitor-issue-head svg {
+  color: #F87171;
+}
+
+.bt-monitor-issue.is-warning .bt-monitor-issue-head svg {
+  color: #FBBF24;
+}
+
+.bt-monitor-issue-head span,
+.bt-monitor-invoice-project {
+  color: #9CA3AF;
+  font-size: 12px;
+  margin: 0;
+}
+
+.bt-monitor-issue p {
+  margin: 0;
+  color: #D1D5DB;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.bt-monitor-notes {
+  color: #9CA3AF;
+  font-size: 12px;
+}
+
+.bt-monitor-notes summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.bt-monitor-notes p {
+  margin: 6px 0 0;
+}
+
+.bt-monitor-invoice-head a {
+  color: #93C5FD;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.bt-monitor-invoice-head strong,
+.bt-monitor-invoice-head > span {
+  color: #E5E7EB;
+  font-size: 13px;
+}
+
+.bt-monitor-status {
+  border-radius: 999px;
+  border: 1px solid #4B5563;
+  padding: 2px 8px;
+  font-size: 11px !important;
+  font-weight: 800;
+}
+
+.bt-monitor-status.is-matched,
+.bt-monitor-status.is-matched_split {
+  border-color: rgba(52, 211, 153, 0.5);
+  color: #A7F3D0 !important;
+}
+
+.bt-monitor-status.is-amount_mismatch,
+.bt-monitor-status.is-over_entered {
+  border-color: rgba(248, 113, 113, 0.55);
+  color: #FECACA !important;
+}
+
+.bt-monitor-status.is-partially_entered,
+.bt-monitor-status.is-not_in_quickbooks {
+  border-color: rgba(251, 191, 36, 0.5);
+  color: #FDE68A !important;
+}
+
+.bt-monitor-entries {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bt-monitor-entries li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  border-top: 1px solid #1F2937;
+  padding-top: 4px;
+  color: #C4CAD2;
+  font-size: 12px;
+}
+
+.bt-monitor-entries li span:first-child {
+  min-width: 84px;
+  color: #F3F4F6;
+  font-weight: 800;
+  text-transform: capitalize;
+}
+
+.bt-monitor-feed {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bt-monitor-feed li {
+  display: grid;
+  grid-template-columns: 120px 96px minmax(0, 1fr);
+  gap: 10px;
+  border-bottom: 1px solid #1F2937;
+  padding: 7px 2px;
+  font-size: 12px;
+  color: #D1D5DB;
+}
+
+.bt-monitor-feed li.is-warning .bt-monitor-feed-message {
+  color: #FDE68A;
+}
+
+.bt-monitor-feed li.is-alert .bt-monitor-feed-message {
+  color: #FECACA;
+}
+
+.bt-monitor-feed-time {
+  color: #9CA3AF;
+}
+
+.bt-monitor-source {
+  justify-self: start;
+  border-radius: 999px;
+  border: 1px solid #4B5563;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 800;
+  color: #E5E7EB;
+}
+
+.bt-monitor-source.is-email { border-color: rgba(147, 197, 253, 0.5); color: #BFDBFE; }
+.bt-monitor-source.is-quickbooks { border-color: rgba(52, 211, 153, 0.5); color: #A7F3D0; }
+.bt-monitor-source.is-monitor { border-color: rgba(196, 181, 253, 0.5); color: #DDD6FE; }
+
+@media (max-width: 700px) {
+  .bt-monitor-feed li {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}

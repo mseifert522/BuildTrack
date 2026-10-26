@@ -1066,6 +1066,51 @@ async function sendInvoiceInboxReviewEmail({ email, items, link, attachments = [
   return { to };
 }
 
+// The invoice <-> QuickBooks monitor found things that do not match (Mike,
+// 2026-10-26): possible double entries, estimates entered as bills, amounts or
+// projects that differ, invoices not entered. One email per batch of new items.
+async function sendInvoiceMonitorAlertEmail({ issues, more = 0, link }) {
+  const to = invoiceInboxNotifyRecipient();
+  if (!to) throw new Error('Missing office email');
+  const transporter = createTransporter();
+  const TITLES = {
+    possible_double_entry: 'Possible double entry in QuickBooks',
+    estimate_billed: 'Estimate entered as a bill',
+    amount_mismatch: 'Amount differs from QuickBooks',
+    over_entered: 'More in QuickBooks than invoiced',
+    project_mismatch: 'Different project in QuickBooks',
+    quickbooks_deleted: 'Bill deleted in QuickBooks',
+    not_in_quickbooks: 'Not entered in QuickBooks yet',
+    partially_entered: 'Only partly entered in QuickBooks',
+  };
+  const alerts = issues.filter(issue => issue.severity === 'alert').length;
+  const cards = issues.map(issue => `
+    <div style="border:1px solid ${issue.severity === 'alert' ? '#FECACA' : '#FDE68A'}; background:${issue.severity === 'alert' ? '#FEF2F2' : '#FFFBEB'}; border-radius:10px; padding:12px 14px; margin-bottom:10px;">
+      <p style="font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; color:${issue.severity === 'alert' ? '#991B1B' : '#92400E'}; margin:0 0 4px;">${escapeHtml(TITLES[issue.kind] || 'Needs attention')}</p>
+      <p style="font-size:13px; color:#1F2937; line-height:1.5; margin:0;">${escapeHtml(issue.message)}</p>
+    </div>
+  `).join('');
+  const html = emailWrapper(`
+    <h2 style="color:#111827; font-size:20px; font-weight:800; margin:0 0 8px;">Invoices and QuickBooks do not match</h2>
+    <p style="color:#6B7280; font-size:14px; line-height:1.6; margin:0 0 18px;">
+      The invoice monitor compares every invoice that came in by email with what is entered in QuickBooks. These need a person to check:
+    </p>
+    ${cards}
+    ${more ? `<p style="color:#6B7280; font-size:13px; margin:0 0 14px;">...and ${more} more in BuildTrack.</p>` : ''}
+    <p style="margin:14px 0 4px;">
+      <a href="${escapeHtml(absoluteUrl(link || '/invoices'))}" style="display:inline-block; background:#D99D26; color:#111827; font-weight:800; font-size:14px; text-decoration:none; padding:11px 18px; border-radius:10px;">Open the invoice monitor in BuildTrack</a>
+    </p>
+  `);
+  const count = issues.length + more;
+  await sendBrandedMail(transporter, {
+    from: process.env.EMAIL_FROM || brandedFrom(),
+    to,
+    subject: `Invoice monitor: ${count} item${count === 1 ? '' : 's'} need${count === 1 ? 's' : ''} attention${alerts ? ` (${alerts} alert${alerts === 1 ? '' : 's'})` : ''}`,
+    html,
+  });
+  return { to };
+}
+
 // Email / Send Punch List: one contractor's punch list for one property.
 // `items` carry title/description/notes/priority/status/due_date and
 // photos[{ url }] (signed, expiring /uploads links, at most a dozen per item).
@@ -1443,4 +1488,5 @@ module.exports = {
   vendorClarificationRecipient,
   sendInvoiceInboxReviewEmail,
   invoiceInboxNotifyRecipient,
+  sendInvoiceMonitorAlertEmail,
 };

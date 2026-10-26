@@ -46,5 +46,46 @@ UI: Invoices page, "Incoming invoices from email". Tests: `backend/tests/invoice
 `INVOICE_INBOX_LABEL` (`''` = do not label), `INVOICE_INBOX_SYSTEM_USER_ID` (login the
 invoices are filed under; default the first active super admin).
 
-**Blue-green deploys: the green container must get `INVOICE_INBOX_ENABLED=false`**, or
-two containers read the mailbox at once.
+**Blue-green deploys: the green container must get `INVOICE_INBOX_ENABLED=false` and
+`INVOICE_MONITOR_ENABLED=false`**, or two containers read the mailbox / write links at once.
+
+# Invoice <-> QuickBooks monitor
+
+Live since 2026-10-26. Code: `backend/src/services/invoiceReconciliation.js`, API
+`backend/src/routes/invoiceMonitor.js` (`/api/invoices/monitor`), UI: Invoices page,
+"Invoice monitor" (`frontend/src/components/InvoiceMonitorPanel.tsx`). Tests:
+`backend/tests/invoiceReconciliation.test.js`.
+
+Every emailed invoice must match what the operations manager enters in QuickBooks. The
+monitor reads only BuildTrack's QuickBooks mirror (kept current by the existing sync from
+Intuit's change feed) - it never calls the Intuit API and never writes to QuickBooks. It
+runs every 5 minutes and a few seconds after any QuickBooks sync or inbox change.
+
+- **Links** (`invoice_qbo_links`): each emailed invoice to the bill(s) entered for it -
+  same vendor only, by the same attached document (sha256), the invoice number in the
+  bill's note, the full amount, two halves (the office writes "First Half" / "Second
+  Half" in the note; there is no DocNumber), parts adding up to it, or a bill whose class
+  lines split it across projects. Never a guess: a bill dated before the invoice (3 days'
+  slack), entered more than 3 weeks before the email, or one of several equally
+  plausible bills is not taken. The QuickBooks sync honors these links
+  (`findInvoiceForBill`), and an invoice entered as several bills is not overwritten by
+  each bill.
+- **Filed from QuickBooks**: an emailed invoice whose job was not on it (`needs_project`)
+  is filed under the project the office chose in QuickBooks - one BuildTrack invoice per
+  project share when the bill splits it across classes.
+- **Mirrors QuickBooks**: project invoice lists show an emailed invoice that is entered in
+  QuickBooks as those QuickBooks rows (tagged "Emailed NUD-x - 1st half"), so nothing is
+  counted twice; what is not entered yet shows as "Not in QuickBooks yet". All parts
+  paid -> the BuildTrack invoice is marked paid.
+- **Issues** (`invoice_monitor_issues`, emailed to info@ once, batched every 10 minutes):
+  possible double entry (same vendor, amount and description within 10 days), a bill for
+  a document the AI read as an estimate, amount differs, more entered than invoiced,
+  QuickBooks has another project, a linked bill deleted in QuickBooks, not entered after
+  `INVOICE_MONITOR_GRACE_DAYS` (3), only partly entered. Info only (not emailed): the
+  document attached in QuickBooks totals something else (Cost Analyzer's read). "It is OK"
+  dismisses an issue.
+- **Feed** (`invoice_monitor_events`): every email received, AI verdict, invoice filed,
+  duplicate, estimate, QuickBooks bill entered / edited / paid / deleted, link and issue.
+
+Settings: `INVOICE_MONITOR_ENABLED` (default on), `INVOICE_MONITOR_SINCE` (bills checked
+from this date, default 2026-08-01), `INVOICE_MONITOR_GRACE_DAYS`, `INVOICE_MONITOR_INTERVAL_MS`.

@@ -2548,6 +2548,85 @@ function initializeSchema() {
 	      CREATE INDEX IF NOT EXISTS idx_invoice_inbox_items_sha ON invoice_inbox_items(document_sha256);
 	    `);
 	  } catch (_) { /* best-effort */ }
+	  // Invoice <-> QuickBooks monitor (2026-10-26): which QuickBooks bill(s) each emailed
+	  // invoice was entered as (halves, parts, class splits), what does not match, and the
+	  // feed of everything the inbox and QuickBooks did.
+	  try {
+	    db.exec(`
+	      CREATE TABLE IF NOT EXISTS invoice_qbo_links (
+	        id TEXT PRIMARY KEY,
+	        invoice_id TEXT NOT NULL,
+	        qbo_bill_id TEXT NOT NULL,
+	        amount REAL NOT NULL DEFAULT 0,
+	        part TEXT NOT NULL DEFAULT 'full' CHECK(part IN ('full','first_half','second_half','part','project_share')),
+	        method TEXT NOT NULL,
+	        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	        UNIQUE(invoice_id, qbo_bill_id),
+	        FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
+	      );
+	      CREATE INDEX IF NOT EXISTS idx_invoice_qbo_links_bill ON invoice_qbo_links(qbo_bill_id);
+	      CREATE TABLE IF NOT EXISTS invoice_reconciliation (
+	        invoice_id TEXT PRIMARY KEY,
+	        status TEXT NOT NULL,
+	        invoice_total REAL,
+	        quickbooks_total REAL,
+	        paid_amount REAL,
+	        bill_count INTEGER NOT NULL DEFAULT 0,
+	        summary TEXT,
+	        signature TEXT,
+	        checked_at TEXT NOT NULL DEFAULT (datetime('now')),
+	        changed_at TEXT NOT NULL DEFAULT (datetime('now')),
+	        FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
+	      );
+	      CREATE TABLE IF NOT EXISTS qbo_bill_monitor (
+	        qbo_bill_id TEXT PRIMARY KEY,
+	        sync_token TEXT,
+	        total REAL,
+	        balance REAL,
+	        payment_status TEXT,
+	        deleted INTEGER NOT NULL DEFAULT 0,
+	        checked_at TEXT NOT NULL DEFAULT (datetime('now'))
+	      );
+	      CREATE TABLE IF NOT EXISTS invoice_monitor_issues (
+	        id TEXT PRIMARY KEY,
+	        issue_key TEXT UNIQUE NOT NULL,
+	        kind TEXT NOT NULL,
+	        severity TEXT NOT NULL CHECK(severity IN ('info','warning','alert')),
+	        invoice_id TEXT,
+	        qbo_bill_id TEXT,
+	        intake_id TEXT,
+	        project_id TEXT,
+	        message TEXT NOT NULL,
+	        status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','resolved','dismissed')),
+	        first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+	        last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+	        resolved_at TEXT,
+	        dismissed_by TEXT,
+	        notified_at TEXT
+	      );
+	      CREATE INDEX IF NOT EXISTS idx_invoice_monitor_issues_status ON invoice_monitor_issues(status, severity);
+	      CREATE TABLE IF NOT EXISTS invoice_monitor_events (
+	        id TEXT PRIMARY KEY,
+	        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	        source TEXT NOT NULL CHECK(source IN ('email','quickbooks','buildtrack','monitor')),
+	        kind TEXT NOT NULL,
+	        severity TEXT NOT NULL DEFAULT 'info' CHECK(severity IN ('info','warning','alert')),
+	        invoice_id TEXT,
+	        qbo_bill_id TEXT,
+	        intake_id TEXT,
+	        project_id TEXT,
+	        message TEXT NOT NULL,
+	        details_json TEXT
+	      );
+	      CREATE INDEX IF NOT EXISTS idx_invoice_monitor_events_created ON invoice_monitor_events(created_at);
+	      CREATE TABLE IF NOT EXISTS qbo_attachment_hashes (
+	        attachment_id TEXT PRIMARY KEY,
+	        sha256 TEXT,
+	        checked_at TEXT NOT NULL DEFAULT (datetime('now'))
+	      );
+	    `);
+	  } catch (_) { /* best-effort */ }
 	  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_quickbooks_vendors_display_name ON quickbooks_vendors(display_name, company_name)`); } catch (_) { /* best-effort */ }
 	  try { db.exec(`ALTER TABLE quickbooks_bills ADD COLUMN qbo_class_id TEXT`); } catch (_) { /* already exists */ }
 	  try { db.exec(`ALTER TABLE quickbooks_bills ADD COLUMN qbo_class_name TEXT`); } catch (_) { /* already exists */ }

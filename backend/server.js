@@ -43,6 +43,8 @@ const financeConsolidatedRoutes = require('./src/routes/financeConsolidated');
 const documentReviewService = require('./src/services/documentReview');
 const invoiceEmailIntake = require('./src/routes/invoiceEmailIntake');
 const invoiceInboxAgent = require('./src/services/invoiceInboxAgent');
+const invoiceMonitorRoutes = require('./src/routes/invoiceMonitor');
+const invoiceMonitor = require('./src/services/invoiceReconciliation');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -197,6 +199,8 @@ app.use('/api/inbound/invoices', (_req, res) => {
 });
 // invoices@ is read by the invoice inbox agent; this is the office review queue.
 app.use('/api/invoices/email-intake', invoiceEmailIntake.authenticatedRouter);
+// Emailed invoices vs QuickBooks: what matches, what needs a person, and the feed.
+app.use('/api/invoices/monitor', invoiceMonitorRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/contractor-onboarding', contractorOnboardingRoutes);
 app.use('/api/vendor-setup', vendorSetupRoutes);
@@ -418,6 +422,8 @@ async function start() {
       videoNormalization.start();
       // Reads every email to invoices@, adds vendors, files invoices to their project.
       invoiceInboxAgent.start();
+      // Checks every emailed invoice against what the office enters in QuickBooks.
+      invoiceMonitor.start();
       if (typeof quickBooksRoutes.startQuickBooksAutoSync === 'function') {
         quickBooksRoutes.startQuickBooksAutoSync();
       }

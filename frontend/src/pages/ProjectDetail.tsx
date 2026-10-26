@@ -9760,6 +9760,8 @@ type ProjectInvoiceRow = {
   source?: string | null;
   source_label?: string | null;
   category?: string | null;
+  email_invoice_number?: string | null;
+  email_invoice_part?: string | null;
   invoice_number?: string | null;
   external_invoice_number?: string | null;
   contractor_id?: string | null;
@@ -9797,6 +9799,14 @@ function formatInvoiceMoney(value: any) {
 function invoiceStatusLabel(status?: string | null) {
   return String(status || 'draft').replace(/_/g, ' ');
 }
+
+// Which part of an emailed invoice a QuickBooks row is (the office's split).
+const EMAILED_PART_LABELS: Record<string, string> = {
+  first_half: '1st half',
+  second_half: '2nd half',
+  part: 'part',
+  project_share: 'project share',
+};
 
 // Emailed invoices are filed under a staff login; group them (with the same vendor's
 // QuickBooks bills) by the vendor named on them.
@@ -9990,6 +10000,11 @@ function InvoicesTab({ projectId, user, project }: { projectId: string; user: an
                       {invoice.category && (
                         <span className="shrink-0 rounded-full border border-amber-300/45 bg-amber-400/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-amber-100">
                           {invoice.category}
+                        </span>
+                      )}
+                      {invoice.email_invoice_number && (
+                        <span className="shrink-0 rounded-full border border-emerald-300/45 bg-emerald-400/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-emerald-100">
+                          Emailed {invoice.email_invoice_number}{EMAILED_PART_LABELS[invoice.email_invoice_part || ''] ? ` - ${EMAILED_PART_LABELS[invoice.email_invoice_part || '']}` : ''}
                         </span>
                       )}
                       {showBillId && <span>Bill {quickBooksBillId}</span>}

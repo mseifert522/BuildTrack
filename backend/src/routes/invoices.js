@@ -11,6 +11,7 @@ const { recordWorkItemEvent } = require('../utils/workItemEvents');
 const { sendInvoiceEmail, sendApprovedPayNotificationEmail } = require('../utils/email');
 const { generateInvoicePDF } = require('../utils/pdf');
 const { nextInvoiceSeq } = require('../utils/invoiceNumbers');
+const invoiceMonitor = require('../services/invoiceReconciliation');
 
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
@@ -49,6 +50,22 @@ function headerFilename(filename) {
 
 function invoiceAttachmentRoot() {
   return path.resolve(process.env.UPLOADS_PATH || './uploads', 'invoice-attachments');
+}
+
+// QuickBooks rows that are (part of) an emailed invoice say which one, and which part.
+function annotateEmailedInvoices(db, rows) {
+  const byBill = invoiceMonitor.emailInvoicesForBills(db, [...new Set(rows.map(row => String(row.quickbooks_bill_id || '')).filter(Boolean))]);
+  return rows.map(row => {
+    const emailed = byBill.get(String(row.quickbooks_bill_id || ''));
+    if (!emailed) return row;
+    return {
+      ...row,
+      email_invoice_id: emailed.invoice_id,
+      email_invoice_number: emailed.invoice_number,
+      email_invoice_part: emailed.part,
+      category: row.category || emailed.category || null,
+    };
+  });
 }
 
 // Emailed invoices are filed under a staff login; the vendor is who billed us.
@@ -497,11 +514,15 @@ router.get('/', authorizeProjectAccess, (req, res) => {
       lineItemsByInvoice.set(item.invoice_id, items);
     });
   }
-  const invoices = invoiceRows.map(invoice => {
+  const canSeeQuickBooks = canViewQuickBooksProjectInvoices(req.user);
+  // Emailed invoices the office entered in QuickBooks show as those QuickBooks rows
+  // (split the way the office entered them); only what is not entered yet shows here.
+  const coverage = canSeeQuickBooks ? invoiceMonitor.quickBooksCoverage(db, invoiceRows.map(invoice => invoice.id)) : new Map();
+  const invoices = invoiceRows.flatMap(invoice => {
     const linkedWorkCount = db.prepare('SELECT COUNT(*) as count FROM invoice_work_items WHERE invoice_id = ?').get(invoice.id).count;
     const holds = getFieldWorkPaymentHolds(db, invoice.project_id, invoice.id);
     const lineItems = lineItemsByInvoice.get(invoice.id) || [];
-    return {
+    const row = {
       ...invoice,
       ...emailVendorAsContractor(invoice),
       source_label: invoice.quickbooks_bill_id ? 'BuildTrack + QuickBooks' : (invoice.ai_filed ? 'Email - AI filed' : 'BuildTrack'),
@@ -511,9 +532,28 @@ router.get('/', authorizeProjectAccess, (req, res) => {
       line_item_count: lineItems.length,
       line_items: lineItems,
     };
+    const entered = coverage.get(invoice.id);
+    if (!entered) return [row];
+    const remaining = Math.round((Number(invoice.total || 0) - entered.covered) * 100) / 100;
+    if (remaining <= 0.015) return [];
+    const usd = value => `$${Number(value || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return [{
+      ...row,
+      total: remaining,
+      source_label: 'Email - not in QuickBooks yet',
+      quickbooks_partial: true,
+      line_item_count: 1,
+      line_items: [{
+        id: `${invoice.id}:not-in-quickbooks`,
+        invoice_id: invoice.id,
+        description: `Not in QuickBooks yet: ${usd(remaining)} of ${usd(invoice.total)}`,
+        amount: remaining,
+        sort_order: 0,
+      }],
+    }];
   });
-  const quickBooksInvoices = canViewQuickBooksProjectInvoices(req.user)
-    ? getProjectQuickBooksInvoices(db, req.params.projectId)
+  const quickBooksInvoices = canSeeQuickBooks
+    ? annotateEmailedInvoices(db, getProjectQuickBooksInvoices(db, req.params.projectId))
     : [];
   const rows = [...invoices, ...quickBooksInvoices].sort((left, right) => {
     const leftTime = Date.parse(left.submitted_at || left.created_at || left.updated_at || '');

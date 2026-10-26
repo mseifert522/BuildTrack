@@ -2,6 +2,7 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../lib/api';
 import { Loading } from '../components/ui';
+import InvoiceMonitorPanel from '../components/InvoiceMonitorPanel';
 import {
   AlertTriangle,
   ArrowDown,
@@ -2783,6 +2784,10 @@ export default function Invoices() {
             </div>
             )}
           </section>
+        )}
+
+        {isAdminRole(user?.role || '') && (
+          <InvoiceMonitorPanel canManage={['super_admin', 'operations_manager'].includes(user?.role || '')} />
         )}
 
         {isAdminRole(user?.role || '') && (

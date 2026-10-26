@@ -50,6 +50,12 @@ const {
 } = require('../utils/vendorDirectory');
 const costAnalyzer = require('./costAnalyzerExtraction');
 const { addressKey } = require('./documentReview');
+const monitor = require('./invoiceReconciliation');
+
+// Everything the inbox does goes into the invoice monitor's feed.
+function feed(db, event) {
+  monitor.logEvent(db, { source: 'email', ...event });
+}
 
 const PRIMARY_MODEL = process.env.INVOICE_AI_MODEL || 'claude-opus-5-5';
 const MODEL_STEPDOWN = ['claude-opus-5', 'claude-opus-4-8'];
@@ -779,7 +785,9 @@ function lineItemsFor(entry, total) {
   return [{ description: text(`${entry.category}: ${entry.summary || 'Invoice'}`, 300), amount: total }];
 }
 
-function fileInvoice(db, { intake, entry, vendor, project, total, actorId, emailSummary }) {
+// `note` is an extra line (the monitor files under the project the office chose in
+// QuickBooks, sometimes one share of a bill split across projects).
+function fileInvoice(db, { intake, entry, vendor, project, total, actorId, emailSummary, note = '' }) {
   const invoiceId = uuidv4();
   const invoiceNumber = `NUD-${nextInvoiceSeq(db)}`;
   const typeLabel = TYPE_LABELS[entry.invoice_type] || 'Other';
@@ -792,6 +800,7 @@ function fileInvoice(db, { intake, entry, vendor, project, total, actorId, email
     entry.payment_terms ? `Terms: ${entry.payment_terms}.` : '',
     entry.amount_due !== null && entry.amount_due !== total ? `Balance due as printed: ${money(entry.amount_due)}.` : '',
     entry.project_evidence ? `Job on the invoice: "${entry.project_evidence}".` : '',
+    note,
   ].filter(Boolean).join('\n');
   db.prepare(`
     INSERT INTO invoices (
@@ -1002,6 +1011,27 @@ function markFailed(db, intake, reason, message) {
       WHERE id = ?
     `).run(message, `${reason} Office emailed.`, intake.id);
   })();
+  feed(db, { kind: 'read_failed', severity: 'warning', intakeId: intake.id, message: `"${text(intake.subject, 120)}" from ${intake.from_email}: ${reason}` });
+}
+
+// One feed line per document the AI read (filed, needs a person, duplicate, not an invoice).
+function feedOutcomes(db, intake, read, outcomes) {
+  const from = `"${text(intake.subject, 100)}" from ${intake.from_email || 'unknown sender'}`;
+  if (!outcomes.length) {
+    feed(db, { kind: 'not_invoice', intakeId: intake.id, message: `${from}: not an invoice - ${KIND_LABELS[read.email_kind] || 'not an invoice'}.` });
+    return;
+  }
+  for (const outcome of outcomes) {
+    const base = { intakeId: intake.id, invoiceId: outcome.invoice ? outcome.invoice.invoiceId : null, projectId: outcome.project && outcome.project.id ? outcome.project.id : null };
+    const what = outcome.entry ? describeOutcome(outcome) : outcome.reason;
+    const kind = {
+      filed: 'invoice_filed', needs_project: 'needs_person', needs_review: 'needs_person', duplicate: 'duplicate', not_invoice: 'not_invoice',
+    }[outcome.status] || outcome.status;
+    feed(db, { ...base, kind, severity: kind === 'needs_person' ? 'warning' : 'info', message: `${from}: ${what}` });
+    if (outcome.vendor && outcome.vendor.created) {
+      feed(db, { ...base, kind: 'vendor_added', message: `New vendor added to Contractors / Suppliers: ${outcome.vendor.name}.` });
+    }
+  }
 }
 
 const UNREAD_ITEM_INDEX = 1000;
@@ -1080,6 +1110,7 @@ function fileRead(db, { intake, read, model, ctx, usage, unread = [] }) {
       intakeId
     );
   })();
+  feedOutcomes(db, intake, read, outcomes);
   log(`intake ${intakeId}: ${read.email_kind}, ${outcomes.map(o => o.status).join(',') || 'no invoices'} (${usage.inputTokens} in / ${usage.outputTokens} out, ${model})`);
   return { status: 'read', emailKind: read.email_kind, outcomes: outcomes.map(o => o.status) };
 }
@@ -1138,6 +1169,7 @@ async function notifyOffice(db) {
       const ids = items.map(item => item.id);
       db.prepare(`UPDATE invoice_inbox_items SET notified_at = datetime('now'), updated_at = datetime('now') WHERE id IN (${ids.map(() => '?').join(',')})`).run(...ids);
       sent += 1;
+      feed(db, { kind: 'office_emailed', intakeId, message: `Emailed the office about "${text(intake.subject, 100)}" (${items.length} invoice(s) need a person).` });
     } catch (err) {
       warn(`intake ${intakeId}: office email failed (${text(err && err.message, 120)}); will retry`);
     }
@@ -1250,6 +1282,11 @@ function storeMessage(db, payload) {
         agent_notes = 'Waiting for the AI to read it.', updated_at = datetime('now')
     WHERE id = ?
   `).run(result.id);
+  feed(db, {
+    kind: 'email_received',
+    intakeId: result.id,
+    message: `Email received from ${payload.fromName ? `${text(payload.fromName, 80)} ` : ''}<${payload.fromEmail}>: "${text(payload.subject, 120)}" (${(payload.attachments || []).length} file(s)).`,
+  });
   return true;
 }
 
@@ -1281,7 +1318,11 @@ async function pollOnce() {
     state.lastPollAt = new Date().toISOString();
     state.lastPollError = null;
     state.lastResult = { stored, read: results.length, notified };
-    if (stored || results.length || notified) log(`poll: ${stored} new email(s), ${results.length} read, ${notified} office email(s)`);
+    if (stored || results.length || notified) {
+      log(`poll: ${stored} new email(s), ${results.length} read, ${notified} office email(s)`);
+      // New invoices: the monitor matches them against QuickBooks.
+      monitor.kick('inbox');
+    }
     return state.lastResult;
   } catch (err) {
     state.lastPollAt = new Date().toISOString();
@@ -1349,6 +1390,9 @@ module.exports = {
   rereadIntake,
   notifyOffice,
   statusSummary,
+  // shared with services/invoiceReconciliation.js (filing from QuickBooks' answer)
+  fileInvoice,
+  systemUserId,
   // exposed for tests
   resolveProject,
   printedAddressKeys,
