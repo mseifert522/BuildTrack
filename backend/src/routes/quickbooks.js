@@ -1657,7 +1657,9 @@ function findInvoiceForBill(db, bill) {
   // unique per vendor (Snyders #2055 is not ELT #2055), so it must agree on the vendor.
   const ownNumber = candidates.find(row => doc && normalizeDoc(row.invoice_number) === doc);
   if (ownNumber) return ownNumber;
-  const exactDoc = candidates.find(row => (
+  // A bill without a number (the office never fills it in) is not "the same number" as an
+  // invoice without one - that blank-equals-blank match let an amount alone pick an invoice.
+  const exactDoc = candidates.find(row => doc && (
     (normalizeDoc(row.external_invoice_number) === doc || normalizeDoc(row.quickbooks_doc_number) === doc)
     && invoiceVendorAgrees(db, row, bill)
   ));
