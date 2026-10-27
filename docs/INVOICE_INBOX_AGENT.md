@@ -21,7 +21,12 @@ UI: Invoices page, "Incoming invoices from email". Tests: `backend/tests/invoice
    - **not_invoice** - estimates, quotes (also quotes written on an invoice form),
      statements, receipts. Never a BuildTrack invoice; no vendor is created from them.
    - **duplicate** - the same invoice already received (same vendor + invoice number,
-     or vendor + amount + date, or the very same file bytes). Not added again.
+     or vendor + amount + date, or the very same file bytes). Not added again. Inside one
+     email only the same vendor invoice number counts (a PDF and a photo of invoice #31
+     file once; two unnumbered $250 bills of one day may be two jobs). "Re-read with AI"
+     keeps what is filed and recognises it by what it is (number, vendor, file, amount),
+     not by its place in the email, so a re-read in another order files nothing twice
+     and drops nothing.
    - **filed** - added as a BuildTrack invoice (`source='email'`, `ai_filed=1`, with
      `category`, `invoice_type`, vendor dates, line items and the document attached)
      to the project whose address / job name is printed on the invoice or written by
@@ -47,8 +52,9 @@ recent QuickBooks classes (`projectSuggestions`). **Assign** calls
 `POST /api/invoices/email-intake/:id/items/:itemId/assign` (`assignItem`): filed exactly
 as the AI files (its read, the document on the invoice, vendor matched or added,
 `ai_filed=0`, no scope task), item -> `filed_by_office`. Vendor / amount / invoice # are
-asked for only when the AI could not read them. The old `/file` route (scope task
-required) is no longer used by the page.
+asked for only when the AI could not read them. Assign refuses (409) an invoice already
+in BuildTrack for the same amount, and stores the item's invoice key so a later copy is a
+duplicate. The old `/file` route (scope task required) is no longer used by the page.
 5. QuickBooks: the existing bill matcher (`findInvoiceForBill`) links a bill to the
    BuildTrack invoice; a vendor invoice number now only matches when the vendor agrees.
 
@@ -76,14 +82,17 @@ Intuit's change feed) - it never calls the Intuit API and never writes to QuickB
 runs every 5 minutes and a few seconds after any QuickBooks sync or inbox change.
 
 - **Links** (`invoice_qbo_links`): each emailed invoice to the bill(s) entered for it -
-  same vendor only, by the same attached document (sha256), the invoice number in the
+  by the same attached document (sha256, whatever the vendor is called in QuickBooks),
+  or, same vendor only, the invoice number in the
   bill's note, the full amount, two halves (the office writes "First Half" / "Second
   Half" in the note; there is no DocNumber), parts adding up to it, or a bill whose class
   lines split it across projects. Never a guess: a bill dated before the invoice (3 days'
   slack), entered more than 3 weeks before the email, or one of several equally
   plausible bills is not taken. The QuickBooks sync honors these links
   (`findInvoiceForBill`), and an invoice entered as several bills is not overwritten by
-  each bill.
+  each bill. The sync's own vendor + amount match never takes an invoice another live
+  bill already stands for (next week's $250 Snyders bill cannot take - and mark paid -
+  this week's invoice).
 - **Filed from QuickBooks**: an emailed invoice whose job was not on it (`needs_project`)
   is filed under the project the office chose in QuickBooks - one BuildTrack invoice per
   project share when the bill splits it across classes.
@@ -99,8 +108,10 @@ runs every 5 minutes and a few seconds after any QuickBooks sync or inbox change
   noted on the invoice and in the feed. Partly entered and more-than-invoiced stay issues.
 - **Mirrors QuickBooks**: project invoice lists show an emailed invoice that is entered in
   QuickBooks as those QuickBooks rows (tagged "Emailed NUD-x - 1st half"), so nothing is
-  counted twice; what is not entered yet shows as "Not in QuickBooks yet". All parts
-  paid -> the BuildTrack invoice is marked paid.
+  counted twice; what is not entered yet shows as "Not in QuickBooks yet". A BuildTrack
+  invoice the sync matched to a bill without a monitor link (e.g. from before the
+  monitor) is listed once too, as that bill's QuickBooks row. All parts paid -> the
+  BuildTrack invoice is marked paid.
 - **Issues** (`invoice_monitor_issues`, emailed to info@ once, batched every 10 minutes):
   possible double entry (same vendor, amount and description within 10 days), a bill for
   a document the AI read as an estimate, amount differs (only when it cannot follow),

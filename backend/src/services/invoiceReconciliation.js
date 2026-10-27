@@ -326,8 +326,7 @@ function chooseBills(candidates, { total, projectId, docHashes, invoiceNumber, r
     return pa - pb || Math.abs(dayGap(refDate, a.date) || 0) - Math.abs(dayGap(refDate, b.date) || 0);
   });
   const key = numberKey(invoiceNumber);
-  const strong = candidates.filter(bill => bill.docs.some(doc => doc.sha && docHashes.has(doc.sha))
-    || noteHasNumber(bill.noteKey, key));
+  const strong = candidates.filter(bill => carriesDocument(bill, docHashes) || noteHasNumber(bill.noteKey, key));
   if (strong.length) {
     let chosen = byFit(strong).slice(0, MAX_PARTS);
     if (chosen.length === 1 && chosen[0].half) {
@@ -369,6 +368,12 @@ function partFor(bill, count) {
 function docHashesForInvoice(db, invoiceId) {
   return new Set(db.prepare('SELECT document_sha256 FROM invoice_inbox_items WHERE invoice_id = ? AND document_sha256 IS NOT NULL')
     .all(invoiceId).map(row => row.document_sha256));
+}
+
+// The office attached the very document that was emailed to this bill in QuickBooks -
+// the same invoice even when the vendor is spelled differently there.
+function carriesDocument(bill, docHashes) {
+  return bill.docs.some(doc => doc.sha && docHashes.has(doc.sha));
 }
 
 function linkBills(db, invoice, chosen, billsById) {
@@ -513,13 +518,14 @@ function reconcileInvoices(db, bills, billsById, now, fileMoves = []) {
         quickbooksVendorName: invoice.quickbooks_vendor_name,
       });
       const refDate = window.invoiceDate || receivedAt;
-      const candidates = bills.filter(bill => !bill.deleted && !bill.linkedTo && sameVendor(identity, bill)
-        && billFits(bill, window));
+      const docHashes = docHashesForInvoice(db, invoice.id);
+      const candidates = bills.filter(bill => !bill.deleted && !bill.linkedTo && billFits(bill, window)
+        && (sameVendor(identity, bill) || carriesDocument(bill, docHashes)));
       const remaining = round2(invoice.total - covered);
       const chosen = chooseBills(candidates, {
         total: covered > 0 ? remaining : round2(invoice.total),
         projectId: invoice.project_id,
-        docHashes: docHashesForInvoice(db, invoice.id),
+        docHashes,
         invoiceNumber: invoice.external_invoice_number,
         refDate,
       });
@@ -774,12 +780,13 @@ function resolveFromQuickBooks(db, bills, billsById) {
     const identity = vendorIdentity(db, { vendorName: item.vendor_name, vendorProfileId: item.vendor_profile_id });
     const window = { invoiceDate: item.invoice_date || null, receivedAt: item.received_at };
     const refDate = window.invoiceDate || item.received_at;
-    const candidates = bills.filter(bill => !bill.deleted && !bill.linkedTo && sameVendor(identity, bill)
-      && billFits(bill, window) && bill.shares.size);
+    const docHashes = new Set(item.document_sha256 ? [item.document_sha256] : []);
+    const candidates = bills.filter(bill => !bill.deleted && !bill.linkedTo && billFits(bill, window) && bill.shares.size
+      && (sameVendor(identity, bill) || carriesDocument(bill, docHashes)));
     const chosen = chooseBills(candidates, {
       total: round2(item.total),
       projectId: null,
-      docHashes: new Set(item.document_sha256 ? [item.document_sha256] : []),
+      docHashes,
       invoiceNumber: item.invoice_number,
       refDate,
     });

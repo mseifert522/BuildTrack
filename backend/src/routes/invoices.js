@@ -518,6 +518,16 @@ router.get('/', authorizeProjectAccess, (req, res) => {
   // Emailed invoices the office entered in QuickBooks show as those QuickBooks rows
   // (split the way the office entered them); only what is not entered yet shows here.
   const coverage = canSeeQuickBooks ? invoiceMonitor.quickBooksCoverage(db, invoiceRows.map(invoice => invoice.id)) : new Map();
+  const quickBooksInvoices = canSeeQuickBooks
+    ? annotateEmailedInvoices(db, getProjectQuickBooksInvoices(db, req.params.projectId))
+    : [];
+  // A BuildTrack invoice the QuickBooks sync matched to a bill (no monitor link - e.g. one
+  // from before the monitor) is that bill's QuickBooks row here: listed once, not twice.
+  const quickBooksOnProject = new Map();
+  quickBooksInvoices.forEach(row => {
+    const billId = String(row.quickbooks_bill_id || '');
+    quickBooksOnProject.set(billId, (quickBooksOnProject.get(billId) || 0) + Number(row.total || 0));
+  });
   const invoices = invoiceRows.flatMap(invoice => {
     const linkedWorkCount = db.prepare('SELECT COUNT(*) as count FROM invoice_work_items WHERE invoice_id = ?').get(invoice.id).count;
     const holds = getFieldWorkPaymentHolds(db, invoice.project_id, invoice.id);
@@ -533,7 +543,10 @@ router.get('/', authorizeProjectAccess, (req, res) => {
       line_items: lineItems,
     };
     const entered = coverage.get(invoice.id);
-    if (!entered) return [row];
+    if (!entered) {
+      const shown = invoice.quickbooks_bill_id ? quickBooksOnProject.get(String(invoice.quickbooks_bill_id)) : undefined;
+      return shown !== undefined && Math.abs(shown - Number(invoice.total || 0)) <= 0.015 ? [] : [row];
+    }
     const remaining = Math.round((Number(invoice.total || 0) - entered.covered) * 100) / 100;
     if (remaining <= 0.015) return [];
     const usd = value => `$${Number(value || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -552,9 +565,6 @@ router.get('/', authorizeProjectAccess, (req, res) => {
       }],
     }];
   });
-  const quickBooksInvoices = canSeeQuickBooks
-    ? annotateEmailedInvoices(db, getProjectQuickBooksInvoices(db, req.params.projectId))
-    : [];
   const rows = [...invoices, ...quickBooksInvoices].sort((left, right) => {
     const leftTime = Date.parse(left.submitted_at || left.created_at || left.updated_at || '');
     const rightTime = Date.parse(right.submitted_at || right.created_at || right.updated_at || '');

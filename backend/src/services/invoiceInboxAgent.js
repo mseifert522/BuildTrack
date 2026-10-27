@@ -711,10 +711,14 @@ function resolveProject(ctx, entry) {
   return { id: project.id, address: project.address };
 }
 
+function invoiceNumberKey(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '').replace(/^(inv|invoice|no)+/, '');
+}
+
 function invoiceKey(vendorName, entry, total) {
   const vendor = looseVendorKey(vendorName);
   if (!vendor) return null;
-  const number = String(entry.invoice_number || '').toLowerCase().replace(/[^a-z0-9]/g, '').replace(/^(inv|invoice|no)+/, '');
+  const number = invoiceNumberKey(entry.invoice_number);
   if (number) return `${vendor}|#${number}`;
   if (total !== null && entry.invoice_date) return `${vendor}|${total.toFixed(2)}|${entry.invoice_date}`;
   return null;
@@ -722,9 +726,12 @@ function invoiceKey(vendorName, entry, total) {
 
 // An earlier copy of the same invoice, in BuildTrack or already in this inbox. The
 // very same file sent again (same bytes) is a copy even without an invoice number.
+// Inside one email only the same vendor invoice NUMBER makes a copy: one PDF can hold
+// several invoices, and two unnumbered $250 bills of one day can be two jobs.
 function findEarlierCopy(db, { key, intakeId, sha256, index }) {
   const describe = (item, sameFile) => ({
-    total: item.total, invoiceId: item.invoice_id, label: item.bt_invoice_number || 'an earlier email', status: item.status, sameFile,
+    total: item.total, invoiceId: item.invoice_id, status: item.status, sameFile,
+    label: item.bt_invoice_number || (item.intake_id === intakeId ? 'earlier in this email' : 'an earlier email'),
   });
   if (sha256) {
     const sameFile = db.prepare(`
@@ -733,7 +740,7 @@ function findEarlierCopy(db, { key, intakeId, sha256, index }) {
       LEFT JOIN invoices inv ON inv.id = i.invoice_id
       WHERE i.document_sha256 = ? AND i.intake_id <> ? AND i.status NOT IN ('duplicate', 'not_invoice')
         AND (i.item_index = ? OR (? IS NOT NULL AND i.invoice_key = ?))
-      ORDER BY datetime(i.created_at) ASC LIMIT 1
+      ORDER BY i.invoice_id IS NULL, datetime(i.created_at) ASC LIMIT 1
     `).get(sha256, intakeId, index, key, key);
     if (sameFile) return describe(sameFile, true);
   }
@@ -742,9 +749,10 @@ function findEarlierCopy(db, { key, intakeId, sha256, index }) {
     SELECT i.*, inv.invoice_number AS bt_invoice_number
     FROM invoice_inbox_items i
     LEFT JOIN invoices inv ON inv.id = i.invoice_id
-    WHERE i.invoice_key = ? AND i.intake_id <> ? AND i.status NOT IN ('duplicate', 'not_invoice')
-    ORDER BY datetime(i.created_at) ASC LIMIT 1
-  `).get(key, intakeId);
+    WHERE i.invoice_key = ? AND i.status NOT IN ('duplicate', 'not_invoice')
+      AND (i.intake_id <> ? OR (? = 1 AND i.item_index <> ?))
+    ORDER BY i.invoice_id IS NULL, datetime(i.created_at) ASC LIMIT 1
+  `).get(key, intakeId, key.includes('|#') ? 1 : 0, index);
   if (item) return describe(item, false);
   const rows = db.prepare(`
     SELECT id, invoice_number, vendor_name, external_invoice_number, total, vendor_invoice_date
@@ -1038,6 +1046,41 @@ function feedOutcomes(db, intake, read, outcomes) {
 
 const UNREAD_ITEM_INDEX = 1000;
 
+// Is this document of a fresh read the invoice already filed from this email as `row`?
+// The same vendor invoice number, or the same amount from the same file / vendor.
+function sameDocument(entry, row) {
+  const total = entry.total !== null ? entry.total : entry.amount_due;
+  const sameFile = Boolean(entry.source_attachment_id) && entry.source_attachment_id === row.source_attachment_id;
+  const vendor = looseVendorKey(entry.vendor.name);
+  const sameVendor = Boolean(vendor) && vendor === looseVendorKey(row.vendor_name);
+  const number = invoiceNumberKey(entry.invoice_number);
+  const rowNumber = invoiceNumberKey(row.invoice_number);
+  if (number && rowNumber) return number === rowNumber && (sameVendor || sameFile);
+  const sameTotal = total !== null && row.total !== null && Math.abs(total - Number(row.total)) < 0.015;
+  return sameTotal && (sameFile || sameVendor);
+}
+
+// Which documents of this read were already filed from this email (a re-read keeps
+// them)? Recognised by what they are first - a re-read may list the documents in
+// another order - and only then by their place in the email (the same file there).
+function filedDocuments(documents, keptRows) {
+  const open = [...keptRows];
+  const covered = new Set();
+  const claim = (index, test) => {
+    const at = open.findIndex(test);
+    if (at < 0) return;
+    open.splice(at, 1);
+    covered.add(index);
+  };
+  documents.forEach((entry, index) => claim(index, row => sameDocument(entry, row)));
+  documents.forEach((entry, index) => {
+    if (!covered.has(index)) {
+      claim(index, row => row.item_index === index && (row.source_attachment_id || null) === (entry.source_attachment_id || null));
+    }
+  });
+  return covered;
+}
+
 function fileRead(db, { intake, read, model, ctx, usage, unread = [] }) {
   const intakeId = intake.id;
   const invoiceDocs = read.documents.filter(entry => entry.document_kind === 'invoice');
@@ -1046,9 +1089,11 @@ function fileRead(db, { intake, read, model, ctx, usage, unread = [] }) {
   db.transaction(() => {
     db.prepare("DELETE FROM invoice_inbox_items WHERE intake_id = ? AND status <> 'filed' AND status <> 'filed_by_office'").run(intakeId);
     const staffKeys = staffNameKeys(db);
-    const alreadyFiled = new Set(db.prepare('SELECT item_index FROM invoice_inbox_items WHERE intake_id = ?').all(intakeId).map(row => row.item_index));
+    const kept = db.prepare('SELECT * FROM invoice_inbox_items WHERE intake_id = ?').all(intakeId);
+    const alreadyFiled = new Set(kept.map(row => row.item_index));
+    const keptDocuments = filedDocuments(read.documents, kept);
     read.documents.forEach((entry, index) => {
-      if (alreadyFiled.has(index)) return;
+      if (keptDocuments.has(index)) return;
       outcomes.push(entry.document_kind === 'invoice'
         ? handleEntry(db, { intake, entry, index, ctx, staffKeys, read, model })
         : recordNotInvoice(db, { intake, entry, index, model }));
@@ -1406,17 +1451,27 @@ function assignItem(db, { intakeId, itemId, projectId, actorId, actorName = 'the
       vendor = createVendor(db, sameVendor ? entry : { ...entry, vendor: {} }, { readable: true, id: null, name, created: false });
     }
 
+    // Never a second copy: the same vendor invoice already filed for this amount (a
+    // different amount is a revision the AI already flagged - the person decides).
+    const key = invoiceKey(vendor.name, entry, amount);
+    const earlier = findEarlierCopy(db, { key, intakeId, sha256: item.document_sha256 || null, index: item.item_index });
+    if (earlier && earlier.invoiceId && db.prepare('SELECT 1 FROM invoices WHERE id = ?').get(earlier.invoiceId)
+      && (earlier.total === null || Math.abs(Number(earlier.total) - amount) < 0.015)) {
+      throw fail(`This invoice is already in BuildTrack as ${earlier.label} - not added again.`, 409);
+    }
+
     const invoice = fileInvoice(db, {
       intake, entry, vendor, project, total: amount, actorId, emailSummary: intake.extracted_summary,
       note: `Project chosen by ${actorName} in the invoices@ review queue.`, aiFiled: false,
     });
+    // The key lets a later copy of this invoice be recognised as a duplicate.
     db.prepare(`
       UPDATE invoice_inbox_items
       SET status = 'filed_by_office', invoice_id = ?, project_id = ?, vendor_profile_id = ?, vendor_name = ?, total = ?,
-          invoice_number = COALESCE(?, invoice_number), reason = ?, updated_at = datetime('now')
+          invoice_number = COALESCE(?, invoice_number), invoice_key = ?, reason = ?, updated_at = datetime('now')
       WHERE id = ?
     `).run(
-      invoice.invoiceId, project.id, vendor.id, vendor.name, amount, typedNumber || null,
+      invoice.invoiceId, project.id, vendor.id, vendor.name, amount, typedNumber || null, key,
       `Filed by ${actorName} to ${project.address} as ${invoice.invoiceNumber}.`, item.id
     );
     const open = db.prepare("SELECT COUNT(*) AS n FROM invoice_inbox_items WHERE intake_id = ? AND status IN ('needs_project','needs_review')").get(intakeId).n;

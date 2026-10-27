@@ -1666,9 +1666,18 @@ function findInvoiceForBill(db, bill) {
   if (exactDoc) return exactDoc;
   // Vendor + amount alone is weak: Snyders bills $250 every week. The bill must also be
   // dated for the invoice (Mike, 2026-10-27: an August bill had taken the October
-  // invoice #2059 and marked it paid). Same window as the invoice monitor.
+  // invoice #2059 and marked it paid). Same window as the invoice monitor. And an
+  // invoice another live bill already stands for is not this one: next week's $250 bill
+  // must not take (and pay) this week's invoice.
   const { billCouldBeFor } = require('../services/invoiceReconciliation');
-  const dated = candidates.filter(row => billCouldBeFor(row, bill));
+  const heldByOtherBill = db.prepare(`
+    SELECT 1 FROM quickbooks_bills
+    WHERE qbo_id <> ? AND COALESCE(payment_approval_status, '') <> ?
+      AND (qbo_id = ? OR qbo_id IN (SELECT qbo_bill_id FROM invoice_qbo_links WHERE invoice_id = ?))
+    LIMIT 1
+  `);
+  const dated = candidates.filter(row => billCouldBeFor(row, bill)
+    && !heldByOtherBill.get(qboId, PAYMENT_APPROVAL_DELETED_STATUS, String(row.quickbooks_bill_id || ''), row.id));
   const sameVendor = dated.filter(row => invoiceVendorAgrees(db, row, bill));
   return sameVendor.length === 1 && dated.length === 1 ? sameVendor[0] : null;
 }

@@ -605,6 +605,64 @@ async function main() {
     assert.strictEqual(db.prepare("SELECT COUNT(*) n FROM invoices WHERE external_invoice_number = 'G-1'").get().n, 1);
   });
 
+  await check('a re-read that lists the documents in another order: nothing filed twice, the open one stays', async () => {
+    const intake = intakeBySubject('Two invoices');
+    const [g1, g2] = answers.get('Two invoices').documents;
+    answers.set('Two invoices', read([g2, g1]));
+    const reread = await agent.rereadIntake(intake.id);
+    assert.strictEqual(reread.status, 'read');
+    const items = itemsFor(intake.id);
+    assert.deepStrictEqual(items.map(i => [i.invoice_number, i.status]).sort(), [['G-1', 'filed'], ['G-2', 'needs_project']]);
+    assert.strictEqual(db.prepare("SELECT COUNT(*) n FROM invoices WHERE external_invoice_number = 'G-1'").get().n, 1);
+  });
+
+  // The same invoice twice in one email (the PDF and a photo of it); a person files an
+  // invoice the AI could not read the vendor of, and later the vendor sends it again.
+  const sameTwice = invoice({ vendor_name: 'Riverside Tile LLC', invoice_number: 'RT-31', category: 'Flooring', property_address: '160 Chopin Ave', total: 812, amount_due: 812, subtotal: 812, tax: null, line_items: [] });
+  answers.set('Tile invoice and photo', read([sameTwice, { ...sameTwice, source_ref: 'A2' }]));
+  const noVendor = { vendor_name: '', vendor_email: '', invoice_number: '', invoice_date: '2026-10-20', category: 'Landscaping', property_address: '', project_basis: 'none', project_evidence: '', total: 375, amount_due: 375, subtotal: 375, tax: null, line_items: [] };
+  answers.set('Lawn bill', read([invoice({ ...noVendor, vendor_confidence: 'low' })]));
+  answers.set('Lawn bill again', read([invoice({ ...noVendor, vendor_name: 'Pine Tree Services', property_address: '160 Chopin Ave', project_basis: 'printed_on_invoice' })]));
+  for (const subject of ['Tile invoice and photo', 'Tile photo', 'Lawn bill', 'Lawn bill again']) await pdfFor(subject);
+  queue.push(email('Tile invoice and photo', { files: [
+    { originalname: 'RT-31.pdf', mimetype: 'application/pdf', buffer: pdfBySubject.get('Tile invoice and photo') },
+    { originalname: 'RT-31 photo.pdf', mimetype: 'application/pdf', buffer: pdfBySubject.get('Tile photo') },
+  ] }));
+  queue.push(email('Lawn bill'));
+  const later = await agent.pollOnce();
+  assert.ok(!later.error, later.error);
+
+  await check('the same numbered invoice twice in one email is filed once', () => {
+    const items = itemsFor(intakeBySubject('Tile invoice and photo').id);
+    assert.deepStrictEqual(items.map(i => i.status), ['filed', 'duplicate']);
+    assert.match(items[1].reason, /already received \(NUD-\d+\)/);
+    assert.strictEqual(db.prepare("SELECT COUNT(*) n FROM invoices WHERE external_invoice_number = 'RT-31'").get().n, 1);
+  });
+
+  await check('a person cannot file a second copy of an invoice already in BuildTrack', () => {
+    const weird = intakeBySubject('Weird email');
+    const [item] = itemsFor(weird.id);
+    const copy = { intakeId: weird.id, itemId: item.id, projectId: 'p-milverton', actorId: ADMIN_ID, vendorName: 'Oakline Roofing LLC', invoiceNumber: '1858' };
+    assert.throws(() => agent.assignItem(db, { ...copy, total: '1060' }), err => err.statusCode === 409 && /already in BuildTrack as NUD-\d+/.test(err.message));
+    assert.strictEqual(itemsFor(weird.id)[0].status, 'needs_review');
+    assert.strictEqual(db.prepare("SELECT COUNT(*) n FROM invoices WHERE external_invoice_number = '1858'").get().n, 1);
+  });
+
+  await check('an invoice a person filed is recognised when the vendor sends it again', async () => {
+    const lawn = intakeBySubject('Lawn bill');
+    const [item] = itemsFor(lawn.id);
+    assert.strictEqual(item.status, 'needs_project');
+    const filed = agent.assignItem(db, { intakeId: lawn.id, itemId: item.id, projectId: 'p-chopin', actorId: ADMIN_ID, vendorName: 'Pine Tree Services' });
+    assert.strictEqual(itemsFor(lawn.id)[0].invoice_key, 'pinetreeservices|375.00|2026-10-20');
+    queue.push(email('Lawn bill again'));
+    const again = await agent.pollOnce();
+    assert.ok(!again.error, again.error);
+    const [copy] = itemsFor(intakeBySubject('Lawn bill again').id);
+    assert.strictEqual(copy.status, 'duplicate', copy.reason);
+    assert.strictEqual(copy.duplicate_of, filed.invoiceId);
+    assert.strictEqual(db.prepare("SELECT COUNT(*) n FROM invoices WHERE vendor_name = 'Pine Tree Services'").get().n, 1);
+  });
+
   await check('the run never logged into a real mailbox or API', () => {
     assert.ok(requests.every(r => r.model));
   });

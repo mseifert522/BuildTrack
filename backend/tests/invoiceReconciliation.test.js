@@ -212,6 +212,13 @@ async function main() {
   addInvoice(db, { id: 'i-amb', vendor: 'larmon', number: 'L-90', total: 600, project: P.R, daysAgo: 4 });
   addBill(db, { id: 'Q16', vendor: 'larmon', total: 600, date: day(4), note: '3170 Robina outlets', project: P.R });
   addBill(db, { id: 'Q17', vendor: 'larmon', total: 600, date: day(3), note: '3170 Robina lights', project: P.R });
+  // The emailed PDF attached to a bill entered under a differently named vendor.
+  addInvoice(db, { id: 'i-docx', vendor: 'oak', number: '1950', total: 777, project: P.W, daysAgo: 3 });
+  addIntakeItem(db, { id: 'docx-doc', vendor: 'oak', total: 777, status: 'filed', sha: 'b'.repeat(64), receivedDaysAgo: 3 });
+  db.prepare("UPDATE invoice_inbox_items SET invoice_id = 'i-docx' WHERE id = 'docx-doc'").run();
+  addBill(db, { id: 'Q30', vendor: 'sterling', total: 777, date: day(2), note: 'Wisconsin roof repair', project: P.W });
+  db.prepare("INSERT INTO quickbooks_bill_attachments (id, qbo_bill_id, filename, original_name, mime_type, uploaded_by) VALUES ('att-q30', 'Q30', 'q30.pdf', 'q30.pdf', 'application/pdf', ?)").run(ADMIN);
+  db.prepare("INSERT INTO cost_analyzer_documents (attachment_id, qbo_bill_id, status, content_hash) VALUES ('att-q30', 'Q30', 'extracted', ?)").run('b'.repeat(64));
   // The same "second half" entered twice.
   addBill(db, { id: 'Q12', vendor: 'forever', total: 3800, date: day(19), note: '3170 Robina Second Half of Waterproofing Invoice', project: P.R });
   addBill(db, { id: 'Q13', vendor: 'forever', total: 3800, date: day(16), note: '3170 Robina Second Half of Waterproofing Invoice', project: P.R });
@@ -287,6 +294,11 @@ async function main() {
     assert.strictEqual(db.prepare("SELECT amount FROM invoice_line_items WHERE id = 'li-larmon'").get().amount, 3000);
     assert.strictEqual(recon(db, 'i-larmon').status, 'matched');
     assert.ok(!issue(db, 'amount:i-larmon'));
+  });
+
+  await check('the emailed document attached to a bill links it, whatever the vendor is called there', () => {
+    assert.deepStrictEqual(links(db, 'i-docx').map(l => [l.qbo_bill_id, l.method]), [['Q30', 'document']]);
+    assert.strictEqual(recon(db, 'i-docx').status, 'matched');
   });
 
   await check('not entered after the grace days: flagged; a brand-new one just waits', () => {
@@ -453,6 +465,15 @@ async function main() {
     const invoiceId = db.prepare("SELECT invoice_id FROM invoice_inbox_items WHERE id = 'snyders-today'").get().invoice_id;
     assert.deepStrictEqual(links(db, invoiceId).map(l => l.qbo_bill_id), ['Q18']);
     assert.strictEqual(recon(db, invoiceId).status, 'matched');
+  });
+
+  await check('next week\'s $250 bill does not take (or pay) the invoice another bill stands for', () => {
+    const findInvoiceForBill = require('../src/routes/quickbooks').findInvoiceForBill;
+    const vendor = { value: '104', name: 'Snyders Services LLC' };
+    const bill = { Id: 'Q92', TotalAmt: 250, TxnDate: day(0), VendorRef: vendor, MetaData: { CreateTime: new Date().toISOString() } };
+    assert.strictEqual(findInvoiceForBill(db, bill), null);
+    const invoiceId = db.prepare("SELECT invoice_id FROM invoice_inbox_items WHERE id = 'snyders-today'").get().invoice_id;
+    assert.strictEqual(findInvoiceForBill(db, { ...bill, Id: 'Q18' }).id, invoiceId, 'its own bill still finds it');
   });
 
   await check('QuickBooks changes show in the feed: paid, gone, new', () => {
