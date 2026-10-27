@@ -1565,11 +1565,9 @@ function rankedProjectMatches(projects, classRef, bill) {
   return scored[0].project;
 }
 
+// QuickBooks is the source of truth (Mike, 2026-10-27): a class the office entered the
+// bill under, already tied to a project, wins over the BuildTrack invoice it matched.
 function findProjectForBill(db, bill, invoice = null, classRef = null) {
-  if (invoice?.project_id) {
-    return db.prepare('SELECT * FROM projects WHERE id = ? LIMIT 1').get(invoice.project_id) || null;
-  }
-
   if (classRef?.value) {
     const byClassId = db.prepare('SELECT * FROM projects WHERE quickbooks_class_id = ? LIMIT 2').all(classRef.value);
     if (byClassId.length === 1) return byClassId[0];
@@ -1584,6 +1582,10 @@ function findProjectForBill(db, bill, invoice = null, classRef = null) {
     const className = normalizeMatchText(classRef.name);
     const bySavedClassName = projects.filter(project => normalizeMatchText(project.quickbooks_class_name) === className);
     if (bySavedClassName.length === 1) return bySavedClassName[0];
+  }
+
+  if (invoice?.project_id) {
+    return db.prepare('SELECT * FROM projects WHERE id = ? LIMIT 1').get(invoice.project_id) || null;
   }
 
   return rankedProjectMatches(projects, classRef, bill);
@@ -1660,8 +1662,13 @@ function findInvoiceForBill(db, bill) {
     && invoiceVendorAgrees(db, row, bill)
   ));
   if (exactDoc) return exactDoc;
-  const sameVendor = candidates.filter(row => invoiceVendorAgrees(db, row, bill));
-  return sameVendor.length === 1 && candidates.length === 1 ? sameVendor[0] : null;
+  // Vendor + amount alone is weak: Snyders bills $250 every week. The bill must also be
+  // dated for the invoice (Mike, 2026-10-27: an August bill had taken the October
+  // invoice #2059 and marked it paid). Same window as the invoice monitor.
+  const { billCouldBeFor } = require('../services/invoiceReconciliation');
+  const dated = candidates.filter(row => billCouldBeFor(row, bill));
+  const sameVendor = dated.filter(row => invoiceVendorAgrees(db, row, bill));
+  return sameVendor.length === 1 && dated.length === 1 ? sameVendor[0] : null;
 }
 
 // Does the BuildTrack invoice name the same vendor as the QuickBooks bill? Invoices

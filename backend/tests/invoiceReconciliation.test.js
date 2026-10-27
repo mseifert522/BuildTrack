@@ -401,6 +401,16 @@ async function main() {
     assert.throws(() => agent.assignItem(db, { intakeId: 'intake-snyders-today', itemId: 'snyders-today', projectId: P.J, actorId: ADMIN }), /already filed/);
   });
 
+  await check('the QuickBooks sync never matches an old $250 bill to today\'s $250 invoice', () => {
+    const findInvoiceForBill = require('../src/routes/quickbooks').findInvoiceForBill;
+    const invoiceId = db.prepare("SELECT invoice_id FROM invoice_inbox_items WHERE id = 'snyders-today'").get().invoice_id;
+    const vendor = { value: '104', name: 'Snyders Services LLC' };
+    const ago = n => new Date(Date.now() - n * 86400000).toISOString();
+    assert.strictEqual(findInvoiceForBill(db, { Id: 'Q90', TotalAmt: 250, TxnDate: day(64), VendorRef: vendor, MetaData: { CreateTime: ago(46) } }), null);
+    const today = findInvoiceForBill(db, { Id: 'Q91', TotalAmt: 250, TxnDate: day(0), VendorRef: vendor, MetaData: { CreateTime: ago(0) } });
+    assert.strictEqual(today && today.id, invoiceId);
+  });
+
   await check('one click when the AI could not read it: vendor and amount typed in, vendor added', () => {
     db.prepare(`
       INSERT INTO invoice_email_intake (id, provider, provider_message_id, message_hash, from_email, subject, status, agent_status, received_at)

@@ -486,10 +486,13 @@ function reconcileInvoices(db, bills, billsById, now, fileMoves = []) {
       db.prepare('DELETE FROM invoice_reconciliation WHERE invoice_id = ?').run(invoice.id);
       continue;
     }
-    // A full-amount bill the QuickBooks sync already matched: adopt it.
+    const receivedAt = receivedAtFor.get(invoice.id)?.received_at || invoice.created_at;
+    const window = { invoiceDate: invoice.vendor_invoice_date || null, receivedAt };
+    // A full-amount bill the QuickBooks sync already matched: adopt it - only when it is
+    // dated for this invoice (the sync once matched an August $250 bill to an October one).
     if (!links.length && invoice.quickbooks_bill_id && billsById.has(String(invoice.quickbooks_bill_id))) {
       const bill = billsById.get(String(invoice.quickbooks_bill_id));
-      if (!bill.linkedTo || bill.linkedTo === invoice.id) {
+      if ((!bill.linkedTo || bill.linkedTo === invoice.id) && billFits(bill, window)) {
         linkBills(db, invoice, { bills: [bill], method: 'quickbooks_sync' }, billsById);
         links = linksFor.all(invoice.id);
         linked += 1;
@@ -509,8 +512,6 @@ function reconcileInvoices(db, bills, billsById, now, fileMoves = []) {
         quickbooksVendorId: invoice.quickbooks_vendor_id,
         quickbooksVendorName: invoice.quickbooks_vendor_name,
       });
-      const receivedAt = receivedAtFor.get(invoice.id)?.received_at || invoice.created_at;
-      const window = { invoiceDate: invoice.vendor_invoice_date || null, receivedAt };
       const refDate = window.invoiceDate || receivedAt;
       const candidates = bills.filter(bill => !bill.deleted && !bill.linkedTo && sameVendor(identity, bill)
         && billFits(bill, window));
@@ -699,6 +700,20 @@ function billFits(bill, { invoiceDate, receivedAt }) {
   const arrived = toMs(receivedAt);
   if (Number.isFinite(entered) && Number.isFinite(arrived) && entered < arrived - ENTERED_BEFORE_EMAIL_DAYS * 86400000) return false;
   return true;
+}
+
+// The same test for the QuickBooks sync's own matcher (routes/quickbooks.js
+// findInvoiceForBill), which sees Intuit's raw bill: could `qboBill` be the bill entered
+// for BuildTrack `invoice`? An amount alone is not enough - Snyders bills $250 every week.
+function billCouldBeFor(invoice, qboBill) {
+  const bill = {
+    date: qboBill?.TxnDate || '',
+    row: { qbo_created_at: qboBill?.MetaData?.CreateTime || null, first_seen_at: null },
+  };
+  return billFits(bill, {
+    invoiceDate: invoice?.vendor_invoice_date || null,
+    receivedAt: invoice?.submitted_at || invoice?.created_at || null,
+  });
 }
 
 function saveReconciliation(db, invoice, links, result) {
@@ -1232,6 +1247,7 @@ module.exports = {
   quickBooksCoverage,
   emailInvoicesForBills,
   projectSuggestions,
+  billCouldBeFor,
   STATUS_LABELS,
   PART_LABELS,
   // exposed for tests
