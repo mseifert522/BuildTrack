@@ -339,6 +339,8 @@ interface QueueDraft {
   invoiceNumber: string;
 }
 
+const EMPTY_QUEUE_DRAFT: QueueDraft = { projectId: '', vendorName: '', total: '', invoiceNumber: '' };
+
 interface QueueRow {
   key: string;
   email: InvoiceEmailItem;
@@ -964,10 +966,7 @@ export default function Invoices() {
   };
 
   const updateQueueDraft = (itemId: string, patch: Partial<QueueDraft>) => {
-    setQueueDrafts(current => ({
-      ...current,
-      [itemId]: { projectId: '', vendorName: '', total: '', invoiceNumber: '', ...current[itemId], ...patch },
-    }));
+    setQueueDrafts(current => ({ ...current, [itemId]: { ...(current[itemId] || EMPTY_QUEUE_DRAFT), ...patch } }));
   };
 
   const loadEmailBox = async () => {
@@ -1922,7 +1921,7 @@ export default function Invoices() {
 
     // Waiting for a person: pick the project (and type what the AI could not read).
     if (item && isOpenAiItem(item)) {
-      const draft = queueDrafts[item.id] || { projectId: '', vendorName: '', total: '', invoiceNumber: '' };
+      const draft = queueDrafts[item.id] || EMPTY_QUEUE_DRAFT;
       const needs = queueNeeds(item);
       const suggestions = item.suggestions || [];
       const fromBills = suggestions.filter(s => s.source === 'quickbooks_bill');
@@ -2054,7 +2053,7 @@ export default function Invoices() {
   };
 
   const renderInvoiceQueue = () => {
-    const rows: QueueRow[] = emailBoxItems.flatMap(email => {
+    const rows = emailBoxItems.flatMap<QueueRow>(email => {
       const items = email.ai_items || [];
       const shown = emailBoxStatus === 'new' ? items.filter(isOpenAiItem) : items;
       if (shown.length) return shown.map(item => ({ key: item.id, email, item }));
