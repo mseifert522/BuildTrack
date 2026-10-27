@@ -295,6 +295,13 @@ const QBO_STATUS_LABELS: Record<string, string> = {
 // "2811 Wisconsin Rd, Troy, MI 48083, USA" -> "2811 Wisconsin Rd, Troy"
 const shortAddress = (value?: string | null) => String(value || '').split(',').slice(0, 2).join(',').trim();
 
+// The agent's note "AI: not an invoice - not an invoice (why)." reads as "Not an invoice - why".
+const plainAgentNote = (value?: string | null) =>
+  String(value || '')
+    .replace(/^AI:\s*not an invoice\s*-\s*not an invoice\s*\((.*)\)\.?$/i, 'Not an invoice - $1')
+    .replace(/^AI:\s*not an invoice\s*-\s*/i, 'Not an invoice - ')
+    .replace(/^AI:\s*/i, '');
+
 // One invoice the invoice inbox agent found in an email (invoice_inbox_items).
 interface InvoiceInboxAiItem {
   id: string;
@@ -2039,7 +2046,7 @@ export default function Invoices() {
     const who = item?.vendor_name || email.from_name || email.from_email || 'Unknown sender';
     const what = item
       ? `${AI_ITEM_LABELS[item.status] || item.status}${item.reason ? ` - ${item.reason}` : ''}`
-      : (email.agent_notes || (email.agent_status === 'pending' ? 'Waiting for the AI to read it.' : email.subject || '(no subject)'));
+      : (plainAgentNote(email.agent_notes) || (email.agent_status === 'pending' ? 'Waiting for the AI to read it.' : email.subject || '(no subject)'));
     return (
       <li key={row.key} className="bt-inq-item is-quiet">
         <div className="bt-inq-row">
