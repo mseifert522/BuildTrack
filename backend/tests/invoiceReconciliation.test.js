@@ -91,6 +91,9 @@ const V = {
   ben: ['vp-ben', 'Ben Vonrusten', '107'],
   sterling: ['vp-sterling', 'Sterling Painting', '108'],
   forever: ['vp-forever', 'Forever Watertite Waterproofing, LLC', '109'],
+  ace: ['vp-ace', 'Ace Drywall LLC', '110'],
+  kings: ['vp-kings', 'Kings Gutters', '111'],
+  apex: ['vp-apex', 'Apex Painting', '112'],
 };
 
 let invoiceSeq = 1500;
@@ -219,6 +222,20 @@ async function main() {
   addBill(db, { id: 'Q30', vendor: 'sterling', total: 777, date: day(2), note: 'Wisconsin roof repair', project: P.W });
   db.prepare("INSERT INTO quickbooks_bill_attachments (id, qbo_bill_id, filename, original_name, mime_type, uploaded_by) VALUES ('att-q30', 'Q30', 'q30.pdf', 'q30.pdf', 'application/pdf', ?)").run(ADMIN);
   db.prepare("INSERT INTO cost_analyzer_documents (attachment_id, qbo_bill_id, status, content_hash) VALUES ('att-q30', 'Q30', 'extracted', ?)").run('b'.repeat(64));
+  // QuickBooks split an invoice in half and the vendor billed each half for the same amount:
+  // the second emailed copy was set aside as a duplicate before the office entered the halves.
+  addInvoice(db, { id: 'i-ace', vendor: 'ace', number: 'AD-7', total: 2200, project: P.J, daysAgo: 6 });
+  addIntakeItem(db, { id: 'ace-1', vendor: 'ace', total: 2200, status: 'filed', number: 'AD-7', receivedDaysAgo: 6 });
+  addIntakeItem(db, { id: 'ace-2', vendor: 'ace', total: 2200, status: 'duplicate', number: 'AD-7', receivedDaysAgo: 2 });
+  db.prepare("UPDATE invoice_inbox_items SET invoice_key = 'acedrywall|#ad7' WHERE id IN ('ace-1', 'ace-2')").run();
+  db.prepare("UPDATE invoice_inbox_items SET invoice_id = 'i-ace' WHERE id = 'ace-1'").run();
+  db.prepare("UPDATE invoice_inbox_items SET duplicate_of = 'i-ace' WHERE id = 'ace-2'").run();
+  addBill(db, { id: 'Q40', vendor: 'ace', total: 2200, date: day(6), note: '34641 Joel Drywall First Half of Invoice', project: P.J });
+  addBill(db, { id: 'Q41', vendor: 'ace', total: 2200, date: day(2), note: '34641 Joel Drywall Second Half of Invoice', project: P.J });
+  // One invoice entered as two halves with no description, on the same day.
+  addInvoice(db, { id: 'i-kings', vendor: 'kings', number: 'KG-2', total: 1000, project: P.W, daysAgo: 5 });
+  addBill(db, { id: 'Q42', vendor: 'kings', total: 500, date: day(5), note: '', project: P.W });
+  addBill(db, { id: 'Q43', vendor: 'kings', total: 500, date: day(5), note: '', project: P.W });
   // The same "second half" entered twice.
   addBill(db, { id: 'Q12', vendor: 'forever', total: 3800, date: day(19), note: '3170 Robina Second Half of Waterproofing Invoice', project: P.R });
   addBill(db, { id: 'Q13', vendor: 'forever', total: 3800, date: day(16), note: '3170 Robina Second Half of Waterproofing Invoice', project: P.R });
@@ -299,6 +316,24 @@ async function main() {
   await check('the emailed document attached to a bill links it, whatever the vendor is called there', () => {
     assert.deepStrictEqual(links(db, 'i-docx').map(l => [l.qbo_bill_id, l.method]), [['Q30', 'document']]);
     assert.strictEqual(recon(db, 'i-docx').status, 'matched');
+  });
+
+  await check('QuickBooks split in half: a copy set aside as a duplicate is filed as the other half', () => {
+    const item = db.prepare("SELECT * FROM invoice_inbox_items WHERE id = 'ace-2'").get();
+    assert.strictEqual(item.status, 'filed', item.reason);
+    const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(item.invoice_id);
+    assert.deepStrictEqual([inv.total, inv.project_id, inv.external_invoice_number], [2200, P.J, 'AD-7']);
+    assert.match(inv.notes, /split in half \(bills Q40 and Q41\)/);
+    assert.deepStrictEqual(links(db, inv.id).map(l => [l.qbo_bill_id, l.part, l.method]), [['Q41', 'full', 'split_half']]);
+    assert.deepStrictEqual(links(db, 'i-ace').map(l => [l.qbo_bill_id, l.part]), [['Q40', 'full']]);
+    assert.strictEqual(recon(db, 'i-ace').status, 'matched');
+    assert.strictEqual(recon(db, inv.id).status, 'matched');
+    assert.ok(db.prepare("SELECT 1 FROM invoice_monitor_events WHERE kind = 'filed_split_half' AND intake_id = 'intake-ace-2'").get());
+  });
+
+  await check('two halves of one invoice entered blank on the same day are not a double entry', () => {
+    assert.strictEqual(recon(db, 'i-kings').status, 'matched_split');
+    assert.ok(!issue(db, 'double:Q42:Q43'));
   });
 
   await check('not entered after the grace days: flagged; a brand-new one just waits', () => {
@@ -441,6 +476,27 @@ async function main() {
     assert.ok(db.prepare("SELECT 1 FROM contractor_profiles WHERE id = ? AND source = 'invoice_email'").get(result.vendor.id));
   });
 
+  // The vendor billed each half of a split invoice for the same amount; two copies wait.
+  // (Past the NUD numbers the monitor has filed under in the meantime.)
+  invoiceSeq += 100;
+  addInvoice(db, { id: 'i-apex', vendor: 'apex', number: 'AP-1', total: 800, project: P.R, daysAgo: 3 });
+  addIntakeItem(db, { id: 'apex-2', vendor: 'apex', total: 800, status: 'needs_project', number: 'AP-1', receivedDaysAgo: 1 });
+  addIntakeItem(db, { id: 'apex-3', vendor: 'apex', total: 800, status: 'needs_project', number: 'AP-1', receivedDaysAgo: 0 });
+  db.prepare("UPDATE invoice_inbox_items SET invoice_key = 'apexpainting|#ap1' WHERE id IN ('apex-2', 'apex-3')").run();
+
+  await check('Assign: a second copy only once QuickBooks has the invoice split in half, never a third', () => {
+    const base = { intakeId: 'intake-apex-2', itemId: 'apex-2', projectId: P.R, actorId: ADMIN, actorName: 'Monitor Admin' };
+    assert.throws(() => agent.assignItem(db, base), err => err.statusCode === 409 && /split it in half in QuickBooks/.test(err.message));
+    addBill(db, { id: 'Q44', vendor: 'apex', total: 800, date: day(3), note: '3170 Robina Painting First Half of Invoice', project: P.R });
+    addBill(db, { id: 'Q45', vendor: 'apex', total: 800, date: day(1), note: '3170 Robina Painting Second Half of Invoice', project: P.R });
+    const second = agent.assignItem(db, base);
+    const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(second.invoiceId);
+    assert.deepStrictEqual([inv.total, inv.external_invoice_number], [800, 'AP-1']);
+    assert.match(inv.notes, /split in half \(bills Q44 and Q45\)/);
+    assert.throws(() => agent.assignItem(db, { ...base, intakeId: 'intake-apex-3', itemId: 'apex-3' }), err => err.statusCode === 409);
+    assert.strictEqual(db.prepare("SELECT COUNT(*) n FROM invoices WHERE external_invoice_number = 'AP-1'").get().n, 2);
+  });
+
   // QuickBooks changes: the second half is paid, the Oak bill is deleted, a new bill comes in,
   // and the office edits the Snyders bill (new amount, other class).
   db.prepare("UPDATE quickbooks_bills SET balance = 0, payment_status = 'paid', sync_token = '1' WHERE qbo_id = 'Q3'").run();
@@ -474,6 +530,16 @@ async function main() {
     assert.strictEqual(findInvoiceForBill(db, bill), null);
     const invoiceId = db.prepare("SELECT invoice_id FROM invoice_inbox_items WHERE id = 'snyders-today'").get().invoice_id;
     assert.strictEqual(findInvoiceForBill(db, { ...bill, Id: 'Q18' }).id, invoiceId, 'its own bill still finds it');
+  });
+
+  await check('each copy of a split invoice is linked to its own half and follows it in full', () => {
+    const second = db.prepare("SELECT invoice_id FROM invoice_inbox_items WHERE id = 'apex-2'").get().invoice_id;
+    assert.deepStrictEqual(links(db, 'i-apex').map(l => [l.qbo_bill_id, l.part]), [['Q44', 'full']]);
+    assert.deepStrictEqual(links(db, second).map(l => [l.qbo_bill_id, l.part]), [['Q45', 'full']]);
+    assert.strictEqual(recon(db, 'i-apex').status, 'matched');
+    assert.strictEqual(recon(db, second).status, 'matched');
+    assert.strictEqual(db.prepare("SELECT status FROM invoice_inbox_items WHERE id = 'apex-3'").get().status, 'needs_project');
+    assert.ok(!issue(db, 'double:Q44:Q45'));
   });
 
   await check('QuickBooks changes show in the feed: paid, gone, new', () => {

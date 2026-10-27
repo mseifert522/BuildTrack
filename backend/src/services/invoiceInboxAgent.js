@@ -733,6 +733,8 @@ function findEarlierCopy(db, { key, intakeId, sha256, index }) {
     total: item.total, invoiceId: item.invoice_id, status: item.status, sameFile,
     label: item.bt_invoice_number || (item.intake_id === intakeId ? 'earlier in this email' : 'an earlier email'),
   });
+  // A copy already in BuildTrack wins over one still waiting in the inbox.
+  let waiting = null;
   if (sha256) {
     const sameFile = db.prepare(`
       SELECT i.*, inv.invoice_number AS bt_invoice_number
@@ -742,9 +744,11 @@ function findEarlierCopy(db, { key, intakeId, sha256, index }) {
         AND (i.item_index = ? OR (? IS NOT NULL AND i.invoice_key = ?))
       ORDER BY i.invoice_id IS NULL, datetime(i.created_at) ASC LIMIT 1
     `).get(sha256, intakeId, index, key, key);
-    if (sameFile) return describe(sameFile, true);
+    if (sameFile && sameFile.invoice_id) return describe(sameFile, true);
+    if (sameFile) waiting = describe(sameFile, true);
   }
-  if (!key) return null;
+  if (!key) return waiting;
+  const numbered = key.includes('|#');
   const item = db.prepare(`
     SELECT i.*, inv.invoice_number AS bt_invoice_number
     FROM invoice_inbox_items i
@@ -752,18 +756,59 @@ function findEarlierCopy(db, { key, intakeId, sha256, index }) {
     WHERE i.invoice_key = ? AND i.status NOT IN ('duplicate', 'not_invoice')
       AND (i.intake_id <> ? OR (? = 1 AND i.item_index <> ?))
     ORDER BY i.invoice_id IS NULL, datetime(i.created_at) ASC LIMIT 1
-  `).get(key, intakeId, key.includes('|#') ? 1 : 0, index);
-  if (item) return describe(item, false);
-  const rows = db.prepare(`
-    SELECT id, invoice_number, vendor_name, external_invoice_number, total, vendor_invoice_date
+  `).get(key, intakeId, numbered ? 1 : 0, index);
+  if (item && item.invoice_id) return describe(item, false);
+  const filed = invoicesWithKey(db, key).find(row => numbered || row.source_intake_id !== intakeId);
+  if (filed) return { total: filed.total, invoiceId: filed.id, label: filed.invoice_number, status: 'filed', sameFile: false };
+  return waiting || (item ? describe(item, false) : null);
+}
+
+// BuildTrack invoices filed for this vendor invoice (same vendor + number, or vendor +
+// amount + date when it has no number), oldest first.
+function invoicesWithKey(db, key) {
+  if (!key) return [];
+  return db.prepare(`
+    SELECT id, invoice_number, vendor_name, external_invoice_number, vendor_invoice_date, total, source_intake_id, created_at
     FROM invoices
-    WHERE trim(COALESCE(external_invoice_number, '')) <> '' AND trim(COALESCE(vendor_name, '')) <> ''
-  `).all();
-  for (const row of rows) {
-    const rowKey = invoiceKey(row.vendor_name, { invoice_number: row.external_invoice_number }, row.total);
-    if (rowKey === key) return { total: row.total, invoiceId: row.id, label: row.invoice_number, status: 'filed', sameFile: false };
-  }
-  return null;
+    WHERE trim(COALESCE(vendor_name, '')) <> ''
+      AND (trim(COALESCE(external_invoice_number, '')) <> '' OR trim(COALESCE(vendor_invoice_date, '')) <> '')
+    ORDER BY datetime(created_at) ASC, id ASC
+  `).all().filter(row => invoiceKey(row.vendor_name, {
+    invoice_number: row.external_invoice_number, invoice_date: row.vendor_invoice_date,
+  }, Number(row.total)) === key);
+}
+
+// The copies of this vendor invoice BuildTrack holds for this amount, oldest first.
+function invoiceCopies(db, key, total) {
+  return invoicesWithKey(db, key).filter(row => Math.abs(Number(row.total) - Number(total)) < 0.015);
+}
+
+// How many copies there are: filed invoices, or inbox items filed / waiting for a person
+// (each becomes one) - whichever is more.
+function copiesOf(db, key, total, exceptItemId = null) {
+  if (!key) return 0;
+  const items = db.prepare(`
+    SELECT COUNT(*) AS n FROM invoice_inbox_items
+    WHERE invoice_key = ? AND status IN ('filed', 'filed_by_office', 'needs_project', 'needs_review')
+      AND abs(total - ?) < 0.015 AND id IS NOT ?
+  `).get(key, Number(total), exceptItemId).n;
+  return Math.max(invoiceCopies(db, key, total).length, items);
+}
+
+// Mike, 2026-10-27: the office may split an invoice in half in QuickBooks and the vendor
+// bill each half for the same amount - a second copy is then the other half, not a
+// duplicate. QuickBooks decides (`quickBooksSplit`): with the halves there, two copies of
+// the invoice are allowed in BuildTrack, never more. -> the two bills, or null.
+function splitInQuickBooks(db, { key, total, vendor, entry, receivedAt, exceptItemId = null }) {
+  if (!key || !(Number(total) > 0)) return null;
+  const pair = monitor.quickBooksSplit(db, {
+    vendorName: vendor.name, vendorProfileId: vendor.id || null, total, invoiceDate: entry.invoice_date || null, receivedAt,
+  });
+  return pair && copiesOf(db, key, total, exceptItemId) < 2 ? pair : null;
+}
+
+function splitNote(pair) {
+  return `QuickBooks has this invoice split in half (bills ${pair[0].id} and ${pair[1].id}), so this copy is the other half - filed, not a duplicate.`;
 }
 
 function systemUserId(db) {
@@ -881,10 +926,13 @@ function handleEntry(db, { intake, entry, index, ctx, staffKeys, read, model }) 
 
   const key = vendor.readable ? invoiceKey(vendor.name, entry, total) : null;
   const earlier = findEarlierCopy(db, { key, intakeId: intake.id, sha256: entry.source_sha256, index });
-  const sameCopy = Boolean(earlier) && (earlier.sameFile || earlier.total === null || total === null
+  let sameCopy = Boolean(earlier) && (earlier.sameFile || earlier.total === null || total === null
     || Math.abs(Number(earlier.total) - total) < 0.015);
+  // ...unless QuickBooks has the invoice split in half: then this copy is the other half.
+  const split = sameCopy ? splitInQuickBooks(db, { key, total, vendor, entry, receivedAt: intake.received_at }) : null;
+  if (split) sameCopy = false;
   // The same invoice number with a new amount is a revision: a person picks the right one.
-  if (earlier && !sameCopy) {
+  if (earlier && !sameCopy && !split) {
     reasons.push(`This invoice number was already received (${earlier.label}) for ${money(earlier.total)}; this copy says ${money(total)}. Check which one is right.`);
   }
   let status;
@@ -905,8 +953,9 @@ function handleEntry(db, { intake, entry, index, ctx, staffKeys, read, model }) 
     reason = reasons.join(' ');
   } else {
     status = 'filed';
+    reason = split ? splitNote(split) : null;
     invoice = fileInvoice(db, {
-      intake, entry, vendor, project, total, actorId: systemUserId(db), emailSummary: read.email_summary,
+      intake, entry, vendor, project, total, actorId: systemUserId(db), emailSummary: read.email_summary, note: reason || '',
     });
   }
 
@@ -1452,17 +1501,23 @@ function assignItem(db, { intakeId, itemId, projectId, actorId, actorName = 'the
     }
 
     // Never a second copy: the same vendor invoice already filed for this amount (a
-    // different amount is a revision the AI already flagged - the person decides).
+    // different amount is a revision the AI already flagged - the person decides) -
+    // unless QuickBooks has it split in half: then this copy is the other half.
     const key = invoiceKey(vendor.name, entry, amount);
     const earlier = findEarlierCopy(db, { key, intakeId, sha256: item.document_sha256 || null, index: item.item_index });
+    let split = null;
     if (earlier && earlier.invoiceId && db.prepare('SELECT 1 FROM invoices WHERE id = ?').get(earlier.invoiceId)
       && (earlier.total === null || Math.abs(Number(earlier.total) - amount) < 0.015)) {
-      throw fail(`This invoice is already in BuildTrack as ${earlier.label} - not added again.`, 409);
+      split = splitInQuickBooks(db, { key, total: amount, vendor, entry, receivedAt: intake.received_at, exceptItemId: item.id });
+      if (!split) {
+        throw fail(`This invoice is already in BuildTrack as ${earlier.label} - not added again. If the office split it in half in QuickBooks, enter both halves there first; then Assign files this copy as the other half.`, 409);
+      }
     }
 
     const invoice = fileInvoice(db, {
       intake, entry, vendor, project, total: amount, actorId, emailSummary: intake.extracted_summary,
-      note: `Project chosen by ${actorName} in the invoices@ review queue.`, aiFiled: false,
+      note: [`Project chosen by ${actorName} in the invoices@ review queue.`, split ? splitNote(split) : ''].filter(Boolean).join(' '),
+      aiFiled: false,
     });
     // The key lets a later copy of this invoice be recognised as a duplicate.
     db.prepare(`
@@ -1542,6 +1597,9 @@ module.exports = {
   // shared with services/invoiceReconciliation.js (filing from QuickBooks' answer)
   fileInvoice,
   systemUserId,
+  invoiceCopies,
+  copiesOf,
+  splitNote,
   // exposed for tests
   resolveProject,
   printedAddressKeys,

@@ -26,7 +26,14 @@ UI: Invoices page, "Incoming invoices from email". Tests: `backend/tests/invoice
      file once; two unnumbered $250 bills of one day may be two jobs). "Re-read with AI"
      keeps what is filed and recognises it by what it is (number, vendor, file, amount),
      not by its place in the email, so a re-read in another order files nothing twice
-     and drops nothing.
+     and drops nothing. **Exception - split in half (Mike, 2026-10-27):** when the
+     office splits an invoice in half in QuickBooks, the vendor may bill each half for
+     the same amount. If QuickBooks has two of the vendor's bills for that amount, dated
+     for the invoice - written "First Half" / "Second Half", or entered together (same
+     day, same class) - a second copy is the other half and is filed (noted on the
+     invoice). Never more than two copies; without the halves in QuickBooks it stays a
+     duplicate. A copy set aside before the office entered the halves is filed by the
+     monitor once they are there (QuickBooks is the source of truth).
    - **filed** - added as a BuildTrack invoice (`source='email'`, `ai_filed=1`, with
      `category`, `invoice_type`, vendor dates, line items and the document attached)
      to the project whose address / job name is printed on the invoice or written by
@@ -53,8 +60,9 @@ recent QuickBooks classes (`projectSuggestions`). **Assign** calls
 as the AI files (its read, the document on the invoice, vendor matched or added,
 `ai_filed=0`, no scope task), item -> `filed_by_office`. Vendor / amount / invoice # are
 asked for only when the AI could not read them. Assign refuses (409) an invoice already
-in BuildTrack for the same amount, and stores the item's invoice key so a later copy is a
-duplicate. The old `/file` route (scope task required) is no longer used by the page.
+in BuildTrack for the same amount - unless QuickBooks has it split in half (see
+duplicate above; then it files the second copy, never a third) - and stores the item's
+invoice key so a later copy is a duplicate. The old `/file` route (scope task required) is no longer used by the page.
 5. QuickBooks: the existing bill matcher (`findInvoiceForBill`) links a bill to the
    BuildTrack invoice; a vendor invoice number now only matches when the vendor agrees.
 
@@ -92,7 +100,10 @@ runs every 5 minutes and a few seconds after any QuickBooks sync or inbox change
   (`findInvoiceForBill`), and an invoice entered as several bills is not overwritten by
   each bill. The sync's own vendor + amount match never takes an invoice another live
   bill already stands for (next week's $250 Snyders bill cannot take - and mark paid -
-  this week's invoice).
+  this week's invoice). Two copies of a split invoice: the earlier copy takes the
+  "First Half" bill, the later one the "Second Half"; each copy is whole on its own
+  bill, so it follows that bill in full (amount, class). Two bills linked to the one
+  invoice they split are never a "possible double entry".
 - **Filed from QuickBooks**: an emailed invoice whose job was not on it (`needs_project`)
   is filed under the project the office chose in QuickBooks - one BuildTrack invoice per
   project share when the bill splits it across classes.

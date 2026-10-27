@@ -376,6 +376,46 @@ function carriesDocument(bill, docHashes) {
   return bill.docs.some(doc => doc.sha && docHashes.has(doc.sha));
 }
 
+// ── QuickBooks split an invoice in half ──────────────────────────────────────
+
+// Mike, 2026-10-27: the office may split an invoice in half in QuickBooks and the vendor
+// bill each half for the same amount, so BuildTrack holds two copies of one invoice.
+// QuickBooks decides: two of the vendor's bills for this amount - written "First Half" /
+// "Second Half", or entered together (same day, same class). -> [first, second] or null.
+function splitPair(bills) {
+  const first = bills.find(bill => bill.half === 'first_half');
+  const second = bills.find(bill => bill.half === 'second_half');
+  if (first && second) return [first, second];
+  if (bills.length !== 2) return null;
+  const [a, b] = [...bills].sort((x, y) => String(x.date).localeCompare(String(y.date)) || x.id.localeCompare(y.id));
+  const classOf = bill => (bill.shares.size === 1 ? [...bill.shares.keys()][0] : null);
+  return a.date === b.date && classOf(a) && classOf(a) === classOf(b) ? [a, b] : null;
+}
+
+// The vendor's bills that split this amount in half, dated for the invoice (the inbox and
+// the review queue ask before calling a same-amount copy a duplicate).
+function quickBooksSplit(db, { vendorName, vendorProfileId, total, invoiceDate, receivedAt }) {
+  if (!(Number(total) > 0)) return null;
+  const identity = vendorIdentity(db, { vendorName, vendorProfileId });
+  const window = { invoiceDate: invoiceDate || null, receivedAt: receivedAt || new Date().toISOString() };
+  return splitPair(loadBills(db).filter(bill => !bill.deleted && sameVendor(identity, bill) && near(bill.total, total)
+    && billFits(bill, window)));
+}
+
+// Both halves still free and BuildTrack holds a copy per half: the earlier copy takes the
+// first half, the later copy the second.
+function splitHalfFor(db, invoice, candidates) {
+  const pair = splitPair(candidates.filter(bill => near(bill.total, invoice.total)));
+  if (!pair) return null;
+  const agent = require('./invoiceInboxAgent');
+  const key = agent.invoiceKey(invoice.vendor_name, {
+    invoice_number: invoice.external_invoice_number, invoice_date: invoice.vendor_invoice_date,
+  }, round2(invoice.total));
+  const copies = agent.invoiceCopies(db, key, invoice.total);
+  const rank = copies.findIndex(row => row.id === invoice.id);
+  return copies.length >= 2 && (rank === 0 || rank === 1) ? { bills: [pair[rank]], method: 'split_half' } : null;
+}
+
 function linkBills(db, invoice, chosen, billsById) {
   const insert = db.prepare(`
     INSERT INTO invoice_qbo_links (id, invoice_id, qbo_bill_id, amount, part, method)
@@ -522,13 +562,17 @@ function reconcileInvoices(db, bills, billsById, now, fileMoves = []) {
       const candidates = bills.filter(bill => !bill.deleted && !bill.linkedTo && billFits(bill, window)
         && (sameVendor(identity, bill) || carriesDocument(bill, docHashes)));
       const remaining = round2(invoice.total - covered);
-      const chosen = chooseBills(candidates, {
+      let chosen = chooseBills(candidates, {
         total: covered > 0 ? remaining : round2(invoice.total),
         projectId: invoice.project_id,
         docHashes,
         invoiceNumber: invoice.external_invoice_number,
         refDate,
       });
+      if (!chosen && covered === 0) chosen = splitHalfFor(db, invoice, candidates);
+      // One bill for the whole invoice is all of it, even when the office wrote "First Half"
+      // on it (the vendor billed that half as its own invoice): it follows QuickBooks in full.
+      if (chosen && chosen.bills.length === 1 && near(chosen.bills[0].total, invoice.total)) chosen.part = 'full';
       if (chosen) {
         linkBills(db, invoice, chosen, billsById);
         links = linksFor.all(invoice.id);
@@ -838,10 +882,11 @@ function fileFromQuickBooks(db, item, chosen, shares, billsById) {
       emailSummary: item.extracted_summary, note,
     });
     const row = db.prepare('SELECT i.*, p.address AS project_address FROM invoices i LEFT JOIN projects p ON p.id = i.project_id WHERE i.id = ?').get(invoice.invoiceId);
+    const whole = chosen.bills.length === 1 && near(chosen.bills[0].total, item.total);
     linkBills(db, row, {
       bills: multi ? chosen.bills.filter(bill => bill.shares.has(projectId)) : chosen.bills,
       method: chosen.method,
-      part: multi ? 'project_share' : null,
+      part: multi ? 'project_share' : (whole ? 'full' : null),
       amountFor: multi ? bill => bill.shares.get(projectId) || 0 : null,
     }, billsById);
     // A bill shared by several of these invoices stays "linked" for every one of them.
@@ -878,6 +923,80 @@ function fileFromQuickBooks(db, item, chosen, shares, billsById) {
   });
 }
 
+// ── a copy set aside as a duplicate, then QuickBooks split the invoice in half ──
+
+// The inbox set a same-amount copy aside as a duplicate before the office entered the
+// halves; once QuickBooks has them, that copy is the other half - BuildTrack yields and
+// files it (two copies at most, the second half's bill linked to it).
+function fileSplitHalves(db, bills, billsById) {
+  const agent = require('./invoiceInboxAgent');
+  const items = db.prepare(`
+    SELECT a.*, e.received_at
+    FROM invoice_inbox_items a
+    JOIN invoice_email_intake e ON e.id = a.intake_id
+    WHERE a.status = 'duplicate' AND a.invoice_id IS NULL AND a.duplicate_of IS NOT NULL
+      AND a.total IS NOT NULL AND a.total > 0 AND COALESCE(a.invoice_key, '') <> ''
+    ORDER BY datetime(a.created_at) ASC
+  `).all();
+  let filed = 0;
+  for (const item of items) {
+    const original = db.prepare('SELECT id, project_id FROM invoices WHERE id = ?').get(item.duplicate_of);
+    if (!original) continue;
+    const identity = vendorIdentity(db, { vendorName: item.vendor_name, vendorProfileId: item.vendor_profile_id });
+    const window = { invoiceDate: item.invoice_date || null, receivedAt: item.received_at };
+    const pair = splitPair(bills.filter(bill => !bill.deleted && sameVendor(identity, bill) && near(bill.total, item.total)
+      && billFits(bill, window)));
+    if (!pair || agent.copiesOf(db, item.invoice_key, item.total, item.id) >= 2) continue;
+    const bill = [pair[1], pair[0]].find(candidate => !candidate.linkedTo);
+    if (!bill) continue;
+    try {
+      db.transaction(() => fileSplitHalf(db, item, original, pair, bill, billsById))();
+      filed += 1;
+    } catch (err) {
+      warn(`could not file inbox item ${item.id} as the other half: ${err.message}`);
+    }
+  }
+  return filed;
+}
+
+function fileSplitHalf(db, item, original, pair, bill, billsById) {
+  const agent = require('./invoiceInboxAgent');
+  const intake = db.prepare('SELECT * FROM invoice_email_intake WHERE id = ?').get(item.intake_id);
+  let entry = {};
+  try { entry = JSON.parse(item.read_json || '{}'); } catch (_) { entry = {}; }
+  entry = {
+    line_items: [], tax: null, amount_due: null, billing_stage: 'unclear', vendor: {},
+    category: item.category || 'Miscellaneous', invoice_type: item.invoice_type || 'other',
+    ...entry,
+  };
+  // The class the office entered this half under; else the first copy's project.
+  const projectOf = id => db.prepare('SELECT id, address FROM projects WHERE id = ?').get(id);
+  const project = (bill.shares.size === 1 && projectOf([...bill.shares.keys()][0])) || projectOf(original.project_id);
+  if (!project) throw new Error('no project for the other half');
+  const total = round2(item.total);
+  const note = agent.splitNote(pair);
+  const invoice = agent.fileInvoice(db, {
+    intake, entry, vendor: { id: item.vendor_profile_id || null, name: item.vendor_name, created: false },
+    project, total, actorId: agent.systemUserId(db), emailSummary: intake.extracted_summary, note,
+  });
+  const row = db.prepare('SELECT i.*, p.address AS project_address FROM invoices i LEFT JOIN projects p ON p.id = i.project_id WHERE i.id = ?').get(invoice.invoiceId);
+  linkBills(db, row, { bills: [bill], method: 'split_half', part: 'full' }, billsById);
+  db.prepare(`
+    UPDATE invoice_inbox_items
+    SET status = 'filed', invoice_id = ?, project_id = ?, duplicate_of = NULL, reason = ?, updated_at = datetime('now')
+    WHERE id = ?
+  `).run(invoice.invoiceId, project.id, `Filed as ${invoice.invoiceNumber}: ${note}`, item.id);
+  logEvent(db, {
+    source: 'monitor',
+    kind: 'filed_split_half',
+    invoiceId: invoice.invoiceId,
+    intakeId: item.intake_id,
+    qboBillId: bill.id,
+    projectId: project.id,
+    message: `${item.vendor_name} ${money(total)}${item.invoice_number ? ` #${item.invoice_number}` : ''}: ${note} Filed as ${invoice.invoiceNumber} under ${project.address}.`,
+  });
+}
+
 // ── checks on every recent QuickBooks bill ───────────────────────────────────
 
 function quickBooksIssues(db, bills) {
@@ -903,7 +1022,9 @@ function quickBooksIssues(db, bills) {
         const sameText = a.noteKey && a.noteKey === b.noteKey;
         const bothBlank = !a.noteKey && !b.noteKey && a.date === b.date;
         if (!sameText && !bothBlank) continue;
-        if (a.linkedTo && b.linkedTo && a.linkedTo !== b.linkedTo && a.linkedTo !== 'shared') continue;
+        // Bills that stand for different invoices - or that are the halves / parts of the
+        // one invoice they are linked to (a split in QuickBooks) - are not a double entry.
+        if (a.linkedTo && b.linkedTo && a.linkedTo !== 'shared') continue;
         issues.push({
           key: `double:${a.id}:${b.id}`, kind: 'possible_double_entry', severity: 'alert', qboBillId: b.id,
           projectId: [...b.shares.keys()][0] || null,
@@ -1068,6 +1189,7 @@ async function runOnce({ notify = true } = {}) {
     db.transaction(() => {
       const billEvents = trackBillChanges(db, bills, firstRun);
       const filedFromQuickBooks = resolveFromQuickBooks(db, bills, billsById);
+      const filedSplitHalves = fileSplitHalves(db, bills, billsById);
       const invoiceResult = reconcileInvoices(db, bills, billsById, now, fileMoves);
       const issues = [...invoiceResult.issues, ...quickBooksIssues(db, bills)];
       const issueResult = saveIssues(db, issues);
@@ -1078,6 +1200,7 @@ async function runOnce({ notify = true } = {}) {
         bills: bills.length,
         bill_events: billEvents,
         filed_from_quickbooks: filedFromQuickBooks,
+        filed_split_halves: filedSplitHalves,
         invoices: invoiceResult.invoices,
         linked: invoiceResult.linked,
         followed_quickbooks: invoiceResult.followed,
@@ -1096,8 +1219,8 @@ async function runOnce({ notify = true } = {}) {
     state.lastRunAt = now;
     state.lastError = null;
     state.lastResult = result;
-    if (result.linked || result.followed_quickbooks || result.filed_from_quickbooks || result.issues_opened || result.issues_resolved || result.bill_events) {
-      log(`run: ${result.bills} bills, ${result.linked} linked, ${result.followed_quickbooks} updated from QuickBooks, ${result.filed_from_quickbooks} filed from QuickBooks, ${result.issues_opened} new / ${result.issues_resolved} resolved issue(s), ${result.office_emailed} emailed`);
+    if (result.linked || result.followed_quickbooks || result.filed_from_quickbooks || result.filed_split_halves || result.issues_opened || result.issues_resolved || result.bill_events) {
+      log(`run: ${result.bills} bills, ${result.linked} linked, ${result.followed_quickbooks} updated from QuickBooks, ${result.filed_from_quickbooks} filed from QuickBooks, ${result.filed_split_halves} filed as the other half of a split, ${result.issues_opened} new / ${result.issues_resolved} resolved issue(s), ${result.office_emailed} emailed`);
     }
     return result;
   } catch (err) {
@@ -1255,6 +1378,7 @@ module.exports = {
   emailInvoicesForBills,
   projectSuggestions,
   billCouldBeFor,
+  quickBooksSplit,
   STATUS_LABELS,
   PART_LABELS,
   // exposed for tests

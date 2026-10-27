@@ -663,6 +663,34 @@ async function main() {
     assert.strictEqual(db.prepare("SELECT COUNT(*) n FROM invoices WHERE vendor_name = 'Pine Tree Services'").get().n, 1);
   });
 
+  // The office splits an invoice in half in QuickBooks; the vendor bills each half for the
+  // same amount (same invoice number), then sends a reminder.
+  const masonry = read([invoice({ vendor_name: 'Half & Half Masonry', vendor_email: 'hh@masonry.test', invoice_number: 'HM-3', property_address: '160 Chopin Ave', total: 1500, amount_due: 1500, subtotal: 1500, tax: null, line_items: [] })]);
+  for (const subject of ['Masonry invoice', 'Masonry second half', 'Masonry reminder']) {
+    answers.set(subject, masonry);
+    await pdfFor(subject);
+  }
+  queue.push(email('Masonry invoice'));
+  assert.ok(!(await agent.pollOnce()).error);
+  const addHalf = (id, note) => db.prepare(`
+    INSERT INTO quickbooks_bills (qbo_id, realm_id, vendor_id, vendor_name, txn_date, total_amt, balance, payment_status,
+      payment_approval_status, private_note, project_id, sync_token)
+    VALUES (?, 'realm', '901', 'Half & Half Masonry LLC', '2026-10-15', 1500, 1500, 'unpaid', 'not_approved', ?, 'p-chopin', '0')
+  `).run(id, note);
+  addHalf('HM-Q1', '160 Chopin Masonry First Half of Invoice');
+  addHalf('HM-Q2', '160 Chopin Masonry Second Half of Invoice');
+  queue.push(email('Masonry second half'));
+  queue.push(email('Masonry reminder'));
+  assert.ok(!(await agent.pollOnce()).error);
+
+  await check('QuickBooks split in half: the vendor\'s second copy is filed as the other half, a third is a duplicate', () => {
+    const items = ['Masonry invoice', 'Masonry second half', 'Masonry reminder'].map(subject => itemsFor(intakeBySubject(subject).id)[0]);
+    assert.deepStrictEqual(items.map(i => i.status), ['filed', 'filed', 'duplicate']);
+    assert.match(items[1].reason, /split in half \(bills HM-Q1 and HM-Q2\)/);
+    assert.match(db.prepare('SELECT notes FROM invoices WHERE id = ?').get(items[1].invoice_id).notes, /the other half - filed, not a duplicate/);
+    assert.strictEqual(db.prepare("SELECT COUNT(*) n FROM invoices WHERE external_invoice_number = 'HM-3'").get().n, 2);
+  });
+
   await check('the run never logged into a real mailbox or API', () => {
     assert.ok(requests.every(r => r.model));
   });
