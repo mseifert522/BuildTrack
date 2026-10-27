@@ -191,6 +191,23 @@ async function main() {
   // A recurring $250 vendor: today's invoice must not grab an older, paid $250 bill.
   addIntakeItem(db, { id: 'snyders-today', vendor: 'snyders', total: 250, status: 'needs_project', number: '2059', receivedDaysAgo: 0, invoiceDate: day(0) });
   addBill(db, { id: 'Q15', vendor: 'snyders', total: 250, date: day(40), note: '3170 Robina Junk Removal Invoice', project: P.R, paid: true });
+  // ...and today the office entered two $250 Snyders bills: the monitor cannot choose,
+  // the review queue offers both projects.
+  addBill(db, { id: 'Q18', vendor: 'snyders', total: 250, date: day(0), note: '2811 Wisconsin junk removal', project: P.W });
+  addBill(db, { id: 'Q19', vendor: 'snyders', total: 250, date: day(0), note: '34641 Joel junk removal', project: P.J });
+  // The Snyders invoice filed to Wisconsin carries its document (QuickBooks has it under Blair).
+  const docDir = path.join(process.env.UPLOADS_PATH, 'invoice-attachments', P.W, 'i-snyders');
+  fs.mkdirSync(docDir, { recursive: true });
+  fs.writeFileSync(path.join(docDir, 'doc-snyders.pdf'), 'snyders invoice');
+  db.prepare("INSERT INTO invoice_attachments (id, invoice_id, project_id, filename, original_name, mime_type, size, uploaded_by) VALUES ('att-snyders', 'i-snyders', ?, 'doc-snyders.pdf', 'Invoice_2053.pdf', 'application/pdf', 15, ?)").run(P.W, ADMIN);
+  // The Larmon invoice as one line; QuickBooks has it for less.
+  db.prepare("INSERT INTO invoice_line_items (id, invoice_id, description, amount, sort_order) VALUES ('li-larmon', 'i-larmon', 'Electrical', 3100, 0)").run();
+  // QuickBooks has this one under another class, but it is tied to a scope task: not moved.
+  addInvoice(db, { id: 'i-tasks', vendor: 'forever', number: 'F-12', total: 900, project: P.W, daysAgo: 5 });
+  addBill(db, { id: 'Q20', vendor: 'forever', total: 900, date: day(5), note: '34641 Joel gutters', project: P.J });
+  db.pragma('foreign_keys = OFF');
+  db.prepare("INSERT INTO invoice_work_items (id, invoice_id, project_id, construction_plan_item_id, linked_by) VALUES ('iwi-1', 'i-tasks', ?, 'task-1', ?)").run(P.W, ADMIN);
+  db.pragma('foreign_keys = ON');
   // Two equally plausible bills for the same amount: nothing is linked.
   addInvoice(db, { id: 'i-amb', vendor: 'larmon', number: 'L-90', total: 600, project: P.R, daysAgo: 4 });
   addBill(db, { id: 'Q16', vendor: 'larmon', total: 600, date: day(4), note: '3170 Robina outlets', project: P.R });
@@ -240,18 +257,36 @@ async function main() {
     assert.match(open.message, /\$1,430\.00 is not entered yet/);
   });
 
-  await check('QuickBooks has it under another project: flagged, the invoice is not moved', () => {
+  const docAt = project => path.join(process.env.UPLOADS_PATH, 'invoice-attachments', project, 'i-snyders', 'doc-snyders.pdf');
+
+  await check('QuickBooks has it under another class: the invoice moves there with its document', () => {
     assert.strictEqual(recon(db, 'i-snyders').status, 'matched');
-    const open = issue(db, 'project:i-snyders');
-    assert.ok(open && open.severity === 'alert');
-    assert.match(open.message, /under class p-blair/);
-    assert.strictEqual(db.prepare("SELECT project_id FROM invoices WHERE id = 'i-snyders'").get().project_id, P.W);
+    const inv = db.prepare("SELECT project_id, notes FROM invoices WHERE id = 'i-snyders'").get();
+    assert.strictEqual(inv.project_id, P.B);
+    assert.match(inv.notes, /to match QuickBooks \(class class p-blair\)/);
+    assert.ok(!issue(db, 'project:i-snyders'));
+    assert.strictEqual(db.prepare("SELECT project_id FROM invoice_attachments WHERE id = 'att-snyders'").get().project_id, P.B);
+    assert.ok(fs.existsSync(docAt(P.B)), 'document copied to the new project');
+    assert.ok(!fs.existsSync(path.dirname(docAt(P.W))), 'old project folder removed after commit');
+    assert.ok(db.prepare("SELECT 1 FROM invoice_monitor_events WHERE kind = 'moved_to_quickbooks_project' AND invoice_id = 'i-snyders'").get());
+    assert.ok(db.prepare("SELECT 1 FROM activity_log WHERE action = 'invoice_moved_to_match_quickbooks' AND entity_id = 'i-snyders' AND project_id = ?").get(P.B));
   });
 
-  await check('the same document attached in QuickBooks with a different amount: amount mismatch', () => {
+  await check('tied to a scope task of its project: not moved, flagged for a person', () => {
+    assert.strictEqual(db.prepare("SELECT project_id FROM invoices WHERE id = 'i-tasks'").get().project_id, P.W);
+    const open = issue(db, 'project:i-tasks');
+    assert.ok(open && open.severity === 'alert');
+    assert.match(open.message, /scope tasks .* move it by hand/);
+  });
+
+  await check('QuickBooks has another amount for the whole invoice: BuildTrack takes the QuickBooks amount', () => {
     assert.deepStrictEqual(links(db, 'i-larmon').map(l => [l.qbo_bill_id, l.method]), [['Q6', 'document']]);
-    assert.strictEqual(recon(db, 'i-larmon').status, 'amount_mismatch');
-    assert.match(issue(db, 'amount:i-larmon').message, /\$3,100\.00 but QuickBooks has \$3,000\.00/);
+    const inv = db.prepare("SELECT total, notes FROM invoices WHERE id = 'i-larmon'").get();
+    assert.strictEqual(inv.total, 3000);
+    assert.match(inv.notes, /Amount changed from \$3,100\.00 to \$3,000\.00 to match QuickBooks \(bill Q6\)/);
+    assert.strictEqual(db.prepare("SELECT amount FROM invoice_line_items WHERE id = 'li-larmon'").get().amount, 3000);
+    assert.strictEqual(recon(db, 'i-larmon').status, 'matched');
+    assert.ok(!issue(db, 'amount:i-larmon'));
   });
 
   await check('not entered after the grace days: flagged; a brand-new one just waits', () => {
@@ -338,12 +373,77 @@ async function main() {
     assert.strictEqual(found && found.id, 'i-fatmir');
   });
 
-  // QuickBooks changes: the second half is paid, the Oak bill is deleted, a new bill comes in.
+  await check('review queue: QuickBooks bills entered for the invoice first, then the vendor\'s recent classes', () => {
+    const item = db.prepare("SELECT a.*, e.received_at FROM invoice_inbox_items a JOIN invoice_email_intake e ON e.id = a.intake_id WHERE a.id = 'snyders-today'").get();
+    const list = monitor.projectSuggestions(db, [item]).get('snyders-today');
+    assert.deepStrictEqual(list.slice(0, 2).map(s => s.source), ['quickbooks_bill', 'quickbooks_bill']);
+    assert.deepStrictEqual(list.slice(0, 2).map(s => s.project_id).sort(), [P.J, P.W].sort());
+    assert.ok(list.some(s => s.project_id === P.B && s.source === 'vendor_history'));
+    assert.ok(!list.some(s => s.qbo_bill_id === 'Q15'), 'an old paid bill is not offered as this invoice');
+  });
+
+  const agent = require('../src/services/invoiceInboxAgent');
+
+  await check('one click: a person files it under the chosen project, as the AI would', () => {
+    const result = agent.assignItem(db, { intakeId: 'intake-snyders-today', itemId: 'snyders-today', projectId: P.W, actorId: ADMIN, actorName: 'Monitor Admin' });
+    const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(result.invoiceId);
+    assert.strictEqual(inv.project_id, P.W);
+    assert.strictEqual(inv.total, 250);
+    assert.strictEqual(inv.ai_filed, 0);
+    assert.strictEqual(inv.vendor_profile_id, 'vp-snyders');
+    assert.strictEqual(inv.external_invoice_number, '2059');
+    assert.strictEqual(inv.source, 'email');
+    assert.match(inv.notes, /Project chosen by Monitor Admin/);
+    const item = db.prepare("SELECT status, invoice_id FROM invoice_inbox_items WHERE id = 'snyders-today'").get();
+    assert.deepStrictEqual([item.status, item.invoice_id], ['filed_by_office', result.invoiceId]);
+    assert.strictEqual(db.prepare("SELECT status FROM invoice_email_intake WHERE id = 'intake-snyders-today'").get().status, 'filed');
+    assert.ok(db.prepare("SELECT 1 FROM activity_log WHERE action = 'invoice_email_filed' AND entity_id = ?").get(result.invoiceId));
+    assert.throws(() => agent.assignItem(db, { intakeId: 'intake-snyders-today', itemId: 'snyders-today', projectId: P.J, actorId: ADMIN }), /already filed/);
+  });
+
+  await check('one click when the AI could not read it: vendor and amount typed in, vendor added', () => {
+    db.prepare(`
+      INSERT INTO invoice_email_intake (id, provider, provider_message_id, message_hash, from_email, subject, status, agent_status, received_at)
+      VALUES ('intake-unread', 'gmail-imap', 'msg-unread', 'hash-unread', 'billing@example.test', 'Invoice attached', 'new', 'needs_review', datetime('now'))
+    `).run();
+    db.prepare("INSERT INTO invoice_inbox_items (id, intake_id, item_index, status, reason) VALUES ('unread', 'intake-unread', 0, 'needs_review', 'The AI could not read this email.')").run();
+    const base = { intakeId: 'intake-unread', itemId: 'unread', projectId: P.R, actorId: ADMIN, actorName: 'Monitor Admin' };
+    assert.throws(() => agent.assignItem(db, { ...base, vendorName: 'Brand New Plumbing LLC' }), /Enter the invoice amount/);
+    assert.throws(() => agent.assignItem(db, { ...base, total: '120' }), /Enter the vendor/);
+    const result = agent.assignItem(db, { ...base, vendorName: 'Brand New Plumbing LLC', total: '$1,234.50', invoiceNumber: 'BN-9' });
+    assert.ok(result.vendor.created);
+    const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(result.invoiceId);
+    assert.deepStrictEqual([inv.total, inv.project_id, inv.external_invoice_number, inv.ai_filed], [1234.5, P.R, 'BN-9', 0]);
+    assert.match(inv.vendor_name, /^Brand New Plumbing/);
+    assert.strictEqual(inv.vendor_profile_id, result.vendor.id);
+    assert.ok(db.prepare("SELECT 1 FROM contractor_profiles WHERE id = ? AND source = 'invoice_email'").get(result.vendor.id));
+  });
+
+  // QuickBooks changes: the second half is paid, the Oak bill is deleted, a new bill comes in,
+  // and the office edits the Snyders bill (new amount, other class).
   db.prepare("UPDATE quickbooks_bills SET balance = 0, payment_status = 'paid', sync_token = '1' WHERE qbo_id = 'Q3'").run();
   db.prepare("UPDATE quickbooks_bills SET payment_approval_status = 'deleted_from_buildtrack' WHERE qbo_id = 'Q1'").run();
   addBill(db, { id: 'Q14', vendor: 'bardhyl', total: 1430, date: day(18), note: '2811 Wisconsin Second Half of Flooring Invoice', project: P.W });
+  db.prepare("UPDATE quickbooks_bills SET total_amt = 1450, balance = 1450, project_id = ?, sync_token = '1' WHERE qbo_id = 'Q5'").run(P.R);
+  db.prepare("UPDATE quickbooks_bill_lines SET amount = 1450, project_id = ?, class_name = 'class p-robina' WHERE qbo_bill_id = 'Q5'").run(P.R);
   const second = await monitor.runOnce();
   assert.ok(!second.error, second.error);
+
+  await check('a bill edited in QuickBooks: the invoice takes its new amount and class', () => {
+    const inv = db.prepare("SELECT project_id, total FROM invoices WHERE id = 'i-snyders'").get();
+    assert.deepStrictEqual([inv.project_id, inv.total], [P.R, 1450]);
+    assert.strictEqual(links(db, 'i-snyders')[0].amount, 1450);
+    assert.strictEqual(recon(db, 'i-snyders').status, 'matched');
+    assert.ok(fs.existsSync(docAt(P.R)));
+    assert.ok(!fs.existsSync(path.dirname(docAt(P.B))));
+    assert.ok(db.prepare("SELECT 1 FROM invoice_monitor_events WHERE kind = 'link_amount_updated' AND qbo_bill_id = 'Q5'").get());
+  });
+
+  await check('the invoice filed by a person links to the bill entered under its project', () => {
+    const invoiceId = db.prepare("SELECT invoice_id FROM invoice_inbox_items WHERE id = 'snyders-today'").get().invoice_id;
+    assert.deepStrictEqual(links(db, invoiceId).map(l => l.qbo_bill_id), ['Q18']);
+    assert.strictEqual(recon(db, invoiceId).status, 'matched');
+  });
 
   await check('QuickBooks changes show in the feed: paid, gone, new', () => {
     const kinds = new Set(db.prepare('SELECT kind FROM invoice_monitor_events').all().map(row => row.kind));

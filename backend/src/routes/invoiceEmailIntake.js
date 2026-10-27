@@ -531,31 +531,46 @@ authenticatedRouter.get('/', (req, res) => {
     LIMIT ?
   `).all(...params);
 
-  // What the invoice inbox agent found in each email (one row per invoice).
+  // What the invoice inbox agent found in each email (one row per invoice), with how
+  // QuickBooks has the filed ones and, for the open ones, the projects QuickBooks points to.
   const aiItemsByIntake = new Map();
   if (rows.length) {
     const placeholders = rows.map(() => '?').join(',');
-    db.prepare(`
+    const receivedAt = new Map(rows.map(row => [row.id, row.received_at]));
+    const items = db.prepare(`
       SELECT a.id, a.intake_id, a.item_index, a.status, a.reason, a.vendor_profile_id, a.vendor_name, a.vendor_created,
              a.invoice_number, a.invoice_date, a.due_date, a.invoice_type, a.category, a.total,
              a.property_address, a.job_reference, a.project_id, a.invoice_id, a.notified_at,
-             a.source_attachment_name, p.address AS project_address, i.invoice_number AS bt_invoice_number
+             a.source_attachment_id, a.source_attachment_name, p.address AS project_address,
+             i.invoice_number AS bt_invoice_number, i.total AS bt_total,
+             r.status AS qbo_status, r.summary AS qbo_summary
       FROM invoice_inbox_items a
       LEFT JOIN projects p ON p.id = a.project_id
       LEFT JOIN invoices i ON i.id = a.invoice_id
+      LEFT JOIN invoice_reconciliation r ON r.invoice_id = a.invoice_id
       WHERE a.intake_id IN (${placeholders})
       ORDER BY a.intake_id, a.item_index
-    `).all(...rows.map(row => row.id)).forEach(item => {
-      const items = aiItemsByIntake.get(item.intake_id) || [];
-      items.push(item);
-      aiItemsByIntake.set(item.intake_id, items);
+    `).all(...rows.map(row => row.id));
+    const open = items.filter(item => !item.invoice_id && ['needs_project', 'needs_review'].includes(item.status));
+    let suggestions = new Map();
+    try {
+      suggestions = require('../services/invoiceReconciliation')
+        .projectSuggestions(db, open.map(item => ({ ...item, received_at: receivedAt.get(item.intake_id) })));
+    } catch (err) {
+      console.warn('[INBOUND INVOICE] project suggestions failed:', err.message);
+    }
+    items.forEach(item => {
+      const list = aiItemsByIntake.get(item.intake_id) || [];
+      list.push({ ...item, suggestions: suggestions.get(item.id) || [] });
+      aiItemsByIntake.set(item.intake_id, list);
     });
   }
 
   res.json(rows.map(row => {
     const attachments = parseStoredAttachments(row.attachments_json);
     const filedAttachments = attachments.filter(item => item.filed_invoice_id);
-    const { agent_result_json: _read, ...rest } = row;
+    // The review queue shows the AI's read, not the raw email.
+    const { agent_result_json: _read, text_body: _text, html_body: _html, ...rest } = row;
     return {
       ...rest,
       body_preview: stripHtml(row.text_body || row.html_body || row.extracted_summary || '').slice(0, 3000),
@@ -592,6 +607,32 @@ authenticatedRouter.post('/:id/ai-reread', async (req, res) => {
   } catch (err) {
     console.error('[INBOUND INVOICE] AI re-read failed:', err.message);
     res.status(500).json({ error: 'The AI could not read this email again' });
+  }
+});
+
+// One click: file an invoice the AI could not place under the chosen project. Vendor,
+// amount and invoice number only when the AI could not read them.
+authenticatedRouter.post('/:id/items/:itemId/assign', (req, res) => {
+  try {
+    const result = require('../services/invoiceInboxAgent').assignItem(getDb(), {
+      intakeId: req.params.id,
+      itemId: req.params.itemId,
+      projectId: String(req.body?.project_id || '').trim(),
+      actorId: req.user.id,
+      actorName: req.user.name || req.user.email || 'the office',
+      vendorName: req.body?.vendor_name || '',
+      total: req.body?.total ?? null,
+      invoiceNumber: req.body?.invoice_number || '',
+    });
+    res.status(201).json({
+      message: `Filed ${result.invoiceNumber} to ${result.project.address}`,
+      invoice: { id: result.invoiceId, invoice_number: result.invoiceNumber, project_id: result.project.id, project_address: result.project.address, total: result.total },
+      vendor_created: Boolean(result.vendor.created),
+      open_in_email: result.open,
+    });
+  } catch (err) {
+    if (!err.statusCode) console.error('[INBOUND INVOICE] Assign failed:', err);
+    res.status(err.statusCode || 500).json({ error: err.statusCode ? err.message : 'Could not file this invoice' });
   }
 });
 

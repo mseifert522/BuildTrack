@@ -4512,3 +4512,263 @@ a.bg-blue-600:hover {
     gap: 2px;
   }
 }
+
+/* Incoming invoices from email - one row per invoice, one click to file (2026-10-27). */
+.bt-inq {
+  margin: 10px 14px 18px;
+}
+
+.bt-inq-head,
+.bt-inq-row {
+  display: grid;
+  grid-template-columns: 64px minmax(140px, 1.2fr) 88px 96px minmax(110px, 0.9fr) minmax(120px, 1fr) minmax(180px, 1.25fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.bt-inq-head {
+  border-bottom: 1px solid #1F2937;
+  padding: 0 12px 8px;
+  color: #9CA3AF;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.bt-inq-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bt-inq-item {
+  border-bottom: 1px solid #1F2937;
+  padding: 10px 12px;
+}
+
+.bt-inq-item.is-open {
+  background: #0A0F14;
+}
+
+.bt-inq-item.is-quiet .bt-inq-cell,
+.bt-inq-item.is-quiet strong {
+  color: #9CA3AF;
+}
+
+.bt-inq-cell {
+  min-width: 0;
+  overflow: hidden;
+  color: #D1D5DB;
+  font-size: 13px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bt-inq-cell strong {
+  color: #F3F4F6;
+  font-weight: 600;
+}
+
+.bt-inq-head .is-amount,
+.bt-inq-cell.is-amount {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.bt-inq-span {
+  grid-column: span 5;
+}
+
+.bt-inq-muted {
+  color: #9CA3AF;
+  font-size: 12px;
+}
+
+.bt-inq-doc {
+  appearance: none;
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: #93C5FD;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.bt-inq-doc span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bt-inq-doc:hover span,
+.bt-inq-link:hover {
+  text-decoration: underline;
+}
+
+.bt-inq-link {
+  color: #93C5FD;
+}
+
+.bt-inq-select,
+.bt-inq-input {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid #374151;
+  border-radius: 6px;
+  background: #0B1117;
+  padding: 6px 8px;
+  color: #F3F4F6;
+  font-size: 13px;
+}
+
+.bt-inq-select:focus,
+.bt-inq-input:focus {
+  border-color: #E78B4A;
+  outline: 2px solid rgba(231, 139, 74, 0.25);
+  outline-offset: 0;
+}
+
+.bt-inq-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.bt-inq-assign {
+  min-height: 34px;
+  border: 1px solid #E78B4A;
+  border-radius: 6px;
+  background: rgba(231, 139, 74, 0.18);
+  padding: 6px 16px;
+  color: #FFD0A8;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.bt-inq-assign:hover:not(:disabled) {
+  background: rgba(231, 139, 74, 0.3);
+  color: #FFFFFF;
+}
+
+.bt-inq-assign:disabled {
+  border-color: #374151;
+  background: transparent;
+  color: #6B7280;
+  cursor: not-allowed;
+}
+
+.bt-inq-icon {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #6B7280;
+  cursor: pointer;
+}
+
+.bt-inq-icon:hover:not(:disabled) {
+  border-color: #374151;
+  color: #F3F4F6;
+}
+
+.bt-inq-icon:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
+.bt-inq-note {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin-top: 6px;
+  padding-left: 76px;
+  font-size: 12px;
+}
+
+.bt-inq-reason {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: #FDE68A;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bt-inq-suggest {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.bt-inq-chip {
+  border: 1px solid #374151;
+  border-radius: 999px;
+  background: transparent;
+  padding: 2px 10px;
+  color: #D1D5DB;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.bt-inq-chip.is-qbo {
+  border-color: rgba(52, 211, 153, 0.5);
+  color: #A7F3D0;
+}
+
+.bt-inq-chip:hover,
+.bt-inq-chip.is-selected {
+  border-color: #E78B4A;
+  background: rgba(231, 139, 74, 0.16);
+  color: #FFD0A8;
+}
+
+.bt-monitor-status.is-waiting_for_quickbooks {
+  color: #9CA3AF !important;
+}
+
+@media (max-width: 1100px) {
+  .bt-inq-head {
+    display: none;
+  }
+
+  .bt-inq-row {
+    grid-template-columns: 64px minmax(0, 1fr) auto;
+    row-gap: 6px;
+  }
+
+  .bt-inq-row > .bt-inq-cell:nth-child(n + 3) {
+    grid-column: 2 / -1;
+  }
+
+  .bt-inq-row > .bt-inq-actions {
+    grid-column: 2 / -1;
+    justify-content: flex-start;
+  }
+
+  .bt-inq-cell.is-amount {
+    text-align: left;
+  }
+
+  .bt-inq-span {
+    grid-column: 2 / -1;
+  }
+
+  .bt-inq-note {
+    padding-left: 0;
+  }
+}

@@ -786,14 +786,15 @@ function lineItemsFor(entry, total) {
 }
 
 // `note` is an extra line (the monitor files under the project the office chose in
-// QuickBooks, sometimes one share of a bill split across projects).
-function fileInvoice(db, { intake, entry, vendor, project, total, actorId, emailSummary, note = '' }) {
+// QuickBooks, sometimes one share of a bill split across projects). `aiFiled` is false
+// when a person chose the project in the review queue.
+function fileInvoice(db, { intake, entry, vendor, project, total, actorId, emailSummary, note = '', aiFiled = true }) {
   const invoiceId = uuidv4();
   const invoiceNumber = `NUD-${nextInvoiceSeq(db)}`;
   const typeLabel = TYPE_LABELS[entry.invoice_type] || 'Other';
   const notes = [
     entry.summary || emailSummary || 'Invoice received by email.',
-    `Read by AI from the invoices@ email "${text(intake.subject, 150)}" from ${text(intake.from_email, 150)}.`,
+    `${aiFiled ? 'Read by AI from' : 'From'} the invoices@ email "${text(intake.subject, 150)}" from ${text(intake.from_email, 150)}.`,
     `Category: ${entry.category}. Type: ${typeLabel}${entry.billing_stage !== 'unclear' ? ` (${entry.billing_stage})` : ''}.`,
     entry.invoice_date ? `Invoice date: ${entry.invoice_date}.` : '',
     entry.due_date ? `Due: ${entry.due_date}.` : '',
@@ -809,12 +810,13 @@ function fileInvoice(db, { intake, entry, vendor, project, total, actorId, email
       vendor_name, vendor_email, external_invoice_number, submitted_at,
       category, invoice_type, vendor_profile_id, vendor_invoice_date, vendor_due_date, ai_filed
     )
-    VALUES (?, ?, ?, ?, 'submitted', ?, ?, 'email', ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, 1)
+    VALUES (?, ?, ?, ?, 'submitted', ?, ?, 'email', ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?)
   `).run(
     invoiceId, invoiceNumber, project.id, actorId, notes, total,
     intake.id, entry.source_attachment_id, entry.source_attachment_name,
     vendor.name, entry.vendor.email || null, entry.invoice_number || null,
-    entry.category, entry.invoice_type, vendor.id, entry.invoice_date || null, entry.due_date || null
+    entry.category, entry.invoice_type, vendor.id, entry.invoice_date || null, entry.due_date || null,
+    aiFiled ? 1 : 0
   );
   const insertLine = db.prepare('INSERT INTO invoice_line_items (id, invoice_id, description, amount, sort_order) VALUES (?, ?, ?, ?, ?)');
   lineItemsFor(entry, total).forEach((line, index) => insertLine.run(uuidv4(), invoiceId, line.description, line.amount, index));
@@ -841,7 +843,7 @@ function fileInvoice(db, { intake, entry, vendor, project, total, actorId, email
   logActivity({
     userId: actorId,
     projectId: project.id,
-    action: 'invoice_email_ai_filed',
+    action: aiFiled ? 'invoice_email_ai_filed' : 'invoice_email_filed',
     entityType: 'invoice',
     entityId: invoiceId,
     details: {
@@ -1348,6 +1350,97 @@ async function rereadIntake(intakeId) {
   return result;
 }
 
+// A person picks the project for an invoice the AI could not place (review queue,
+// Mike 2026-10-27: one click, no scope task). Filed exactly as the AI files - its read,
+// the document on the invoice, vendor matched or added - under the chosen project.
+// Vendor, amount and invoice number are only needed when the AI could not read them.
+// QuickBooks stays the source of truth: once the bill is entered there, the monitor
+// moves the invoice to the bill's class and takes its amount.
+function assignItem(db, { intakeId, itemId, projectId, actorId, actorName = 'the office', vendorName = '', total = null, invoiceNumber = '' }) {
+  const fail = (message, statusCode = 400) => Object.assign(new Error(message), { statusCode });
+  let result;
+  db.transaction(() => {
+    const item = db.prepare('SELECT * FROM invoice_inbox_items WHERE id = ? AND intake_id = ?').get(itemId, intakeId);
+    if (!item) throw fail('Invoice not found in this email', 404);
+    if (item.invoice_id || !['needs_project', 'needs_review'].includes(item.status)) throw fail('This invoice is already filed.', 409);
+    const intake = db.prepare('SELECT * FROM invoice_email_intake WHERE id = ?').get(intakeId);
+    const project = db.prepare('SELECT id, address FROM projects WHERE id = ?').get(projectId);
+    if (!project) throw fail('Choose the project.');
+
+    let entry = {};
+    try { entry = JSON.parse(item.read_json || '{}'); } catch (_) { entry = {}; }
+    entry = {
+      line_items: [], tax: null, amount_due: null, billing_stage: 'unclear',
+      category: item.category || 'Miscellaneous', invoice_type: item.invoice_type || 'other',
+      summary: item.summary || intake.subject || '',
+      source_attachment_id: item.source_attachment_id || null, source_attachment_name: item.source_attachment_name || null,
+      ...entry,
+    };
+    entry.vendor = entry.vendor || {};
+    const typedNumber = text(invoiceNumber, 80);
+    if (typedNumber) entry.invoice_number = typedNumber;
+    // An email the AI could not read: its one attachment is the invoice.
+    if (!entry.source_attachment_id) {
+      const files = parseAttachments(intake.attachments_json);
+      if (files.length === 1) {
+        entry.source_attachment_id = files[0].id;
+        entry.source_attachment_name = files[0].original_name || null;
+      }
+    }
+
+    const typedTotal = String(total ?? '').replace(/[$,\s]/g, '');
+    const amount = typedTotal ? Math.round(Number(typedTotal) * 100) / 100 : Number(item.total);
+    if (!Number.isFinite(amount) || amount <= 0) throw fail('Enter the invoice amount.');
+
+    const typedVendor = text(vendorName, 150);
+    const sameVendor = !typedVendor || looseVendorKey(typedVendor) === looseVendorKey(item.vendor_name);
+    let vendor = null;
+    if (item.vendor_profile_id && sameVendor) {
+      const row = db.prepare('SELECT id, vendor_name FROM contractor_profiles WHERE id = ?').get(item.vendor_profile_id);
+      if (row) vendor = { id: row.id, name: row.vendor_name, created: false };
+    }
+    if (!vendor) {
+      const name = typedVendor || text(item.vendor_name, 150);
+      if (!name) throw fail('Enter the vendor.');
+      // The AI's contact details belong to the vendor it read, not to a different one typed in.
+      vendor = createVendor(db, sameVendor ? entry : { ...entry, vendor: {} }, { readable: true, id: null, name, created: false });
+    }
+
+    const invoice = fileInvoice(db, {
+      intake, entry, vendor, project, total: amount, actorId, emailSummary: intake.extracted_summary,
+      note: `Project chosen by ${actorName} in the invoices@ review queue.`, aiFiled: false,
+    });
+    db.prepare(`
+      UPDATE invoice_inbox_items
+      SET status = 'filed_by_office', invoice_id = ?, project_id = ?, vendor_profile_id = ?, vendor_name = ?, total = ?,
+          invoice_number = COALESCE(?, invoice_number), reason = ?, updated_at = datetime('now')
+      WHERE id = ?
+    `).run(
+      invoice.invoiceId, project.id, vendor.id, vendor.name, amount, typedNumber || null,
+      `Filed by ${actorName} to ${project.address} as ${invoice.invoiceNumber}.`, item.id
+    );
+    const open = db.prepare("SELECT COUNT(*) AS n FROM invoice_inbox_items WHERE intake_id = ? AND status IN ('needs_project','needs_review')").get(intakeId).n;
+    db.prepare(`
+      UPDATE invoice_email_intake
+      SET status = CASE WHEN ? = 0 THEN 'filed' ELSE status END,
+          agent_status = CASE WHEN ? = 0 THEN 'filed' ELSE agent_status END,
+          matched_project_id = COALESCE(matched_project_id, ?), updated_at = datetime('now')
+      WHERE id = ?
+    `).run(open, open, project.id, intakeId);
+    feed(db, {
+      kind: 'filed_by_office', intakeId, invoiceId: invoice.invoiceId, projectId: project.id,
+      message: `${vendor.name} ${money(amount)}${entry.invoice_number ? ` #${entry.invoice_number}` : ''}: ${actorName} chose ${project.address} - filed as ${invoice.invoiceNumber}.`,
+    });
+    if (vendor.created) {
+      feed(db, { kind: 'vendor_added', intakeId, invoiceId: invoice.invoiceId, message: `New vendor added to Contractors / Suppliers: ${vendor.name}.` });
+    }
+    result = { invoiceId: invoice.invoiceId, invoiceNumber: invoice.invoiceNumber, project, vendor, total: amount, open };
+  })();
+  // Link it to its QuickBooks bill now if the office already entered one.
+  monitor.kick('inbox');
+  return result;
+}
+
 function statusSummary() {
   return {
     enabled: enabled(),
@@ -1388,6 +1481,7 @@ module.exports = {
   pollOnce,
   processIntake,
   rereadIntake,
+  assignItem,
   notifyOffice,
   statusSummary,
   // shared with services/invoiceReconciliation.js (filing from QuickBooks' answer)
