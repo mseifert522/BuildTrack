@@ -2,6 +2,7 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 const convertHeic = require('heic-convert');
+const { convertHeicFileToJpegOffThread } = require('./heicWorker');
 
 const HEIC_EXTENSIONS = new Set(['.heic', '.heif']);
 const HEIC_MIME_TYPES = new Set([
@@ -47,6 +48,14 @@ async function getAvailablePath(preferredPath) {
 
 async function convertHeicFileToJpeg(sourcePath, preferredTargetPath) {
   const targetPath = await getAvailablePath(preferredTargetPath);
+  // 2026-10-28: decode in a worker thread, encode in libvips (see heicWorker.js). null =
+  // over its pixel gate; any failure falls back to the old in-process path below.
+  try {
+    const converted = await convertHeicFileToJpegOffThread(sourcePath, targetPath);
+    if (converted) return converted;
+  } catch (err) {
+    console.warn('HEIC worker conversion failed, using heic-convert:', err.message || err);
+  }
   const input = await fsp.readFile(sourcePath);
   const output = await convertHeic({
     buffer: input,
@@ -72,12 +81,10 @@ async function convertHeicUploadToJpeg(file) {
   const preferredTargetPath = path.join(path.dirname(originalPath), nextFilename);
   const { targetPath, size } = await convertHeicFileToJpeg(originalPath, preferredTargetPath);
 
-  try {
-    await fsp.unlink(originalPath);
-  } catch (err) {
-    console.warn('Failed to remove original HEIC upload after conversion:', err.message || err);
-  }
-
+  // 2026-10-28: the HEIC is kept (it was deleted, leaving a q90 re-encode without the
+  // phone's EXIF/ICC as the only copy). photos.js records it in photos.image_original_path
+  // and removes it with the photo, like video_original_path.
+  file.heic_original_path = originalPath;
   file.path = targetPath;
   file.filename = path.basename(targetPath);
   file.mimetype = 'image/jpeg';

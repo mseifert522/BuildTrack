@@ -1629,12 +1629,15 @@ function findInvoiceForBill(db, bill) {
   const candidates = db.prepare(`
     SELECT *
     FROM invoices
-    WHERE (? != '' AND (
+    WHERE ((? != '' AND (
         lower(COALESCE(external_invoice_number, '')) = ?
         OR lower(COALESCE(invoice_number, '')) = ?
         OR lower(COALESCE(quickbooks_doc_number, '')) = ?
       ))
-      OR (? > 0 AND ? != '' AND ABS(COALESCE(total, 0) - ?) < 0.01 AND lower(COALESCE(vendor_name, '')) = ?)
+      OR (? > 0 AND ? != '' AND ABS(COALESCE(total, 0) - ?) < 0.01 AND lower(COALESCE(vendor_name, '')) = ?))
+      -- A piece of a split vendor invoice is matched only by the invoice monitor, as part
+      -- of the whole split (services/invoiceReconciliation.js linkSplitGroups).
+      AND split_group_id IS NULL
     ORDER BY
       CASE
         WHEN ? != '' AND lower(COALESCE(external_invoice_number, '')) = ? THEN 0
@@ -2351,6 +2354,35 @@ function statusSummary(db) {
   };
 }
 
+// 2026-10-28: the Dashboard's Friday payment chip needs only these two numbers, and it
+// polls every 60 s. statusSummary scans every bill (with a split-line subquery per bill)
+// and /status also flushes the API-usage counters, so this is the cheap twin: the same
+// approved-and-unpaid rule, deleted and excluded-vendor filters, from the local mirror
+// of QuickBooks (pending pre-QuickBooks approvals are not counted, same as /status).
+// `payment_approval_status = approved` equals statusSummary's COALESCE(...) = approved
+// (the default is never 'approved') and lets SQLite use idx_quickbooks_bills_payment_approval.
+function paymentQueueSummary(db) {
+  const excludedVendors = excludedQuickBooksBillVendors();
+  const where = [
+    `qb.payment_approval_status = '${PAYMENT_APPROVAL_STATUS}'`,
+    "qb.payment_status != 'paid'",
+    `COALESCE(qb.payment_approval_status, '${PAYMENT_APPROVAL_DEFAULT_STATUS}') != '${PAYMENT_APPROVAL_DELETED_STATUS}'`,
+  ];
+  if (excludedVendors.length) {
+    where.push(`lower(trim(COALESCE(qb.vendor_name, ''))) NOT IN (${excludedVendors.map(() => '?').join(', ')})`);
+  }
+  const row = db.prepare(`
+    SELECT COUNT(*) AS approved_payment_count,
+           ROUND(COALESCE(SUM(qb.balance), 0), 2) AS approved_payment_balance
+    FROM quickbooks_bills qb
+    WHERE ${where.join(' AND ')}
+  `).get(...excludedVendors);
+  return {
+    approved_payment_count: Number(row?.approved_payment_count || 0),
+    approved_payment_balance: Number(row?.approved_payment_balance || 0),
+  };
+}
+
 function quickBooksBillSelectSql() {
   return `
       qb.qbo_id,
@@ -2542,15 +2574,31 @@ const PENDING_INVOICE_ROW_PREFIX = 'bt-';
 // The intake's hard floor (nothing received before 2026-10-25 ET is in the panel).
 const PENDING_INVOICE_SINCE = '2026-10-25';
 
+// A vendor invoice split across projects (invoices.split_group_id, Mike 2026-10-28) is
+// ONE row: `bt-g-<group id>`, the vendor invoice's total, one split line per project
+// (the Invoice Center's split-lines pull-down), one approval for all its pieces.
+const PENDING_GROUP_ROW_PREFIX = 'bt-g-';
+
 function pendingInvoiceIdFromRowId(rowId) {
   const value = String(rowId || '');
   return value.startsWith(PENDING_INVOICE_ROW_PREFIX) ? value.slice(PENDING_INVOICE_ROW_PREFIX.length) : null;
 }
 
-function pendingInvoiceRows(db, invoiceId = null) {
-  return db.prepare(`
+// The invoices a waiting row stands for: one, or every piece of a split.
+function pendingRowInvoiceIds(db, rowId) {
+  const value = String(rowId || '');
+  if (value.startsWith(PENDING_GROUP_ROW_PREFIX)) {
+    return db.prepare('SELECT id FROM invoices WHERE split_group_id = ? ORDER BY datetime(created_at), id').all(value.slice(PENDING_GROUP_ROW_PREFIX.length)).map(r => r.id);
+  }
+  const id = pendingInvoiceIdFromRowId(value);
+  return id ? [id] : [];
+}
+
+function pendingInvoiceRows(db, rowId = null) {
+  require('../services/invoiceProjects').ensureSchema(db);
+  const pieces = db.prepare(`
     SELECT i.id, i.invoice_number, i.external_invoice_number, i.status, i.total, i.vendor_name, i.vendor_email,
-           i.project_id, i.vendor_invoice_date, i.vendor_due_date, i.created_at,
+           i.project_id, i.vendor_invoice_date, i.vendor_due_date, i.created_at, i.split_group_id, i.split_group_total,
            i.pay_approval_status, i.pay_approved_at, i.pay_approved_by, i.pay_run_date,
            p.address AS project_address, p.job_name AS project_job_name, u.name AS approved_by_name
     FROM invoices i
@@ -2559,15 +2607,50 @@ function pendingInvoiceRows(db, invoiceId = null) {
     WHERE i.source = 'email'
       AND i.status IN ('submitted', 'approved')
       AND date(i.created_at) >= ?
-      AND (? IS NULL OR i.id = ?)
       AND NOT EXISTS (SELECT 1 FROM invoice_qbo_links l WHERE l.invoice_id = i.id)
       AND NOT EXISTS (
         SELECT 1 FROM quickbooks_bills qb
         WHERE qb.matched_invoice_id = i.id AND COALESCE(qb.payment_approval_status, '${PAYMENT_APPROVAL_DEFAULT_STATUS}') != '${PAYMENT_APPROVAL_DELETED_STATUS}'
       )
-    ORDER BY i.created_at ASC
-  `).all(PENDING_INVOICE_SINCE, invoiceId, invoiceId).map(row => ({
-    qbo_id: `${PENDING_INVOICE_ROW_PREFIX}${row.id}`,
+    ORDER BY i.created_at ASC, i.id ASC
+  `).all(PENDING_INVOICE_SINCE);
+  // A split waits as one row for the pieces NOT in QuickBooks yet: whole while none is,
+  // then only what is left (the office entering it project by project) - each entered
+  // piece is carried by its QuickBooks bill row, never counted twice or dropped.
+  const groupSize = new Map();
+  for (const row of db.prepare('SELECT split_group_id, COUNT(*) AS n FROM invoices WHERE split_group_id IS NOT NULL GROUP BY split_group_id').all()) {
+    groupSize.set(row.split_group_id, row.n);
+  }
+  const rows = [];
+  const groups = new Map();
+  for (const piece of pieces) {
+    if (!piece.split_group_id) { rows.push(pendingRowFor(piece, [piece])); continue; }
+    if (!groups.has(piece.split_group_id)) groups.set(piece.split_group_id, []);
+    groups.get(piece.split_group_id).push(piece);
+  }
+  for (const [groupId, list] of groups) {
+    rows.push(pendingRowFor(list[0], list, groupId, list.length === groupSize.get(groupId)));
+  }
+  rows.sort((a, b) => String(a.first_seen_at).localeCompare(String(b.first_seen_at)));
+  return rowId ? rows.filter(row => row.qbo_id === rowId) : rows;
+}
+
+function pendingRowFor(row, pieces, groupId = null, whole = true) {
+  const piecesTotal = Math.round(pieces.reduce((s, p) => s + Number(p.total || 0), 0) * 100) / 100;
+  const total = groupId ? (whole ? Number(row.split_group_total ?? piecesTotal) : piecesTotal) : Number(row.total || 0);
+  const splitLines = groupId ? pieces.map((piece, index) => ({
+    id: piece.id,
+    qbo_bill_id: `${PENDING_GROUP_ROW_PREFIX}${groupId}`,
+    line_num: index + 1,
+    description: `${piece.invoice_number} - ${String(piece.project_address || '').split(',')[0]}`,
+    amount: Number(piece.total || 0),
+    project_id: piece.project_id,
+    project_address: piece.project_address,
+    project_job_name: piece.project_job_name,
+    class_name: null,
+  })) : [];
+  return {
+    qbo_id: groupId ? `${PENDING_GROUP_ROW_PREFIX}${groupId}` : `${PENDING_INVOICE_ROW_PREFIX}${row.id}`,
     buildtrack_only: true,
     bt_invoice_number: row.external_invoice_number || null,
     doc_number: row.external_invoice_number || null,
@@ -2577,8 +2660,8 @@ function pendingInvoiceRows(db, invoiceId = null) {
     qbo_class_name: null,
     txn_date: row.vendor_invoice_date || String(row.created_at || '').slice(0, 10),
     due_date: row.vendor_due_date || null,
-    total_amt: Number(row.total || 0),
-    balance: Number(row.total || 0),
+    total_amt: total,
+    balance: total,
     payment_status: 'unpaid',
     payment_approval_status: row.pay_approval_status || PAYMENT_APPROVAL_DEFAULT_STATUS,
     payment_approved_at: row.pay_approved_at,
@@ -2592,33 +2675,45 @@ function pendingInvoiceRows(db, invoiceId = null) {
     vendor_receipt_notified_at: null,
     vendor_receipt_notified_email: null,
     vendor_email: row.vendor_email || null,
-    private_note: 'Not in QuickBooks yet - joins its QuickBooks bill automatically once the office enters it.',
-    matched_invoice_id: row.id,
-    project_id: row.project_id,
+    private_note: groupId
+      ? (whole
+        ? `Not in QuickBooks yet - one invoice split by job site across ${pieces.length} projects; joins its QuickBooks bill automatically once the office enters it by class.`
+        : `Partly in QuickBooks - the ${pieces.length} project${pieces.length === 1 ? '' : 's'} below ${pieces.length === 1 ? 'is' : 'are'} not entered yet; the entered projects are on their QuickBooks bill rows.`)
+      : 'Not in QuickBooks yet - joins its QuickBooks bill automatically once the office enters it.',
+    // A split pairs with no single BuildTrack invoice: its projects are its split lines.
+    matched_invoice_id: groupId ? null : row.id,
+    project_id: groupId ? null : row.project_id,
     qbo_updated_at: null,
     first_seen_at: row.created_at,
     last_seen_at: row.created_at,
     invoice_number: row.invoice_number,
     external_invoice_number: row.external_invoice_number,
     buildtrack_status: row.status,
-    project_address: row.project_address,
-    project_job_name: row.project_job_name,
+    project_address: groupId ? null : row.project_address,
+    project_job_name: groupId ? null : row.project_job_name,
+    split_group_id: groupId,
+    split_invoice_ids: pieces.map(p => p.id),
+    split_lines: splitLines,
+    split_line_count: splitLines.length,
+    matched_split_line_count: splitLines.filter(line => line.project_id).length,
+    unmatched_split_line_count: splitLines.filter(line => !line.project_id).length,
     lines: [],
-  }));
+  };
 }
 
 function setPendingInvoicePayApproval(req, res, approve) {
   const db = getDb();
-  const invoiceId = pendingInvoiceIdFromRowId(req.params.qboId);
-  const [row] = pendingInvoiceRows(db, invoiceId);
+  const rowId = String(req.params.qboId || '');
+  const [row] = pendingInvoiceRows(db, rowId);
   if (!row) {
     return res.status(409).json({ error: 'This invoice is now in QuickBooks. Reload the Invoice Center and use its QuickBooks row.' });
   }
-  if (approve && !row.project_id) {
+  const placed = row.split_group_id ? row.split_line_count > 0 && row.unmatched_split_line_count === 0 : Boolean(row.project_id);
+  if (approve && !placed) {
     return res.status(409).json({ error: 'Choose the project for this invoice before approving it for pay.' });
   }
   const runDate = approve ? nextPaymentRunDate(req.body?.payment_run_date || new Date()) : null;
-  db.prepare(`
+  const update = db.prepare(`
     UPDATE invoices
     SET pay_approval_status = ?,
         pay_approved_at = CASE WHEN ? THEN COALESCE(pay_approved_at, datetime('now')) ELSE NULL END,
@@ -2626,15 +2721,24 @@ function setPendingInvoicePayApproval(req, res, approve) {
         pay_run_date = ?,
         updated_at = datetime('now')
     WHERE id = ?
-  `).run(approve ? PAYMENT_APPROVAL_STATUS : null, approve ? 1 : 0, approve ? 1 : 0, req.user.id, runDate, invoiceId);
-  const [updated] = pendingInvoiceRows(db, invoiceId);
+  `);
+  // One decision for a split: every waiting piece carries it (each hands it to its bill);
+  // pieces already on a QuickBooks bill row are approved there.
+  const ids = row.split_group_id ? row.split_invoice_ids : pendingRowInvoiceIds(db, rowId);
+  db.transaction(() => {
+    for (const id of ids) update.run(approve ? PAYMENT_APPROVAL_STATUS : null, approve ? 1 : 0, approve ? 1 : 0, req.user.id, runDate, id);
+  })();
+  const [updated] = pendingInvoiceRows(db, rowId);
   logActivity({
     userId: req.user.id,
     projectId: updated.project_id || undefined,
     action: approve ? 'invoice_approved_for_pay_before_quickbooks' : 'invoice_removed_from_pay_queue_before_quickbooks',
     entityType: 'invoice',
-    entityId: invoiceId,
-    details: { vendor_name: updated.vendor_name, invoice_number: updated.invoice_number, total: updated.total_amt, payment_run_date: updated.payment_run_date },
+    entityId: ids[0],
+    details: {
+      vendor_name: updated.vendor_name, invoice_number: updated.invoice_number, total: updated.total_amt, payment_run_date: updated.payment_run_date,
+      ...(row.split_group_id ? { split_invoice_ids: ids } : {}),
+    },
   });
   return res.json(updated);
 }
@@ -2645,17 +2749,20 @@ function setPendingInvoicePayApproval(req, res, approve) {
 function carryInvoicePayApprovalToBills(db = getDb()) {
   const rows = db.prepare(`
     SELECT i.id AS invoice_id, i.invoice_number, i.pay_approved_at, i.pay_approved_by, i.pay_run_date,
-           qb.qbo_id, qb.vendor_name, qb.balance, qb.project_id, COALESCE(l.part, 'full') AS part
+           qb.qbo_id, qb.vendor_name, qb.balance, qb.project_id, COALESCE(l.part, 'full') AS part,
+           u.name AS approver_name, u.email AS approver_email
     FROM invoices i
     JOIN quickbooks_bills qb
       ON qb.matched_invoice_id = i.id
       OR qb.qbo_id IN (SELECT qbo_bill_id FROM invoice_qbo_links WHERE invoice_id = i.id)
     LEFT JOIN invoice_qbo_links l ON l.invoice_id = i.id AND l.qbo_bill_id = qb.qbo_id
+    LEFT JOIN users u ON u.id = i.pay_approved_by
     WHERE i.pay_approval_status = ? AND i.pay_carried_at IS NULL
   `).all(PAYMENT_APPROVAL_STATUS);
   if (!rows.length) return 0;
   const today = new Date().toISOString().slice(0, 10);
   let approved = 0;
+  const carried = [];
   db.transaction(() => {
     const done = new Set();
     for (const row of rows) {
@@ -2665,12 +2772,17 @@ function carryInvoicePayApprovalToBills(db = getDb()) {
       const result = db.prepare(`
         UPDATE quickbooks_bills
         SET payment_approval_status = ?, payment_approved_at = COALESCE(payment_approved_at, ?),
-            payment_approved_by = COALESCE(payment_approved_by, ?), payment_run_date = ?, updated_at = datetime('now')
+            payment_approved_by = COALESCE(payment_approved_by, ?), payment_run_date = ?,
+            payment_approval_queued_at = datetime('now'), updated_at = datetime('now')
         WHERE qbo_id = ? AND payment_status != 'paid'
           AND COALESCE(payment_approval_status, '${PAYMENT_APPROVAL_DEFAULT_STATUS}') = '${PAYMENT_APPROVAL_DEFAULT_STATUS}'
       `).run(PAYMENT_APPROVAL_STATUS, row.pay_approved_at, row.pay_approved_by, runDate, row.qbo_id);
       if (!result.changes) continue;
       approved += 1;
+      carried.push({
+        qbo_id: row.qbo_id,
+        user: { id: row.pay_approved_by || null, name: row.approver_name || null, email: row.approver_email || null },
+      });
       logActivity({
         userId: row.pay_approved_by || undefined,
         projectId: row.project_id || undefined,
@@ -2683,6 +2795,11 @@ function carryInvoicePayApprovalToBills(db = getDb()) {
     const mark = db.prepare(`UPDATE invoices SET pay_carried_at = datetime('now') WHERE id = ?`);
     for (const id of done) mark.run(id);
   })();
+  // 2026-10-28: a carried approval emails management exactly like one given in the
+  // Invoice Center: same debounced digest, queued only after the commit and only for
+  // bills this run actually approved (a bill approved directly is not announced twice).
+  // queueApprovalDigest honors the digest / green-container kill switches itself.
+  for (const entry of carried) queueApprovalDigest({ qbo_id: entry.qbo_id }, entry.user);
   if (approved) console.log(`[QBO] ${approved} bill(s) took the Approve to Pay given before they were in QuickBooks.`);
   return approved;
 }
@@ -2941,7 +3058,7 @@ function recoverPendingApprovalDigest() {
         AND qb.payment_status != 'paid'
         AND qb.payment_approval_notified_at IS NULL
         AND qb.payment_approved_at IS NOT NULL
-        AND julianday('now') - julianday(qb.payment_approved_at) <= ?
+        AND julianday('now') - julianday(COALESCE(qb.payment_approval_queued_at, qb.payment_approved_at)) <= ?
     `).all(PAYMENT_APPROVAL_STATUS, APPROVAL_DIGEST_RECOVERY_WINDOW_HOURS / 24);
     if (!rows.length) return;
     for (const row of rows) {
@@ -4179,6 +4296,16 @@ router.get('/status', authorize(...MANAGEMENT_ROLES), (req, res) => {
   });
 });
 
+// Same roles as /status; see paymentQueueSummary for why it exists.
+router.get('/payment-queue-summary', authorize(...MANAGEMENT_ROLES), (req, res) => {
+  try {
+    res.json(paymentQueueSummary(getDb()));
+  } catch (err) {
+    console.error('[QBO] Payment queue summary failed:', err.message);
+    res.status(500).json({ error: 'Failed to load the payment queue summary.' });
+  }
+});
+
 router.get('/connect-url', authorize(...QUICKBOOKS_ADMIN_ROLES), (req, res) => {
   const config = qboConfig();
   if (!config.configured) {
@@ -4434,6 +4561,7 @@ router.delete('/bills/:qboId', authorize(...QUICKBOOKS_ADMIN_ROLES), (req, res) 
         UPDATE quickbooks_bills
         SET payment_approval_status = ?,
             payment_approved_at = NULL,
+            payment_approval_queued_at = NULL,
             payment_approved_by = NULL,
             payment_run_date = NULL,
             payment_approval_notified_at = NULL,
@@ -4489,6 +4617,7 @@ router.put('/bills/:qboId/approve-for-pay', authorize(...QUICKBOOKS_ADMIN_ROLES)
         payment_approved_at = COALESCE(payment_approved_at, datetime('now')),
         payment_approved_by = COALESCE(payment_approved_by, ?),
         payment_run_date = ?,
+        payment_approval_queued_at = datetime('now'),
         updated_at = datetime('now')
     WHERE qbo_id = ?
   `).run(PAYMENT_APPROVAL_STATUS, req.user.id, paymentRunDate, bill.qbo_id);
@@ -4529,6 +4658,7 @@ router.put('/bills/:qboId/remove-from-pay', authorize(...QUICKBOOKS_ADMIN_ROLES)
     UPDATE quickbooks_bills
     SET payment_approval_status = ?,
         payment_approved_at = NULL,
+        payment_approval_queued_at = NULL,
         payment_approved_by = NULL,
         payment_run_date = NULL,
         payment_approval_notified_at = NULL,
@@ -4691,6 +4821,7 @@ router.put('/bills/:qboId/mark-paid-from-queue', authorize(...QUICKBOOKS_ADMIN_R
       UPDATE quickbooks_bills
       SET payment_approval_status = ?,
           payment_approved_at = NULL,
+          payment_approval_queued_at = NULL,
           payment_approved_by = NULL,
           payment_run_date = NULL,
           payment_approval_notified_at = NULL,
@@ -4943,6 +5074,7 @@ router.__test = {
   recordWebhookEvents,
   requestChangeCheck,
   missingQuickBooksBillIds,
+  paymentQueueSummary,
   paymentStatusForBill,
   queuedUnpaidQuickBooksBillIds,
   reconcileMissingQuickBooksBills,

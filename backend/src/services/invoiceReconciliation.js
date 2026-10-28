@@ -94,6 +94,13 @@ function enabled() {
   return String(process.env.INVOICE_MONITOR_ENABLED || 'true').trim().toLowerCase() !== 'false';
 }
 
+// Same switches routes/quickbooks.js approvalDigestEnabled() inherits; a green
+// container sets them false to stay silent during a blue-green overlap.
+function paymentQueueEmailEnabled() {
+  return process.env.QBO_PAYMENT_QUEUE_NOTIFY_ENABLED !== 'false'
+    && process.env.PAYMENT_QUEUE_NOTIFY_ENABLED !== 'false';
+}
+
 function sinceDate() {
   const raw = String(process.env.INVOICE_MONITOR_SINCE || '').trim();
   return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : '2026-08-01';
@@ -505,7 +512,76 @@ function invoiceStatus(invoice, links, billsById, now) {
   return { status, quickbooksTotal, paidAmount, billCount: live.length, issues };
 }
 
+// A vendor invoice split by job site (invoices.split_group_id, one piece per project,
+// Mike 2026-10-28) is matched AS A WHOLE, QuickBooks deciding: either one bill whose
+// class lines carry every piece's project (each piece links as that project's share and
+// follows QuickBooks' amount), or - when the office entered it per project - one
+// single-project bill per piece. A piece is never matched alone to the whole bill: that
+// would put the full amount on one project. -> number of links made.
+function linkSplitGroups(db, invoices, bills, billsById, linksFor, receivedAtFor) {
+  const groups = new Map();
+  for (const invoice of invoices) {
+    if (!invoice.split_group_id || !(Number(invoice.total) > 0)) continue;
+    if (!groups.has(invoice.split_group_id)) groups.set(invoice.split_group_id, []);
+    groups.get(invoice.split_group_id).push(invoice);
+  }
+  let linked = 0;
+  for (const pieces of groups.values()) {
+    const unlinked = pieces.filter(piece => !linksFor.all(piece.id).some(link => {
+      const bill = billsById.get(String(link.qbo_bill_id));
+      return bill && !bill.deleted;
+    }));
+    if (!unlinked.length) continue;
+    const first = pieces[0];
+    const groupTotal = round2(Number(first.split_group_total) || pieces.reduce((acc, p) => acc + Number(p.total || 0), 0));
+    const receivedAt = receivedAtFor.get(first.id)?.received_at || first.created_at;
+    const window = { invoiceDate: first.vendor_invoice_date || null, receivedAt };
+    const identity = vendorIdentity(db, {
+      vendorName: first.vendor_name, vendorProfileId: first.vendor_profile_id,
+      quickbooksVendorId: first.quickbooks_vendor_id, quickbooksVendorName: first.quickbooks_vendor_name,
+    });
+    const docHashes = new Set(pieces.flatMap(piece => [...docHashesForInvoice(db, piece.id)]));
+    const key = numberKey(first.external_invoice_number);
+    const candidates = bills.filter(bill => !bill.deleted && !bill.linkedTo && billFits(bill, window)
+      && (sameVendor(identity, bill) || carriesDocument(bill, docHashes)));
+    const link = (piece, bill, part, amountFor) => {
+      linkBills(db, piece, { bills: [bill], method: 'split_group', part, amountFor }, billsById);
+      linked += 1;
+    };
+    // One bill split by class across every project of the split.
+    const covering = candidates.filter(bill => pieces.every(piece => bill.shares.has(piece.project_id))
+      && (near(bill.total, groupTotal) || carriesDocument(bill, docHashes) || noteHasNumber(bill.noteKey, key)));
+    if (covering.length === 1 && unlinked.length === pieces.length) {
+      const bill = covering[0];
+      for (const piece of pieces) link(piece, bill, 'project_share', () => round2(bill.shares.get(piece.project_id)));
+      bill.linkedTo = 'shared';
+      continue;
+    }
+    if (covering.length > 1) continue; // two possible bills: a person decides
+    // Entered per project: each piece's own single-class bill for its amount.
+    for (const piece of unlinked) {
+      const own = candidates.filter(bill => !bill.linkedTo && bill.shares.size === 1 && bill.shares.has(piece.project_id) && near(bill.total, piece.total));
+      if (own.length === 1) link(piece, own[0], 'full', null);
+    }
+    // Entered in part: a class-split bill holding only projects of the split that are still
+    // open, known by this invoice's number or document (or adding up to exactly those
+    // pieces). Its pieces link as their project shares; the rest keep waiting.
+    for (const bill of candidates) {
+      if (bill.linkedTo || bill.shares.size < 2) continue;
+      const open = new Map(pieces.filter(piece => !linksFor.all(piece.id).length).map(piece => [piece.project_id, piece]));
+      const projectIds = [...bill.shares.keys()];
+      if (!projectIds.every(id => open.has(id))) continue;
+      const sum = round2(projectIds.reduce((acc, id) => acc + Number(open.get(id).total || 0), 0));
+      if (!(carriesDocument(bill, docHashes) || noteHasNumber(bill.noteKey, key) || near(bill.total, sum))) continue;
+      for (const id of projectIds) link(open.get(id), bill, 'project_share', () => round2(bill.shares.get(id)));
+      bill.linkedTo = 'shared';
+    }
+  }
+  return linked;
+}
+
 function reconcileInvoices(db, bills, billsById, now, fileMoves = []) {
+  require('./invoiceProjects').ensureSchema(db);
   const invoices = db.prepare(`
     SELECT i.*, p.address AS project_address
     FROM invoices i
@@ -521,7 +597,7 @@ function reconcileInvoices(db, bills, billsById, now, fileMoves = []) {
     WHERE a.invoice_id IS NOT NULL GROUP BY a.invoice_id
   `).all().map(row => [row.invoice_id, row]));
   const issues = [];
-  let linked = 0;
+  let linked = linkSplitGroups(db, invoices, bills, billsById, linksFor, receivedAtFor);
   let changed = 0;
   let followed = 0;
   for (const invoice of invoices) {
@@ -535,7 +611,7 @@ function reconcileInvoices(db, bills, billsById, now, fileMoves = []) {
     const window = { invoiceDate: invoice.vendor_invoice_date || null, receivedAt };
     // A full-amount bill the QuickBooks sync already matched: adopt it - only when it is
     // dated for this invoice (the sync once matched an August $250 bill to an October one).
-    if (!links.length && invoice.quickbooks_bill_id && billsById.has(String(invoice.quickbooks_bill_id))) {
+    if (!links.length && !invoice.split_group_id && invoice.quickbooks_bill_id && billsById.has(String(invoice.quickbooks_bill_id))) {
       const bill = billsById.get(String(invoice.quickbooks_bill_id));
       if ((!bill.linkedTo || bill.linkedTo === invoice.id) && billFits(bill, window)) {
         linkBills(db, invoice, { bills: [bill], method: 'quickbooks_sync' }, billsById);
@@ -550,7 +626,8 @@ function reconcileInvoices(db, bills, billsById, now, fileMoves = []) {
     };
     const liveCovered = () => round2(links.filter(isLive).reduce((acc, link) => acc + Number(link.amount || 0), 0));
     const covered = liveCovered();
-    if (covered < round2(invoice.total) - HALF_TOLERANCE) {
+    // Pieces of a split were matched as a whole above, never one by one here.
+    if (!invoice.split_group_id && covered < round2(invoice.total) - HALF_TOLERANCE) {
       const identity = vendorIdentity(db, {
         vendorName: invoice.vendor_name,
         vendorProfileId: invoice.vendor_profile_id,
@@ -1217,10 +1294,23 @@ async function runOnce({ notify = true } = {}) {
     }
     // An emailed invoice approved before the office entered its bill: the linked bill
     // takes that approval now (lazy require - routes/quickbooks.js requires this file).
-    try {
-      result.approvals_carried = require('../routes/quickbooks').carryInvoicePayApprovalToBills(db);
-    } catch (err) {
-      warn(`carrying invoice approvals failed: ${err.message}`);
+    // 2026-10-28: skipped only on a blue-green green container. The carry stamps
+    // invoices.pay_carried_at in the shared DB, so a manual "Check now" on green, whose
+    // approval email is muted, would consume it and nobody would be emailed. Green is
+    // recognized by BOTH the monitor and the Friday-queue email being switched off; the
+    // monitor flag alone is also the production kill switch, and a container with only
+    // the monitor paused must still carry on "Check now" (as before). The approval-
+    // digest-only switch is ignored here: with it off the carry was always silent.
+    // During an overlap blue still runs the old code, which carries without an email;
+    // after cutover the new code carries and queues the email.
+    if (enabled() || paymentQueueEmailEnabled()) {
+      try {
+        result.approvals_carried = require('../routes/quickbooks').carryInvoicePayApprovalToBills(db);
+      } catch (err) {
+        warn(`carrying invoice approvals failed: ${err.message}`);
+      }
+    } else {
+      result.approvals_carried = 0;
     }
     result.office_emailed = notify ? await notifyOffice(db, { force: firstRun }) : 0;
     state.lastRunAt = now;

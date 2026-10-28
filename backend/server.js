@@ -22,7 +22,7 @@ const calendarRoutes = require('./src/routes/calendar');
 const { startCalendarReminderScheduler } = require('./src/services/calendarReminderScheduler');
 const { startActivityRetentionScheduler } = require('./src/services/activityRetentionScheduler');
 const videoNormalization = require('./src/services/videoNormalization');
-const { createUploadsGate, isInlineSafeUpload } = require('./src/middleware/uploadsGate');
+const { createUploadsGate, isInlineSafeUpload, MANAGEMENT_ONLY_DIRS } = require('./src/middleware/uploadsGate');
 const { createImageVariants } = require('./src/middleware/imageVariants');
 const documentRoutes = require('./src/routes/documents');
 const contractorOnboardingRoutes = require('./src/routes/contractorOnboarding');
@@ -46,6 +46,17 @@ const invoiceEmailIntake = require('./src/routes/invoiceEmailIntake');
 const invoiceInboxAgent = require('./src/services/invoiceInboxAgent');
 const invoiceMonitorRoutes = require('./src/routes/invoiceMonitor');
 const invoiceMonitor = require('./src/services/invoiceReconciliation');
+
+// libvips defaults to one thread per HOST core, not the container's 1.5-CPU quota, so
+// thumbnail renders (2 at a time) and HEIC encodes could throttle the whole container,
+// API included. One thread per render; a small operation cache under the 768 MB cap.
+try {
+  const sharp = require('sharp');
+  sharp.concurrency(1);
+  sharp.cache({ memory: 32 });
+} catch (err) {
+  console.warn('sharp is unavailable; image thumbnails will not render:', err.message || err);
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -132,19 +143,40 @@ app.use('/uploads/vendor-setup', (req, res) => res.status(404).json({ error: 'No
 app.use('/uploads/agreements', (req, res) => res.status(404).json({ error: 'Not found' }));
 // Scope of Work PDFs are only ever read through /api/projects/:id/scope-document (audited).
 app.use('/uploads/scope-documents', (req, res) => res.status(404).json({ error: 'Not found' }));
-// `?w=160|480|1280` on an image answers with a small WebP copy (grids and tiles);
-// see src/middleware/imageVariants.js. Runs after the gate, so the same rules apply.
-app.use('/uploads', createUploadsGate(uploadsPath), createImageVariants(uploadsPath), express.static(path.resolve(uploadsPath), {
+// The WebP thumbnail/poster cache (src/middleware/imageVariants.js) lives in
+// uploads/.variants and is only ever served through ?w= on the original's URL.
+app.use('/uploads/.variants', (req, res) => res.status(404).json({ error: 'Not found' }));
+// `?w=160|480|1280` on an image answers with a small WebP copy (grids and tiles), and
+// `?w=160|480&poster=1` on a video with a WebP poster frame; see
+// src/middleware/imageVariants.js. Runs after the gate, so the same rules apply.
+// app.locals.uploadVariants.warm() pre-renders them (photos.js after an upload, boot warm-up).
+const uploadsRoot = path.resolve(uploadsPath);
+const uploadVariants = createImageVariants(uploadsPath);
+app.locals.uploadVariants = uploadVariants;
+app.use('/uploads', createUploadsGate(uploadsPath), uploadVariants, express.static(uploadsRoot, {
   index: false,
   setHeaders: (res, filePath) => {
     // Every upload is private: no shared cache (Cloudflare included) may hold a file
     // that now needs a login.
-    if (filePath.includes(`${path.sep}avatars${path.sep}`)) {
-      res.setHeader('Cache-Control', 'private, no-cache, max-age=0, must-revalidate');
-    } else if (filePath.includes(`${path.sep}project-main${path.sep}`)) {
+    const segments = path.relative(uploadsRoot, filePath).split(path.sep);
+    const top = segments[0];
+    if (filePath.includes(`${path.sep}project-main${path.sep}`)) {
       res.setHeader('Cache-Control', 'private, max-age=2592000, immutable');
+    } else if (res.locals.uploadsCacheControl) {
+      // Signed links (uploadsGate.js) keep their own lifetime.
+      res.setHeader('Cache-Control', res.locals.uploadsCacheControl);
+    } else if (isInlineSafeUpload(filePath)
+      && (top === 'avatars' || (segments.length > 1 && !MANAGEMENT_ONLY_DIRS.has(top)))) {
+      // 2026-10-28: photos, videos and PDFs in project folders, and avatars, never change
+      // behind a URL (every write gets a new name: batch stamp + sequence, markup_<id>_<time>,
+      // avatar-<user>-<time>, -web-r<deg>.mp4), so a day in the browser's private cache
+      // saves a gate check and a 304 round trip on every view. Documents, invoices and
+      // quote uploads are not proven immutable and stay on no-cache.
+      res.setHeader('Cache-Control', 'private, max-age=86400');
+    } else if (top === 'avatars') {
+      res.setHeader('Cache-Control', 'private, no-cache, max-age=0, must-revalidate');
     } else {
-      res.setHeader('Cache-Control', res.locals.uploadsCacheControl || 'private, no-cache');
+      res.setHeader('Cache-Control', 'private, no-cache');
     }
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cross-Origin-Resource-Policy', 'same-site');
@@ -403,6 +435,49 @@ export default function BuildTrackAssetRefresh() { return null; }
   });
 }
 
+// Renders the thumbnails pages ask for most, in the background, once after boot:
+// photos at 480 (video posters at 480) and project main photos at 1280. One file at a
+// time at warm priority, only what is missing from uploads/.variants, so after the first
+// run a deploy only checks file dates. UPLOAD_VARIANT_WARMUP_ENABLED=false turns it off.
+const UPLOAD_VARIANT_WARMUP_DELAY_MS = 90 * 1000;
+function startUploadVariantWarmup(variants) {
+  if (process.env.UPLOAD_VARIANT_WARMUP_ENABLED === 'false') return;
+  if (!variants || typeof variants.warm !== 'function') return;
+  const timer = setTimeout(async () => {
+    const startedAt = Date.now();
+    let checked = 0;
+    let rendered = 0;
+    try {
+      const { getDb } = require('./src/db/schema');
+      const db = getDb();
+      // .all(), not .iterate(): an open iterator would make this connection busy for
+      // every request while the walk awaits renders.
+      const mainPhotos = db.prepare(`
+        SELECT main_photo_url FROM projects WHERE main_photo_url LIKE '/uploads/project-main/%'
+      `).all();
+      const photos = db.prepare(`
+        SELECT project_id, filename FROM photos
+        WHERE filename IS NOT NULL
+          AND COALESCE(upload_status, 'uploaded') != 'correction_deleted'
+          AND correction_deleted_at IS NULL
+        ORDER BY created_at DESC
+      `).all();
+      for (const row of mainPhotos) {
+        checked += 1;
+        rendered += await variants.warm(String(row.main_photo_url).split(/[?#]/)[0].slice('/uploads/'.length), [1280]);
+      }
+      for (const row of photos) {
+        checked += 1;
+        rendered += await variants.warm(`${row.project_id}/${row.filename}`, [480]);
+      }
+      console.log(`[uploads] thumbnail warm-up: checked ${checked}, rendered ${rendered} in ${Math.round((Date.now() - startedAt) / 1000)}s`);
+    } catch (err) {
+      console.warn(`[uploads] thumbnail warm-up stopped after ${checked} files:`, err.message || err);
+    }
+  }, UPLOAD_VARIANT_WARMUP_DELAY_MS);
+  if (timer.unref) timer.unref();
+}
+
 // Initialize DB and start server
 async function start() {
   try {
@@ -427,6 +502,8 @@ async function start() {
       invoiceInboxAgent.start();
       // Checks every emailed invoice against what the office enters in QuickBooks.
       invoiceMonitor.start();
+      // Pre-renders missing grid thumbnails and video posters in the background.
+      startUploadVariantWarmup(uploadVariants);
       if (typeof quickBooksRoutes.startQuickBooksAutoSync === 'function') {
         quickBooksRoutes.startQuickBooksAutoSync();
       }

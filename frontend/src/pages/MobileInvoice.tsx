@@ -1,3 +1,4 @@
+import '../styles/mobile-heavy.css';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../lib/api';
@@ -306,7 +307,9 @@ export default function MobileInvoice() {
     <div className="mobile-shell" style={{ background: '#F0F2F5', fontFamily: "'Inter', -apple-system, sans-serif" }}>
 
       {/* ── Header ── */}
-      <div style={{ background: 'linear-gradient(135deg, #0D1117 0%, #181D25 100%)' }}>
+      {/* 2026-10-28: solid colours, not gradients. flat-ui.css strips background-image, so
+          gradient-only backgrounds went transparent and white text vanished in light mode. */}
+      <div style={{ background: '#0D1117' }}>
         <div className="flex items-center gap-3 px-4 pt-4 pb-4">
           <button
             onClick={() => {
@@ -328,7 +331,7 @@ export default function MobileInvoice() {
             <button
               onClick={startNewInvoice}
               className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-bold text-white flex-shrink-0"
-              style={{ background: 'linear-gradient(135deg, #D99D26, #C4891F)' }}
+              style={{ background: '#A96F10' }}
             >
               <Plus className="w-4 h-4" />
               New
@@ -350,7 +353,7 @@ export default function MobileInvoice() {
               <button
                 onClick={startNewInvoice}
                 className="mt-5 px-6 py-3 rounded-2xl font-bold text-white text-sm"
-                style={{ background: 'linear-gradient(135deg, #D99D26, #C4891F)' }}
+                style={{ background: '#A96F10' }}
               >
                 Create Invoice
               </button>
@@ -409,7 +412,7 @@ export default function MobileInvoice() {
 
           {/* Invoice Header Card */}
           <div className="mx-4 mt-4 rounded-2xl overflow-hidden" style={{ background: 'white', boxShadow: '0 2px 12px rgba(0,0,0,0.07)' }}>
-            <div className="h-1.5" style={{ background: 'linear-gradient(90deg, #D99D26, #C4891F)' }} />
+            <div className="h-1.5" style={{ background: '#D99D26' }} />
             <div className="px-5 py-4 space-y-3">
               <div className="flex items-start gap-3">
                 <MapPin className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: '#D99D26' }} />
@@ -703,7 +706,7 @@ export default function MobileInvoice() {
           {/* Live Running Total */}
           <div
             className="mx-4 mt-4 rounded-2xl px-5 py-4"
-            style={{ background: 'linear-gradient(135deg, #0D1117 0%, #181D25 100%)', boxShadow: '0 4px 16px rgba(0,0,0,0.15)' }}
+            style={{ background: '#0D1117', boxShadow: '0 4px 16px rgba(0,0,0,0.15)' }}
           >
             <div className="flex items-center justify-between">
               <div>
@@ -772,7 +775,7 @@ export default function MobileInvoice() {
               onClick={handleSubmit}
               disabled={saving || submitting}
               className="flex items-center justify-center gap-2 py-4 rounded-2xl font-bold text-sm text-white transition-all active:scale-95 disabled:opacity-50"
-              style={{ background: 'linear-gradient(135deg, #D99D26 0%, #C4891F 100%)', boxShadow: '0 4px 16px rgba(217,157,38,0.35)' }}
+              style={{ background: '#A96F10', boxShadow: '0 4px 16px rgba(217,157,38,0.35)' }}
             >
               {submitting
                 ? <div className="w-4 h-4 rounded-full animate-spin" style={{ border: '2px solid rgba(255,255,255,0.3)', borderTopColor: 'white' }} />

@@ -1,3 +1,4 @@
+import '../styles/mobile-heavy.css';
 import { formatEasternDate, formatEasternDateTime } from '../lib/time';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -25,18 +26,17 @@ import {
   X,
 } from 'lucide-react';
 import api from '../lib/api';
-import { uploadThumbSrc } from '../lib/uploadVariants';
+import { uploadPosterSrc, uploadThumbSrc } from '../lib/uploadVariants';
 import { useAuthStore } from '../store/authStore';
 import { fileDropHandlers } from '../lib/fileDrop';
 import {
   appendProgressUploadAudit,
   PROGRESS_MEDIA_ACCEPT,
-  prepareProgressUploadFile,
   type ProgressUploadLocation,
   type ProgressCaptureSource,
 } from '../lib/progressUpload';
 import { MOBILE_DATA_CHANGED_EVENT, notifyMobileDataChanged } from '../lib/mobileEvents';
-import { uploadProjectMedia } from '../lib/projectMediaUpload';
+import { discardChunkedUploadResume, uploadProjectMedia } from '../lib/projectMediaUpload';
 import VoiceTextarea from '../components/VoiceTextarea';
 import PhotoMarkupModal from '../components/PhotoMarkupModal';
 import VideoPlayer from '../components/VideoPlayer';
@@ -146,8 +146,11 @@ const PHOTO_PURPOSES: { value: PhotoPurpose; label: string; helper: string }[] =
 const SUPPORTED_MEDIA_TYPES = /^(image|video)\//;
 const SUPPORTED_FILE_EXTENSIONS = /\.(avif|bmp|dib|gif|heic|heif|jpe?g|jfif|pjpeg|pjp|png|tiff?|webp|dng|mp4|mov|qt|m4v|webm|avi|mkv|mpe?g|3gp|3g2|hevc|mts|m2ts)$/i;
 const MOBILE_PROGRESS_UPLOAD_CONCURRENCY = 3;
-const LIVE_CAMERA_CAPTURE_MAX_DIMENSION = 1800;
-const LIVE_CAMERA_IMAGE_QUALITY = 0.88;
+// 2026-10-28: the in-app camera keeps full quality. ImageCapture.takePhoto()
+// returns the sensor's full-resolution still where supported (Chrome/Android);
+// elsewhere (iOS Safari) the video frame is saved at its full size.
+const LIVE_CAMERA_IMAGE_QUALITY = 0.92;
+const LIVE_CAMERA_TAKE_PHOTO_TIMEOUT_MS = 4000;
 const CAPTURE_LOCATION_MAX_AGE_MS = 2 * 60 * 1000;
 const CAPTURE_LOCATION_TIMEOUT_MS = 1200;
 
@@ -289,16 +292,39 @@ function playShutterSound() {
 
 function captureVideoFrameBlob(video: HTMLVideoElement): Promise<Blob | null> {
   if (!video.videoWidth || !video.videoHeight) return Promise.resolve(null);
-  const scale = Math.min(1, LIVE_CAMERA_CAPTURE_MAX_DIMENSION / Math.max(video.videoWidth, video.videoHeight));
   const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
-  canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
   const context = canvas.getContext('2d');
   if (!context) return Promise.resolve(null);
-  context.imageSmoothingEnabled = true;
-  context.imageSmoothingQuality = 'high';
   context.drawImage(video, 0, 0, canvas.width, canvas.height);
   return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', LIVE_CAMERA_IMAGE_QUALITY));
+}
+
+type FullResolutionPhotoResult = { blob: Blob | null; failure: 'timeout' | 'error' | null };
+
+// Full-resolution still from ImageCapture; blob is null when unsupported,
+// failing or hanging (some Android builds never settle), so the caller falls
+// back. `failure` tells the caller whether to stop trying for this session.
+async function takeFullResolutionPhoto(imageCapture: any): Promise<FullResolutionPhotoResult> {
+  if (!imageCapture || typeof imageCapture.takePhoto !== 'function') return { blob: null, failure: null };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const timedOut = Symbol('timeout');
+    const timeout = new Promise<typeof timedOut>(resolve => {
+      timer = setTimeout(() => resolve(timedOut), LIVE_CAMERA_TAKE_PHOTO_TIMEOUT_MS);
+    });
+    const photo: unknown = await Promise.race([
+      Promise.resolve(imageCapture.takePhoto()).catch(() => null),
+      timeout,
+    ]);
+    if (photo === timedOut) return { blob: null, failure: 'timeout' };
+    return photo instanceof Blob && photo.size > 0 ? { blob: photo, failure: null } : { blob: null, failure: 'error' };
+  } catch {
+    return { blob: null, failure: 'error' };
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 async function applyTrackZoom(track: MediaStreamTrack | null, value: number) {
@@ -329,6 +355,7 @@ export default function MobilePhotos() {
   const batchCameraStreamRef = useRef<MediaStream | null>(null);
   const batchCameraTrackRef = useRef<MediaStreamTrack | null>(null);
   const imageCaptureRef = useRef<any>(null);
+  const imageCaptureFailuresRef = useRef(0);
   const uploadSequenceRef = useRef(0);
   const activeUploadCountRef = useRef(0);
   const refreshPhotosTimerRef = useRef<number | null>(null);
@@ -658,7 +685,8 @@ export default function MobilePhotos() {
     adjustActiveUploadCount(1);
 
     try {
-      const preparedFile = await prepareProgressUploadFile(item.file);
+      // 2026-10-28: the original file goes up untouched (full resolution, EXIF
+      // intact), so capture time and GPS are read from the real photo.
       const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
       const uploadType = primaryTypeForPurpose(item.purpose);
       const label = item.label || defaultLabelForPurpose(item.purpose);
@@ -670,7 +698,7 @@ export default function MobilePhotos() {
       formData.append('batch_sequence', String(item.sequence));
       if (item.batchNote) formData.append('batch_note', item.batchNote);
       if (item.note.trim()) formData.append('individual_note', item.note.trim());
-      await appendProgressUploadAudit(formData, [preparedFile], [item.source], {
+      await appendProgressUploadAudit(formData, [item.file], [item.source], {
         batchId: item.batchId,
         batchNote: item.batchNote,
         labels: [label],
@@ -681,7 +709,7 @@ export default function MobilePhotos() {
         skipDeviceLocation: item.source === 'batch_camera' && !item.captureLocation,
         projectId: item.projectId,
       });
-      formData.append('photos', preparedFile, preparedFile.name);
+      formData.append('photos', item.file, item.file.name);
 
       const response = await uploadProjectMedia(item.projectId, formData, {
         query: `?type=${uploadType}`,
@@ -701,7 +729,7 @@ export default function MobilePhotos() {
         toast.error('A photo returned under the wrong project and was not added locally.');
       }
       const uploadedPhoto = uploadedPhotos[0] || null;
-      addUploadedPhotosToList(item.projectId, uploadedPhotos, preparedFile);
+      addUploadedPhotosToList(item.projectId, uploadedPhotos, item.file);
       setUploadItems(current => current.map(uploadItem => uploadItem.id === item.id
         ? {
             ...uploadItem,
@@ -816,6 +844,10 @@ export default function MobilePhotos() {
       toast.error('Wait for this item to finish before removing it');
       return;
     }
+    // Removing a file that never finished is an explicit cancel: drop any
+    // resumable server session it left behind.
+    if (item && item.status !== 'uploaded') discardChunkedUploadResume(item.projectId, item.file);
+    uploadQueueRef.current = uploadQueueRef.current.filter(queued => queued.id !== itemId);
     setUploadItems(current => {
       current.forEach(uploadItem => {
         if (uploadItem.id === itemId) URL.revokeObjectURL(uploadItem.previewUrl);
@@ -941,6 +973,7 @@ export default function MobilePhotos() {
     batchCameraStreamRef.current = null;
     batchCameraTrackRef.current = null;
     imageCaptureRef.current = null;
+    imageCaptureFailuresRef.current = 0;
     setCameraReady(false);
   }, []);
 
@@ -1056,7 +1089,17 @@ export default function MobilePhotos() {
     setCaptureProcessing(true);
     triggerShotFeedback('Captured');
     try {
-      const blob = await captureVideoFrameBlob(video);
+      const fullResolution = await takeFullResolutionPhoto(imageCaptureRef.current);
+      // 2026-10-28: a takePhoto() that hangs once (or keeps rejecting) will do so
+      // for the whole camera session; stop waiting 4 s per shot and use the frame
+      // grab until the camera is restarted.
+      if (fullResolution.failure) {
+        imageCaptureFailuresRef.current += 1;
+        if (fullResolution.failure === 'timeout' || imageCaptureFailuresRef.current >= 2) imageCaptureRef.current = null;
+      } else if (fullResolution.blob) {
+        imageCaptureFailuresRef.current = 0;
+      }
+      const blob = fullResolution.blob || await captureVideoFrameBlob(video);
 
       if (!blob) {
         toast.error('Camera capture failed');
@@ -1119,6 +1162,9 @@ export default function MobilePhotos() {
   });
 
   const cancelUpload = () => {
+    uploadItems
+      .filter(item => item.status !== 'uploaded' && item.status !== 'uploading')
+      .forEach(item => discardChunkedUploadResume(item.projectId, item.file));
     clearUploadQueue();
   };
 
@@ -1315,7 +1361,7 @@ export default function MobilePhotos() {
 
   return (
     <div className="mobile-shell" style={{ background: '#F4F5F7' }}>
-      <div className="mobile-header" style={{ background: 'linear-gradient(135deg, #0D1117 0%, #181D25 100%)', color: 'white' }}>
+      <div className="mobile-header" style={{ background: '#0D1117', color: 'white' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 14px 10px' }}>
           <button
             onClick={() => navigate('/mobile')}
@@ -1346,7 +1392,7 @@ export default function MobilePhotos() {
           </button>
           <button
             onClick={openCameraFirst}
-            style={{ minHeight: 50, width: '100%', border: 'none', borderRadius: 13, padding: '11px 14px', background: 'linear-gradient(135deg, #D99D26, #C4891F)', color: 'white', fontSize: 14, fontWeight: 950, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, whiteSpace: 'normal', textAlign: 'center', lineHeight: 1.15, boxShadow: '0 10px 20px rgba(217,157,38,0.24)' }}
+            style={{ minHeight: 50, width: '100%', border: 'none', borderRadius: 13, padding: '11px 14px', background: '#A96F10', color: 'white', fontSize: 14, fontWeight: 950, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, whiteSpace: 'normal', textAlign: 'center', lineHeight: 1.15, boxShadow: '0 10px 20px rgba(217,157,38,0.24)' }}
           >
             <Camera size={18} color="white" />
             Take Pictures
@@ -1515,7 +1561,7 @@ export default function MobilePhotos() {
               </div>
             )}
             <div style={{ borderRadius: 12, background: uploadComplete ? '#BBF7D0' : '#F3F4F6', overflow: 'hidden', marginBottom: 12 }}>
-              <div style={{ height: 8, width: `${aggregateProgress}%`, background: uploadComplete ? '#16A34A' : 'linear-gradient(135deg, #D99D26, #C4891F)', transition: 'width 180ms ease' }} />
+              <div style={{ height: 8, width: `${aggregateProgress}%`, background: uploadComplete ? '#16A34A' : '#D99D26', transition: 'width 180ms ease' }} />
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', margin: '-6px 1px 11px', color: uploadComplete ? '#15803D' : '#6B7280', fontSize: 10, fontWeight: 900, textTransform: 'uppercase' }}>
               <span>{aggregateProgress}% uploaded</span>
@@ -1529,13 +1575,15 @@ export default function MobilePhotos() {
                   </div>
                   {isVideoMedia(item.file) ? (
                     <>
-                      <video src={item.previewUrl} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} muted playsInline />
+                      <video src={item.previewUrl} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} preload="metadata" muted playsInline />
                       <PlayCircle size={22} color="white" style={{ position: 'absolute', inset: 0, margin: 'auto', filter: 'drop-shadow(0 1px 4px rgba(0,0,0,0.65))' }} />
                     </>
                   ) : (
                     <img
                       src={item.previewUrl}
                       alt=""
+                      loading="lazy"
+                      decoding="async"
                       onError={event => { event.currentTarget.style.display = 'none'; }}
                       style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
                     />
@@ -1561,13 +1609,15 @@ export default function MobilePhotos() {
                     </div>
                     {isVideoMedia(item.file) ? (
                       <>
-                        <video src={item.previewUrl} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} muted playsInline />
+                        <video src={item.previewUrl} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} preload="metadata" muted playsInline />
                         <PlayCircle size={24} color="white" style={{ position: 'absolute', inset: 0, margin: 'auto', filter: 'drop-shadow(0 1px 4px rgba(0,0,0,0.65))' }} />
                       </>
                     ) : (
                       <img
                         src={item.previewUrl}
                         alt=""
+                        loading="lazy"
+                        decoding="async"
                         onError={event => { event.currentTarget.style.display = 'none'; }}
                         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
                       />
@@ -1767,7 +1817,7 @@ export default function MobilePhotos() {
             <button
               type="button"
               onClick={openCameraFirst}
-              style={{ marginTop: 16, width: '100%', minHeight: 46, border: 'none', borderRadius: 13, background: 'linear-gradient(135deg, #D99D26, #C4891F)', color: 'white', fontSize: 13, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}
+              style={{ marginTop: 16, width: '100%', minHeight: 46, border: 'none', borderRadius: 13, background: '#A96F10', color: 'white', fontSize: 13, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}
             >
               <Camera size={17} color="white" />
               Take Pictures
@@ -1820,12 +1870,20 @@ export default function MobilePhotos() {
                       >
                         <div style={{ aspectRatio: '1 / 1', background: '#E5E7EB', position: 'relative' }}>
                           {isVideo ? (
-                            <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-                              <video src={src} style={{ width: '100%', height: '100%', objectFit: 'cover' }} preload="metadata" muted playsInline />
+                            <div style={{ position: 'relative', width: '100%', height: '100%', background: '#111827' }}>
+                              {/* Poster frame only; the lightbox plays the clip. */}
+                              <img
+                                src={uploadPosterSrc(src, 480) || undefined}
+                                alt={photo.caption || photo.original_name}
+                                loading="lazy"
+                                decoding="async"
+                                onError={event => { event.currentTarget.style.display = 'none'; }}
+                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                              />
                               <PlayCircle size={30} color="white" style={{ position: 'absolute', inset: 0, margin: 'auto', filter: 'drop-shadow(0 1px 4px rgba(0,0,0,0.65))' }} />
                             </div>
                           ) : (
-                            <img src={uploadThumbSrc(src)} alt={photo.caption || photo.original_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            <img src={uploadThumbSrc(src)} alt={photo.caption || photo.original_name} loading="lazy" decoding="async" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                           )}
                           {photo.label && (
                             <span style={{ position: 'absolute', left: 6, top: 6, borderRadius: 999, background: 'rgba(217,157,38,0.92)', color: 'white', padding: '4px 7px', fontSize: 9, fontWeight: 900 }}>
@@ -1963,7 +2021,7 @@ export default function MobilePhotos() {
               <button
                 type="button"
                 onClick={openCameraFirst}
-                style={{ minHeight: 64, border: 'none', borderRadius: 16, background: 'linear-gradient(135deg, #D99D26, #C4891F)', color: 'white', padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left' }}
+                style={{ minHeight: 64, border: 'none', borderRadius: 16, background: '#A96F10', color: 'white', padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left' }}
               >
                 <Camera size={22} color="white" />
                 <span style={{ display: 'block' }}>
@@ -2086,11 +2144,13 @@ export default function MobilePhotos() {
                       <FileImage size={18} color="rgba(255,255,255,0.62)" />
                     </div>
                     {isVideoMedia(item.file) ? (
-                      <video src={item.previewUrl} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} muted playsInline />
+                      <video src={item.previewUrl} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} preload="metadata" muted playsInline />
                     ) : (
                       <img
                         src={item.previewUrl}
                         alt=""
+                        loading="lazy"
+                        decoding="async"
                         onError={event => { event.currentTarget.style.display = 'none'; }}
                         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
                       />

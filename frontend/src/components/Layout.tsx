@@ -203,7 +203,19 @@ export default function Layout({ children }: LayoutProps) {
   const vendorSearchTerm = isVendorDirectory
     ? new URLSearchParams(location.search).get('search') || ''
     : '';
-  const headerSearchTerm = isVendorDirectory ? vendorSearchTerm : searchTerm;
+  // The vendor search box keeps its own text (2026-10-28): bound straight to the URL,
+  // React Router's transition-wrapped navigate lagged each keystroke, so fast typing or
+  // backspacing left stray letters ("oa") stuck in the box and filtering the list. The
+  // URL follows the box; a link that changes ?search= (or leaving the page) resets it.
+  const [vendorSearchDraft, setVendorSearchDraft] = useState(vendorSearchTerm);
+  const vendorSearchSentRef = useRef(vendorSearchTerm);
+  useEffect(() => {
+    if (vendorSearchTerm !== vendorSearchSentRef.current) {
+      vendorSearchSentRef.current = vendorSearchTerm;
+      setVendorSearchDraft(vendorSearchTerm);
+    }
+  }, [vendorSearchTerm]);
+  const headerSearchTerm = isVendorDirectory ? vendorSearchDraft : searchTerm;
 
   const handleLogout = () => {
     endServerSession(localStorage.getItem('token'));
@@ -330,6 +342,8 @@ export default function Layout({ children }: LayoutProps) {
       return;
     }
 
+    setVendorSearchDraft(value);
+    vendorSearchSentRef.current = value.trim() ? value : '';
     const params = new URLSearchParams(location.search);
     if (value.trim()) params.set('search', value);
     else params.delete('search');
@@ -620,6 +634,12 @@ export default function Layout({ children }: LayoutProps) {
             <div className="relative">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: '#8A929C' }} />
               <input
+                type="search"
+                name={isVendorDirectory ? 'bt-vendor-search' : 'bt-global-search'}
+                // Never let the browser autofill or restore old text into the box.
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
                 value={headerSearchTerm}
                 onChange={e => updateHeaderSearch(e.target.value)}
                 onFocus={() => {
@@ -627,7 +647,7 @@ export default function Layout({ children }: LayoutProps) {
                 }}
                 aria-label={isVendorDirectory ? 'Search vendors' : 'Search BuildTrack'}
                 placeholder={isVendorDirectory ? 'Search all vendor records' : 'Search BuildTrack'}
-                className="w-full rounded-md py-2 pl-10 pr-10 text-sm font-medium placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full rounded-md py-2 pl-10 pr-10 text-sm font-medium placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 [&::-webkit-search-cancel-button]:hidden"
                 style={{
                   background: '#111315',
                   color: 'var(--bt-text)',
@@ -840,7 +860,8 @@ export default function Layout({ children }: LayoutProps) {
                 style={{ background: '#111315', border: '1px solid #343A42' }}
                 aria-label="Open profile menu"
               >
-                <Avatar src={user?.avatar_url} name={user?.name} size={30} />
+                {/* Always on screen: eager (Avatar defaults to lazy for feed rows). Same src as the sidebar one, so one fetch. */}
+                <Avatar src={user?.avatar_url} name={user?.name} size={30} loading="eager" />
                 <div className="hidden min-w-0 text-left sm:block">
                   <p className="truncate text-[13px] font-bold leading-4" style={{ color: '#F8FAFC' }}>{user?.name}</p>
                   <div className="mt-0.5 flex min-w-0 items-center gap-1.5">

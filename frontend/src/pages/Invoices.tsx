@@ -280,6 +280,18 @@ interface InvoiceEmailItem {
   agent_notes?: string | null;
   ai_error?: string | null;
   ai_items?: InvoiceInboxAiItem[];
+  // Links in the email (vendor "View invoice" pages) for a person to open.
+  links?: string[];
+}
+
+// One priced line of a multi-site invoice, pre-filled with the project BuildTrack placed
+// it on for certain (null = a person chooses).
+interface InvoiceSplitLine {
+  index: number;
+  description: string;
+  amount: number;
+  job_site?: string | null;
+  project_id?: string | null;
 }
 
 const OPEN_AI_STATUSES = new Set(['needs_project', 'needs_review']);
@@ -327,6 +339,7 @@ interface InvoiceInboxAiItem {
   qbo_status?: string | null;
   qbo_summary?: string | null;
   suggestions?: InvoiceProjectSuggestion[];
+  split_lines?: InvoiceSplitLine[];
 }
 
 // Where QuickBooks points for an invoice that waits for a project: a bill the office
@@ -860,6 +873,9 @@ export default function Invoices() {
   const [emailBoxItems, setEmailBoxItems] = useState<InvoiceEmailItem[]>([]);
   const [queueDrafts, setQueueDrafts] = useState<Record<string, QueueDraft>>({});
   const [assigningItemId, setAssigningItemId] = useState<string | null>(null);
+  // Line-by-line project picks for a multi-site invoice: itemId -> line index -> project id.
+  const [splitDrafts, setSplitDrafts] = useState<Record<string, Record<number, string>>>({});
+  const [splitRemember, setSplitRemember] = useState<Record<string, boolean>>({});
   const [ignoringEmailId, setIgnoringEmailId] = useState<string | null>(null);
   const [rereadingEmailId, setRereadingEmailId] = useState<string | null>(null);
   const [attachmentPreview, setAttachmentPreview] = useState<AttachmentPreviewState | null>(null);
@@ -1031,6 +1047,31 @@ export default function Invoices() {
         invoice_number: draft.invoiceNumber.trim() || undefined,
       });
       toast.success(res.data?.message || 'Invoice filed');
+      await Promise.all([refreshInvoiceData(), loadEmailBox()]);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Could not file this invoice');
+    } finally {
+      setAssigningItemId(null);
+    }
+  };
+
+  // The project chosen for each line: the person's pick, else what BuildTrack placed for certain.
+  const splitPicks = (item: InvoiceInboxAiItem) => {
+    const draft = splitDrafts[item.id] || {};
+    return (item.split_lines || []).map(line => ({ index: line.index, project_id: draft[line.index] ?? line.project_id ?? '' }));
+  };
+
+  const splitQueueItem = async (email: InvoiceEmailItem, item: InvoiceInboxAiItem) => {
+    const lines = splitPicks(item);
+    if (!lines.length || lines.some(line => !line.project_id)) return toast.error('Choose the project for every line');
+    setAssigningItemId(item.id);
+    try {
+      const res = await api.post(`/invoices/email-intake/${email.id}/items/${item.id}/split`, {
+        lines,
+        remember: Boolean(splitRemember[item.id]),
+      });
+      const remembered: string[] = Array.isArray(res.data?.remembered) ? res.data.remembered : [];
+      toast.success(`${res.data?.message || 'Invoice filed'}${remembered.length ? ` - BuildTrack will now recognize ${remembered.map(name => `"${name}"`).join(', ')}` : ''}`);
       await Promise.all([refreshInvoiceData(), loadEmailBox()]);
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Could not file this invoice');
@@ -2011,7 +2052,64 @@ export default function Invoices() {
             {recent.length ? (
               <span className="bt-inq-suggest"><span className="bt-inq-muted">Recent jobs:</span>{recent.map(chip)}</span>
             ) : null}
+            {(email.links || []).length ? (
+              <span className="bt-inq-suggest">
+                <span className="bt-inq-muted">Invoice links:</span>
+                {(email.links || []).map(url => (
+                  <a key={url} href={url} target="_blank" rel="noopener noreferrer" className="bt-inq-link" title={url}>
+                    {(() => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return 'link'; } })()}
+                  </a>
+                ))}
+              </span>
+            ) : null}
           </div>
+          {(item.split_lines || []).length > 1 ? (() => {
+            const picks = splitPicks(item);
+            const placed = picks.filter(pick => pick.project_id).length;
+            return (
+              <div className="bt-inq-note" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+                <span className="bt-inq-muted">
+                  Split by project - one invoice, {placed} of {picks.length} lines placed{placed < picks.length ? '; choose the rest' : ''}:
+                </span>
+                {(item.split_lines || []).map(line => {
+                  const value = picks.find(pick => pick.index === line.index)?.project_id || '';
+                  return (
+                    <div key={line.index} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <span style={{ flex: '1 1 260px', minWidth: 0 }} title={line.description}>{line.description}</span>
+                      <span className="is-amount" style={{ width: 90, textAlign: 'right' }}>{money(Number(line.amount))}</span>
+                      <select
+                        className="bt-inq-select"
+                        value={value}
+                        aria-label={`Project for ${line.description}`}
+                        onChange={event => setSplitDrafts(prev => ({ ...prev, [item.id]: { ...(prev[item.id] || {}), [line.index]: event.target.value } }))}
+                      >
+                        <option value="">Choose project</option>
+                        {projectChoices.map(project => <option key={project.id} value={project.id}>{shortAddress(project.address)}</option>)}
+                      </select>
+                    </div>
+                  );
+                })}
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <label className="bt-inq-muted" style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(splitRemember[item.id])}
+                      onChange={event => setSplitRemember(prev => ({ ...prev, [item.id]: event.target.checked }))}
+                    />
+                    Remember these place names for next time
+                  </label>
+                  <button
+                    type="button"
+                    className="bt-inq-assign"
+                    disabled={busy || placed < picks.length}
+                    onClick={() => void splitQueueItem(email, item)}
+                  >
+                    {busy ? 'Filing...' : 'File split'}
+                  </button>
+                </div>
+              </div>
+            );
+          })() : null}
         </li>
       );
     }
@@ -2541,7 +2639,7 @@ export default function Invoices() {
                               {isSplitScoped ? (
                                 <small>Project split from bill total {money(bill.split_scope_parent_total || 0)}</small>
                               ) : splitLineCount > 1 ? (
-                                <small>{splitLineCount} QBO class split lines</small>
+                                <small>{bill.buildtrack_only ? `One invoice split across ${splitLineCount} projects` : `${splitLineCount} QBO class split lines`}</small>
                               ) : null}
                             </td>
                             <td>{bill.txn_date ? formatDateOnly(bill.txn_date, { month: 'short', day: 'numeric', year: 'numeric' }) : '-'}</td>
@@ -2551,8 +2649,8 @@ export default function Invoices() {
                             <td>
                               {visibleSplitLineCount > 0 ? (
                                 <>
-                                  <strong>{isSplitScoped ? 'Project split matched' : splitMatched ? `${splitLineCount} class splits matched` : `${unmatchedSplitCount} class split${unmatchedSplitCount === 1 ? '' : 's'} need match`}</strong>
-                                  <small>{isSplitScoped ? 'Showing only the selected project split.' : 'Approval stays on one QBO balance'}</small>
+                                  <strong>{isSplitScoped ? 'Project split matched' : bill.buildtrack_only ? `${splitLineCount} project splits` : splitMatched ? `${splitLineCount} class splits matched` : `${unmatchedSplitCount} class split${unmatchedSplitCount === 1 ? '' : 's'} need match`}</strong>
+                                  <small>{isSplitScoped ? 'Showing only the selected project split.' : bill.buildtrack_only ? 'One approval covers every project' : 'Approval stays on one QBO balance'}</small>
                                   <button
                                     type="button"
                                     className="bt-qbo-split-toggle"

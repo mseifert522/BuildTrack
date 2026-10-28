@@ -1,3 +1,4 @@
+import '../styles/mobile-heavy.css';
 import {
   Camera,
   ClipboardList,

@@ -2411,6 +2411,9 @@ function initializeSchema() {
   try { db.exec(`ALTER TABLE photos ADD COLUMN video_orientation_source TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE photos ADD COLUMN video_processed_at TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE photos ADD COLUMN video_error TEXT`); } catch (_) { /* already exists */ }
+  // 2026-10-28: an iPhone HEIC upload is shown as a converted JPEG; this keeps the
+  // untouched HEIC (relative path, like video_original_path) instead of deleting it.
+  try { db.exec(`ALTER TABLE photos ADD COLUMN image_original_path TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_photos_video_status ON photos(video_status) WHERE video_status IS NOT NULL`); } catch (_) { /* best-effort */ }
   try { db.exec(`UPDATE photos SET updated_at = COALESCE(updated_at, created_at, datetime('now')) WHERE updated_at IS NULL`); } catch (_) { /* best-effort */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_photos_project_type_taken ON photos(project_id, photo_type, taken_at, created_at)`); } catch (_) { /* best-effort */ }
@@ -2513,6 +2516,12 @@ function initializeSchema() {
 	  try { db.exec(`ALTER TABLE invoices ADD COLUMN pay_approved_by TEXT`); } catch (_) { /* already exists */ }
 	  try { db.exec(`ALTER TABLE invoices ADD COLUMN pay_run_date TEXT`); } catch (_) { /* already exists */ }
 	  try { db.exec(`ALTER TABLE invoices ADD COLUMN pay_carried_at TEXT`); } catch (_) { /* already exists */ }
+	  // One vendor invoice split by job site across projects (2026-10-28): its pieces share
+	  // split_group_id and carry the vendor invoice's full total (services/invoiceProjects.js
+	  // also creates these, and the project_location_aliases table, if missing).
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN split_group_id TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN split_group_total REAL`); } catch (_) { /* already exists */ }
+	  try { require('../services/invoiceProjects').ensureSchema(db); } catch (_) { /* best-effort */ }
 	  try { db.exec(`ALTER TABLE invoice_email_intake ADD COLUMN ai_attempts INTEGER NOT NULL DEFAULT 0`); } catch (_) { /* already exists */ }
 	  try { db.exec(`ALTER TABLE invoice_email_intake ADD COLUMN ai_error TEXT`); } catch (_) { /* already exists */ }
 	  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_invoice_email_intake_provider_msg ON invoice_email_intake(provider_message_id)`); } catch (_) { /* best-effort */ }
@@ -2643,6 +2652,10 @@ function initializeSchema() {
 	  try { db.exec(`ALTER TABLE quickbooks_bills ADD COLUMN payment_run_date TEXT`); } catch (_) { /* already exists */ }
 	  try { db.exec(`ALTER TABLE quickbooks_bills ADD COLUMN payment_approval_notified_at TEXT`); } catch (_) { /* already exists */ }
 	  try { db.exec(`ALTER TABLE quickbooks_bills ADD COLUMN payment_approval_notified_by TEXT`); } catch (_) { /* already exists */ }
+	  // 2026-10-28: when the bill entered the approved queue. payment_approved_at keeps the
+	  // original approval time (an approval carried from BuildTrack can be days older), so
+	  // the approval-digest restart recovery keys its 2-hour window on this instead.
+	  try { db.exec(`ALTER TABLE quickbooks_bills ADD COLUMN payment_approval_queued_at TEXT`); } catch (_) { /* already exists */ }
 	  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_quickbooks_bills_qbo_class ON quickbooks_bills(qbo_class_id, project_id)`); } catch (_) { /* best-effort */ }
 	  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_quickbooks_bills_payment_approval ON quickbooks_bills(payment_approval_status, payment_run_date, payment_status)`); } catch (_) { /* best-effort */ }
 	  try {

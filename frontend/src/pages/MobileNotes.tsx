@@ -1,9 +1,10 @@
+import '../styles/mobile-heavy.css';
 import NoteReplies, { type NoteReply } from '../components/NoteReplies';
 import { openEventStream } from '../lib/noteEvents';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../lib/api';
-import { uploadThumbSrc } from '../lib/uploadVariants';
+import { uploadPosterSrc, uploadThumbSrc } from '../lib/uploadVariants';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '../store/authStore';
 import {
@@ -658,11 +659,19 @@ export default function MobileNotes() {
                                       <div key={photo.id} className="relative aspect-square rounded-xl overflow-hidden" style={{ background: 'rgba(0,0,0,0.12)' }}>
                                         {isVideo ? (
                                           <button type="button" className="block w-full h-full" onClick={() => setPlayingVideo(src)} aria-label="Play video">
-                                            <video src={src} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                                            {/* Poster frame only; the player opens the clip. */}
+                                            <img
+                                              src={uploadPosterSrc(src, 480) || undefined}
+                                              alt=""
+                                              className="w-full h-full object-cover"
+                                              loading="lazy"
+                                              decoding="async"
+                                              onError={event => { event.currentTarget.style.display = 'none'; }}
+                                            />
                                             <PlayCircle className="absolute inset-0 m-auto w-7 h-7 text-white drop-shadow" />
                                           </button>
                                         ) : (
-                                          <img src={uploadThumbSrc(src)} alt={photo.original_name || 'Progress picture'} className="w-full h-full object-cover" loading="lazy" />
+                                          <img src={uploadThumbSrc(src)} alt={photo.original_name || 'Progress picture'} className="w-full h-full object-cover" loading="lazy" decoding="async" />
                                         )}
                                         <div className="absolute left-1 bottom-1 rounded-full px-1.5 py-0.5 text-[9px] font-black text-white" style={{ background: 'rgba(17,24,39,0.72)' }}>
                                           {formatEasternDateTime(photo.taken_at || photo.created_at, { hour: 'numeric', minute: '2-digit' })}
@@ -815,11 +824,11 @@ export default function MobileNotes() {
                 <div key={url} className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-xl bg-white">
                   {noteFiles[index]?.type.startsWith('video/') ? (
                     <>
-                      <video src={url} className="h-full w-full object-cover" muted playsInline />
+                      <video src={url} className="h-full w-full object-cover" muted playsInline preload="metadata" />
                       <PlayCircle className="absolute inset-0 m-auto h-5 w-5 text-white drop-shadow" />
                     </>
                   ) : (
-                    <img src={url} alt={`Queued progress picture ${index + 1}`} className="h-full w-full object-cover" />
+                    <img src={url} alt={`Queued progress picture ${index + 1}`} className="h-full w-full object-cover" decoding="async" />
                   )}
                 </div>
               ))}
@@ -879,7 +888,7 @@ export default function MobileNotes() {
             className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 transition-all active:scale-95 disabled:opacity-40"
             style={{
               background: text.trim()
-                ? 'linear-gradient(135deg, #D99D26, #C4891F)'
+                ? '#A96F10'
                 : '#E5E7EB',
               boxShadow: text.trim() ? '0 4px 12px rgba(217,157,38,0.35)' : 'none',
             }}

@@ -2,6 +2,27 @@ export const EASTERN_TIME_ZONE = 'America/New_York';
 
 type DateTimeOptions = Intl.DateTimeFormatOptions;
 
+// 2026-10-28: building an Intl formatter (especially a time-zone one) costs far more than
+// calling .format(), and feeds/lists call these helpers dozens of times per render. Cache one
+// formatter per distinct option set; same options give byte-identical output. JSON.stringify
+// drops undefined keys, which Intl also treats as absent, so those share an entry correctly.
+const dateTimeFormatCache = new Map<string, Intl.DateTimeFormat>();
+const DATE_TIME_FORMAT_CACHE_LIMIT = 200;
+
+function cachedDateTimeFormat(options: DateTimeOptions) {
+  const key = JSON.stringify(options);
+  let formatter = dateTimeFormatCache.get(key);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-US', options);
+    // Option sets come from code, so this never fills in practice; the cap is only a backstop.
+    if (dateTimeFormatCache.size >= DATE_TIME_FORMAT_CACHE_LIMIT) dateTimeFormatCache.clear();
+    dateTimeFormatCache.set(key, formatter);
+  }
+  return formatter;
+}
+
+const relativeTimeFormatter = new Intl.RelativeTimeFormat('en-US', { numeric: 'auto' });
+
 export function parseBuildTrackTimestamp(value?: string | null): Date | null {
   if (!value) return null;
   const trimmed = String(value).trim();
@@ -18,7 +39,7 @@ export function parseBuildTrackTimestamp(value?: string | null): Date | null {
 export function formatEasternDateTime(value?: string | null, options: DateTimeOptions = {}) {
   const parsed = parseBuildTrackTimestamp(value);
   if (!parsed) return '-';
-  return new Intl.DateTimeFormat('en-US', {
+  return cachedDateTimeFormat({
     timeZone: EASTERN_TIME_ZONE,
     month: 'short',
     day: 'numeric',
@@ -32,7 +53,7 @@ export function formatEasternDateTime(value?: string | null, options: DateTimeOp
 export function formatEasternDate(value?: string | null, options: DateTimeOptions = {}) {
   const parsed = parseBuildTrackTimestamp(value);
   if (!parsed) return '-';
-  return new Intl.DateTimeFormat('en-US', {
+  return cachedDateTimeFormat({
     timeZone: EASTERN_TIME_ZONE,
     month: 'short',
     day: 'numeric',
@@ -47,7 +68,7 @@ export function formatDateOnly(value?: string | null, options: DateTimeOptions =
   if (!match) return formatEasternDate(value, options);
   const parsed = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
   if (!Number.isFinite(parsed.getTime())) return '-';
-  return new Intl.DateTimeFormat('en-US', {
+  return cachedDateTimeFormat({
     timeZone: 'UTC',
     month: 'short',
     day: 'numeric',
@@ -59,7 +80,7 @@ export function formatDateOnly(value?: string | null, options: DateTimeOptions =
 export function formatEasternTime(value?: string | null, options: DateTimeOptions = {}) {
   const parsed = parseBuildTrackTimestamp(value);
   if (!parsed) return '-';
-  return new Intl.DateTimeFormat('en-US', {
+  return cachedDateTimeFormat({
     timeZone: EASTERN_TIME_ZONE,
     hour: 'numeric',
     minute: '2-digit',
@@ -84,7 +105,7 @@ export function formatEasternRelative(value?: string | null) {
   ];
   const [unit, seconds] = units.find(([, size]) => abs >= size) || ['second', 1];
   const valueForUnit = Math.max(1, Math.floor(abs / seconds)) * (future ? 1 : -1);
-  return new Intl.RelativeTimeFormat('en-US', { numeric: 'auto' }).format(valueForUnit, unit);
+  return relativeTimeFormatter.format(valueForUnit, unit);
 }
 
 export function easternTimeZoneLabel() {

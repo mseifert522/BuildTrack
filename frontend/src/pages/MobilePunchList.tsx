@@ -1,3 +1,4 @@
+import '../styles/mobile-heavy.css';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
@@ -666,7 +667,7 @@ export default function MobilePunchList() {
                       return (
                         <div key={photo.id} style={{ position: 'relative', aspectRatio: '1', borderRadius: 14, overflow: 'hidden', background: '#E2E8F0' }}>
                           <button type="button" onClick={() => setLightboxUrl(src)} style={{ display: 'block', width: '100%', height: '100%', border: 0, padding: 0 }}>
-                            <img src={uploadThumbSrc(src)} alt={photo.caption || photo.original_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            <img src={uploadThumbSrc(src)} alt={photo.caption || photo.original_name} loading="lazy" decoding="async" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                           </button>
                           {isImage && (
                             <button

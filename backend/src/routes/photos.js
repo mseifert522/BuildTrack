@@ -133,6 +133,7 @@ function removeStoredPhotoFiles(photo, projectId) {
     photo.stored_file_name,
     photo.thumbnail_path,
     photo.video_original_path,
+    photo.image_original_path,
   ].filter(Boolean);
 
   for (const candidate of new Set(candidates)) {
@@ -475,11 +476,46 @@ function uploadProjectPhotos(req, res, next) {
 
 function cleanupUploadedFiles(files = []) {
   for (const file of files) {
-    try {
-      if (file?.path && fs.existsSync(file.path)) fs.unlinkSync(file.path);
-    } catch (err) {
-      console.warn('Failed to clean up rejected upload file:', err.message || err);
+    // heic_original_path: the kept HEIC behind a converted JPEG (mediaConversion.js).
+    for (const filePath of [file?.path, file?.heic_original_path]) {
+      try {
+        if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      } catch (err) {
+        console.warn('Failed to clean up rejected upload file:', err.message || err);
+      }
     }
+  }
+}
+
+// Kept HEIC original, relative to the project folder like video_original_path.
+function heicOriginalRelPath(projectRoot, file) {
+  if (!file?.heic_original_path) return null;
+  const rel = path.relative(projectRoot, file.heic_original_path).replace(/\\/g, '/');
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  return rel;
+}
+
+// Thumbnails of a fresh upload render in the background right after the 201, so the
+// uploader's grid finds them ready instead of queueing 20 first renders. Videos are
+// skipped (2026-10-28): videoNormalization is re-encoding the clip at this moment and
+// then moves the row to <base>-web-rN.mp4, so a poster of the original name would never
+// be asked for and would only compete with that encode for CPU and memory. Their
+// posters render on first request (or from a warm after the swap).
+// Called after the 201 inside the upload try: it must never throw, or that catch would
+// clean up files that were just stored.
+function warmUploadVariants(req, photos) {
+  try {
+    const variants = req.app?.locals?.uploadVariants;
+    if (!variants || typeof variants.warm !== 'function') return;
+    const projectId = req.params.projectId;
+    setImmediate(() => {
+      for (const photo of photos) {
+        if (!photo?.filename || videoNormalization.isVideoRow(photo)) continue;
+        Promise.resolve(variants.warm(`${projectId}/${photo.filename}`, [480, 160])).catch(() => {});
+      }
+    });
+  } catch (err) {
+    console.warn('Failed to queue upload thumbnails:', err.message || err);
   }
 }
 
@@ -876,6 +912,15 @@ async function handleProjectMediaUpload(req, res) {
         photoLabel, sharedBatchNote, note, gpsLatitude, gpsLongitude, gpsAccuracy,
         'uploaded', uploadedAt
       );
+      const imageOriginalPath = heicOriginalRelPath(projectRoot, file);
+      if (imageOriginalPath) {
+        // Separate, guarded write: the INSERT above must never depend on the new column.
+        try {
+          db.prepare('UPDATE photos SET image_original_path = ? WHERE id = ?').run(imageOriginalPath, id);
+        } catch (err) {
+          console.warn('Failed to record the kept HEIC original:', err.message || err);
+        }
+      }
       inserted.push({
         id,
         project_id: req.params.projectId,
@@ -884,6 +929,7 @@ async function handleProjectMediaUpload(req, res) {
         stored_file_name: file.filename,
         storage_path: storedFilename,
         thumbnail_path: null,
+        image_original_path: imageOriginalPath,
         taken_at: takenAt,
         captured_at: capturedAt,
         uploaded_at: uploadedAt,
@@ -1008,6 +1054,7 @@ async function handleProjectMediaUpload(req, res) {
     // Videos are straightened and made browser-safe in the background.
     videoNormalization.enqueueVideos(uploadedPhotoIds);
     res.status(201).json({ uploaded: inserted.length, batch_id: batchId, photos: inserted });
+    warmUploadVariants(req, inserted);
   } catch (err) {
     cleanupUploadedFiles(req.files);
     console.error(err);

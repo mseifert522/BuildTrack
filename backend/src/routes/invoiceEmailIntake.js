@@ -514,6 +514,36 @@ publicRouter.post('/google-workspace', requireInboundToken, upload.any(), (req, 
 authenticatedRouter.use(authenticate);
 authenticatedRouter.use(authorize(...ADMIN_ROLES));
 
+// Priced lines of an open multi-site invoice for the line-by-line split, pre-filled with
+// the projects the rules already placed for certain (read_json.split_suggestion).
+function splitLinesFor(item, readJson) {
+  if (item.invoice_id || !['needs_project', 'needs_review'].includes(item.status)) return [];
+  let read = {};
+  try { read = JSON.parse(readJson || '{}'); } catch (_) { return []; }
+  const priced = (Array.isArray(read.line_items) ? read.line_items : []).filter(line => line && line.amount !== null && line.amount !== undefined);
+  if (priced.length < 2 && !(read.split_suggestion || []).length) return [];
+  const placed = new Map((read.split_suggestion || []).map(s => [Number(s.index), s.project_id || null]));
+  return priced.map((line, index) => ({
+    index,
+    description: String(line.description || '').slice(0, 300),
+    amount: Number(line.amount),
+    job_site: String(line.job_site || '').slice(0, 200),
+    project_id: placed.get(index) || null,
+  }));
+}
+
+// Links in the email (vendor "View invoice" pages, PDFs) so a person can open them.
+function emailLinks(row) {
+  const found = new Set();
+  const source = `${row.text_body || ''} ${row.html_body || ''}`;
+  for (const match of source.matchAll(/https:\/\/[^\s"'<>)\]]+/gi)) {
+    const url = match[0].replace(/[.,;]+$/, '').replace(/&amp;/g, '&');
+    if (url.length <= 600 && !/\.(png|jpe?g|gif|svg|webp)(\?|$)/i.test(url) && !/unsubscribe|privacy|facebook|twitter|instagram|linkedin|google\.com\/maps/i.test(url)) found.add(url);
+    if (found.size >= 12) break;
+  }
+  return [...found];
+}
+
 authenticatedRouter.get('/', (req, res) => {
   const db = getDb();
   const requestedLimit = Number.parseInt(req.query.limit, 10);
@@ -541,7 +571,7 @@ authenticatedRouter.get('/', (req, res) => {
       SELECT a.id, a.intake_id, a.item_index, a.status, a.reason, a.vendor_profile_id, a.vendor_name, a.vendor_created,
              a.invoice_number, a.invoice_date, a.due_date, a.invoice_type, a.category, a.total,
              a.property_address, a.job_reference, a.project_id, a.invoice_id, a.notified_at,
-             a.source_attachment_id, a.source_attachment_name, p.address AS project_address,
+             a.source_attachment_id, a.source_attachment_name, a.read_json, p.address AS project_address,
              i.invoice_number AS bt_invoice_number, i.total AS bt_total,
              r.status AS qbo_status, r.summary AS qbo_summary
       FROM invoice_inbox_items a
@@ -559,9 +589,9 @@ authenticatedRouter.get('/', (req, res) => {
     } catch (err) {
       console.warn('[INBOUND INVOICE] project suggestions failed:', err.message);
     }
-    items.forEach(item => {
+    items.forEach(({ read_json: readJson, ...item }) => {
       const list = aiItemsByIntake.get(item.intake_id) || [];
-      list.push({ ...item, suggestions: suggestions.get(item.id) || [] });
+      list.push({ ...item, suggestions: suggestions.get(item.id) || [], split_lines: splitLinesFor(item, readJson) });
       aiItemsByIntake.set(item.intake_id, list);
     });
   }
@@ -574,6 +604,7 @@ authenticatedRouter.get('/', (req, res) => {
     return {
       ...rest,
       body_preview: stripHtml(row.text_body || row.html_body || row.extracted_summary || '').slice(0, 3000),
+      links: emailLinks(row),
       attachments,
       filed_attachment_count: filedAttachments.length,
       unfiled_attachment_count: Math.max(attachments.length - filedAttachments.length, 0),
@@ -632,6 +663,32 @@ authenticatedRouter.post('/:id/items/:itemId/assign', (req, res) => {
     });
   } catch (err) {
     if (!err.statusCode) console.error('[INBOUND INVOICE] Assign failed:', err);
+    res.status(err.statusCode || 500).json({ error: err.statusCode ? err.message : 'Could not file this invoice' });
+  }
+});
+
+// A multi-site invoice placed line by line (Mike, 2026-10-28): body
+// { lines: [{ index, project_id }], remember: boolean } - one project per priced line.
+authenticatedRouter.post('/:id/items/:itemId/split', (req, res) => {
+  try {
+    const result = require('../services/invoiceInboxAgent').splitItem(getDb(), {
+      intakeId: req.params.id,
+      itemId: req.params.itemId,
+      lines: Array.isArray(req.body?.lines) ? req.body.lines : [],
+      actorId: req.user.id,
+      actorName: req.user.name || req.user.email || 'the office',
+      remember: req.body?.remember === true,
+    });
+    res.status(201).json({
+      message: result.pieces.length > 1
+        ? `Split across ${result.pieces.length} projects as one ${result.vendor.name} invoice`
+        : `Filed ${result.invoiceNumber}`,
+      invoices: result.pieces.map(p => ({ id: p.invoiceId, invoice_number: p.invoiceNumber, project_id: p.project.id, project_address: p.project.address, total: p.total })),
+      remembered: result.remembered,
+      open_in_email: result.open,
+    });
+  } catch (err) {
+    if (!err.statusCode) console.error('[INBOUND INVOICE] Split failed:', err);
     res.status(err.statusCode || 500).json({ error: err.statusCode ? err.message : 'Could not file this invoice' });
   }
 });

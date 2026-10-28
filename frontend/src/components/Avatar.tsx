@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { uploadThumbSrc } from '../lib/uploadVariants';
+import { uploadThumbSrc, uploadThumbSrcSet } from '../lib/uploadVariants';
 
 interface AvatarProps {
   src?: string | null;
@@ -13,6 +13,8 @@ interface AvatarProps {
   style?: CSSProperties;
   imageStyle?: CSSProperties;
   fallbackStyle?: CSSProperties;
+  /** Feed rows and lists stay lazy; pass 'eager' for an avatar that is always on screen (header). */
+  loading?: 'lazy' | 'eager';
 }
 
 // The signed-in user's avatar renders from the cached user in localStorage, so on a
@@ -49,6 +51,7 @@ export default function Avatar({
   style,
   imageStyle,
   fallbackStyle,
+  loading = 'lazy',
 }: AvatarProps) {
   const normalizedSrc = String(src || '').trim();
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
@@ -89,6 +92,11 @@ export default function Avatar({
     return (
       <img
         src={imageSrc ? uploadThumbSrc(imageSrc, size > 80 ? 480 : 160) : undefined}
+        // 2026-10-28: let DPR-3 phones pick the 480 copy for mid-size avatars.
+        srcSet={imageSrc && size <= 80 ? uploadThumbSrcSet(imageSrc) : undefined}
+        sizes={imageSrc && size <= 80 ? `${size}px` : undefined}
+        loading={loading}
+        decoding="async"
         alt={alt || (name ? `${name} profile photo` : 'User profile photo')}
         className={`${commonClassName} object-cover bg-slate-100 ${imageClassName}`.trim()}
         style={{ objectPosition: 'center top', ...baseStyle, ...imageStyle }}

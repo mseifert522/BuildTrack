@@ -5,6 +5,10 @@ const DESKTOP_SESSION_IDLE_TIMEOUT_MS = SESSION_IDLE_TIMEOUT_MS;
 const MOBILE_SESSION_IDLE_TIMEOUT_MINUTES = SESSION_IDLE_TIMEOUT_MINUTES;
 const MOBILE_SESSION_IDLE_TIMEOUT_MS = SESSION_IDLE_TIMEOUT_MS;
 const SESSION_ARCHIVE_AFTER_DAYS = 14;
+// 2026-10-28: touchSession writes last_seen_at at most once per interval per session
+// (it used to write on every request). The same interval is added as grace to the
+// idle expiry below, so a throttled session never ends earlier than it did before.
+const SESSION_TOUCH_INTERVAL_MS = 60 * 1000;
 
 function parseSqliteDateTime(value) {
   if (!value) return 0;
@@ -24,7 +28,7 @@ function sessionLastActivityMs(session) {
 function sessionExpiryPolicy(session, nowMs = Date.now()) {
   if (!session || session.revoked_at) return null;
   const lastActivityMs = sessionLastActivityMs(session);
-  if (lastActivityMs > 0 && lastActivityMs + SESSION_IDLE_TIMEOUT_MS <= nowMs) {
+  if (lastActivityMs > 0 && lastActivityMs + SESSION_IDLE_TIMEOUT_MS + SESSION_TOUCH_INTERVAL_MS <= nowMs) {
     return {
       reason: 'Session expired after 2 hours of inactivity',
       message: 'Session expired after 2 hours of inactivity. Please log in again.',
@@ -75,6 +79,8 @@ function revokeUserAccess(db, userId, actorId, reason, revokedAt) {
   `).run(revokedAt, userId);
 }
 
+// '-121 minutes' = the 120-minute idle timeout plus SESSION_TOUCH_INTERVAL_MS of grace
+// (see above), so the sweep never ends a session the request path would still accept.
 function applySessionRetentionPolicy(db) {
   const desktopResult = db.prepare(`
     UPDATE auth_sessions
@@ -83,7 +89,7 @@ function applySessionRetentionPolicy(db) {
         updated_at = datetime('now')
     WHERE revoked_at IS NULL
       AND COALESCE(session_type, 'desktop') != 'mobile_app'
-      AND datetime(COALESCE(last_seen_at, issued_at, created_at)) <= datetime('now', '-120 minutes')
+      AND datetime(COALESCE(last_seen_at, issued_at, created_at)) <= datetime('now', '-121 minutes')
   `).run();
 
   const mobileResult = db.prepare(`
@@ -93,7 +99,7 @@ function applySessionRetentionPolicy(db) {
         updated_at = datetime('now')
     WHERE revoked_at IS NULL
       AND COALESCE(session_type, 'desktop') = 'mobile_app'
-      AND datetime(COALESCE(last_seen_at, issued_at, created_at)) <= datetime('now', '-120 minutes')
+      AND datetime(COALESCE(last_seen_at, issued_at, created_at)) <= datetime('now', '-121 minutes')
   `).run();
 
   const archiveResult = db.prepare(`
@@ -120,6 +126,7 @@ module.exports = {
   MOBILE_SESSION_IDLE_TIMEOUT_MINUTES,
   MOBILE_SESSION_IDLE_TIMEOUT_MS,
   SESSION_ARCHIVE_AFTER_DAYS,
+  SESSION_TOUCH_INTERVAL_MS,
   parseSqliteDateTime,
   isMobileSessionType,
   sessionExpiryPolicy,

@@ -5,7 +5,8 @@ import { type ChangeEvent, type Dispatch, type DragEvent, type KeyboardEvent, ty
 import { useParams, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore, canChangeProjectStatus, canManageProjects, isAdminRole } from '../store/authStore';
 import api from '../lib/api';
-import { uploadThumbSrc } from '../lib/uploadVariants';
+import { hasUploadPoster, uploadLargeSrcSet, uploadPosterSrc, uploadPosterSrcSet, uploadThumbSrc, uploadThumbSrcSet } from '../lib/uploadVariants';
+import { useFinancialAccess } from '../lib/financialAccess';
 import { Loading, StatusBadge, Modal, statusLabels } from '../components/ui';
 import {
   QuoteApprovalEmailNoticeModal, noticeFromApproveResponse, approvalEmailToastSuffix,
@@ -26,7 +27,6 @@ import {
   appendProgressUploadAudit,
   isSupportedProgressMediaFile,
   MAX_PROGRESS_UPLOAD_BATCH_FILES,
-  prepareProgressUploadFile,
   PROGRESS_MEDIA_ACCEPT,
   type ProgressCaptureSource,
 } from '../lib/progressUpload';
@@ -151,6 +151,8 @@ type ContractorTextMessage = {
 };
 
 type DictationStatus = 'idle' | 'starting' | 'listening';
+// 2026-10-28: note attachments upload 3 at a time, like the phone queue.
+const NOTE_ATTACH_UPLOAD_CONCURRENCY = 3;
 type NoteAttachmentProgress = {
   phase: 'preparing' | 'uploading' | 'processing' | 'finishing';
   current: number;
@@ -919,7 +921,13 @@ export default function ProjectDetail() {
   const [showEdit, setShowEdit] = useState(false);
   const [addVendorOpen, setAddVendorOpen] = useState(false);
   // Finance is shown only to roles/users the server allows (null = not known yet).
-  const [bankDrawAccess, setBankDrawAccess] = useState<{ allowed: boolean; canManage: boolean } | null>(null);
+  // 2026-10-28: shares lib/financialAccess' per-user cache instead of asking
+  // /feature-access/me again on every project open.
+  const financialAccess = useFinancialAccess();
+  const bankDrawAccess = useMemo<{ allowed: boolean; canManage: boolean } | null>(
+    () => (financialAccess.loading ? null : { allowed: financialAccess.allowed, canManage: financialAccess.canManage }),
+    [financialAccess.loading, financialAccess.allowed, financialAccess.canManage]
+  );
   const [showAssign, setShowAssign] = useState(false);
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [notes, setNotes] = useState<any[]>([]);
@@ -1012,15 +1020,6 @@ export default function ProjectDetail() {
 
   useEffect(() => { load(); }, [load]);
 
-  useEffect(() => {
-    if (!user?.id || user.role === 'contractor') { setBankDrawAccess({ allowed: false, canManage: false }); return; }
-    let cancelled = false;
-    api.get('/feature-access/me')
-      .then(res => { if (!cancelled) setBankDrawAccess({ allowed: Boolean(res.data?.access?.bank_draws), canManage: Boolean(res.data?.can_manage) }); })
-      .catch(() => { if (!cancelled) setBankDrawAccess({ allowed: false, canManage: false }); });
-    return () => { cancelled = true; };
-  }, [user?.id, user?.role]);
-
   // A #finance link opened by someone without access falls back to Notes.
   useEffect(() => {
     if (tab === 'finance' && bankDrawAccess && !bankDrawAccess.allowed) setTab('notes');
@@ -1028,8 +1027,17 @@ export default function ProjectDetail() {
 
   useEffect(() => {
     if (tab !== 'overview') return;
-    const interval = window.setInterval(load, 30000);
-    return () => window.clearInterval(interval);
+    // 2026-10-28: no polling (and no data-access log rows) while the browser
+    // tab is hidden; one refresh when it becomes visible again.
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') void load();
+    };
+    const interval = window.setInterval(refreshIfVisible, 30000);
+    document.addEventListener('visibilitychange', refreshIfVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', refreshIfVisible);
+    };
   }, [load, tab]);
 
   useEffect(() => {
@@ -1205,53 +1213,81 @@ export default function ProjectDetail() {
     if (!files.length) return;
     const batchId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const total = files.length;
+    // Combined progress across the files in flight: bytes sent / bytes total,
+    // finished files counted in full.
+    const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+    const loadedBytes = files.map(() => 0);
+    const completedIndexes: number[] = [];
+    let failure = null as unknown;
+    let nextIndex = 0;
+    let lastFileName = files[0]?.name;
 
-    for (const [index, originalFile] of files.entries()) {
-      const current = index + 1;
+    const emit = (phase: NoteAttachmentProgress['phase']) => {
+      const loaded = loadedBytes.reduce((sum, value) => sum + value, 0);
+      const ratio = totalBytes > 0 ? Math.min(1, loaded / totalBytes) : completedIndexes.length / total;
       onProgress?.({
-        phase: 'preparing',
-        current,
+        phase: phase === 'uploading' && ratio >= 0.999 ? 'processing' : phase,
+        current: Math.min(total, completedIndexes.length + 1),
         total,
-        percent: Math.round((index / total) * 100),
-        fileName: originalFile.name,
+        percent: Math.min(99, Math.round(ratio * 100)),
+        fileName: lastFileName,
+        loadedBytes: loaded,
+        totalBytes,
       });
-      const uploadFile = await prepareProgressUploadFile(originalFile);
-      const formData = new FormData();
+    };
 
+    const uploadOne = async (index: number) => {
+      const file = files[index];
+      const formData = new FormData();
       formData.append('note_id', noteId);
       formData.append('photo_type', 'progress');
       formData.append('caption', 'Photos attached to project note');
-      await appendProgressUploadAudit(formData, [originalFile], [source], {
+      // The original file goes up untouched (full quality, EXIF intact).
+      await appendProgressUploadAudit(formData, [file], [source], {
         projectId: id,
         batchId,
-        batchSequenceStart: current,
+        batchSequenceStart: index + 1,
         skipDeviceLocation: source === 'desktop',
       });
-      formData.append('photos', uploadFile);
+      formData.append('photos', file);
 
-      onProgress?.({
-        phase: 'uploading',
-        current,
-        total,
-        percent: Math.round((index / total) * 100),
-        fileName: originalFile.name,
-      });
+      lastFileName = file.name;
+      emit('uploading');
       await uploadProjectMedia(id!, formData, {
         query: '?type=progress',
         onUploadProgress: event => {
-          const totalBytes = event.total || uploadFile.size || 0;
-          const ratio = totalBytes ? Math.min(event.loaded / totalBytes, 1) : 0;
-          onProgress?.({
-            phase: ratio >= 0.999 ? 'processing' : 'uploading',
-            current,
-            total,
-            percent: Math.min(99, Math.round(((index + ratio) / total) * 100)),
-            fileName: originalFile.name,
-            loadedBytes: event.loaded,
-            totalBytes,
-          });
+          const fileTotal = event.total || file.size || 0;
+          loadedBytes[index] = fileTotal ? Math.min(file.size, Math.round((event.loaded / fileTotal) * file.size)) : 0;
+          lastFileName = file.name;
+          emit('uploading');
         },
       });
+      loadedBytes[index] = file.size;
+      completedIndexes.push(index);
+      emit('uploading');
+    };
+
+    const worker = async () => {
+      while (!failure && nextIndex < total) {
+        const index = nextIndex;
+        nextIndex += 1;
+        try {
+          await uploadOne(index);
+        } catch (err) {
+          if (!failure) failure = err;
+        }
+      }
+    };
+
+    emit('preparing');
+    await Promise.all(Array.from({ length: Math.min(NOTE_ATTACH_UPLOAD_CONCURRENCY, total) }, () => worker()));
+
+    if (failure) {
+      // Callers retry only the files that did not land (see addNote).
+      if (failure && typeof failure === 'object') {
+        (failure as { noteUploadCompletedIndexes?: number[] }).noteUploadCompletedIndexes = [...completedIndexes];
+      }
+      throw failure;
     }
 
     onProgress?.({
@@ -1352,7 +1388,6 @@ export default function ProjectDetail() {
       setNoteSubmitProgress({ phase: 'preparing', current: 1, total: files.length, percent: 0, fileName: files[0]?.name });
     }
     let targetNoteId: string | null = null;
-    const lastProgress: { value: NoteAttachmentProgress | null } = { value: null };
     try {
       // A retry after a partial failure attaches to the note that already
       // exists — unless the user typed new text, which means a new note.
@@ -1364,7 +1399,6 @@ export default function ProjectDetail() {
       }
       if (files.length && targetNoteId) {
         await uploadProgressPicturesToNote(targetNoteId, files, notePhotoSource, progress => {
-          lastProgress.value = progress;
           setNoteSubmitProgress(progress);
         });
       }
@@ -1379,8 +1413,9 @@ export default function ProjectDetail() {
       if (targetNoteId && files.length) {
         // The note exists but the media upload died partway. Keep only the files that
         // did NOT finish so pressing Submit Note again retries without duplicating.
-        const failedIndex = Math.max(0, (lastProgress.value?.current || 1) - 1);
-        const remaining = files.slice(failedIndex);
+        // Uploads run in parallel, so "finished" is the set the pool reports.
+        const completed = new Set<number>(Array.isArray(err?.noteUploadCompletedIndexes) ? err.noteUploadCompletedIndexes : []);
+        const remaining = files.filter((_, index) => !completed.has(index));
         const uploadedCount = files.length - remaining.length;
         noteRetryTargetRef.current = targetNoteId;
         setNewNote('');
@@ -2198,11 +2233,11 @@ export default function ProjectDetail() {
                                 >
                                   {isVideo ? (
                                     <>
-                                      <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+                                      <VideoPosterTile src={src} />
                                       <PlayCircle className="absolute inset-0 m-auto h-7 w-7 text-white drop-shadow" />
                                     </>
                                   ) : mediaKind === 'image' ? (
-                                    <img src={uploadThumbSrc(src)} alt={attachmentName} className="h-full w-full object-cover transition duration-200 group-hover:scale-[1.02]" loading="lazy" />
+                                    <img src={uploadThumbSrc(src)} alt={attachmentName} className="h-full w-full object-cover transition duration-200 group-hover:scale-[1.02]" loading="lazy" decoding="async" />
                                   ) : (
                                     <UnsupportedProgressMediaTile name={attachmentName} />
                                   )}
@@ -2373,7 +2408,7 @@ export default function ProjectDetail() {
                   style={{ background: '#1c1f29' }}
                 >
                   {project.main_photo_url ? (
-                    <img src={uploadThumbSrc(project.main_photo_url, 1280)} alt={project.address} className="h-full w-full object-cover" />
+                    <img src={uploadThumbSrc(project.main_photo_url, 480)} srcSet={uploadThumbSrcSet(project.main_photo_url)} sizes="80px" alt={project.address} className="h-full w-full object-cover" fetchPriority="high" decoding="async" />
                   ) : (
                     <MapPin className="w-6 h-6 text-blue-400" />
                   )}
@@ -2392,7 +2427,7 @@ export default function ProjectDetail() {
             ) : (
               <div className="h-16 w-20 overflow-hidden rounded-xl border border-white/10 flex items-center justify-center flex-shrink-0 shadow-[0_6px_18px_rgba(0,0,0,0.45)]" style={{ background: '#1c1f29' }}>
                 {project.main_photo_url ? (
-                  <img src={uploadThumbSrc(project.main_photo_url, 1280)} alt={project.address} className="h-full w-full object-cover" />
+                  <img src={uploadThumbSrc(project.main_photo_url, 480)} srcSet={uploadThumbSrcSet(project.main_photo_url)} sizes="80px" alt={project.address} className="h-full w-full object-cover" fetchPriority="high" decoding="async" />
                 ) : (
                   <MapPin className="w-6 h-6 text-blue-400" />
                 )}
@@ -2623,7 +2658,7 @@ export default function ProjectDetail() {
                 />
                 <div className="w-16 h-12 rounded-xl overflow-hidden flex items-center justify-center flex-shrink-0" style={{ background: '#F3F4F6' }}>
                   {project.main_photo_url ? (
-                    <img src={uploadThumbSrc(project.main_photo_url, 160)} alt={project.address} className="w-full h-full object-cover" />
+                    <img src={uploadThumbSrc(project.main_photo_url, 160)} srcSet={uploadThumbSrcSet(project.main_photo_url)} sizes="64px" alt={project.address} className="w-full h-full object-cover" decoding="async" />
                   ) : (
                     <Camera className="w-5 h-5 text-gray-400" />
                   )}
@@ -5482,9 +5517,9 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                                 aria-label={`View ${photo.original_name || 'scope photo'} full size`}
                               >
                                 {mediaKind === 'video' ? (
-                                  <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+                                  <VideoPosterTile src={src} />
                                 ) : mediaKind === 'image' ? (
-                                  <img src={uploadThumbSrc(src)} alt={photo.original_name || 'Scope photo'} className="h-full w-full object-cover" loading="lazy" />
+                                  <img src={uploadThumbSrc(src)} alt={photo.original_name || 'Scope photo'} className="h-full w-full object-cover" loading="lazy" decoding="async" />
                                 ) : (
                                   <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
                                 )}
@@ -5612,7 +5647,7 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                                 {item.photos?.length > 0 && (
                                   <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
                                     {item.photos.map((photo: any) => (
-                                      <img key={photo.id} src={uploadThumbSrc(`/uploads/${projectId}/${photo.filename}`, 160)} alt={photo.original_name || item.title} className="h-20 w-24 flex-shrink-0 rounded-lg border border-white/10 object-cover" />
+                                      <img key={photo.id} {...smallMediaImageProps(`/uploads/${projectId}/${photo.filename}`)} sizes="96px" loading="lazy" decoding="async" alt={photo.original_name || item.title} className="h-20 w-24 flex-shrink-0 rounded-lg border border-white/10 object-cover" />
                                     ))}
                                   </div>
                                 )}
@@ -6152,9 +6187,9 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                   return (
                     <div key={photo.id} className="h-16 w-20 flex-shrink-0 overflow-hidden rounded-lg border border-cyan-200 bg-white">
                       {mediaKind === 'video' ? (
-                        <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+                        <VideoPosterTile src={src} />
                       ) : mediaKind === 'image' ? (
-                        <img src={uploadThumbSrc(src)} alt={photo.original_name || 'Selected scope photo'} className="h-full w-full object-cover" loading="lazy" />
+                        <img src={uploadThumbSrc(src)} alt={photo.original_name || 'Selected scope photo'} className="h-full w-full object-cover" loading="lazy" decoding="async" />
                       ) : (
                         <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
                       )}
@@ -6549,7 +6584,7 @@ function ConstructionPlanBoard({ projectId, canManage }: { projectId: string; ca
                     {item.photos?.length > 0 && (
                       <div className="flex gap-2 mt-3 overflow-x-auto pb-1">
                         {item.photos.map((photo: any) => (
-                          <img key={photo.id} src={uploadThumbSrc(`/uploads/${projectId}/${photo.filename}`, 160)} alt={photo.original_name || item.title} className="w-24 h-20 rounded-lg object-cover border border-gray-200 flex-shrink-0" />
+                          <img key={photo.id} {...smallMediaImageProps(`/uploads/${projectId}/${photo.filename}`)} sizes="96px" loading="lazy" decoding="async" alt={photo.original_name || item.title} className="w-24 h-20 rounded-lg object-cover border border-gray-200 flex-shrink-0" />
                         ))}
                       </div>
                     )}
@@ -6975,7 +7010,7 @@ function ConstructionPlanTab({ projectId, canManage }: { projectId: string; canM
                   {item.photos?.length > 0 && (
                     <div className="flex gap-2 mt-3 overflow-x-auto pb-1">
                       {item.photos.map((photo: any) => (
-                        <img key={photo.id} src={uploadThumbSrc(`/uploads/${projectId}/${photo.filename}`, 160)} alt={photo.original_name || item.title} className="w-24 h-20 rounded-lg object-cover border border-gray-200 flex-shrink-0" />
+                        <img key={photo.id} {...smallMediaImageProps(`/uploads/${projectId}/${photo.filename}`)} sizes="96px" loading="lazy" decoding="async" alt={photo.original_name || item.title} className="w-24 h-20 rounded-lg object-cover border border-gray-200 flex-shrink-0" />
                       ))}
                     </div>
                   )}
@@ -7685,7 +7720,7 @@ function PunchListTab({
                     className={`group relative h-16 w-16 flex-shrink-0 cursor-grab overflow-hidden rounded-lg border bg-slate-900 outline-none transition active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-blue-400 ${selected ? 'border-amber-400 ring-2 ring-amber-300' : 'border-slate-700'}`}
                   >
                     {kind === 'image' ? (
-                      <img src={uploadThumbSrc(progressPhotoSrc(projectId, photo))} alt="" className="h-full w-full object-cover" loading="lazy" draggable={false} />
+                      <img src={uploadThumbSrc(progressPhotoSrc(projectId, photo))} alt="" className="h-full w-full object-cover" loading="lazy" decoding="async" draggable={false} />
                     ) : (
                       <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
                     )}
@@ -7869,9 +7904,9 @@ function PunchListTab({
                               className={`group relative h-20 w-24 flex-shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm ${canMovePhotos ? 'cursor-grab active:cursor-grabbing' : ''}`}
                             >
                               {mediaKind === 'video' ? (
-                                <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+                                <VideoPosterTile src={src} />
                               ) : mediaKind === 'image' ? (
-                                <img src={uploadThumbSrc(src)} alt={photo.original_name || 'Punch list photo'} className="h-full w-full object-cover" loading="lazy" draggable={false} />
+                                <img src={uploadThumbSrc(src)} alt={photo.original_name || 'Punch list photo'} className="h-full w-full object-cover" loading="lazy" decoding="async" draggable={false} />
                               ) : (
                                 <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
                               )}
@@ -8086,8 +8121,16 @@ function ProgressHistoryTab({ projectId, project }: { projectId: string; project
 
   useEffect(() => {
     load();
-    const interval = window.setInterval(load, 30000);
-    return () => window.clearInterval(interval);
+    // Hidden tabs skip the poll and refresh once when they come back.
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') void load();
+    };
+    const interval = window.setInterval(refreshIfVisible, 30000);
+    document.addEventListener('visibilitychange', refreshIfVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', refreshIfVisible);
+    };
   }, [projectId]);
 
   const attachedPhotoKeys = useMemo(() => {
@@ -8518,11 +8561,11 @@ function ProgressMediaGrid({
           >
             {isVideo ? (
               <>
-                <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+                <VideoPosterTile src={src} />
                 <PlayCircle className="absolute inset-0 m-auto h-7 w-7 text-white drop-shadow" />
               </>
             ) : mediaKind === 'image' ? (
-              <img src={uploadThumbSrc(src)} alt={photo.original_name || 'Progress picture'} className="h-full w-full object-cover" loading="lazy" />
+              <img src={uploadThumbSrc(src)} alt={photo.original_name || 'Progress picture'} className="h-full w-full object-cover" loading="lazy" decoding="async" />
             ) : (
               <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
             )}
@@ -8781,7 +8824,16 @@ function PhotoNoteModal({
               {mediaKind === 'video' ? (
                 <VideoPlayer src={src} className="h-full w-full" />
               ) : mediaKind === 'image' ? (
-                <img src={uploadThumbSrc(src, 1280)} alt={photo.original_name || 'Project picture'} className="h-full w-full object-cover" />
+                // 2026-10-28: the box is at most ~350 CSS px; 1280 px WebP already exceeds
+                // its device pixels, so the multi-MB original stays for the lightbox only.
+                <img
+                  src={uploadThumbSrc(src, 1280)}
+                  srcSet={uploadLargeSrcSet(src)}
+                  sizes="(min-width: 768px) 260px, 100vw"
+                  alt={photo.original_name || 'Project picture'}
+                  className="h-full w-full object-cover"
+                  decoding="async"
+                />
               ) : (
                 <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
               )}
@@ -8922,11 +8974,11 @@ function RecentFieldPhotosCard({
                     <div className="relative aspect-[4/3] bg-gray-100">
                       {isVideo ? (
                         <>
-                          <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+                          <VideoPosterTile src={src} />
                           <PlayCircle className="absolute inset-0 m-auto h-8 w-8 text-white drop-shadow" />
                         </>
                       ) : mediaKind === 'image' ? (
-                        <img src={uploadThumbSrc(src)} alt={photo.original_name || 'Recent field photo'} className="h-full w-full object-cover" loading="lazy" />
+                        <img src={uploadThumbSrc(src)} alt={photo.original_name || 'Recent field photo'} className="h-full w-full object-cover" loading="lazy" decoding="async" />
                       ) : (
                         <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
                       )}
@@ -8998,6 +9050,38 @@ function RecentFieldPhotosCard({
 
 function XIcon() {
   return <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>;
+}
+
+// 2026-10-28: grid tiles show the server's WebP poster frame for uploaded
+// videos instead of <video preload="metadata">, which opened a range request
+// into every original (70 MB on average) just to paint a small square. The
+// lightbox / VideoPlayer still plays the clip. Non-upload sources keep the
+// old metadata preview.
+function VideoPosterTile({ src, className = 'h-full w-full object-cover' }: { src: string; className?: string }) {
+  const poster = uploadPosterSrc(src, 480);
+  const [failedPoster, setFailedPoster] = useState('');
+  if (!hasUploadPoster(src)) {
+    return <video src={src} className={className} muted playsInline preload="metadata" />;
+  }
+  if (failedPoster === poster) return <span aria-hidden="true" className={`block bg-slate-800 ${className}`} />;
+  return (
+    <img
+      src={poster}
+      alt=""
+      className={`bg-slate-800 ${className}`}
+      loading="lazy"
+      decoding="async"
+      draggable={false}
+      onError={() => setFailedPoster(poster)}
+    />
+  );
+}
+
+// Small strip thumbnails (about 96 px): the photo's WebP copy, or a video's
+// poster frame, with 160w/480w so DPR-3 phones stay sharp.
+function smallMediaImageProps(src: string) {
+  if (hasUploadPoster(src)) return { src: uploadPosterSrc(src, 160), srcSet: uploadPosterSrcSet(src) };
+  return { src: uploadThumbSrc(src, 160), srcSet: uploadThumbSrcSet(src) };
 }
 
 function UnsupportedProgressMediaTile({ name }: { name?: string }) {
@@ -9126,11 +9210,11 @@ function PhotoBucketPickerModal({
                   <div className="relative aspect-square bg-slate-100">
                     {mediaKind === 'video' ? (
                       <>
-                        <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+                        <VideoPosterTile src={src} />
                         <PlayCircle className="absolute inset-0 m-auto h-8 w-8 text-white drop-shadow" />
                       </>
                     ) : mediaKind === 'image' ? (
-                      <img src={uploadThumbSrc(src)} alt={photo.original_name || 'Project photo'} className="h-full w-full object-cover" loading="lazy" />
+                      <img src={uploadThumbSrc(src)} alt={photo.original_name || 'Project photo'} className="h-full w-full object-cover" loading="lazy" decoding="async" />
                     ) : (
                       <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
                     )}
@@ -9513,11 +9597,11 @@ function PhotosTab({ projectId, project, user }: { projectId: string; project: a
                     >
                       {isVideo ? (
                         <>
-                          <video src={src} className="w-full h-full object-cover transition-transform group-hover:scale-105" muted playsInline preload="metadata" />
+                          <VideoPosterTile src={src} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
                           <PlayCircle className="absolute inset-0 m-auto h-10 w-10 text-white drop-shadow" />
                         </>
                       ) : mediaKind === 'image' ? (
-                        <img src={uploadThumbSrc(src)} alt={photo.original_name} className="w-full h-full object-cover transition-transform group-hover:scale-105" loading="lazy" />
+                        <img src={uploadThumbSrc(src)} alt={photo.original_name} className="w-full h-full object-cover transition-transform group-hover:scale-105" loading="lazy" decoding="async" />
                       ) : (
                           <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
                       )}
@@ -9643,9 +9727,9 @@ function PhotosTab({ projectId, project, user }: { projectId: string; project: a
             <div className="flex gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
               <div className="h-20 w-20 flex-shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-white">
                 {scopeAssignPreviewKind === 'video' ? (
-                  <video src={scopeAssignPreviewSrc} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+                  <VideoPosterTile src={scopeAssignPreviewSrc} />
                 ) : scopeAssignPreviewKind === 'image' ? (
-                  <img src={uploadThumbSrc(scopeAssignPreviewSrc, 160)} alt={scopeAssignPhoto.original_name || 'Selected photo'} className="h-full w-full object-cover" />
+                  <img src={uploadThumbSrc(scopeAssignPreviewSrc, 160)} srcSet={uploadThumbSrcSet(scopeAssignPreviewSrc)} sizes="80px" decoding="async" alt={scopeAssignPhoto.original_name || 'Selected photo'} className="h-full w-full object-cover" />
                 ) : (
                   <UnsupportedProgressMediaTile name={scopeAssignPhoto.original_name || scopeAssignPhoto.filename} />
                 )}

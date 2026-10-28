@@ -45,7 +45,10 @@ function classifyUploadPath(root, reqPath) {
   if (!absolute.startsWith(root + path.sep)) return null;
   const rel = path.relative(root, absolute).split(path.sep).join('/');
   const [first, ...rest] = rel.split('/');
-  if (first === 'chunk-tmp' || first === 'vendor-setup' || first === 'agreements' || first === 'scope-documents') return { kind: 'blocked', rel };
+  // .variants: the WebP thumbnail/poster cache (imageVariants.js). It is only ever served
+  // through ?w= on the original's URL, after this gate has checked the original.
+  if (first === 'chunk-tmp' || first === 'vendor-setup' || first === 'agreements' || first === 'scope-documents'
+    || first === '.variants') return { kind: 'blocked', rel };
   if (!rest.length || MANAGEMENT_ONLY_DIRS.has(first)) return { kind: 'management', rel };
   if (SHARED_DIRS.has(first)) return { kind: 'shared', rel };
   return { kind: 'project', projectId: first, rel }; // uploads/<projectId>/...
@@ -187,4 +190,10 @@ const reportFlush = setInterval(() => {
 }, 5 * 60 * 1000);
 if (reportFlush.unref) reportFlush.unref();
 
-module.exports = { createUploadsGate, classifyUploadPath, isInlineSafeUpload, _reportCounts: reportCounts };
+module.exports = {
+  createUploadsGate,
+  classifyUploadPath,
+  isInlineSafeUpload,
+  MANAGEMENT_ONLY_DIRS,
+  _reportCounts: reportCounts,
+};

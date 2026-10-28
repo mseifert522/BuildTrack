@@ -1,9 +1,9 @@
 import DatedNoteList from '../components/DatedNoteList';
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, MessageSquare, Camera, ClipboardList, Plus, Send, Trash2, Upload, FileText, Package } from 'lucide-react';
+import { ArrowLeft, MessageSquare, Camera, ClipboardList, Plus, PlayCircle, Send, Trash2, Upload, FileText, Package } from 'lucide-react';
 import api from '../lib/api';
-import { uploadThumbSrc } from '../lib/uploadVariants';
+import { uploadPosterSrc, uploadThumbSrc } from '../lib/uploadVariants';
 import toast from 'react-hot-toast';
 import { fileDropHandlers } from '../lib/fileDrop';
 import { formatEasternDateTime, formatEasternRelative } from '../lib/time';
@@ -399,9 +399,20 @@ export default function ContractorProjectDetail() {
                       {n.photos.map((p: any) => (
                         <a key={p.id || p.filename} href={`/uploads/${id}/${p.filename}`} target="_blank" rel="noopener noreferrer" style={{ display: 'block', borderRadius: 10, overflow: 'hidden', aspectRatio: '1', background: '#E5E7EB' }}>
                           {isVideoMedia(p) ? (
-                            <video src={`/uploads/${id}/${p.filename}`} muted playsInline preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            // 2026-10-28: poster frame instead of opening the original with preload="metadata".
+                            <span style={{ position: 'relative', display: 'block', width: '100%', height: '100%', background: '#111827' }}>
+                              <img
+                                src={uploadPosterSrc(`/uploads/${id}/${p.filename}`, 480) || undefined}
+                                alt=""
+                                loading="lazy"
+                                decoding="async"
+                                onError={event => { event.currentTarget.style.display = 'none'; }}
+                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                              />
+                              <PlayCircle size={24} color="white" style={{ position: 'absolute', inset: 0, margin: 'auto', filter: 'drop-shadow(0 1px 4px rgba(0,0,0,0.65))' }} />
+                            </span>
                           ) : (
-                            <img src={uploadThumbSrc(`/uploads/${id}/${p.filename}`)} alt={p.original_name || ''} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            <img src={uploadThumbSrc(`/uploads/${id}/${p.filename}`)} alt={p.original_name || ''} loading="lazy" decoding="async" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                           )}
                         </a>
                       ))}
@@ -467,8 +478,12 @@ export default function ContractorProjectDetail() {
               {photos.map(p => (
                 <div key={p.id} style={{ borderRadius: 10, overflow: 'hidden', aspectRatio: '1', background: '#E5E7EB' }}>
                   <img
-                    src={uploadThumbSrc(`/uploads/${id}/${p.filename}`)}
+                    src={isVideoMedia(p)
+                      ? uploadPosterSrc(`/uploads/${id}/${p.filename}`, 480) || undefined
+                      : uploadThumbSrc(`/uploads/${id}/${p.filename}`)}
                     alt={p.caption || ''}
+                    loading="lazy"
+                    decoding="async"
                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   />
                 </div>

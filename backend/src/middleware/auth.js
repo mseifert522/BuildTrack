@@ -6,6 +6,7 @@ const { getClientIp } = require('../utils/requestIp');
 const {
   SESSION_IDLE_TIMEOUT_MINUTES,
   SESSION_IDLE_TIMEOUT_MS,
+  SESSION_TOUCH_INTERVAL_MS,
   parseSqliteDateTime,
   revokeSession,
   sessionExpiryPolicy,
@@ -140,29 +141,44 @@ function touchSession(db, sessionId, userId, req) {
   const currentIp = getClientIp(req);
   const previousCurrentIp = session.current_ip_address || session.ip_address || '';
 
-  db.prepare(`
-    UPDATE auth_sessions
-    SET last_seen_at = datetime('now'),
-        updated_at = datetime('now'),
-        current_ip_address = CASE
-          WHEN ? != '' THEN ?
-          ELSE COALESCE(current_ip_address, ip_address)
-        END,
-        ip_address_updated_at = CASE
-          WHEN ? != '' AND ? != COALESCE(current_ip_address, ip_address, '') THEN datetime('now')
-          WHEN ip_address_updated_at IS NULL THEN datetime('now')
-          ELSE ip_address_updated_at
-        END
-    WHERE id = ?
-  `).run(currentIp, currentIp, currentIp, currentIp, sessionId);
-  db.prepare(`
-    UPDATE users
-    SET last_seen_at = datetime('now'),
-        updated_at = datetime('now')
-    WHERE id = ?
-  `).run(userId);
+  // 2026-10-28: a page load fans out into 10-30 API calls, and each one used to commit
+  // two UPDATEs. Write at most once per SESSION_TOUCH_INTERVAL_MS per session; the
+  // idle expiry carries the same grace (sessionPolicy.js), so no session ends earlier.
+  // An IP change always writes, so the security event is never delayed. Revocation is
+  // unaffected: revoked_at (above) and users.session_revoked_at are read every request.
+  const ipChanged = Boolean(currentIp) && currentIp !== previousCurrentIp;
+  const lastSeenMs = parseSqliteDateTime(session.last_seen_at);
+  const sinceLastTouchMs = Date.now() - lastSeenMs;
+  if (!ipChanged && lastSeenMs > 0 && sinceLastTouchMs >= 0 && sinceLastTouchMs < SESSION_TOUCH_INTERVAL_MS) {
+    return { ...session, activity_touched: true };
+  }
 
-  recordSessionIpChange(db, userId, sessionId, session.session_type, previousCurrentIp, currentIp, req);
+  // One commit instead of two or three.
+  db.transaction(() => {
+    db.prepare(`
+      UPDATE auth_sessions
+      SET last_seen_at = datetime('now'),
+          updated_at = datetime('now'),
+          current_ip_address = CASE
+            WHEN ? != '' THEN ?
+            ELSE COALESCE(current_ip_address, ip_address)
+          END,
+          ip_address_updated_at = CASE
+            WHEN ? != '' AND ? != COALESCE(current_ip_address, ip_address, '') THEN datetime('now')
+            WHEN ip_address_updated_at IS NULL THEN datetime('now')
+            ELSE ip_address_updated_at
+          END
+      WHERE id = ?
+    `).run(currentIp, currentIp, currentIp, currentIp, sessionId);
+    db.prepare(`
+      UPDATE users
+      SET last_seen_at = datetime('now'),
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(userId);
+
+    recordSessionIpChange(db, userId, sessionId, session.session_type, previousCurrentIp, currentIp, req);
+  })();
   return { ...session, activity_touched: true };
 }
 
@@ -234,6 +250,12 @@ function rejectTokenInUrl(req, res, next) {
 }
 
 function authenticate(req, res, next) {
+  // 2026-10-28: nested routers (/api/projects, then /api/projects/:id/notes etc.) each
+  // run authenticate(); express keeps one req, so the first pass's result stands and
+  // the second would only repeat jwt.verify, the user/session reads and the touch.
+  // Only the three principal paths below ever set req.auth.
+  if (req.user && req.auth) return next();
+
   // AI agents (X-BuildTrack-Agent-Key) are decided here and never fall through.
   try {
     if (authenticateAgentRequest(req, res)) return next();

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import api from '../lib/api';
-import { uploadThumbSrc } from '../lib/uploadVariants';
+import { uploadLargeSrcSet, uploadPosterSrc, uploadPosterSrcSet, uploadThumbSrc, uploadThumbSrcSet } from '../lib/uploadVariants';
 import { Loading } from '../components/ui';
 import { Camera, FileImage, Grid, List, MessageSquare, PlayCircle, Trash2, X } from 'lucide-react';
 import { formatEasternDate, formatEasternDateTime } from '../lib/time';
@@ -412,9 +412,22 @@ export default function Photos() {
                         onClick={() => openMedia(photo)}
                       >
                         {isVideo ? (
-                          <video src={src} className="w-full h-full object-cover transition-transform group-hover:scale-105" preload="metadata" muted playsInline />
+                          // 2026-10-28: poster frame instead of opening each original with
+                          // preload="metadata"; openMedia still plays the clip. The play
+                          // icon comes from the overlay below; the dark wrapper stays if
+                          // the poster fails.
+                          <div className="w-full h-full bg-slate-800">
+                            <img
+                              src={uploadPosterSrc(src, 480) || undefined}
+                              alt={photo.original_name}
+                              className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                              loading="lazy"
+                              decoding="async"
+                              onError={event => { event.currentTarget.style.display = 'none'; }}
+                            />
+                          </div>
                         ) : mediaKind === 'image' ? (
-                          <img src={uploadThumbSrc(src)} alt={photo.original_name} className="w-full h-full object-cover transition-transform group-hover:scale-105" loading="lazy" />
+                          <img src={uploadThumbSrc(src)} alt={photo.original_name} className="w-full h-full object-cover transition-transform group-hover:scale-105" loading="lazy" decoding="async" />
                         ) : (
                           <UnsupportedMediaTile name={photo.original_name || photo.filename} />
                         )}
@@ -510,11 +523,20 @@ export default function Photos() {
                         <div className="w-16 h-16 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0 cursor-pointer relative" onClick={() => openMedia(photo)}>
                           {isVideo ? (
                             <>
-                              <video src={src} className="w-full h-full object-cover" preload="metadata" muted playsInline />
+                              <img
+                                src={uploadPosterSrc(src, 160) || undefined}
+                                srcSet={uploadPosterSrcSet(src)}
+                                sizes="64px"
+                                alt=""
+                                className="w-full h-full object-cover bg-slate-800"
+                                loading="lazy"
+                                decoding="async"
+                                onError={event => { event.currentTarget.style.display = 'none'; }}
+                              />
                               <PlayCircle className="absolute inset-0 m-auto w-7 h-7 text-white drop-shadow" />
                             </>
                           ) : mediaKind === 'image' ? (
-                            <img src={uploadThumbSrc(src, 160)} alt="" className="w-full h-full object-cover" />
+                            <img src={uploadThumbSrc(src, 160)} srcSet={uploadThumbSrcSet(src)} sizes="64px" alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
                           ) : (
                             <UnsupportedMediaTile name={photo.original_name || photo.filename} />
                           )}
@@ -676,7 +698,16 @@ function PhotoDescriptionModal({
               {mediaKind === 'video' ? (
                 <VideoPlayer src={src} className="h-full w-full" />
               ) : mediaKind === 'image' ? (
-                <img src={uploadThumbSrc(src, 1280)} alt={photo.original_name || 'Project picture'} className="h-full w-full object-cover" />
+                // 2026-10-28: the box is at most ~350 CSS px; 1280 px WebP already exceeds
+                // its device pixels, so the multi-MB original stays for the lightbox only.
+                <img
+                  src={uploadThumbSrc(src, 1280)}
+                  srcSet={uploadLargeSrcSet(src)}
+                  sizes="(min-width: 768px) 260px, 100vw"
+                  alt={photo.original_name || 'Project picture'}
+                  className="h-full w-full object-cover"
+                  decoding="async"
+                />
               ) : (
                 <UnsupportedMediaTile name={photo.original_name || photo.filename} />
               )}

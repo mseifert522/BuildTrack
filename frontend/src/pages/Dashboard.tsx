@@ -247,15 +247,114 @@ const buildCalendarDayScheduleBucket = (events: OperationsCalendarEvent[]): Cale
   return { untimed, byHour };
 };
 
-const greeting = () => {
-  const h = Number(new Intl.DateTimeFormat('en-US', {
-    timeZone: EASTERN_TIME_ZONE,
-    hour: 'numeric',
-    hour12: false,
-  }).format(new Date()));
+const greetingHourFormatter = new Intl.DateTimeFormat('en-US', {
+  timeZone: EASTERN_TIME_ZONE,
+  hour: 'numeric',
+  hour12: false,
+});
+
+const greeting = (now = new Date()) => {
+  const h = Number(greetingHourFormatter.format(now));
   if (h < 12) return 'Good morning';
   if (h < 17) return 'Good afternoon';
   return 'Good evening';
+};
+
+const easternClockLabel = (iso: string) => `${formatEasternTime(iso)
+  .replace(/\sAM$/, ' A.M.')
+  .replace(/\sPM$/, ' P.M.')} Eastern Time`;
+
+// 2026-10-28: the clock used to be a 1 s interval in Dashboard itself, which re-rendered the
+// whole page (calendar grid, feed, composers) every second for a label that only shows
+// minutes. Each live label now owns a timer armed to the next minute boundary, so only that
+// label re-renders. Background tabs throttle timers, so resync on focus/visibility as well.
+const useMinuteClock = () => {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    let timer = 0;
+    const arm = () => {
+      // +50 ms so the formatted minute has definitely rolled over when the tick lands.
+      timer = window.setTimeout(() => {
+        setNow(new Date());
+        arm();
+      }, 60_000 - (Date.now() % 60_000) + 50);
+    };
+    const resync = () => {
+      if (document.visibilityState !== 'visible') return;
+      window.clearTimeout(timer);
+      setNow(new Date());
+      arm();
+    };
+    arm();
+    window.addEventListener('focus', resync);
+    document.addEventListener('visibilitychange', resync);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('focus', resync);
+      document.removeEventListener('visibilitychange', resync);
+    };
+  }, []);
+  return now;
+};
+
+function LiveEasternClock({ variant }: { variant: 'header' | 'footer' }) {
+  const nowIso = useMinuteClock().toISOString();
+  const timeLabel = easternClockLabel(nowIso);
+  if (variant === 'footer') return <>{timeLabel}</>;
+  return (
+    <>
+      {formatEasternDate(nowIso, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+      {' - '}
+      {timeLabel}
+    </>
+  );
+}
+
+function LiveGreeting() {
+  const now = useMinuteClock();
+  return <>{greeting(now)}</>;
+}
+
+// Feed "5 minutes ago" labels used to stay current only because the old 1 s page re-render
+// recomputed them; with the socket connected nothing else refreshes them, so each label ticks
+// on the minute clock itself (one cheap timer per visible row, max 25).
+function LiveRelativeTime({ value }: { value?: string | null }) {
+  useMinuteClock();
+  return <>{formatEasternRelative(value)}</>;
+}
+
+// Local calendar day (the browser's own midnight, like formatLocalDateInput). Rolls over at
+// the next local midnight and whenever the tab wakes, so a laptop that slept still flips.
+const useLocalTodayKey = () => {
+  const [todayKey, setTodayKey] = useState(() => formatLocalDateInput());
+  useEffect(() => {
+    let timer = 0;
+    // Same string bails out of the state update, so this never re-renders needlessly.
+    const sync = () => setTodayKey(formatLocalDateInput());
+    const arm = () => {
+      const now = new Date();
+      const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 1);
+      timer = window.setTimeout(() => {
+        sync();
+        arm();
+      }, Math.max(1000, nextMidnight.getTime() - now.getTime()));
+    };
+    const wake = () => {
+      if (document.visibilityState !== 'visible') return;
+      window.clearTimeout(timer);
+      sync();
+      arm();
+    };
+    arm();
+    window.addEventListener('focus', wake);
+    document.addEventListener('visibilitychange', wake);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('focus', wake);
+      document.removeEventListener('visibilitychange', wake);
+    };
+  }, []);
+  return todayKey;
 };
 
 const noteTypeStyles: Record<string, { label: string; bg: string; color: string; border: string; accent: string }> = {
@@ -532,6 +631,35 @@ const fridayPaymentQueueSummaryFromStatus = (status?: QuickBooksQueueStatus | nu
     : null
 );
 
+interface PaymentQueueSummaryResponse {
+  approved_payment_count?: number | null;
+  approved_payment_balance?: number | null;
+}
+
+const fridayPaymentQueueSummaryFromResponse = (data?: PaymentQueueSummaryResponse | null): FridayPaymentQueueSummary | null => (
+  data && typeof data === 'object' && 'approved_payment_count' in data
+    ? {
+      count: paymentQueueAmount(data.approved_payment_count),
+      total: paymentQueueAmount(data.approved_payment_balance),
+    }
+    : null
+);
+
+// 2026-10-28: the reminder reads the light GET /quickbooks/payment-queue-summary (same
+// approved-and-unpaid numbers from the QuickBooks mirror) instead of the heavy /status.
+// During a blue-green overlap this page can reach the old container, which has no such
+// route (404), so fall back to /status there.
+const fetchFridayPaymentQueueSummary = async (): Promise<FridayPaymentQueueSummary | null> => {
+  try {
+    const res = await api.get('/quickbooks/payment-queue-summary');
+    return fridayPaymentQueueSummaryFromResponse(res.data);
+  } catch (err: any) {
+    if (err?.response?.status !== 404) throw err;
+    const res = await api.get('/quickbooks/status');
+    return fridayPaymentQueueSummaryFromStatus(res.data);
+  }
+};
+
 const calendarPreference = {
   get(key: string, fallback: boolean) {
     if (typeof window === 'undefined') return fallback;
@@ -580,9 +708,8 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
   const [calendarEditForm, setCalendarEditForm] = useState<CalendarEditForm>(blankCalendarEditForm);
   const [savingCalendarEdit, setSavingCalendarEdit] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [liveNow, setLiveNow] = useState(() => new Date());
-  const liveTodayKey = formatLocalDateInput(liveNow);
-  const [lastCalendarTodayKey, setLastCalendarTodayKey] = useState(() => liveTodayKey);
+  const todayKey = useLocalTodayKey();
+  const [lastCalendarTodayKey, setLastCalendarTodayKey] = useState(() => todayKey);
   const calendarQueryRange = calendarRangeForView(calendarViewMode, calendarAnchorDateKey);
   const canReadOperationsCalendar = Boolean(user && ['super_admin', 'operations_manager', 'project_manager'].includes(user.role));
   const canAccessOperationsCalendar = Boolean(calendarOnly && canReadOperationsCalendar);
@@ -593,33 +720,27 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
   const [fridayPaymentQueueSummary, setFridayPaymentQueueSummary] = useState<FridayPaymentQueueSummary>(emptyFridayPaymentQueueSummary);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setLiveNow(new Date()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
     calendarPreference.set('bt.operationsCalendar.v2.expanded', calendarExpanded);
   }, [calendarExpanded]);
 
   useEffect(() => {
-    if (liveTodayKey === lastCalendarTodayKey) return;
-    setCalendarAnchorDateKey(current => current === lastCalendarTodayKey ? liveTodayKey : current);
-    setLastCalendarTodayKey(liveTodayKey);
-  }, [lastCalendarTodayKey, liveTodayKey]);
+    if (todayKey === lastCalendarTodayKey) return;
+    setCalendarAnchorDateKey(current => current === lastCalendarTodayKey ? todayKey : current);
+    setLastCalendarTodayKey(todayKey);
+  }, [lastCalendarTodayKey, todayKey]);
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [feedRes, calendarRes, paymentQueueRes] = await Promise.all([
+        // 2026-10-28: the Friday-queue numbers no longer gate first paint (the old
+        // /quickbooks/status call was the slowest of the three); they load in their own effect.
+        const [feedRes, calendarRes] = await Promise.all([
           calendarOnly
             ? Promise.resolve({ data: { items: [] } })
             : api.get('/dashboard/activity-feed?limit=25').catch(() => ({ data: { items: [] } })),
           canReadOperationsCalendar
             ? api.get(`/calendar/events?start=${encodeURIComponent(calendarDataRange.start)}&end=${encodeURIComponent(calendarDataRange.end)}`).catch(() => ({ data: { events: [] } }))
             : Promise.resolve({ data: { events: [] } }),
-          !calendarOnly && canReadFridayPaymentQueue
-            ? api.get('/quickbooks/status').catch(() => ({ data: null }))
-            : Promise.resolve({ data: null }),
         ]);
         const feedItems = Array.isArray(feedRes.data?.items)
           ? feedRes.data.items
@@ -628,9 +749,6 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
             : [];
         setActivityFeed(dedupeActivityFeedItems(feedItems).slice(0, 25));
         setCalendarEvents(Array.isArray(calendarRes.data?.events) ? calendarRes.data.events : []);
-        setFridayPaymentQueueSummary(
-          fridayPaymentQueueSummaryFromStatus(paymentQueueRes.data) || emptyFridayPaymentQueueSummary
-        );
       } catch (err) {
         console.error(err);
       } finally {
@@ -638,7 +756,7 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
       }
     };
     load();
-  }, [user?.id, user?.role, calendarOnly, canReadOperationsCalendar, canReadFridayPaymentQueue, calendarDataRange.start, calendarDataRange.end]);
+  }, [user?.id, user?.role, calendarOnly, canReadOperationsCalendar, calendarDataRange.start, calendarDataRange.end]);
 
   // Re-sync the consolidated calendar whenever the user returns to this view, so
   // events entered elsewhere (e.g. from a project) appear without a manual reload.
@@ -660,27 +778,36 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
 
   // Keep the Friday queue reminder current. Bills paid in QuickBooks leave the
   // queue within a minute; the reminder used to keep its first count until the
-  // dashboard was reloaded.
+  // dashboard was reloaded. First fetch runs right away (even in a background tab,
+  // as the old gated load did); the poll and wake-ups skip hidden tabs.
   useEffect(() => {
-    if (calendarOnly || !canReadFridayPaymentQueue) return;
-    const refreshSummary = () => {
-      if (document.visibilityState !== 'visible') return;
-      api.get('/quickbooks/status')
-        .then(res => {
-          const summary = fridayPaymentQueueSummaryFromStatus(res.data);
-          if (summary) setFridayPaymentQueueSummary(summary);
+    if (calendarOnly || !canReadFridayPaymentQueue) {
+      setFridayPaymentQueueSummary(emptyFridayPaymentQueueSummary);
+      return;
+    }
+    let cancelled = false;
+    const fetchSummary = () => {
+      fetchFridayPaymentQueueSummary()
+        .then(summary => {
+          if (!cancelled && summary) setFridayPaymentQueueSummary(summary);
         })
         .catch(() => {});
     };
+    const refreshSummary = () => {
+      if (document.visibilityState !== 'visible') return;
+      fetchSummary();
+    };
+    fetchSummary();
     const timer = window.setInterval(refreshSummary, 60_000);
     window.addEventListener('focus', refreshSummary);
     document.addEventListener('visibilitychange', refreshSummary);
     return () => {
+      cancelled = true;
       window.clearInterval(timer);
       window.removeEventListener('focus', refreshSummary);
       document.removeEventListener('visibilitychange', refreshSummary);
     };
-  }, [calendarOnly, canReadFridayPaymentQueue]);
+  }, [user?.id, calendarOnly, canReadFridayPaymentQueue]);
 
   useNotesSync(undefined, async () => {
     const response = await api.get('/dashboard/activity-feed?limit=25');
@@ -691,11 +818,6 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
   if (loading) return <Loading />;
 
   const firstName = user?.name?.split(' ')[0] || 'there';
-  const now = liveNow;
-  const liveNowIso = now.toISOString();
-  const liveEasternTimeLabel = `${formatEasternTime(liveNowIso)
-    .replace(/\sAM$/, ' A.M.')
-    .replace(/\sPM$/, ' P.M.')} Eastern Time`;
 
   const refreshCalendarEvents = async (anchorDateKey = calendarAnchorDateKey, viewMode = calendarViewMode) => {
     const range = calendarRangeForView(calendarOnly ? viewMode : 'month', anchorDateKey);
@@ -850,7 +972,6 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
     }
   };
 
-  const todayKey = liveTodayKey;
   const calendarAnchorDate = localDateInputToNoonDate(calendarAnchorDateKey);
   const currentWeekStartDate = calendarAnchorDate;
   const currentWeekEndDate = addCalendarDays(currentWeekStartDate, 6);
@@ -2047,7 +2168,7 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
                 </div>
                 <div className="flex flex-shrink-0 flex-col items-end gap-1.5 text-right">
                   <span className="text-[11px] font-normal text-slate-500">
-                    {formatEasternRelative(item.created_at)}
+                    <LiveRelativeTime value={item.created_at} />
                   </span>
                   {canDeleteProjectNotes && item.feed_type === 'note' && item.project_id ? (
                     <button
@@ -2092,12 +2213,10 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
               </span>
             </div>
             <h1 className="text-2xl font-black tracking-tight text-slate-50">
-              {greeting()}, {firstName}
+              <LiveGreeting />, {firstName}
             </h1>
             <p className="mt-1 text-sm font-semibold text-slate-300">
-              {formatEasternDate(liveNowIso, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
-              {' - '}
-              {liveEasternTimeLabel}
+              <LiveEasternClock variant="header" />
             </p>
           </div>
         </div>
@@ -2500,7 +2619,7 @@ export default function Dashboard({ calendarOnly = false }: DashboardProps) {
         {!calendarOnly && (
         <div className="flex items-center justify-between py-2">
           <p className="text-xs text-gray-400">© 2026 New Urban Development · BuildTrack Platform</p>
-          <p className="text-xs text-gray-400">Live time: {liveEasternTimeLabel}</p>
+          <p className="text-xs text-gray-400">Live time: <LiveEasternClock variant="footer" /></p>
         </div>
         )}
       </div>

@@ -1,3 +1,4 @@
+import '../styles/mobile-heavy.css';
 import { useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Camera } from 'lucide-react';

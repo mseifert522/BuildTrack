@@ -49,13 +49,18 @@ export const PROGRESS_MEDIA_ACCEPT = [
   'video/*',
   ...PROGRESS_MEDIA_EXTENSIONS,
 ].join(',');
-export const MAX_PROGRESS_IMAGE_DIMENSION = 2200;
-export const PROGRESS_IMAGE_QUALITY = 0.86;
 
 export type ProgressCaptureSource = 'batch_camera' | 'device_camera' | 'library' | 'desktop' | 'unknown';
 
 const GEOLOCATION_TIMEOUT_MS = 6500;
-const IMAGE_TYPES_TO_RESIZE = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp']);
+// 2026-10-28: one shared fix per burst of uploads. Before this every file
+// waited up to 6.5 s on its own GPS request (and a failure was never
+// remembered), so 60 library photos indoors sat idle for about two minutes.
+const UPLOAD_POSITION_SUCCESS_TTL_MS = 120 * 1000;
+const UPLOAD_POSITION_FAILURE_TTL_MS = 45 * 1000;
+// Desktop browsers often hand .heic (and some .dng/.tif) files over with an
+// empty MIME type; exifr reads them fine, so fall back to the extension.
+const EXIF_IMAGE_EXTENSION = /\.(jpe?g|heic|heif|tiff?|png|webp|avif|dng)$/i;
 const PROGRESS_MEDIA_EXTENSION_SET = new Set(PROGRESS_MEDIA_EXTENSIONS);
 
 export function isSupportedProgressMediaFile(file: File) {
@@ -111,9 +116,10 @@ function normalizeUploadLocation(value?: Partial<ProgressUploadLocation> | null)
   };
 }
 
-function getUploadPosition(): Promise<GeolocationPosition | null> {
-  if (!navigator.geolocation) return Promise.resolve(null);
+let uploadPositionInFlight: Promise<GeolocationPosition | null> | null = null;
+let uploadPositionCache: { at: number; position: GeolocationPosition | null } | null = null;
 
+function requestUploadPosition(): Promise<GeolocationPosition | null> {
   return new Promise(resolve => {
     navigator.geolocation.getCurrentPosition(
       position => resolve(position),
@@ -127,6 +133,30 @@ function getUploadPosition(): Promise<GeolocationPosition | null> {
   });
 }
 
+// Every concurrent upload shares one in-flight request; a fix is reused for
+// 120 s and a failure/timeout for 45 s so a dead GPS costs one wait, not one
+// per file.
+function getUploadPosition(): Promise<GeolocationPosition | null> {
+  if (typeof navigator === 'undefined' || !navigator.geolocation) return Promise.resolve(null);
+  const cached = uploadPositionCache;
+  if (cached) {
+    const ttl = cached.position ? UPLOAD_POSITION_SUCCESS_TTL_MS : UPLOAD_POSITION_FAILURE_TTL_MS;
+    if (Date.now() - cached.at < ttl) return Promise.resolve(cached.position);
+  }
+  if (uploadPositionInFlight) return uploadPositionInFlight;
+  const request = requestUploadPosition()
+    .catch(() => null)
+    .then(position => {
+      uploadPositionCache = { at: Date.now(), position };
+      return position;
+    })
+    .finally(() => {
+      if (uploadPositionInFlight === request) uploadPositionInFlight = null;
+    });
+  uploadPositionInFlight = request;
+  return request;
+}
+
 function normalizeExifDate(value: unknown): string | null {
   if (!value) return null;
   const date = value instanceof Date ? value : new Date(String(value));
@@ -138,7 +168,7 @@ function getFallbackCapturedAt(file: File, now: Date) {
 }
 
 async function readImageMetadata(file: File): Promise<ImageMetadata> {
-  if (!file.type.startsWith('image/')) return {};
+  if (!file.type.startsWith('image/') && !EXIF_IMAGE_EXTENSION.test(file.name)) return {};
   try {
     const metadata = await exifr.parse(file, {
       pick: ['DateTimeOriginal', 'CreateDate', 'ModifyDate', 'GPSLatitude', 'GPSLongitude'],
@@ -160,47 +190,12 @@ async function readImageMetadata(file: File): Promise<ImageMetadata> {
   }
 }
 
-function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob | null> {
-  return new Promise(resolve => canvas.toBlob(resolve, type, quality));
-}
-
-async function resizeImage(file: File): Promise<File> {
-  if (!IMAGE_TYPES_TO_RESIZE.has(file.type) || file.size < 450 * 1024) return file;
-
-  const bitmap = await createImageBitmap(file).catch(() => null);
-  if (!bitmap) return file;
-
-  const longestSide = Math.max(bitmap.width, bitmap.height);
-  if (longestSide <= MAX_PROGRESS_IMAGE_DIMENSION) {
-    bitmap.close();
-    return file;
-  }
-
-  const scale = MAX_PROGRESS_IMAGE_DIMENSION / longestSide;
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.round(bitmap.width * scale);
-  canvas.height = Math.round(bitmap.height * scale);
-  const context = canvas.getContext('2d');
-  if (!context) {
-    bitmap.close();
-    return file;
-  }
-
-  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  bitmap.close();
-  const outputType = file.type === 'image/png' ? 'image/jpeg' : file.type;
-  const blob = await canvasToBlob(canvas, outputType, PROGRESS_IMAGE_QUALITY);
-  if (!blob || blob.size >= file.size) return file;
-
-  const nextName = outputType === file.type
-    ? file.name
-    : file.name.replace(/\.[^.]+$/, '') + '.jpg';
-  return new File([blob], nextName, { type: outputType, lastModified: file.lastModified });
-}
-
+// 2026-10-28: uploads keep the original file. This used to shrink photos to
+// 2200 px, re-save them as JPEG 0.86 and turn PNGs into JPEGs, which broke the
+// owner's no-quality-loss rule and stripped EXIF. Grids already load the
+// server's small WebP variants, so display speed does not depend on it.
 export async function prepareProgressUploadFile(file: File): Promise<File> {
-  if (!file.type.startsWith('image/')) return file;
-  return resizeImage(file).catch(() => file);
+  return file;
 }
 
 export async function appendProgressUploadAudit(
@@ -218,7 +213,9 @@ export async function appendProgressUploadAudit(
   const metadata = await Promise.all(files.map(readImageMetadata));
   const capturedValues = files.map((file, index) => metadata[index]?.capturedAt || getFallbackCapturedAt(file, now));
   const metadataLocations = metadata.map(item => normalizeUploadLocation(item));
-  const needsLiveDeviceLocation = sources.some(source => source === 'device_camera' || source === 'batch_camera' || source === 'library');
+  // Only wait on the phone's GPS when some file has no EXIF location of its own.
+  const needsLiveDeviceLocation = sources.some(source => source === 'device_camera' || source === 'batch_camera' || source === 'library')
+    && metadataLocations.some(location => !location);
   const optionLocation = normalizeUploadLocation(options.location);
   const position = optionLocation || options.skipDeviceLocation || !needsLiveDeviceLocation ? null : await getUploadPosition();
   const liveLocation = optionLocation || normalizeUploadLocation(position?.coords);

@@ -1,3 +1,4 @@
+import '../styles/mobile-heavy.css';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
