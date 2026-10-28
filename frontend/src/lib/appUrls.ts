@@ -120,7 +120,29 @@ export function desktopHostPathFor(path = '/'): string {
   return `${pathname}${suffix}`;
 }
 
+// mobile.buildtrack / m.buildtrack are two-level subdomains, which the zone's free
+// Cloudflare certificate (*.newurbandev.com) does not cover: browsers refuse to open
+// them. Until a certificate covers them, phones get the field app on the main host
+// under /mobile (2026-10-28). Set to true once https://mobile.buildtrack... loads.
+export const MOBILE_HOST_AVAILABLE = false;
+
+// The /mobile path on the main host for a page; pages without a phone version keep
+// their own path (so the redirect leaves them alone instead of looping).
+function sameHostMobilePathFor(path = '/'): string {
+  const hostPath = mobileHostPathFor(path);
+  const { pathname, suffix } = splitPathAndSuffix(hostPath);
+  if (pathname === '/') return `/mobile${suffix}`;
+  if (pathname === '/photos' || pathname === '/projects' || pathname.startsWith('/project/')) {
+    return `/mobile${pathname}${suffix}`;
+  }
+  return hostPath;
+}
+
 export function mobileExternalUrl(path = '/'): string {
+  if (!MOBILE_HOST_AVAILABLE) {
+    const origin = typeof window !== 'undefined' && isDesktopAppHost() ? window.location.origin : DESKTOP_APP_ORIGIN;
+    return `${origin}${sameHostMobilePathFor(path)}`;
+  }
   return `${MOBILE_APP_ORIGIN}${mobileHostPathFor(path)}`;
 }
 

@@ -39,7 +39,9 @@ const BRAND = {
   name: 'New Urban Development',
   color: '#D99D26',
   url: process.env.APP_URL || 'https://buildtrack.newurbandev.com',
-  mobileUrl: process.env.MOBILE_APP_URL || 'https://mobile.buildtrack.newurbandev.com',
+  // mobile.buildtrack.newurbandev.com is not covered by the zone's certificate, so
+  // phones open the field app on the main host (see frontend lib/appUrls.ts).
+  mobileUrl: process.env.MOBILE_APP_URL || 'https://buildtrack.newurbandev.com/mobile',
   logoUrl: process.env.EMAIL_LOGO_URL || `${(process.env.APP_URL || 'https://buildtrack.newurbandev.com').replace(/\/+$/, '')}/nud-logo.jpg`,
   quoteInbox: process.env.QUOTE_REQUEST_VISIBLE_TO || process.env.COMPANY_EMAIL || process.env.SMTP_USER || 'info@newurbandev.com',
 };

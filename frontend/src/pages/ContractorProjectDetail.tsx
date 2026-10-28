@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, MessageSquare, Camera, ClipboardList, Plus, Send, Trash2, Upload, FileText, Package } from 'lucide-react';
 import api from '../lib/api';
+import { uploadThumbSrc } from '../lib/uploadVariants';
 import toast from 'react-hot-toast';
 import { fileDropHandlers } from '../lib/fileDrop';
 import { formatEasternDateTime, formatEasternRelative } from '../lib/time';
@@ -400,7 +401,7 @@ export default function ContractorProjectDetail() {
                           {isVideoMedia(p) ? (
                             <video src={`/uploads/${id}/${p.filename}`} muted playsInline preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                           ) : (
-                            <img src={`/uploads/${id}/${p.filename}`} alt={p.original_name || ''} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            <img src={uploadThumbSrc(`/uploads/${id}/${p.filename}`)} alt={p.original_name || ''} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                           )}
                         </a>
                       ))}
@@ -466,7 +467,7 @@ export default function ContractorProjectDetail() {
               {photos.map(p => (
                 <div key={p.id} style={{ borderRadius: 10, overflow: 'hidden', aspectRatio: '1', background: '#E5E7EB' }}>
                   <img
-                    src={`/uploads/${id}/${p.filename}`}
+                    src={uploadThumbSrc(`/uploads/${id}/${p.filename}`)}
                     alt={p.caption || ''}
                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   />

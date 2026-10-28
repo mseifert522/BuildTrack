@@ -25,6 +25,7 @@ import {
   X,
 } from 'lucide-react';
 import api from '../lib/api';
+import { uploadThumbSrc } from '../lib/uploadVariants';
 import { useAuthStore } from '../store/authStore';
 import { fileDropHandlers } from '../lib/fileDrop';
 import {
@@ -1824,7 +1825,7 @@ export default function MobilePhotos() {
                               <PlayCircle size={30} color="white" style={{ position: 'absolute', inset: 0, margin: 'auto', filter: 'drop-shadow(0 1px 4px rgba(0,0,0,0.65))' }} />
                             </div>
                           ) : (
-                            <img src={src} alt={photo.caption || photo.original_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            <img src={uploadThumbSrc(src)} alt={photo.caption || photo.original_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                           )}
                           {photo.label && (
                             <span style={{ position: 'absolute', left: 6, top: 6, borderRadius: 999, background: 'rgba(217,157,38,0.92)', color: 'white', padding: '4px 7px', fontSize: 9, fontWeight: 900 }}>

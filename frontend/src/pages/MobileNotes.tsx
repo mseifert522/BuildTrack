@@ -3,6 +3,7 @@ import { openEventStream } from '../lib/noteEvents';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../lib/api';
+import { uploadThumbSrc } from '../lib/uploadVariants';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '../store/authStore';
 import {
@@ -661,7 +662,7 @@ export default function MobileNotes() {
                                             <PlayCircle className="absolute inset-0 m-auto w-7 h-7 text-white drop-shadow" />
                                           </button>
                                         ) : (
-                                          <img src={src} alt={photo.original_name || 'Progress picture'} className="w-full h-full object-cover" loading="lazy" />
+                                          <img src={uploadThumbSrc(src)} alt={photo.original_name || 'Progress picture'} className="w-full h-full object-cover" loading="lazy" />
                                         )}
                                         <div className="absolute left-1 bottom-1 rounded-full px-1.5 py-0.5 text-[9px] font-black text-white" style={{ background: 'rgba(17,24,39,0.72)' }}>
                                           {formatEasternDateTime(photo.taken_at || photo.created_at, { hour: 'numeric', minute: '2-digit' })}

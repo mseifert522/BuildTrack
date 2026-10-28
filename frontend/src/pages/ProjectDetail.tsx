@@ -5,6 +5,7 @@ import { type ChangeEvent, type Dispatch, type DragEvent, type KeyboardEvent, ty
 import { useParams, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore, canChangeProjectStatus, canManageProjects, isAdminRole } from '../store/authStore';
 import api from '../lib/api';
+import { uploadThumbSrc } from '../lib/uploadVariants';
 import { Loading, StatusBadge, Modal, statusLabels } from '../components/ui';
 import {
   QuoteApprovalEmailNoticeModal, noticeFromApproveResponse, approvalEmailToastSuffix,
@@ -2201,7 +2202,7 @@ export default function ProjectDetail() {
                                       <PlayCircle className="absolute inset-0 m-auto h-7 w-7 text-white drop-shadow" />
                                     </>
                                   ) : mediaKind === 'image' ? (
-                                    <img src={src} alt={attachmentName} className="h-full w-full object-cover transition duration-200 group-hover:scale-[1.02]" loading="lazy" />
+                                    <img src={uploadThumbSrc(src)} alt={attachmentName} className="h-full w-full object-cover transition duration-200 group-hover:scale-[1.02]" loading="lazy" />
                                   ) : (
                                     <UnsupportedProgressMediaTile name={attachmentName} />
                                   )}
@@ -2372,7 +2373,7 @@ export default function ProjectDetail() {
                   style={{ background: '#1c1f29' }}
                 >
                   {project.main_photo_url ? (
-                    <img src={project.main_photo_url} alt={project.address} className="h-full w-full object-cover" />
+                    <img src={uploadThumbSrc(project.main_photo_url, 1280)} alt={project.address} className="h-full w-full object-cover" />
                   ) : (
                     <MapPin className="w-6 h-6 text-blue-400" />
                   )}
@@ -2391,7 +2392,7 @@ export default function ProjectDetail() {
             ) : (
               <div className="h-16 w-20 overflow-hidden rounded-xl border border-white/10 flex items-center justify-center flex-shrink-0 shadow-[0_6px_18px_rgba(0,0,0,0.45)]" style={{ background: '#1c1f29' }}>
                 {project.main_photo_url ? (
-                  <img src={project.main_photo_url} alt={project.address} className="h-full w-full object-cover" />
+                  <img src={uploadThumbSrc(project.main_photo_url, 1280)} alt={project.address} className="h-full w-full object-cover" />
                 ) : (
                   <MapPin className="w-6 h-6 text-blue-400" />
                 )}
@@ -2622,7 +2623,7 @@ export default function ProjectDetail() {
                 />
                 <div className="w-16 h-12 rounded-xl overflow-hidden flex items-center justify-center flex-shrink-0" style={{ background: '#F3F4F6' }}>
                   {project.main_photo_url ? (
-                    <img src={project.main_photo_url} alt={project.address} className="w-full h-full object-cover" />
+                    <img src={uploadThumbSrc(project.main_photo_url, 160)} alt={project.address} className="w-full h-full object-cover" />
                   ) : (
                     <Camera className="w-5 h-5 text-gray-400" />
                   )}
@@ -5483,7 +5484,7 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                                 {mediaKind === 'video' ? (
                                   <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
                                 ) : mediaKind === 'image' ? (
-                                  <img src={src} alt={photo.original_name || 'Scope photo'} className="h-full w-full object-cover" loading="lazy" />
+                                  <img src={uploadThumbSrc(src)} alt={photo.original_name || 'Scope photo'} className="h-full w-full object-cover" loading="lazy" />
                                 ) : (
                                   <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
                                 )}
@@ -5611,7 +5612,7 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                                 {item.photos?.length > 0 && (
                                   <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
                                     {item.photos.map((photo: any) => (
-                                      <img key={photo.id} src={`/uploads/${projectId}/${photo.filename}`} alt={photo.original_name || item.title} className="h-20 w-24 flex-shrink-0 rounded-lg border border-white/10 object-cover" />
+                                      <img key={photo.id} src={uploadThumbSrc(`/uploads/${projectId}/${photo.filename}`, 160)} alt={photo.original_name || item.title} className="h-20 w-24 flex-shrink-0 rounded-lg border border-white/10 object-cover" />
                                     ))}
                                   </div>
                                 )}
@@ -6153,7 +6154,7 @@ function ScopeOfWorkTab({ projectId, project, canManage }: { projectId: string; 
                       {mediaKind === 'video' ? (
                         <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
                       ) : mediaKind === 'image' ? (
-                        <img src={src} alt={photo.original_name || 'Selected scope photo'} className="h-full w-full object-cover" loading="lazy" />
+                        <img src={uploadThumbSrc(src)} alt={photo.original_name || 'Selected scope photo'} className="h-full w-full object-cover" loading="lazy" />
                       ) : (
                         <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
                       )}
@@ -6548,7 +6549,7 @@ function ConstructionPlanBoard({ projectId, canManage }: { projectId: string; ca
                     {item.photos?.length > 0 && (
                       <div className="flex gap-2 mt-3 overflow-x-auto pb-1">
                         {item.photos.map((photo: any) => (
-                          <img key={photo.id} src={`/uploads/${projectId}/${photo.filename}`} alt={photo.original_name || item.title} className="w-24 h-20 rounded-lg object-cover border border-gray-200 flex-shrink-0" />
+                          <img key={photo.id} src={uploadThumbSrc(`/uploads/${projectId}/${photo.filename}`, 160)} alt={photo.original_name || item.title} className="w-24 h-20 rounded-lg object-cover border border-gray-200 flex-shrink-0" />
                         ))}
                       </div>
                     )}
@@ -6974,7 +6975,7 @@ function ConstructionPlanTab({ projectId, canManage }: { projectId: string; canM
                   {item.photos?.length > 0 && (
                     <div className="flex gap-2 mt-3 overflow-x-auto pb-1">
                       {item.photos.map((photo: any) => (
-                        <img key={photo.id} src={`/uploads/${projectId}/${photo.filename}`} alt={photo.original_name || item.title} className="w-24 h-20 rounded-lg object-cover border border-gray-200 flex-shrink-0" />
+                        <img key={photo.id} src={uploadThumbSrc(`/uploads/${projectId}/${photo.filename}`, 160)} alt={photo.original_name || item.title} className="w-24 h-20 rounded-lg object-cover border border-gray-200 flex-shrink-0" />
                       ))}
                     </div>
                   )}
@@ -7684,7 +7685,7 @@ function PunchListTab({
                     className={`group relative h-16 w-16 flex-shrink-0 cursor-grab overflow-hidden rounded-lg border bg-slate-900 outline-none transition active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-blue-400 ${selected ? 'border-amber-400 ring-2 ring-amber-300' : 'border-slate-700'}`}
                   >
                     {kind === 'image' ? (
-                      <img src={progressPhotoSrc(projectId, photo)} alt="" className="h-full w-full object-cover" loading="lazy" draggable={false} />
+                      <img src={uploadThumbSrc(progressPhotoSrc(projectId, photo))} alt="" className="h-full w-full object-cover" loading="lazy" draggable={false} />
                     ) : (
                       <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
                     )}
@@ -7870,7 +7871,7 @@ function PunchListTab({
                               {mediaKind === 'video' ? (
                                 <video src={src} className="h-full w-full object-cover" muted playsInline preload="metadata" />
                               ) : mediaKind === 'image' ? (
-                                <img src={src} alt={photo.original_name || 'Punch list photo'} className="h-full w-full object-cover" loading="lazy" draggable={false} />
+                                <img src={uploadThumbSrc(src)} alt={photo.original_name || 'Punch list photo'} className="h-full w-full object-cover" loading="lazy" draggable={false} />
                               ) : (
                                 <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
                               )}
@@ -8521,7 +8522,7 @@ function ProgressMediaGrid({
                 <PlayCircle className="absolute inset-0 m-auto h-7 w-7 text-white drop-shadow" />
               </>
             ) : mediaKind === 'image' ? (
-              <img src={src} alt={photo.original_name || 'Progress picture'} className="h-full w-full object-cover" loading="lazy" />
+              <img src={uploadThumbSrc(src)} alt={photo.original_name || 'Progress picture'} className="h-full w-full object-cover" loading="lazy" />
             ) : (
               <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
             )}
@@ -8780,7 +8781,7 @@ function PhotoNoteModal({
               {mediaKind === 'video' ? (
                 <VideoPlayer src={src} className="h-full w-full" />
               ) : mediaKind === 'image' ? (
-                <img src={src} alt={photo.original_name || 'Project picture'} className="h-full w-full object-cover" />
+                <img src={uploadThumbSrc(src, 1280)} alt={photo.original_name || 'Project picture'} className="h-full w-full object-cover" />
               ) : (
                 <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
               )}
@@ -8925,7 +8926,7 @@ function RecentFieldPhotosCard({
                           <PlayCircle className="absolute inset-0 m-auto h-8 w-8 text-white drop-shadow" />
                         </>
                       ) : mediaKind === 'image' ? (
-                        <img src={src} alt={photo.original_name || 'Recent field photo'} className="h-full w-full object-cover" loading="lazy" />
+                        <img src={uploadThumbSrc(src)} alt={photo.original_name || 'Recent field photo'} className="h-full w-full object-cover" loading="lazy" />
                       ) : (
                         <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
                       )}
@@ -9129,7 +9130,7 @@ function PhotoBucketPickerModal({
                         <PlayCircle className="absolute inset-0 m-auto h-8 w-8 text-white drop-shadow" />
                       </>
                     ) : mediaKind === 'image' ? (
-                      <img src={src} alt={photo.original_name || 'Project photo'} className="h-full w-full object-cover" loading="lazy" />
+                      <img src={uploadThumbSrc(src)} alt={photo.original_name || 'Project photo'} className="h-full w-full object-cover" loading="lazy" />
                     ) : (
                       <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
                     )}
@@ -9516,7 +9517,7 @@ function PhotosTab({ projectId, project, user }: { projectId: string; project: a
                           <PlayCircle className="absolute inset-0 m-auto h-10 w-10 text-white drop-shadow" />
                         </>
                       ) : mediaKind === 'image' ? (
-                        <img src={src} alt={photo.original_name} className="w-full h-full object-cover transition-transform group-hover:scale-105" loading="lazy" />
+                        <img src={uploadThumbSrc(src)} alt={photo.original_name} className="w-full h-full object-cover transition-transform group-hover:scale-105" loading="lazy" />
                       ) : (
                           <UnsupportedProgressMediaTile name={photo.original_name || photo.filename} />
                       )}
@@ -9644,7 +9645,7 @@ function PhotosTab({ projectId, project, user }: { projectId: string; project: a
                 {scopeAssignPreviewKind === 'video' ? (
                   <video src={scopeAssignPreviewSrc} className="h-full w-full object-cover" muted playsInline preload="metadata" />
                 ) : scopeAssignPreviewKind === 'image' ? (
-                  <img src={scopeAssignPreviewSrc} alt={scopeAssignPhoto.original_name || 'Selected photo'} className="h-full w-full object-cover" />
+                  <img src={uploadThumbSrc(scopeAssignPreviewSrc, 160)} alt={scopeAssignPhoto.original_name || 'Selected photo'} className="h-full w-full object-cover" />
                 ) : (
                   <UnsupportedProgressMediaTile name={scopeAssignPhoto.original_name || scopeAssignPhoto.filename} />
                 )}

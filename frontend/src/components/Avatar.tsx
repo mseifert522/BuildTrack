@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { uploadThumbSrc } from '../lib/uploadVariants';
 
 interface AvatarProps {
   src?: string | null;
@@ -87,7 +88,7 @@ export default function Avatar({
   if (canShowImage) {
     return (
       <img
-        src={imageSrc || undefined}
+        src={imageSrc ? uploadThumbSrc(imageSrc, size > 80 ? 480 : 160) : undefined}
         alt={alt || (name ? `${name} profile photo` : 'User profile photo')}
         className={`${commonClassName} object-cover bg-slate-100 ${imageClassName}`.trim()}
         style={{ objectPosition: 'center top', ...baseStyle, ...imageStyle }}

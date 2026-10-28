@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { X } from 'lucide-react';
+import { uploadOriginalSrc } from '../lib/uploadVariants';
 
 type LightboxImage = {
   src: string;
@@ -39,7 +40,8 @@ export default function GlobalImageLightbox() {
       event.preventDefault();
       event.stopPropagation();
       setImage({
-        src: img.currentSrc || img.src,
+        // Tiles show a small `?w=` copy; the enlarged view is the original photo.
+        src: uploadOriginalSrc(img.currentSrc || img.src),
         alt: img.alt || 'BuildTrack photo',
       });
     };

@@ -23,6 +23,7 @@ const { startCalendarReminderScheduler } = require('./src/services/calendarRemin
 const { startActivityRetentionScheduler } = require('./src/services/activityRetentionScheduler');
 const videoNormalization = require('./src/services/videoNormalization');
 const { createUploadsGate, isInlineSafeUpload } = require('./src/middleware/uploadsGate');
+const { createImageVariants } = require('./src/middleware/imageVariants');
 const documentRoutes = require('./src/routes/documents');
 const contractorOnboardingRoutes = require('./src/routes/contractorOnboarding');
 const vendorSetupRoutes = require('./src/routes/vendorSetup');
@@ -131,7 +132,9 @@ app.use('/uploads/vendor-setup', (req, res) => res.status(404).json({ error: 'No
 app.use('/uploads/agreements', (req, res) => res.status(404).json({ error: 'Not found' }));
 // Scope of Work PDFs are only ever read through /api/projects/:id/scope-document (audited).
 app.use('/uploads/scope-documents', (req, res) => res.status(404).json({ error: 'Not found' }));
-app.use('/uploads', createUploadsGate(uploadsPath), express.static(path.resolve(uploadsPath), {
+// `?w=160|480|1280` on an image answers with a small WebP copy (grids and tiles);
+// see src/middleware/imageVariants.js. Runs after the gate, so the same rules apply.
+app.use('/uploads', createUploadsGate(uploadsPath), createImageVariants(uploadsPath), express.static(path.resolve(uploadsPath), {
   index: false,
   setHeaders: (res, filePath) => {
     // Every upload is private: no shared cache (Cloudflare included) may hold a file

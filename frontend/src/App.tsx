@@ -14,6 +14,7 @@ import {
   isMobileAppHost,
   desktopExternalUrl,
   legacyMobilePathToMobileHostPath,
+  MOBILE_HOST_AVAILABLE,
   mobileExternalUrl,
   mobilePath,
 } from './lib/appUrls';
@@ -650,7 +651,8 @@ export default function App() {
         <Route path="/approval/mobile-login-preview" element={<MobileLoginDesignPreview />} />
 
         {/* Auth */}
-        <Route path="/login" element={<AuthRoute><Login /></AuthRoute>} />
+        {/* Phones sign in here while the mobile host is unavailable (lib/appUrls.ts). */}
+        <Route path="/login" element={<AuthRoute>{!MOBILE_HOST_AVAILABLE && isLikelyMobileDevice() ? <Login initialMode="pin" forceMobileLogin /> : <Login />}</AuthRoute>} />
         <Route path="/change-password" element={<ChangePassword />} />
         <Route path="/forgot-password" element={<AuthRoute><ForgotPassword /></AuthRoute>} />
         <Route path="/reset-password" element={<ResetPassword />} />

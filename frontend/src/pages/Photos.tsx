@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import api from '../lib/api';
+import { uploadThumbSrc } from '../lib/uploadVariants';
 import { Loading } from '../components/ui';
 import { Camera, FileImage, Grid, List, MessageSquare, PlayCircle, Trash2, X } from 'lucide-react';
 import { formatEasternDate, formatEasternDateTime } from '../lib/time';
@@ -413,7 +414,7 @@ export default function Photos() {
                         {isVideo ? (
                           <video src={src} className="w-full h-full object-cover transition-transform group-hover:scale-105" preload="metadata" muted playsInline />
                         ) : mediaKind === 'image' ? (
-                          <img src={src} alt={photo.original_name} className="w-full h-full object-cover transition-transform group-hover:scale-105" loading="lazy" />
+                          <img src={uploadThumbSrc(src)} alt={photo.original_name} className="w-full h-full object-cover transition-transform group-hover:scale-105" loading="lazy" />
                         ) : (
                           <UnsupportedMediaTile name={photo.original_name || photo.filename} />
                         )}
@@ -513,7 +514,7 @@ export default function Photos() {
                               <PlayCircle className="absolute inset-0 m-auto w-7 h-7 text-white drop-shadow" />
                             </>
                           ) : mediaKind === 'image' ? (
-                            <img src={src} alt="" className="w-full h-full object-cover" />
+                            <img src={uploadThumbSrc(src, 160)} alt="" className="w-full h-full object-cover" />
                           ) : (
                             <UnsupportedMediaTile name={photo.original_name || photo.filename} />
                           )}
@@ -675,7 +676,7 @@ function PhotoDescriptionModal({
               {mediaKind === 'video' ? (
                 <VideoPlayer src={src} className="h-full w-full" />
               ) : mediaKind === 'image' ? (
-                <img src={src} alt={photo.original_name || 'Project picture'} className="h-full w-full object-cover" />
+                <img src={uploadThumbSrc(src, 1280)} alt={photo.original_name || 'Project picture'} className="h-full w-full object-cover" />
               ) : (
                 <UnsupportedMediaTile name={photo.original_name || photo.filename} />
               )}

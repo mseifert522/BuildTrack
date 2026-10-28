@@ -23,8 +23,13 @@ function cleanVendorName(value) {
 
 // The same name without its legal form, so "Oak Roofing" finds "Oak Roofing LLC".
 const LEGAL_SUFFIXES = /\b(l\.?\s?l\.?\s?c|p\.?\s?l\.?\s?l\.?\s?c|l\.?\s?l\.?\s?p|l\.?\s?p|inc(orporated)?|corp(oration)?|co(mpany)?|ltd|limited)\b\.?/gi;
+// A trailing entity numeral ("Solar Heating and Cooling II LLC.") is how a vendor's
+// legal name differs from the name the office files it under in QuickBooks
+// ("Solar Heating & Cooling"), so it is dropped like the legal form (2026-10-28).
+const ENTITY_NUMERAL = /\s+(ii|iii|iv)\s*$/i;
 function looseVendorKey(value) {
-  const stripped = String(value || '').replace(/^\s*the\s+/i, '').replace(/&/g, ' and ').replace(LEGAL_SUFFIXES, ' ');
+  const stripped = String(value || '').replace(/^\s*the\s+/i, '').replace(/&/g, ' and ').replace(LEGAL_SUFFIXES, ' ')
+    .replace(/[\s.,]+$/, '').replace(ENTITY_NUMERAL, '');
   return normalizeVendorName(stripped);
 }
 
