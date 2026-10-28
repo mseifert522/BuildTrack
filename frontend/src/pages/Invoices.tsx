@@ -111,6 +111,9 @@ interface QuickBooksStatus {
 
 interface QuickBooksBill {
   qbo_id: string;
+  // An emailed invoice filed in BuildTrack that is not in QuickBooks yet (row id
+  // `bt-<invoice id>`); it joins its QuickBooks bill once the office enters it.
+  buildtrack_only?: boolean;
   bt_invoice_number?: string | null;
   doc_number?: string | null;
   vendor_name?: string | null;
@@ -1726,6 +1729,7 @@ export default function Invoices() {
 
   const canDeleteQuickBooksOpenBill = (bill: QuickBooksBill) => (
     canManageQuickBooks
+    && !bill.buildtrack_only
     && !isQuickBooksBillPaid(bill)
     && !isQuickBooksBillBuildTrackPaid(bill)
     && bill.payment_approval_status !== QUICKBOOKS_APPROVED_FOR_PAYMENT_STATUS
@@ -2469,7 +2473,7 @@ export default function Invoices() {
                         const needsReview = hasPaymentMismatch || (!projectMatched && !isPaid && !isBuildTrackPaid);
                         const canDeleteOpenBill = canDeleteQuickBooksOpenBill(bill);
                         const isWaitingForApproval = !isPaid && !isBuildTrackPaid && !isApprovedForPay;
-                        const payDateButton = isWaitingForApproval && canManageQuickBooks ? (
+                        const payDateButton = isWaitingForApproval && canManageQuickBooks && !bill.buildtrack_only ? (
                           <button
                             type="button"
                             onClick={() => sendQuickBooksPayDateEmail(bill)}
@@ -2526,7 +2530,9 @@ export default function Invoices() {
                               {bill.vendor_receipt_notify_status === 'processing' ? (
                                 <small>Pay-date email sending…</small>
                               ) : null}
-                              {renderQuickBooksBillPdfControl(bill)}
+                              {bill.buildtrack_only
+                                ? <small className="font-bold text-amber-700">Not in QuickBooks yet</small>
+                                : renderQuickBooksBillPdfControl(bill)}
                             </td>
                             <td>
                               <strong>{bill.vendor_name || 'Vendor missing'}</strong>
@@ -2786,22 +2792,26 @@ export default function Invoices() {
                         <p className="bt-approved-pay-project">{invoice?.address || bill.project_address || bill.project_job_name || 'Project not listed'}</p>
                         <p className="bt-approved-pay-meta">Pay run: Friday {qboPaymentRunLabel(bill)}</p>
                         <p className="bt-approved-pay-meta">
-                          {bill.payment_approval_notified_at
-                            ? `Management emailed ${formatEasternDateTime(bill.payment_approval_notified_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`
-                            : 'Management email not sent yet'}
+                          {bill.buildtrack_only
+                            ? 'Not in QuickBooks yet - enter the bill there; it joins this approval automatically'
+                            : bill.payment_approval_notified_at
+                              ? `Management emailed ${formatEasternDateTime(bill.payment_approval_notified_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`
+                              : 'Management email not sent yet'}
                         </p>
                       </div>
                       {canManageQuickBooks && (
                         <div className="bt-approved-pay-card-bottom">
-                          <button
-                            type="button"
-                            className="bt-approved-pay-paid-button"
-                            onClick={() => markQuickBooksBillPaidFromQueue(bill)}
-                            disabled={markingQboPaidId === bill.qbo_id}
-                          >
-                            <CheckCircle2 className="h-4 w-4" />
-                            {markingQboPaidId === bill.qbo_id ? 'Checking QBO...' : 'Verify QBO Paid'}
-                          </button>
+                          {bill.buildtrack_only ? null : (
+                            <button
+                              type="button"
+                              className="bt-approved-pay-paid-button"
+                              onClick={() => markQuickBooksBillPaidFromQueue(bill)}
+                              disabled={markingQboPaidId === bill.qbo_id}
+                            >
+                              <CheckCircle2 className="h-4 w-4" />
+                              {markingQboPaidId === bill.qbo_id ? 'Checking QBO...' : 'Verify QBO Paid'}
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => removeQuickBooksBillFromPay(bill)}

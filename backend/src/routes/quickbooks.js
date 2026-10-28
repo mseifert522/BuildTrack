@@ -2533,6 +2533,160 @@ function getQuickBooksBillRow(db, qboId) {
   return attachQuickBooksBillLines(db, attachQuickBooksBillPaymentDates(db, row));
 }
 
+// Emailed invoices filed in BuildTrack (invoices@ intake, AI or Assign) that the office
+// has not entered in QuickBooks yet (Mike, 2026-10-28): they wait for approval in the
+// Invoice Center beside the QuickBooks bills, as row `bt-<invoice id>`. Approve to Pay is
+// kept on the invoice; once the monitor or the sync links its QuickBooks bill, the
+// approval moves to that bill (carryInvoicePayApprovalToBills) and this row is gone.
+const PENDING_INVOICE_ROW_PREFIX = 'bt-';
+// The intake's hard floor (nothing received before 2026-10-25 ET is in the panel).
+const PENDING_INVOICE_SINCE = '2026-10-25';
+
+function pendingInvoiceIdFromRowId(rowId) {
+  const value = String(rowId || '');
+  return value.startsWith(PENDING_INVOICE_ROW_PREFIX) ? value.slice(PENDING_INVOICE_ROW_PREFIX.length) : null;
+}
+
+function pendingInvoiceRows(db, invoiceId = null) {
+  return db.prepare(`
+    SELECT i.id, i.invoice_number, i.external_invoice_number, i.status, i.total, i.vendor_name, i.vendor_email,
+           i.project_id, i.vendor_invoice_date, i.vendor_due_date, i.created_at,
+           i.pay_approval_status, i.pay_approved_at, i.pay_approved_by, i.pay_run_date,
+           p.address AS project_address, p.job_name AS project_job_name, u.name AS approved_by_name
+    FROM invoices i
+    LEFT JOIN projects p ON p.id = i.project_id
+    LEFT JOIN users u ON u.id = i.pay_approved_by
+    WHERE i.source = 'email'
+      AND i.status IN ('submitted', 'approved')
+      AND date(i.created_at) >= ?
+      AND (? IS NULL OR i.id = ?)
+      AND NOT EXISTS (SELECT 1 FROM invoice_qbo_links l WHERE l.invoice_id = i.id)
+      AND NOT EXISTS (
+        SELECT 1 FROM quickbooks_bills qb
+        WHERE qb.matched_invoice_id = i.id AND COALESCE(qb.payment_approval_status, '${PAYMENT_APPROVAL_DEFAULT_STATUS}') != '${PAYMENT_APPROVAL_DELETED_STATUS}'
+      )
+    ORDER BY i.created_at ASC
+  `).all(PENDING_INVOICE_SINCE, invoiceId, invoiceId).map(row => ({
+    qbo_id: `${PENDING_INVOICE_ROW_PREFIX}${row.id}`,
+    buildtrack_only: true,
+    bt_invoice_number: row.external_invoice_number || null,
+    doc_number: row.external_invoice_number || null,
+    vendor_id: null,
+    vendor_name: row.vendor_name,
+    qbo_class_id: null,
+    qbo_class_name: null,
+    txn_date: row.vendor_invoice_date || String(row.created_at || '').slice(0, 10),
+    due_date: row.vendor_due_date || null,
+    total_amt: Number(row.total || 0),
+    balance: Number(row.total || 0),
+    payment_status: 'unpaid',
+    payment_approval_status: row.pay_approval_status || PAYMENT_APPROVAL_DEFAULT_STATUS,
+    payment_approved_at: row.pay_approved_at,
+    payment_approved_by: row.pay_approved_by,
+    payment_run_date: row.pay_run_date,
+    payment_approval_notified_at: null,
+    payment_approval_notified_by: null,
+    payment_approved_by_name: row.approved_by_name || null,
+    payment_approval_notified_by_name: null,
+    vendor_receipt_notify_status: null,
+    vendor_receipt_notified_at: null,
+    vendor_receipt_notified_email: null,
+    vendor_email: row.vendor_email || null,
+    private_note: 'Not in QuickBooks yet - joins its QuickBooks bill automatically once the office enters it.',
+    matched_invoice_id: row.id,
+    project_id: row.project_id,
+    qbo_updated_at: null,
+    first_seen_at: row.created_at,
+    last_seen_at: row.created_at,
+    invoice_number: row.invoice_number,
+    external_invoice_number: row.external_invoice_number,
+    buildtrack_status: row.status,
+    project_address: row.project_address,
+    project_job_name: row.project_job_name,
+    lines: [],
+  }));
+}
+
+function setPendingInvoicePayApproval(req, res, approve) {
+  const db = getDb();
+  const invoiceId = pendingInvoiceIdFromRowId(req.params.qboId);
+  const [row] = pendingInvoiceRows(db, invoiceId);
+  if (!row) {
+    return res.status(409).json({ error: 'This invoice is now in QuickBooks. Reload the Invoice Center and use its QuickBooks row.' });
+  }
+  if (approve && !row.project_id) {
+    return res.status(409).json({ error: 'Choose the project for this invoice before approving it for pay.' });
+  }
+  const runDate = approve ? nextPaymentRunDate(req.body?.payment_run_date || new Date()) : null;
+  db.prepare(`
+    UPDATE invoices
+    SET pay_approval_status = ?,
+        pay_approved_at = CASE WHEN ? THEN COALESCE(pay_approved_at, datetime('now')) ELSE NULL END,
+        pay_approved_by = CASE WHEN ? THEN COALESCE(pay_approved_by, ?) ELSE NULL END,
+        pay_run_date = ?,
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(approve ? PAYMENT_APPROVAL_STATUS : null, approve ? 1 : 0, approve ? 1 : 0, req.user.id, runDate, invoiceId);
+  const [updated] = pendingInvoiceRows(db, invoiceId);
+  logActivity({
+    userId: req.user.id,
+    projectId: updated.project_id || undefined,
+    action: approve ? 'invoice_approved_for_pay_before_quickbooks' : 'invoice_removed_from_pay_queue_before_quickbooks',
+    entityType: 'invoice',
+    entityId: invoiceId,
+    details: { vendor_name: updated.vendor_name, invoice_number: updated.invoice_number, total: updated.total_amt, payment_run_date: updated.payment_run_date },
+  });
+  return res.json(updated);
+}
+
+// Hands Approve to Pay from an emailed invoice to the QuickBooks bill(s) the monitor or
+// the sync linked to it - once per invoice. A "Second Half" bill is left for its own
+// approval (the office pays halves on different runs). Returns how many bills it approved.
+function carryInvoicePayApprovalToBills(db = getDb()) {
+  const rows = db.prepare(`
+    SELECT i.id AS invoice_id, i.invoice_number, i.pay_approved_at, i.pay_approved_by, i.pay_run_date,
+           qb.qbo_id, qb.vendor_name, qb.balance, qb.project_id, COALESCE(l.part, 'full') AS part
+    FROM invoices i
+    JOIN quickbooks_bills qb
+      ON qb.matched_invoice_id = i.id
+      OR qb.qbo_id IN (SELECT qbo_bill_id FROM invoice_qbo_links WHERE invoice_id = i.id)
+    LEFT JOIN invoice_qbo_links l ON l.invoice_id = i.id AND l.qbo_bill_id = qb.qbo_id
+    WHERE i.pay_approval_status = ? AND i.pay_carried_at IS NULL
+  `).all(PAYMENT_APPROVAL_STATUS);
+  if (!rows.length) return 0;
+  const today = new Date().toISOString().slice(0, 10);
+  let approved = 0;
+  db.transaction(() => {
+    const done = new Set();
+    for (const row of rows) {
+      if (row.part === 'second_half') continue;
+      done.add(row.invoice_id);
+      const runDate = row.pay_run_date && row.pay_run_date >= today ? row.pay_run_date : nextPaymentRunDate(new Date());
+      const result = db.prepare(`
+        UPDATE quickbooks_bills
+        SET payment_approval_status = ?, payment_approved_at = COALESCE(payment_approved_at, ?),
+            payment_approved_by = COALESCE(payment_approved_by, ?), payment_run_date = ?, updated_at = datetime('now')
+        WHERE qbo_id = ? AND payment_status != 'paid'
+          AND COALESCE(payment_approval_status, '${PAYMENT_APPROVAL_DEFAULT_STATUS}') = '${PAYMENT_APPROVAL_DEFAULT_STATUS}'
+      `).run(PAYMENT_APPROVAL_STATUS, row.pay_approved_at, row.pay_approved_by, runDate, row.qbo_id);
+      if (!result.changes) continue;
+      approved += 1;
+      logActivity({
+        userId: row.pay_approved_by || undefined,
+        projectId: row.project_id || undefined,
+        action: 'quickbooks_bill_approved_for_pay',
+        entityType: 'quickbooks_bill',
+        entityId: row.qbo_id,
+        details: { vendor_name: row.vendor_name, balance: row.balance, payment_run_date: runDate, carried_from_invoice: row.invoice_number },
+      });
+    }
+    const mark = db.prepare(`UPDATE invoices SET pay_carried_at = datetime('now') WHERE id = ?`);
+    for (const id of done) mark.run(id);
+  })();
+  if (approved) console.log(`[QBO] ${approved} bill(s) took the Approve to Pay given before they were in QuickBooks.`);
+  return approved;
+}
+
 function approvedPaymentQueueRows(db, paymentRunDate = null) {
   const params = [];
   const where = [
@@ -4243,7 +4397,10 @@ router.get('/bills', authorize(...QUICKBOOKS_ADMIN_ROLES, 'project_manager'), fr
       CAST(COALESCE(qb.doc_number, qb.qbo_id) AS TEXT) ASC
     LIMIT ?
   `).all(...params, limit);
-  res.json(attachQuickBooksBillLines(db, attachQuickBooksBillPaymentDates(db, rows)));
+  const bills = attachQuickBooksBillLines(db, attachQuickBooksBillPaymentDates(db, rows));
+  // Emailed invoices not in QuickBooks yet wait for approval beside the bills.
+  const pending = status === 'paid' || status === 'partial' || unmatchedOnly ? [] : pendingInvoiceRows(db);
+  res.json(pending.length ? [...bills, ...pending] : bills);
 });
 
 router.delete('/bills/:qboId', authorize(...QUICKBOOKS_ADMIN_ROLES), (req, res) => {
@@ -4311,6 +4468,7 @@ router.delete('/bills/:qboId', authorize(...QUICKBOOKS_ADMIN_ROLES), (req, res) 
 });
 
 router.put('/bills/:qboId/approve-for-pay', authorize(...QUICKBOOKS_ADMIN_ROLES), (req, res) => {
+  if (pendingInvoiceIdFromRowId(req.params.qboId)) return setPendingInvoicePayApproval(req, res, true);
   const db = getDb();
   const bill = getQuickBooksBillRow(db, req.params.qboId);
   if (!bill) return res.status(404).json({ error: 'QuickBooks bill not found.' });
@@ -4354,6 +4512,7 @@ router.put('/bills/:qboId/approve-for-pay', authorize(...QUICKBOOKS_ADMIN_ROLES)
 });
 
 router.put('/bills/:qboId/remove-from-pay', authorize(...QUICKBOOKS_ADMIN_ROLES), (req, res) => {
+  if (pendingInvoiceIdFromRowId(req.params.qboId)) return setPendingInvoicePayApproval(req, res, false);
   const db = getDb();
   const bill = getQuickBooksBillRow(db, req.params.qboId);
   if (!bill) return res.status(404).json({ error: 'QuickBooks bill not found.' });
@@ -5359,3 +5518,6 @@ router.booksChangeFeed = (tenant, entities, since) => withQboPurpose(BOOKS_PURPO
   const connection = booksConnection(db, tenant);
   return qboRequest(db, connection, `/v3/company/${encodeURIComponent(connection.realm_id)}/cdc?entities=${names.join(',')}&changedSince=${encodeURIComponent(new Date(sinceMs).toISOString())}`);
 });
+
+// The invoice monitor calls this after each run (approval given before the bill existed).
+router.carryInvoicePayApprovalToBills = carryInvoicePayApprovalToBills;

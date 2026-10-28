@@ -2506,6 +2506,13 @@ function initializeSchema() {
 	  try { db.exec(`ALTER TABLE invoices ADD COLUMN vendor_invoice_date TEXT`); } catch (_) { /* already exists */ }
 	  try { db.exec(`ALTER TABLE invoices ADD COLUMN vendor_due_date TEXT`); } catch (_) { /* already exists */ }
 	  try { db.exec(`ALTER TABLE invoices ADD COLUMN ai_filed INTEGER NOT NULL DEFAULT 0`); } catch (_) { /* already exists */ }
+	  // Approve to Pay before the office enters the bill in QuickBooks (2026-10-28): kept
+	  // on the emailed invoice, handed to its QuickBooks bill once linked (pay_carried_at).
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN pay_approval_status TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN pay_approved_at TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN pay_approved_by TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN pay_run_date TEXT`); } catch (_) { /* already exists */ }
+	  try { db.exec(`ALTER TABLE invoices ADD COLUMN pay_carried_at TEXT`); } catch (_) { /* already exists */ }
 	  try { db.exec(`ALTER TABLE invoice_email_intake ADD COLUMN ai_attempts INTEGER NOT NULL DEFAULT 0`); } catch (_) { /* already exists */ }
 	  try { db.exec(`ALTER TABLE invoice_email_intake ADD COLUMN ai_error TEXT`); } catch (_) { /* already exists */ }
 	  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_invoice_email_intake_provider_msg ON invoice_email_intake(provider_message_id)`); } catch (_) { /* best-effort */ }

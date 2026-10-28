@@ -1215,6 +1215,13 @@ async function runOnce({ notify = true } = {}) {
     for (const move of fileMoves) {
       try { fs.rmSync(move.from, { recursive: true, force: true }); } catch (err) { warn(`could not remove ${move.from}: ${err.message}`); }
     }
+    // An emailed invoice approved before the office entered its bill: the linked bill
+    // takes that approval now (lazy require - routes/quickbooks.js requires this file).
+    try {
+      result.approvals_carried = require('../routes/quickbooks').carryInvoicePayApprovalToBills(db);
+    } catch (err) {
+      warn(`carrying invoice approvals failed: ${err.message}`);
+    }
     result.office_emailed = notify ? await notifyOffice(db, { force: firstRun }) : 0;
     state.lastRunAt = now;
     state.lastError = null;
