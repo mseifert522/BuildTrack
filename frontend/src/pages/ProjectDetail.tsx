@@ -963,6 +963,7 @@ export default function ProjectDetail() {
   const [submittingNote, setSubmittingNote] = useState(false);
   const [noteSubmitProgress, setNoteSubmitProgress] = useState<NoteAttachmentProgress | null>(null);
   const [noteComposerDragActive, setNoteComposerDragActive] = useState(false);
+  const [noteDropTargetId, setNoteDropTargetId] = useState<string | null>(null);
   const [noteLightbox, setNoteLightbox] = useState<ProgressLightboxState | null>(null);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editingNoteText, setEditingNoteText] = useState('');
@@ -988,6 +989,21 @@ export default function ProjectDetail() {
   // When a note was created but its attachments failed to upload, a retry
   // must attach to THAT note instead of creating a duplicate.
   const noteRetryTargetRef = useRef<string | null>(null);
+  // True while something on this page is being dragged (e.g. a note thumbnail).
+  // Chrome lists those drags as 'Files' too, so the note drop zones ignore them
+  // instead of re-uploading a thumbnail copy.
+  const pageDragRef = useRef(false);
+  // Browsers repeat dragover while files hover (even standing still). When they stop
+  // without a dragleave (Esc, some browsers), this hides the drop hints anyway.
+  const dropHintTimerRef = useRef<number | null>(null);
+  const keepDropHintAlive = () => {
+    if (dropHintTimerRef.current) window.clearTimeout(dropHintTimerRef.current);
+    dropHintTimerRef.current = window.setTimeout(() => {
+      dropHintTimerRef.current = null;
+      setNoteDropTargetId(null);
+      setNoteComposerDragActive(false);
+    }, 1200);
+  };
   const listeningNote = noteDictationStatus !== 'idle';
 
   // If a dragged file misses a drop zone, the browser's default is to navigate away
@@ -996,11 +1012,23 @@ export default function ProjectDetail() {
     const preventWindowFileDrop = (event: globalThis.DragEvent) => {
       if (Array.from(event.dataTransfer?.types || []).includes('Files')) event.preventDefault();
     };
+    const markPageDrag = () => { pageDragRef.current = true; };
+    const endDrag = (event: globalThis.DragEvent) => {
+      if (event.type === 'drop') preventWindowFileDrop(event);
+      pageDragRef.current = false;
+      setNoteDropTargetId(null);
+      setNoteComposerDragActive(false);
+    };
+    window.addEventListener('dragstart', markPageDrag);
     window.addEventListener('dragover', preventWindowFileDrop);
-    window.addEventListener('drop', preventWindowFileDrop);
+    window.addEventListener('drop', endDrag);
+    window.addEventListener('dragend', endDrag);
     return () => {
+      window.removeEventListener('dragstart', markPageDrag);
       window.removeEventListener('dragover', preventWindowFileDrop);
-      window.removeEventListener('drop', preventWindowFileDrop);
+      window.removeEventListener('drop', endDrag);
+      window.removeEventListener('dragend', endDrag);
+      if (dropHintTimerRef.current) window.clearTimeout(dropHintTimerRef.current);
     };
   }, []);
 
@@ -1298,7 +1326,11 @@ export default function ProjectDetail() {
     });
   };
 
-  const attachProgressPicturesToExistingNote = async (files?: FileList | File[] | null, explicitNoteId?: string) => {
+  const attachProgressPicturesToExistingNote = async (
+    files?: FileList | File[] | null,
+    explicitNoteId?: string,
+    source: ProgressCaptureSource = isMobileCaptureContext() ? 'device_camera' : 'desktop'
+  ) => {
     const selectedFiles = validateNoteUploadFiles(Array.from(files || []));
     const targetNoteId = explicitNoteId || attachNoteId;
     if (!targetNoteId || selectedFiles.length === 0) return;
@@ -1311,12 +1343,7 @@ export default function ProjectDetail() {
       fileName: selectedFiles[0]?.name,
     });
     try {
-      await uploadProgressPicturesToNote(
-        targetNoteId,
-        selectedFiles,
-        isMobileCaptureContext() ? 'device_camera' : 'desktop',
-        setAttachProgress
-      );
+      await uploadProgressPicturesToNote(targetNoteId, selectedFiles, source, setAttachProgress);
       toast.success(`${selectedFiles.length} progress picture${selectedFiles.length === 1 ? '' : 's'} attached`);
       await loadNotes();
     } catch (err: any) {
@@ -1782,23 +1809,62 @@ export default function ProjectDetail() {
     }, { accept: PROGRESS_MEDIA_ACCEPT, multiple: true, disabled: submittingNote });
     return {
       onDragEnter: (event: DragEvent<HTMLDivElement>) => {
+        if (pageDragRef.current) return;
         base.onDragEnter(event);
-        if (!submittingNote && dragEventHasFiles(event)) setNoteComposerDragActive(true);
+        if (!submittingNote && dragEventHasFiles(event)) { setNoteComposerDragActive(true); keepDropHintAlive(); }
       },
       onDragOver: (event: DragEvent<HTMLDivElement>) => {
+        if (pageDragRef.current) return;
         base.onDragOver(event);
-        if (!submittingNote && dragEventHasFiles(event)) setNoteComposerDragActive(true);
+        if (!submittingNote && dragEventHasFiles(event)) { setNoteComposerDragActive(true); keepDropHintAlive(); }
       },
       onDragLeave: (event: DragEvent<HTMLDivElement>) => {
         base.onDragLeave(event);
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setNoteComposerDragActive(false);
       },
       onDrop: (event: DragEvent<HTMLDivElement>) => {
+        if (pageDragRef.current) return;
         base.onDrop(event);
         setNoteComposerDragActive(false);
       },
     };
   })();
+
+  // Drag photos/videos from the computer straight onto a saved note to attach
+  // them — same upload as that note's "Attach photos" button. All files go to
+  // validateNoteUploadFiles so an unsupported type gets a message, not silence.
+  const noteCardDropHandlers = (noteId: string) => {
+    const acceptsDrag = (event: DragEvent<HTMLDivElement>) => !pageDragRef.current && dragEventHasFiles(event);
+    const hover = (event: DragEvent<HTMLDivElement>) => {
+      if (!acceptsDrag(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = attachingNoteId ? 'none' : 'copy';
+      setNoteDropTargetId(noteId);
+      keepDropHintAlive();
+    };
+    return {
+      onDragEnter: hover,
+      onDragOver: hover,
+      onDragLeave: (event: DragEvent<HTMLDivElement>) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setNoteDropTargetId(current => (current === noteId ? null : current));
+        }
+      },
+      onDrop: (event: DragEvent<HTMLDivElement>) => {
+        if (!acceptsDrag(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setNoteDropTargetId(null);
+        if (attachingNoteId) {
+          toast.error('Another upload is still running — drop these again when it finishes');
+          return;
+        }
+        const files = Array.from(event.dataTransfer.files || []);
+        if (files.length) void attachProgressPicturesToExistingNote(files, noteId, 'desktop');
+      },
+    };
+  };
 
   const canSubmitNote = !submittingNote && Boolean(newNote.trim() || notePhotoFiles.length);
 
@@ -2142,7 +2208,22 @@ export default function ProjectDetail() {
       <div className="bt-project-notes-list space-y-2">
         <DatedNoteList items={notes} getTimestamp={note => note.last_activity_at || note.created_at}>
         {note => (
-          <div key={note.id} className="bt-project-note-card flex items-start gap-3 rounded-lg bg-slate-900/50 p-4">
+          <div
+            key={note.id}
+            {...noteCardDropHandlers(note.id)}
+            data-note-drop-target={note.id}
+            className="bt-project-note-card relative flex items-start gap-3 rounded-lg bg-slate-900/50 p-4"
+          >
+            {noteDropTargetId === note.id && (
+              <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-lg border-2 border-dashed border-cyan-300 bg-slate-950/85 px-4 text-center">
+                <span className="flex items-center gap-2 text-base font-black text-cyan-100">
+                  <ImagePlus className="h-5 w-5 flex-shrink-0" />
+                  {attachingNoteId
+                    ? 'Wait for the current upload to finish'
+                    : 'Drop photos & videos to attach them to this note'}
+                </span>
+              </div>
+            )}
             <Avatar src={note.user_avatar_url} name={note.user_name} size={32} />
             <div className="flex-1 min-w-0">
               <div className="bt-project-note-meta-bar mb-1.5 flex items-start justify-between gap-3">
@@ -2317,14 +2398,7 @@ export default function ProjectDetail() {
                     attachExistingNoteInputRef.current?.click();
                   }}
                   disabled={attachingNoteId === note.id}
-                  {...fileDropHandlers(files => {
-                    setAttachNoteId(note.id);
-                    void attachProgressPicturesToExistingNote(files, note.id);
-                  }, {
-                    accept: PROGRESS_MEDIA_ACCEPT,
-                    disabled: attachingNoteId === note.id,
-                    multiple: true,
-                  })}
+                  title="Attach photos or videos — click to browse, or drag them from your computer onto this note"
                   className="mt-2 ml-3 inline-flex min-h-8 items-center gap-1 rounded-lg px-1.5 text-xs font-medium text-amber-300 transition hover:text-white hover:underline disabled:cursor-wait disabled:text-amber-100 disabled:opacity-90"
                 >
                   {attachingNoteId === note.id ? (
