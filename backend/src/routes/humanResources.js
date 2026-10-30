@@ -807,7 +807,7 @@ router.post('/employees', (req, res, next) => {
       source_candidate_id: text(req.body.source_candidate_id, 80),
       linked_user_id: text(req.body.linked_user_id, 80),
       first_name: requiredText(req.body.first_name, 'First name', 100),
-      last_name: requiredText(req.body.last_name, 'Last name', 100),
+      last_name: text(req.body.last_name, 100) || '',
       preferred_name: text(req.body.preferred_name, 100),
       personal_email: text(req.body.personal_email, 200),
       work_email: text(req.body.work_email, 200),
@@ -900,7 +900,7 @@ router.patch('/employees/:id', (req, res, next) => {
   try {
     const employee = updateRecord('hr_employees', req.params.id, req.body, {
       first_name: value => requiredText(value, 'First name', 100),
-      last_name: value => requiredText(value, 'Last name', 100),
+      last_name: value => text(value, 100) || '',
       preferred_name: value => text(value, 100),
       personal_email: value => text(value, 200),
       work_email: value => text(value, 200),

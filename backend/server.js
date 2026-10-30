@@ -33,7 +33,7 @@ const agentBridgeRoutes = require('./src/routes/agentBridge');
 const securityRoutes = require('./src/routes/security');
 const quickBooksRoutes = require('./src/routes/quickbooks');
 const humanResourcesRoutes = require('./src/routes/humanResources');
-const { publicRouter: timesheetLinkRoutes } = require('./src/routes/hrTimesheets');
+const { publicRouter: timesheetLinkRoutes, startTimesheetAutoSendScheduler } = require('./src/routes/hrTimesheets');
 const financeTrackerRoutes = require('./src/routes/financeTracker');
 const costAnalyzerRoutes = require('./src/routes/costAnalyzer');
 const agreementRoutes = require('./src/routes/agreements');
@@ -505,6 +505,8 @@ async function start() {
       console.log('');
       startCalendarReminderScheduler();
       startActivityRetentionScheduler();
+      // Texts (or emails) each field worker their timesheet link every Friday at 10 AM Eastern.
+      startTimesheetAutoSendScheduler();
       // The AI reads every agreement and quote document and checks how it is filed.
       documentReviewService.start();
       // Straightens and re-encodes uploaded videos so they play upright everywhere.

@@ -1844,6 +1844,12 @@ function initializeSchema() {
       usual_start_time TEXT NOT NULL DEFAULT '08:00',
       usual_end_time TEXT NOT NULL DEFAULT '17:00',
       usual_break_minutes INTEGER NOT NULL DEFAULT 0,
+      pay_timing TEXT NOT NULL DEFAULT 'previous_week',
+      payday_weekday INTEGER NOT NULL DEFAULT 5,
+      auto_send_enabled INTEGER NOT NULL DEFAULT 1,
+      auto_last_sent_on TEXT,
+      auto_attempt_on TEXT,
+      auto_attempts INTEGER NOT NULL DEFAULT 0,
       link_token_hash TEXT UNIQUE,
       link_token_enc TEXT,
       link_created_at TEXT,
@@ -2199,6 +2205,14 @@ function initializeSchema() {
   try { db.exec(`ALTER TABLE hr_timesheet_workers ADD COLUMN usual_start_time TEXT NOT NULL DEFAULT '08:00'`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE hr_timesheet_workers ADD COLUMN usual_end_time TEXT NOT NULL DEFAULT '17:00'`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE hr_timesheet_workers ADD COLUMN usual_break_minutes INTEGER NOT NULL DEFAULT 0`); } catch (_) { /* already exists */ }
+  // Pay schedule: paid the same week (Friday for this week's hours) or a week behind; and the
+  // automatic Friday 10 AM timesheet link (one per worker per Friday, at most 3 tries).
+  try { db.exec(`ALTER TABLE hr_timesheet_workers ADD COLUMN pay_timing TEXT NOT NULL DEFAULT 'previous_week'`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE hr_timesheet_workers ADD COLUMN payday_weekday INTEGER NOT NULL DEFAULT 5`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE hr_timesheet_workers ADD COLUMN auto_send_enabled INTEGER NOT NULL DEFAULT 1`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE hr_timesheet_workers ADD COLUMN auto_last_sent_on TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE hr_timesheet_workers ADD COLUMN auto_attempt_on TEXT`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE hr_timesheet_workers ADD COLUMN auto_attempts INTEGER NOT NULL DEFAULT 0`); } catch (_) { /* already exists */ }
   // Vendor activity ranking (directory + suppliers) aggregates payments per vendor.
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_quickbooks_bill_payments_vendor_txn ON quickbooks_bill_payments(vendor_id, txn_date)`); } catch (_) { /* table not created yet */ }
   try {

@@ -24,6 +24,16 @@ const { NUD_COMPANY } = require('../utils/companyInfo');
 const TIME_ZONE = 'America/Detroit';
 const PAY_METHODS = new Set(['cash', 'payroll', 'check', 'other']);
 const PAY_FREQUENCIES = new Set(['weekly', 'biweekly', 'semimonthly', 'monthly']);
+// When a worker is paid for a period: on payday inside it (Chad: Friday for this week) or on
+// the first payday after it (a week behind).
+const PAY_TIMINGS = new Set(['same_week', 'previous_week']);
+// Every Friday at 10 AM Eastern each worker's link goes out (Mike, 2026-10-30). A restart
+// during 10:00-11:00 still sends; nothing is sent late after that.
+const AUTO_SEND_WEEKDAY = 5;
+const AUTO_SEND_START_MINUTES = 10 * 60;
+const AUTO_SEND_WINDOW_MINUTES = 60;
+const AUTO_SEND_MAX_ATTEMPTS = 3;
+const AUTO_SEND_POLL_MS = 5 * 60 * 1000;
 const EMPLOYMENT_TYPES = new Set(['full_time', 'part_time', 'seasonal', 'temporary', 'contractor']);
 // Pay on top of hours. managerOnly types never come from the link.
 const ADDON_TYPES = {
@@ -138,6 +148,36 @@ function workweekStartDay(frequency, anchor) {
 function workweekStartFor(frequency, anchor, date) {
   const back = (weekdayOf(date) - workweekStartDay(frequency, anchor) + 7) % 7;
   return addDays(date, -back);
+}
+
+/** The day a period is paid: the last payday weekday inside it (same week), or the first one after it. */
+function paydayFor(period, payTiming, paydayWeekday) {
+  if (payTiming === 'same_week') {
+    for (let date = period.end; date >= period.start; date = addDays(date, -1)) {
+      if (weekdayOf(date) === paydayWeekday) return date;
+    }
+    return period.end;
+  }
+  let date = addDays(period.end, 1);
+  while (weekdayOf(date) !== paydayWeekday) date = addDays(date, 1);
+  return date;
+}
+
+function shortDay(value) {
+  return parseDay(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
+
+function longDay(value) {
+  return parseDay(value).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
+
+/** Today's date, weekday and minutes after midnight in Eastern time. */
+function easternClock(now = new Date()) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(now).map(part => [part.type, part.value]));
+  const date = `${parts.year}-${parts.month}-${parts.day}`;
+  return { date, weekday: weekdayOf(date), minutes: Number(parts.hour) * 60 + Number(parts.minute) };
 }
 
 // ── day input ────────────────────────────────────────────────────────────────
@@ -375,6 +415,9 @@ function buildPeriod(db, employee, settings, start, end) {
       overtime_after_hours: OVERTIME_AFTER_WEEKLY_HOURS,
       overtime_multiplier: OVERTIME_MULTIPLIER,
       mileage_rate_cents: settings.mileage_rate_cents,
+      pay_timing: settings.pay_timing,
+      payday_weekday: settings.payday_weekday,
+      payday: paydayFor({ start, end }, settings.pay_timing, settings.payday_weekday),
     },
   };
 }
@@ -394,8 +437,8 @@ function recordEvent(db, req, { employeeId, entryId = null, action, actor, detai
       action,
       actor.type === 'link' ? 'link' : 'user',
       actor.userId || null,
-      String(getClientIp(req) || '').slice(0, 80),
-      String(req.headers['user-agent'] || '').slice(0, 300),
+      String((req && getClientIp(req)) || '').slice(0, 80),
+      String(req ? req.headers['user-agent'] || '' : 'BuildTrack Friday timesheet link').slice(0, 300),
       details ? JSON.stringify(details) : null,
     );
   } catch (error) {
@@ -608,6 +651,10 @@ function managerWorker(employee, settings) {
     usual_start_time: settings.usual_start_time,
     usual_end_time: settings.usual_end_time,
     usual_break_minutes: settings.usual_break_minutes,
+    pay_timing: settings.pay_timing,
+    payday_weekday: settings.payday_weekday,
+    auto_send_enabled: Boolean(settings.auto_send_enabled),
+    auto_last_sent_on: settings.auto_last_sent_on,
     link: {
       active: Boolean(settings.link_token_hash),
       created_at: settings.link_created_at,
@@ -646,6 +693,115 @@ function timesheetErrorHandler(label) {
     if (!error.statusCode) console.error(`[TIMESHEETS] ${label} request failed:`, error);
     res.status(status).json({ error: error.statusCode ? error.message : 'Something went wrong. Please try again.' });
   };
+}
+
+// ── the Friday 10 AM link ────────────────────────────────────────────────────
+
+function fridayMessage(employee, settings, period, url, today) {
+  const name = employee.preferred_name || employee.first_name;
+  const payday = paydayFor(period, settings.pay_timing, settings.payday_weekday);
+  const when = settings.pay_timing === 'same_week'
+    ? `You are paid ${payday === today ? 'today' : `on ${longDay(payday)}`} for this week's hours.`
+    : `This week's hours are paid ${longDay(payday)}.`;
+  return `New Urban Development: Hi ${name}, please enter your hours for this week (${shortDay(period.start)} - ${shortDay(period.end)}) and press Submit: ${url} ${when}`;
+}
+
+/**
+ * Sends each worker their link (text if a mobile number is on file, else email) once per
+ * Friday between 10:00 and 11:00 Eastern. A worker is claimed before sending so overlapping
+ * runs can never double-send; a failed send is retried at most AUTO_SEND_MAX_ATTEMPTS times,
+ * and a worker with no phone or email (or who opted out) is not retried.
+ */
+async function runFridaySend({ now = new Date() } = {}) {
+  const clock = easternClock(now);
+  if (clock.weekday !== AUTO_SEND_WEEKDAY
+    || clock.minutes < AUTO_SEND_START_MINUTES
+    || clock.minutes >= AUTO_SEND_START_MINUTES + AUTO_SEND_WINDOW_MINUTES) {
+    return { ran: false, date: clock.date, results: [] };
+  }
+  const db = getDb();
+  const due = db.prepare(`
+    SELECT w.employee_id
+    FROM hr_timesheet_workers w
+    JOIN hr_employees e ON e.id = w.employee_id
+    WHERE w.auto_send_enabled = 1 AND e.employment_status != 'terminated'
+      AND COALESCE(w.auto_last_sent_on, '') != ?
+      AND NOT (COALESCE(w.auto_attempt_on, '') = ? AND w.auto_attempts >= ?)
+  `).all(clock.date, clock.date, AUTO_SEND_MAX_ATTEMPTS);
+  const results = [];
+  for (const { employee_id: employeeId } of due) {
+    const claim = db.prepare(`
+      UPDATE hr_timesheet_workers
+      SET auto_attempts = CASE WHEN auto_attempt_on = ? THEN auto_attempts + 1 ELSE 1 END, auto_attempt_on = ?
+      WHERE employee_id = ? AND COALESCE(auto_last_sent_on, '') != ?
+        AND NOT (COALESCE(auto_attempt_on, '') = ? AND auto_attempts >= ?)
+    `).run(clock.date, clock.date, employeeId, clock.date, clock.date, AUTO_SEND_MAX_ATTEMPTS);
+    if (!claim.changes) continue;
+    const { employee, settings } = loadWorker(db, employeeId);
+    const stopRetries = () => db.prepare('UPDATE hr_timesheet_workers SET auto_attempts = ? WHERE employee_id = ?').run(AUTO_SEND_MAX_ATTEMPTS, employeeId);
+    const phone = normalizeUsPhone(employee.phone);
+    const email = normalizeEmail(employee.work_email || employee.personal_email);
+    if (!phone && !email) {
+      stopRetries();
+      recordEvent(db, null, { employeeId, action: 'link_auto_send_failed', actor: { type: 'user' }, details: { reason: 'No mobile number or email on file' } });
+      results.push({ employee_id: employeeId, status: 'skipped', reason: 'no_contact' });
+      continue;
+    }
+    let token = revealLink(settings);
+    if (!token) token = issueLink(db, employeeId, null);
+    const url = linkUrl(token);
+    const period = payPeriodFor(employee.pay_frequency, settings.period_anchor_date, clock.date);
+    const via = phone ? 'sms' : 'email';
+    try {
+      if (phone) {
+        await sendTextThroughGateway(phone, fridayMessage(employee, settings, period, url, clock.date));
+      } else {
+        if (!isEmailConfigured()) throw httpError(503, 'Email is not set up on BuildTrack.');
+        await sendTimesheetLinkEmail({ name: employee.preferred_name || employee.first_name, email, timesheetUrl: url });
+      }
+      db.prepare(`
+        UPDATE hr_timesheet_workers
+        SET auto_last_sent_on = ?, link_last_sent_at = datetime('now'), link_last_sent_via = ?
+        WHERE employee_id = ?
+      `).run(clock.date, via, employeeId);
+      recordEvent(db, null, { employeeId, action: `link_auto_sent_${via}`, actor: { type: 'user' }, details: { to: phone ? displayPhone(phone) : email, start: period.start, end: period.end } });
+      results.push({ employee_id: employeeId, status: 'sent', via });
+    } catch (error) {
+      // A bad number or an opt-out will not fix itself within the hour.
+      if (error.statusCode === 400 || error.statusCode === 409) stopRetries();
+      recordEvent(db, null, { employeeId, action: 'link_auto_send_failed', actor: { type: 'user' }, details: { via, reason: error.message } });
+      results.push({ employee_id: employeeId, status: 'failed', via, reason: error.message });
+    }
+  }
+  return { ran: true, date: clock.date, results };
+}
+
+function startTimesheetAutoSendScheduler() {
+  if (process.env.TIMESHEET_AUTO_SEND_ENABLED === 'false') {
+    console.log('[TIMESHEETS] Friday timesheet links disabled by environment');
+    return;
+  }
+  let running = false;
+  const tick = async () => {
+    if (running) return;
+    running = true;
+    try {
+      const outcome = await runFridaySend();
+      if (outcome.ran && outcome.results.length) {
+        const count = status => outcome.results.filter(result => result.status === status).length;
+        console.log(`[TIMESHEETS] Friday links ${outcome.date}: sent ${count('sent')}, failed ${count('failed')}, skipped ${count('skipped')}`);
+      }
+    } catch (error) {
+      console.error('[TIMESHEETS] Friday link run failed:', error.message);
+    } finally {
+      running = false;
+    }
+  };
+  const timer = setInterval(tick, AUTO_SEND_POLL_MS);
+  if (timer.unref) timer.unref();
+  const first = setTimeout(tick, 30 * 1000);
+  if (first.unref) first.unref();
+  console.log('[TIMESHEETS] Friday timesheet links on: Fridays 10:00-11:00 America/Detroit');
 }
 
 // ── manager API (/api/human-resources/timesheets) ────────────────────────────
@@ -752,6 +908,10 @@ function createManagerRouter({ seedComplianceTasks, auditMutation }) {
       const payFrequency = PAY_FREQUENCIES.has(body.pay_frequency) ? body.pay_frequency : 'weekly';
       const anchor = body.period_anchor_date ? dayValue(body.period_anchor_date, 'pay period start') : sundayOf(todayEastern());
       const usual = normalizeUsualHours(body, { start: '08:00', end: '17:00', breakMinutes: 0 });
+      const payTiming = PAY_TIMINGS.has(body.pay_timing) ? body.pay_timing : 'previous_week';
+      const paydayWeekday = body.payday_weekday === undefined || body.payday_weekday === ''
+        ? AUTO_SEND_WEEKDAY
+        : Math.round(numberIn(body.payday_weekday, 'payday', 0, 6));
       const mileageCents = body.mileage_rate === undefined || body.mileage_rate === ''
         ? 70
         : Math.round(numberIn(body.mileage_rate, 'mileage rate', 0, 10) * 100);
@@ -803,10 +963,12 @@ function createManagerRouter({ seedComplianceTasks, auditMutation }) {
         db.prepare(`
           INSERT INTO hr_timesheet_workers (
             employee_id, pay_method, period_anchor_date, overtime_enabled, mileage_rate_cents,
-            usual_start_time, usual_end_time, usual_break_minutes, created_by
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            usual_start_time, usual_end_time, usual_break_minutes, pay_timing, payday_weekday,
+            auto_send_enabled, created_by
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(employeeId, payMethod, anchor, body.overtime_enabled === true ? 1 : 0, mileageCents,
-          usual.start, usual.end, usual.breakMinutes, req.user.id);
+          usual.start, usual.end, usual.breakMinutes, payTiming, paydayWeekday,
+          body.auto_send_enabled === false ? 0 : 1, req.user.id);
         token = issueLink(db, employeeId, req.user.id);
       })();
 
@@ -867,6 +1029,14 @@ function createManagerRouter({ seedComplianceTasks, auditMutation }) {
         settingsUpdates.push('mileage_rate_cents = ?');
         settingsParams.push(Math.round(numberIn(body.mileage_rate, 'mileage rate', 0, 10) * 100));
       }
+      if (has('pay_timing')) {
+        if (!PAY_TIMINGS.has(body.pay_timing)) throw httpError(400, 'Invalid pay schedule.');
+        settingsUpdates.push('pay_timing = ?'); settingsParams.push(body.pay_timing);
+      }
+      if (has('payday_weekday')) {
+        settingsUpdates.push('payday_weekday = ?'); settingsParams.push(Math.round(numberIn(body.payday_weekday, 'payday', 0, 6)));
+      }
+      if (has('auto_send_enabled')) { settingsUpdates.push('auto_send_enabled = ?'); settingsParams.push(body.auto_send_enabled ? 1 : 0); }
       if (has('usual_start_time') || has('usual_end_time') || has('usual_break_minutes')) {
         const usual = normalizeUsualHours(body, { start: current.usual_start_time, end: current.usual_end_time, breakMinutes: current.usual_break_minutes });
         settingsUpdates.push('usual_start_time = ?', 'usual_end_time = ?', 'usual_break_minutes = ?');
@@ -884,7 +1054,7 @@ function createManagerRouter({ seedComplianceTasks, auditMutation }) {
       const changed = Object.keys(body).filter(key => [
         'first_name', 'last_name', 'phone', 'email', 'hourly_rate', 'pay_frequency', 'pay_method',
         'period_anchor_date', 'overtime_enabled', 'mileage_rate',
-        'usual_start_time', 'usual_end_time', 'usual_break_minutes',
+        'usual_start_time', 'usual_end_time', 'usual_break_minutes', 'pay_timing', 'payday_weekday', 'auto_send_enabled',
       ].includes(key));
       recordEvent(db, req, { employeeId: employee.id, action: 'settings_updated', actor: { type: 'user', userId: req.user.id }, details: { changed } });
       audit(req, 'hr_timesheet_settings_updated', employee.id, { changed });
@@ -1103,6 +1273,17 @@ function createManagerRouter({ seedComplianceTasks, auditMutation }) {
       next(error);
     }
   });
+
+  // Test hook for the preview only (runs the Friday sender at a given time); never set in production.
+  if (process.env.TIMESHEET_AUTO_SEND_TEST_ROUTE === 'true') {
+    router.post('/auto-send/run', requireLinkManager, async (req, res, next) => {
+      try {
+        res.json(await runFridaySend({ now: new Date(String(req.body?.now || '')) }));
+      } catch (error) {
+        next(error);
+      }
+    });
+  }
 
   router.use(timesheetErrorHandler('Manager'));
   return router;
@@ -1330,6 +1511,7 @@ publicRouter.use(timesheetErrorHandler('Link'));
 module.exports = {
   createManagerRouter,
   publicRouter,
+  startTimesheetAutoSendScheduler,
   // exported for tests
   _internals: { payPeriodFor, workweekStartFor, normalizeDay, buildPeriod, hashToken, normalizeUsPhone },
 };

@@ -13,7 +13,6 @@ import {
   MessageSquare,
   Pencil,
   Plus,
-  Settings2,
   Trash2,
   Undo2,
   Wallet,
@@ -28,7 +27,10 @@ import {
   BREAK_OPTIONS,
   PAY_FREQUENCY_LABELS,
   PAY_METHOD_LABELS,
+  PAY_TIMING_HINTS,
+  PAY_TIMING_LABELS,
   STATUS_LABELS,
+  WEEKDAY_LABELS,
   addonsPayload,
   breakText,
   draftAddonCents,
@@ -50,6 +52,7 @@ import type {
   DraftAddon,
   PayFrequency,
   PayMethod,
+  PayTiming,
   TimesheetDay,
   TimesheetPay,
   TimesheetPeriod,
@@ -88,6 +91,10 @@ interface Worker {
   usual_start_time: string;
   usual_end_time: string;
   usual_break_minutes: number;
+  pay_timing: PayTiming;
+  payday_weekday: number;
+  auto_send_enabled: boolean;
+  auto_last_sent_on: string | null;
   link: WorkerLink;
   current_period?: TimesheetTotals & { start: string; end: string; submitted_at: string | null; changed_since_submit: boolean };
 }
@@ -153,6 +160,9 @@ const EVENT_LABELS: Record<string, string> = {
   period_reopen: 'Reopened the pay period',
   period_unpay: 'Undid paid',
   timesheet_submitted: 'Submitted the timesheet to the office',
+  link_auto_sent_sms: 'Friday 10 AM link texted',
+  link_auto_sent_email: 'Friday 10 AM link emailed',
+  link_auto_send_failed: 'Friday 10 AM link not sent',
 };
 
 const STATUS_PILL: Record<string, string> = {
@@ -328,6 +338,22 @@ export default function Timesheets() {
     }
   };
 
+  // One click on the worker panel: paid the same week, or a week behind.
+  const setPayTiming = async (timing: PayTiming) => {
+    if (!worker || worker.pay_timing === timing) return;
+    setBusy(true);
+    try {
+      await api.patch(`/human-resources/timesheets/workers/${worker.id}`, { pay_timing: timing });
+      toast.success(`${worker.first_name}: paid ${PAY_TIMING_LABELS[timing].toLowerCase()}`, { duration: 2000 });
+      await loadWorkers(worker.id);
+      await loadDetail(worker.id, detail?.period.start);
+    } catch (error) {
+      toast.error(errorMessage(error, 'Could not change the pay schedule'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (loading) {
     return <div className="bt-desktop-page mx-auto max-w-[1500px] p-4 md:p-6"><Loading message="Loading timesheets..." /></div>;
   }
@@ -372,19 +398,25 @@ export default function Timesheets() {
               const selected = item.id === selectedId;
               const current = item.current_period;
               return (
-                <button
+                <div
                   key={item.id}
+                  className={`rounded-md border bg-white transition ${selected ? 'border-amber-600 ring-2 ring-amber-600/40' : 'border-slate-200 hover:border-slate-300'}`}
+                >
+                <button
                   type="button"
                   onClick={() => setSelectedId(item.id)}
                   aria-pressed={selected}
-                  className={`w-full rounded-md border p-3 text-left transition ${selected ? 'border-amber-600 bg-white ring-2 ring-amber-600/40' : 'border-slate-200 bg-white hover:border-slate-300'}`}
+                  className="block w-full p-3 pb-2 text-left"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <p className="truncate font-semibold text-slate-950">{item.name}</p>
                     <MethodPill method={item.pay_method} />
                   </div>
                   <p className="mt-0.5 text-sm text-slate-500">
-                    {item.pay_type === 'hourly' ? `${money(item.hourly_rate_cents)}/hr` : 'Salaried'} · {PAY_FREQUENCY_LABELS[item.pay_frequency]}
+                    {item.pay_type === 'hourly' ? `${money(item.hourly_rate_cents)}/hr` : 'Salaried'} · {PAY_FREQUENCY_LABELS[item.pay_frequency]} · Paid {PAY_TIMING_LABELS[item.pay_timing].toLowerCase()}
+                  </p>
+                  <p className={`mt-0.5 text-xs font-semibold ${item.phone ? 'text-slate-600' : 'text-amber-700'}`}>
+                    {item.phone ? `Mobile ${item.phone}` : 'No mobile number'}
                   </p>
                   {current && (
                     <p className="mt-2 text-sm text-slate-700">
@@ -411,6 +443,22 @@ export default function Timesheets() {
                           : 'Link not sent yet'}
                   </p>
                 </button>
+                {canEdit && (
+                  <div className="flex justify-end border-t border-slate-200 px-3 py-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedId(item.id);
+                        setModal('settings');
+                      }}
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 hover:underline"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                      Edit worker
+                    </button>
+                  </div>
+                )}
+                </div>
               );
             })}
           </aside>
@@ -420,22 +468,60 @@ export default function Timesheets() {
               <div className="rounded-md border border-slate-200 bg-white p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <h2 className="text-lg font-bold text-slate-950">{worker.name}</h2>
+                    {canEdit ? (
+                      <button
+                        type="button"
+                        onClick={() => setModal('settings')}
+                        className="group inline-flex items-center gap-2 text-left text-lg font-bold text-slate-950 hover:underline"
+                        title="Edit this worker"
+                      >
+                        {worker.name}
+                        <Pencil className="h-4 w-4 text-slate-500 group-hover:text-slate-800" />
+                      </button>
+                    ) : (
+                      <h2 className="text-lg font-bold text-slate-950">{worker.name}</h2>
+                    )}
                     <p className="mt-0.5 text-sm text-slate-500">
                       {worker.pay_type === 'hourly' ? `${money(worker.hourly_rate_cents)} per hour` : 'Salaried (hours only)'}
                       {' · '}Paid {PAY_METHOD_LABELS[worker.pay_method].toLowerCase()}
-                      {' · '}{PAY_FREQUENCY_LABELS[worker.pay_frequency]}
+                      {' · '}{PAY_FREQUENCY_LABELS[worker.pay_frequency]}, payday {WEEKDAY_LABELS[worker.payday_weekday]}
                       {' · '}Usual hours {time12(worker.usual_start_time)} - {time12(worker.usual_end_time)}
                     </p>
-                    {(worker.phone || worker.email) && (
-                      <p className="mt-0.5 text-sm text-slate-500">{[worker.phone, worker.email].filter(Boolean).join(' · ')}</p>
+                    <p className="mt-0.5 text-sm text-slate-500">
+                      {[worker.phone ? `Mobile ${worker.phone}` : null, worker.email].filter(Boolean).join(' · ') || 'No phone or email on file'}
+                      {' · '}Friday 10 AM link: {!worker.auto_send_enabled ? 'off' : worker.phone ? 'on, by text' : worker.email ? 'on, by email' : 'on, but nothing to send it to'}
+                    </p>
+                    {!worker.phone && canEdit && (
+                      <p className="mt-2 inline-flex flex-wrap items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm text-amber-800">
+                        No mobile number on file, so BuildTrack cannot text {worker.first_name} the link.
+                        <button type="button" className="font-semibold underline" onClick={() => setModal('settings')}>Add phone number</button>
+                      </p>
                     )}
                   </div>
                   {canEdit && (
-                    <button type="button" className={secondaryButton} onClick={() => setModal('settings')}>
-                      <Settings2 className="h-4 w-4" />
-                      Worker &amp; pay settings
-                    </button>
+                    <div className="flex flex-col items-end gap-2">
+                      <button type="button" className={secondaryButton} onClick={() => setModal('settings')}>
+                        <Pencil className="h-4 w-4" />
+                        Edit worker
+                      </button>
+                      <div className="flex items-center gap-2" title={PAY_TIMING_HINTS[worker.pay_timing]}>
+                        <span className="text-xs font-semibold uppercase text-slate-500">Paid</span>
+                        <div className="inline-flex rounded-md border border-slate-300 p-0.5" role="group" aria-label="Pay schedule">
+                          {(Object.keys(PAY_TIMING_LABELS) as PayTiming[]).map(timing => (
+                            <button
+                              key={timing}
+                              type="button"
+                              aria-pressed={worker.pay_timing === timing}
+                              onClick={() => setPayTiming(timing)}
+                              disabled={busy}
+                              className={`h-7 rounded px-2.5 text-xs font-semibold ${worker.pay_timing === timing ? 'bg-slate-900 text-white' : 'text-slate-600'}`}
+                            >
+                              {PAY_TIMING_LABELS[timing]}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
                   )}
                 </div>
 
@@ -595,6 +681,7 @@ function PeriodPanel({
           <div className="min-w-[13rem] text-center">
             <p className="text-xs font-semibold uppercase text-slate-500">{isCurrent ? 'Current pay period' : 'Pay period'}</p>
             <p className="font-bold text-slate-950">{formatPeriod(period.start, period.end)}</p>
+            <p className="text-xs text-slate-500">Payday {formatWeekday(pay.payday)} {formatMonthDay(pay.payday)} ({PAY_TIMING_LABELS[pay.pay_timing].toLowerCase()})</p>
           </div>
           <button type="button" className={iconButton} onClick={() => period.next_start && onNavigate(period.next_start)} disabled={busy || !period.next_start} aria-label="Next pay period">
             <ChevronRight className="h-4 w-4" />
@@ -759,7 +846,7 @@ function PeriodPanel({
               return (
                 <li key={event.id} className="flex flex-wrap items-baseline justify-between gap-2 border-b border-slate-200 pb-2 last:border-0 last:pb-0">
                   <span className="text-slate-700">
-                    <strong className="text-slate-950">{event.actor_type === 'link' ? `${detail.worker.first_name} (link)` : event.user_name || 'Office'}</strong>
+                    <strong className="text-slate-950">{event.actor_type === 'link' ? `${detail.worker.first_name} (link)` : event.user_name || 'BuildTrack'}</strong>
                     {' '}{EVENT_LABELS[event.action] || event.action}
                     {workDate ? ` - ${formatDayLong(workDate)}` : ''}
                     {typeof event.details?.to === 'string' ? ` to ${event.details.to}` : ''}
@@ -799,6 +886,9 @@ function AddWorkerModal({
     usual_start_time: '08:00',
     usual_end_time: '17:00',
     usual_break_minutes: 0,
+    pay_timing: 'previous_week' as PayTiming,
+    payday_weekday: 5,
+    auto_send_enabled: true,
   });
   const [saving, setSaving] = useState(false);
   const [created, setCreated] = useState<{ worker: Worker; url: string | null } | null>(null);
@@ -820,6 +910,9 @@ function AddWorkerModal({
         usual_start_time: form.usual_start_time,
         usual_end_time: form.usual_end_time,
         usual_break_minutes: form.usual_break_minutes,
+        pay_timing: form.pay_timing,
+        payday_weekday: form.payday_weekday,
+        auto_send_enabled: form.auto_send_enabled,
       };
       const response = await api.post<{ worker: Worker; link_url: string | null }>('/human-resources/timesheets/workers', body);
       setCreated({ worker: response.data.worker, url: response.data.link_url });
@@ -932,6 +1025,9 @@ interface PayForm {
   usual_start_time: string;
   usual_end_time: string;
   usual_break_minutes: number;
+  pay_timing: PayTiming;
+  payday_weekday: number;
+  auto_send_enabled: boolean;
 }
 
 function PayFields<T extends PayForm>({ form, set }: { form: T; set: (patch: Partial<T>) => void }) {
@@ -983,6 +1079,26 @@ function PayFields<T extends PayForm>({ form, set }: { form: T; set: (patch: Par
           </Field>
         </div>
       </div>
+      <div>
+        <p className="mb-1.5 text-xs font-semibold uppercase text-slate-500">Pay schedule</p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field labelText="When paid" hint={PAY_TIMING_HINTS[form.pay_timing]}>
+            <select className={fieldClass} value={form.pay_timing} onChange={event => set({ pay_timing: event.target.value as PayTiming } as Partial<T>)}>
+              <option value="same_week">Same week (paid on payday for that week)</option>
+              <option value="previous_week">Week behind (paid on payday for last week)</option>
+            </select>
+          </Field>
+          <Field labelText="Payday">
+            <select className={fieldClass} value={form.payday_weekday} onChange={event => set({ payday_weekday: Number(event.target.value) } as Partial<T>)}>
+              {WEEKDAY_LABELS.map((day, index) => <option key={day} value={index}>{day}</option>)}
+            </select>
+          </Field>
+        </div>
+        <label className="mt-3 flex items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" className="h-4 w-4" checked={form.auto_send_enabled} onChange={event => set({ auto_send_enabled: event.target.checked } as Partial<T>)} />
+          Send the timesheet link every Friday at 10 AM (by text; by email if there is no mobile number)
+        </label>
+      </div>
       <p className={`rounded-md border px-3 py-2 text-xs ${notice.tone === 'payroll' ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
         <strong>{notice.title}.</strong> {payNotice(form.pay_method, 'worker').body} (This is what the worker sees on their timesheet.)
       </p>
@@ -1016,6 +1132,9 @@ function SettingsModal({
     usual_start_time: worker.usual_start_time,
     usual_end_time: worker.usual_end_time,
     usual_break_minutes: worker.usual_break_minutes,
+    pay_timing: worker.pay_timing,
+    payday_weekday: worker.payday_weekday,
+    auto_send_enabled: worker.auto_send_enabled,
   });
   const [saving, setSaving] = useState(false);
   const [confirm, setConfirm] = useState<null | 'rotate' | 'off'>(null);
@@ -1066,7 +1185,7 @@ function SettingsModal({
         <div className="grid gap-4 sm:grid-cols-2">
           <Field labelText="First name"><input required className={fieldClass} value={form.first_name} onChange={event => set({ first_name: event.target.value })} /></Field>
           <Field labelText="Last name"><input className={fieldClass} value={form.last_name} onChange={event => set({ last_name: event.target.value })} /></Field>
-          <Field labelText="Mobile phone"><input className={fieldClass} inputMode="tel" value={form.phone} onChange={event => set({ phone: event.target.value })} /></Field>
+          <Field labelText="Mobile phone (for texts)" hint="10-digit US number, like (248) 555-0100"><input className={fieldClass} inputMode="tel" value={form.phone} onChange={event => set({ phone: event.target.value })} placeholder="(248) 555-0100" /></Field>
           <Field labelText="Email"><input type="email" className={fieldClass} value={form.email} onChange={event => set({ email: event.target.value })} /></Field>
         </div>
         <PayFields form={form} set={set} />

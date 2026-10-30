@@ -4,6 +4,7 @@
 // saved number; previewDay() mirrors its math so the calculator updates while typing.
 
 export type PayMethod = 'cash' | 'payroll' | 'check' | 'other';
+export type PayTiming = 'same_week' | 'previous_week';
 export type PayFrequency = 'weekly' | 'biweekly' | 'semimonthly' | 'monthly';
 export type EntryStatus = 'submitted' | 'approved' | 'paid';
 
@@ -78,6 +79,9 @@ export interface TimesheetPay {
   overtime_after_hours: number;
   overtime_multiplier: number;
   mileage_rate_cents: number;
+  pay_timing: PayTiming;
+  payday_weekday: number;
+  payday: string;
 }
 
 export interface TimesheetPeriod {
@@ -102,6 +106,19 @@ export const PAY_FREQUENCY_LABELS: Record<PayFrequency, string> = {
   semimonthly: 'Twice a month (1st-15th, 16th-end)',
   monthly: 'Monthly',
 };
+
+// When a worker is paid for a week's hours (Mike, 2026-10-30: Chad is paid the same week).
+export const PAY_TIMING_LABELS: Record<PayTiming, string> = {
+  same_week: 'Same week',
+  previous_week: 'Week behind',
+};
+
+export const PAY_TIMING_HINTS: Record<PayTiming, string> = {
+  same_week: "Paid on payday for that same week's hours.",
+  previous_week: "Paid on payday for the previous week's hours.",
+};
+
+export const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 export const STATUS_LABELS: Record<EntryStatus, string> = {
   submitted: 'Submitted',

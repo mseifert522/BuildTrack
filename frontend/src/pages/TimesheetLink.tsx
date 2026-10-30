@@ -15,6 +15,7 @@ import {
   draftAddonCents,
   draftFromAddons,
   formatDayLong,
+  formatMonthDay,
   formatPeriod,
   formatWeekday,
   hoursFromTimes,
@@ -188,6 +189,7 @@ export default function TimesheetLink() {
           {pay.hourly && pay.hourly_rate_cents != null && <span className="tsl-chip">{money(pay.hourly_rate_cents)} / hour</span>}
           <span className={`tsl-chip tsl-chip--${notice.tone}`}>{PAY_METHOD_LABELS[pay.pay_method]}</span>
           <span className="tsl-chip">{SHORT_FREQUENCY[pay.pay_frequency] || PAY_FREQUENCY_LABELS[pay.pay_frequency]}</span>
+          <span className="tsl-chip">Payday {formatWeekday(pay.payday)}, {formatMonthDay(pay.payday)}</span>
         </div>
 
         <nav className="tsl-period" aria-label="Pay period">

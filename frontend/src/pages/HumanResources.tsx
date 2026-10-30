@@ -1925,7 +1925,7 @@ export default function HumanResources() {
             <SectionHeading title="Person" />
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <Field labelText="First name"><input required className={fieldClass} value={employeeForm.first_name} onChange={event => setEmployeeForm({ ...employeeForm, first_name: event.target.value })} /></Field>
-              <Field labelText="Last name"><input required className={fieldClass} value={employeeForm.last_name} onChange={event => setEmployeeForm({ ...employeeForm, last_name: event.target.value })} /></Field>
+              <Field labelText="Last name"><input className={fieldClass} value={employeeForm.last_name} onChange={event => setEmployeeForm({ ...employeeForm, last_name: event.target.value })} /></Field>
               <Field labelText="Preferred name"><input className={fieldClass} value={employeeForm.preferred_name} onChange={event => setEmployeeForm({ ...employeeForm, preferred_name: event.target.value })} /></Field>
               <Field labelText="Personal email"><input type="email" className={fieldClass} value={employeeForm.personal_email} onChange={event => setEmployeeForm({ ...employeeForm, personal_email: event.target.value })} /></Field>
               <Field labelText="Work email"><input type="email" className={fieldClass} value={employeeForm.work_email} onChange={event => setEmployeeForm({ ...employeeForm, work_email: event.target.value })} /></Field>
