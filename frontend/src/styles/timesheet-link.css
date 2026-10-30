@@ -918,46 +918,6 @@
   line-height: 1.35;
 }
 
-.tsl-submit-area {
-  padding: 0 0 12px;
-}
-
-.tsl-submit {
-  display: flex;
-  width: 100%;
-  min-height: 54px;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border: 0;
-  border-radius: 12px;
-  background: var(--tsl-gold);
-  color: #1a1204;
-  font-size: 17px;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.tsl-submit:disabled {
-  opacity: 0.6;
-}
-
-.tsl-submitted-note {
-  display: flex;
-  min-height: 46px;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  margin: 0;
-  padding: 0 10px;
-  border-radius: 12px;
-  background: rgba(16, 185, 129, 0.16);
-  color: #6ee7b7;
-  font-size: 15px;
-  font-weight: 700;
-  text-align: center;
-}
-
 .tsl-popup-backdrop {
   position: fixed;
   inset: 0;
@@ -1003,4 +963,339 @@
 
 .tsl-popup .tsl-primary {
   width: 100%;
+}
+
+/* ── compact week (2026-10-30): the whole Sun-Sat week fits on a phone screen when the link
+   opens, above the totals bar. These rules come last so they win over the ones above. ── */
+
+.tsl-shell {
+  padding: calc(env(safe-area-inset-top, 0px) + 10px) 14px 16px;
+}
+
+.tsl-header {
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.tsl-logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+}
+
+.tsl-company {
+  font-size: 12px;
+}
+
+.tsl-title {
+  font-size: 20px;
+}
+
+.tsl-chips {
+  gap: 5px;
+  margin-bottom: 10px;
+}
+
+.tsl-chip {
+  min-height: 24px;
+  padding: 2px 9px;
+  font-size: 13px;
+}
+
+.tsl-period {
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  gap: 4px;
+  margin-bottom: 10px;
+  padding: 4px;
+  border-radius: 12px;
+}
+
+.tsl-period .tsl-icon-btn {
+  width: 44px;
+  height: 44px;
+}
+
+.tsl-period-label span {
+  font-size: 11px;
+}
+
+.tsl-period-label strong {
+  font-size: 16px;
+}
+
+.tsl-days {
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.tsl-day {
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  gap: 10px;
+  min-height: 56px;
+  padding: 7px 10px;
+  border-radius: 12px;
+  scroll-margin-top: 12px;
+  scroll-margin-bottom: 150px;
+}
+
+.tsl-day.is-today {
+  padding: 6px 9px;
+}
+
+.tsl-day-date {
+  width: 46px;
+  height: 42px;
+  border-radius: 9px;
+}
+
+.tsl-day-date span {
+  font-size: 11px;
+}
+
+.tsl-day-date strong {
+  font-size: 17px;
+}
+
+/* Today's date box is gold, entered or not. */
+.tsl-day.is-today .tsl-day-date {
+  background: var(--tsl-gold);
+  color: #1a1204;
+}
+
+.tsl-day-hours {
+  overflow: hidden;
+  font-size: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tsl-day-time {
+  margin-left: 6px;
+  color: var(--tsl-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tsl-day-project,
+.tsl-day-extras {
+  font-size: 13px;
+}
+
+.tsl-day-right {
+  gap: 3px;
+}
+
+.tsl-day-right strong {
+  font-size: 16px;
+}
+
+.tsl-totalbar-main {
+  min-height: 60px;
+  padding: 8px 0;
+}
+
+.tsl-total-block span {
+  font-size: 12px;
+}
+
+.tsl-total-block strong {
+  font-size: 22px;
+}
+
+/* ── punch clock (2026-10-30): one Punch in / Punch out button in the bottom bar, with a status
+   line under it (where Submit used to be) saying the time went to the office. ── */
+
+.tsl-punch {
+  display: grid;
+  gap: 8px;
+  padding: 10px 0 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.tsl-punch-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.tsl-punch-row .tsl-input {
+  min-height: 52px;
+}
+
+.tsl-punch-row select {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 52px;
+  margin: 0;
+  padding: 10px 42px 10px 12px;
+  border: 1px solid #c9ced6;
+  border-radius: 12px;
+  background: #ffffff;
+  color: var(--tsl-ink);
+  font: inherit;
+  font-size: 16px;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.tsl-punch-btn {
+  display: inline-flex;
+  min-width: 140px;
+  min-height: 52px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 12px;
+  color: #ffffff;
+  font: inherit;
+  font-size: 17px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.tsl-punch-btn:disabled {
+  opacity: 0.6;
+}
+
+.tsl-punch-btn--in {
+  background: #059669;
+}
+
+.tsl-punch-btn--out {
+  background: #dc2626;
+}
+
+.tsl-punch-btn--fix {
+  width: 100%;
+  background: var(--tsl-gold);
+  color: #1a1204;
+}
+
+.tsl-punch-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: #cbd5e1;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.tsl-punch-status > span:first-of-type,
+.tsl-punch-status > svg + span {
+  min-width: 0;
+}
+
+.tsl-punch-status > svg {
+  flex: 0 0 auto;
+}
+
+.tsl-punch-status--on,
+.tsl-punch-status--done {
+  color: #bbf7d0;
+}
+
+.tsl-punch-status--done > svg {
+  color: #4ade80;
+}
+
+.tsl-punch-status--warn {
+  color: #fcd34d;
+}
+
+.tsl-punch-dot {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #34d399;
+  box-shadow: 0 0 0 4px rgba(52, 211, 153, 0.22);
+}
+
+.tsl-punch-elapsed {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(52, 211, 153, 0.18);
+  color: #6ee7b7;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.tsl-punch-error {
+  margin: 0;
+  color: #fca5a5;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.tsl-status--open { background: #dcfce7; color: var(--tsl-green); }
+
+.tsl-popup-icon.is-out {
+  color: var(--tsl-red);
+}
+
+.tsl-popup-time {
+  color: var(--tsl-ink);
+  font-size: 26px;
+  font-weight: 800;
+}
+
+/* The totals line above the punch button stays compact, and the pay chips stay on one line. */
+.tsl-totalbar-main {
+  min-height: 52px;
+  padding: 6px 0;
+}
+
+.tsl-chips {
+  gap: 4px;
+}
+
+.tsl-chip {
+  min-height: 22px;
+  padding: 1px 7px;
+  font-size: 12px;
+}
+
+/* Project and extras share one line under the hours, so every day row stays one height and the
+   whole week still fits under the punch clock. */
+.tsl-day-sub {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 8px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.tsl-day-sub .tsl-day-project {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.tsl-day-sub .tsl-day-extras {
+  flex: 0 0 auto;
+}
+
+/* Logo: the BuildTrack mark in the same tile as the top-left of BuildTrack (slate tile, thin gold ring). */
+.tsl-logo {
+  display: block;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #020617;
+  box-shadow: 0 0 0 1px rgba(245, 183, 49, 0.38);
+}
+
+.tsl-logo img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }

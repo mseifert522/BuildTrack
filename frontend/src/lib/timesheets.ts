@@ -44,6 +44,8 @@ export interface TimesheetEntry {
   entered_via?: 'link' | 'manager';
   updated_via?: 'link' | 'manager';
   entered_by_office?: boolean;
+  /** Punched in from the link and not punched out yet. */
+  open_shift?: boolean;
   updated_at?: string;
 }
 
@@ -119,6 +121,15 @@ export const PAY_TIMING_HINTS: Record<PayTiming, string> = {
 };
 
 export const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+// The automatic 10 AM link text: every workday by default (the link is for daily use), Fridays
+// only, or off. 'off' maps to auto_send_enabled = false on the server.
+export type AutoSendChoice = 'workdays' | 'fridays' | 'off';
+export const AUTO_SEND_LABELS: Record<AutoSendChoice, string> = {
+  workdays: 'Every workday (Mon-Fri) at 10 AM',
+  fridays: 'Fridays at 10 AM',
+  off: "Don't text it automatically",
+};
 
 export const STATUS_LABELS: Record<EntryStatus, string> = {
   submitted: 'Submitted',

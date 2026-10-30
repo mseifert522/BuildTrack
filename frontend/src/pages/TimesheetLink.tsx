@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { FormEvent, SelectHTMLAttributes } from 'react';
 import { useParams } from 'react-router-dom';
-import { CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleAlert, LoaderCircle, Plus, Send, Trash2, X } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleAlert, Clock, LoaderCircle, LogIn, LogOut, Plus, Trash2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 import '../styles/timesheet-link.css';
-import { formatEasternDateTime } from '../lib/time';
+import { BUILDTRACK_TRUTH_ICON_SRC } from '../lib/branding';
 import {
   BREAK_OPTIONS,
   PAY_FREQUENCY_LABELS,
@@ -45,22 +45,43 @@ interface LinkPayload {
   totals: TimesheetTotals;
   submission: { submitted_at: string; hours: number; gross_cents: number; changed_since: boolean } | null;
   can_submit: boolean;
+  punch: {
+    open: { date: string; start_time: string; job_site: string | null; minutes: number; too_long: boolean } | null;
+    can_punch_in: boolean;
+    last_project: string | null;
+  };
   days: TimesheetDay[];
   addon_types: AddonType[];
 }
 
-/** An open day reads "Submitted" once the period was submitted after it was last saved, else "Saved". */
-function dayStatusLabel(data: LinkPayload, entry: { status: keyof typeof STATUS_LABELS; updated_at?: string }) {
-  if (entry.status !== 'submitted') return { label: STATUS_LABELS[entry.status], tone: entry.status };
-  const sent = Boolean(data.submission && entry.updated_at && entry.updated_at <= data.submission.submitted_at);
-  return sent ? { label: 'Submitted', tone: 'submitted' } : { label: 'Saved', tone: 'saved' };
+interface PunchResult {
+  kind: 'in' | 'out';
+  time: string | null;
+  project: string | null;
+  hours: number | null;
+}
+
+/** The time right now on the office's clock, which is the one punches are saved with. */
+function nowEastern() {
+  return new Date().toLocaleTimeString('en-US', { timeZone: 'America/Detroit', hour: 'numeric', minute: '2-digit' });
+}
+
+function elapsedText(minutes: number) {
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return hours ? `${hours} hr ${rest} min` : `${rest} min`;
+}
+
+/** Every punch and saved day goes to the office as it happens, so an open day reads "Sent". */
+function dayStatusLabel(entry: { status: keyof typeof STATUS_LABELS }) {
+  return { label: entry.status === 'submitted' ? 'Sent' : STATUS_LABELS[entry.status], tone: entry.status };
 }
 
 const SHORT_FREQUENCY: Record<string, string> = {
-  weekly: 'Paid weekly',
-  biweekly: 'Paid every 2 weeks',
-  semimonthly: 'Paid twice a month',
-  monthly: 'Paid monthly',
+  weekly: 'Weekly',
+  biweekly: 'Every 2 weeks',
+  semimonthly: 'Twice a month',
+  monthly: 'Monthly',
 };
 
 function Dropdown({ children, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
@@ -97,8 +118,7 @@ export default function TimesheetLink() {
   const [loadingPeriod, setLoadingPeriod] = useState(false);
   const [editing, setEditing] = useState<TimesheetDay | null>(null);
   const [totalsOpen, setTotalsOpen] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [submitted, setSubmitted] = useState<LinkPayload | null>(null);
+  const [punched, setPunched] = useState<PunchResult | null>(null);
 
   // The token is in the URL: send no Referer anywhere, and give the tab a plain title.
   useEffect(() => {
@@ -133,18 +153,43 @@ export default function TimesheetLink() {
     void load();
   }, [load]);
 
-  const submitTimesheet = async () => {
-    if (!data || submitting) return;
-    setSubmitting(true);
-    try {
-      const payload = await callLink(token, '/submit', { method: 'POST', body: { start: data.period.start } });
-      setData(payload);
-      setSubmitted(payload);
-    } catch (error) {
-      toast.error((error as Error).message);
-    } finally {
-      setSubmitting(false);
+  // A tab left open since the morning shows what is saved now when the worker comes back to it
+  // (to punch out, say). The current week reloads as "this week", so a new day rolls over too.
+  const shownPeriod = useRef<{ start: string; isCurrent: boolean } | null>(null);
+  useEffect(() => {
+    if (data) shownPeriod.current = { start: data.period.start, isCurrent: Boolean(data.period.is_current) };
+  }, [data]);
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible' || !shownPeriod.current) return;
+      const { start, isCurrent } = shownPeriod.current;
+      callLink(token, isCurrent ? '' : `?start=${encodeURIComponent(start)}`).then(setData).catch(() => undefined);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [token]);
+
+  // The punch confirmation closes itself after a few seconds.
+  useEffect(() => {
+    if (!punched) return undefined;
+    const timer = window.setTimeout(() => setPunched(null), 3500);
+    return () => window.clearTimeout(timer);
+  }, [punched]);
+
+  const openDay = async (date: string) => {
+    if (!data) return;
+    let day = data.days.find(item => item.date === date);
+    if (!day) {
+      try {
+        const payload = await callLink(token, `?start=${encodeURIComponent(date)}`);
+        setData(payload);
+        day = payload.days.find(item => item.date === date);
+      } catch (error) {
+        toast.error((error as Error).message);
+        return;
+      }
     }
+    if (day) setEditing(day);
   };
 
   if (fatal) {
@@ -178,7 +223,10 @@ export default function TimesheetLink() {
     <div className="tsl-root">
       <div className="tsl-shell">
         <header className="tsl-header">
-          <img src="/nud-logo.jpg" alt="" className="tsl-logo" />
+          {/* The same logo as the top-left of BuildTrack (Mike, 2026-10-30). */}
+          <span className="tsl-logo">
+            <img src={BUILDTRACK_TRUTH_ICON_SRC} alt="BuildTrack" />
+          </span>
           <div className="min-w-0">
             <p className="tsl-company">{data.company}</p>
             <h1 className="tsl-title">{data.worker.first_name}'s timesheet</h1>
@@ -186,10 +234,10 @@ export default function TimesheetLink() {
         </header>
 
         <div className="tsl-chips">
-          {pay.hourly && pay.hourly_rate_cents != null && <span className="tsl-chip">{money(pay.hourly_rate_cents)} / hour</span>}
+          {pay.hourly && pay.hourly_rate_cents != null && <span className="tsl-chip">{money(pay.hourly_rate_cents)}/hr</span>}
           <span className={`tsl-chip tsl-chip--${notice.tone}`}>{PAY_METHOD_LABELS[pay.pay_method]}</span>
           <span className="tsl-chip">{SHORT_FREQUENCY[pay.pay_frequency] || PAY_FREQUENCY_LABELS[pay.pay_frequency]}</span>
-          <span className="tsl-chip">Payday {formatWeekday(pay.payday)}, {formatMonthDay(pay.payday)}</span>
+          <span className="tsl-chip">Payday {formatWeekday(pay.payday)} {formatMonthDay(pay.payday)}</span>
         </div>
 
         <nav className="tsl-period" aria-label="Pay period">
@@ -229,42 +277,54 @@ export default function TimesheetLink() {
                   className={`tsl-day ${entry ? 'has-entry' : ''} ${isToday ? 'is-today' : ''}`}
                   disabled={!clickable}
                   onClick={() => setEditing(day)}
-                  aria-label={`${formatDayLong(day.date)}${entry ? `, ${hoursText(entry.hours)} hours, ${money(entry.gross_cents)}` : day.editable ? ', add hours' : ''}`}
+                  aria-label={`${formatDayLong(day.date)}${entry?.open_shift
+                    ? `, punched in at ${time12(entry.start_time)}`
+                    : entry ? `, ${hoursText(entry.hours)} hours, ${money(entry.gross_cents)}` : day.editable ? ', add hours' : ''}`}
                 >
                   <span className="tsl-day-date" aria-hidden="true">
                     <span>{formatWeekday(day.date)}</span>
                     <strong>{Number(day.date.slice(8))}</strong>
                   </span>
                   <span className="tsl-day-body">
-                    {entry ? (
+                    {entry?.open_shift ? (
+                      <>
+                        <span className="tsl-day-hours">
+                          On the clock
+                          <span className="tsl-day-time">in {time12(entry.start_time)}</span>
+                        </span>
+                        {entry.job_site && <span className="tsl-day-project">{entry.job_site}</span>}
+                      </>
+                    ) : entry ? (
                       <>
                         <span className="tsl-day-hours">
                           {hoursText(entry.hours)} hrs
                           {entry.overtime_hours > 0 ? ` (${hoursText(entry.overtime_hours)} overtime)` : ''}
-                          {isToday && <span className="tsl-today-tag">Today</span>}
+                          {entry.start_time && <span className="tsl-day-time">{time12(entry.start_time)} - {time12(entry.end_time)}</span>}
                         </span>
-                        {entry.job_site && <span className="tsl-day-project">{entry.job_site}</span>}
-                        <span className="tsl-day-detail">
-                          {entry.start_time ? `${time12(entry.start_time)} - ${time12(entry.end_time)}` : 'Total hours entered'}
-                        </span>
-                        {entry.addons.length > 0 && (
-                          <span className="tsl-day-extras">+ {money(entry.addons_cents)} extras</span>
+                        {(entry.job_site || entry.addons.length > 0) && (
+                          <span className="tsl-day-sub">
+                            {entry.job_site && <span className="tsl-day-project">{entry.job_site}</span>}
+                            {entry.addons.length > 0 && <span className="tsl-day-extras">+ {money(entry.addons_cents)} extras</span>}
+                          </span>
                         )}
                       </>
                     ) : day.editable ? (
                       <span className="tsl-day-empty">
                         <Plus size={18} aria-hidden="true" />
-                        Add hours
-                        {isToday && <span className="tsl-today-tag">Today</span>}
+                        {isToday ? 'Add today\'s hours' : 'Add hours'}
                       </span>
                     ) : (
                       <span className="tsl-day-off">{day.date > data.today ? 'Coming up' : 'No hours'}</span>
                     )}
                   </span>
-                  {entry && (
+                  {entry?.open_shift ? (
+                    <span className="tsl-day-right">
+                      <span className="tsl-status tsl-status--open">Punched in</span>
+                    </span>
+                  ) : entry && (
                     <span className="tsl-day-right">
                       <strong>{money(entry.gross_cents)}</strong>
-                      <span className={`tsl-status tsl-status--${dayStatusLabel(data, entry).tone}`}>{dayStatusLabel(data, entry).label}</span>
+                      <span className={`tsl-status tsl-status--${dayStatusLabel(entry).tone}`}>{dayStatusLabel(entry).label}</span>
                     </span>
                   )}
                 </button>
@@ -279,7 +339,10 @@ export default function TimesheetLink() {
         </section>
 
         <p className="tsl-fineprint">
-          This page is only for you. Tip: save it to your home screen so it's one tap away. Questions? Call the office at{' '}
+          Open this link when you start work and tap Punch in, then open it again when you finish and tap Punch out.
+          Each punch is submitted to the office right away. Forgot to punch? Tap the day to enter the hours yourself.
+          The link is only for you.
+          Tip: save it to your home screen so it's one tap away. Questions? Call the office at{' '}
           <a href={data.office.phone_href}>{data.office.phone}</a>.
         </p>
       </div>
@@ -333,35 +396,32 @@ export default function TimesheetLink() {
             <ChevronUp size={24} className={`tsl-chevron ${totalsOpen ? 'is-open' : ''}`} aria-hidden="true" />
             <span className="tsl-sr-only">{totalsOpen ? 'Hide the breakdown' : 'Show the breakdown'}</span>
           </button>
-          {data.can_submit && (
-            <div className="tsl-submit-area">
-              {data.submission && !data.submission.changed_since ? (
-                <p className="tsl-submitted-note" role="status">
-                  <CheckCircle2 size={20} aria-hidden="true" />
-                  Submitted to the office {formatEasternDateTime(data.submission.submitted_at)}
-                </p>
-              ) : (
-                <button type="button" className="tsl-submit" onClick={submitTimesheet} disabled={submitting}>
-                  <Send size={20} aria-hidden="true" />
-                  {submitting ? 'Submitting...' : data.submission ? 'Submit changes to the office' : 'Submit timesheet'}
-                </button>
-              )}
-            </div>
-          )}
+          <PunchBar
+            data={data}
+            token={token}
+            onPunched={(payload, result) => {
+              setData(payload);
+              setPunched(result);
+            }}
+            onOpenDay={openDay}
+          />
         </div>
       </footer>
 
-      {submitted && (
-        <div className="tsl-popup-backdrop" role="presentation" onClick={() => setSubmitted(null)}>
-          <div className="tsl-popup" role="alertdialog" aria-modal="true" aria-labelledby="tsl-popup-title" onClick={event => event.stopPropagation()}>
-            <CheckCircle2 size={56} className="tsl-popup-icon" aria-hidden="true" />
-            <h2 id="tsl-popup-title">Your timesheet has been submitted to the office</h2>
+      {punched && (
+        <div className="tsl-popup-backdrop" role="presentation" onClick={() => setPunched(null)}>
+          <div className="tsl-popup" role="alertdialog" aria-modal="true" aria-labelledby="tsl-punch-title" onClick={event => event.stopPropagation()}>
+            <CheckCircle2 size={56} className={`tsl-popup-icon ${punched.kind === 'out' ? 'is-out' : ''}`} aria-hidden="true" />
+            <h2 id="tsl-punch-title">{punched.kind === 'in' ? 'You are punched in' : 'You are punched out'}</h2>
             <p>
-              {formatPeriod(submitted.period.start, submitted.period.end)}
+              <strong className="tsl-popup-time">{time12(punched.time)}</strong>
+              {punched.kind === 'in'
+                ? punched.project && <><br />{punched.project}</>
+                : punched.hours != null && <><br />{hoursText(punched.hours)} hours for the day</>}
               <br />
-              {hoursText(submitted.totals.hours)} hours · {money(submitted.totals.gross_cents)} gross{submitted.pay.pay_method === 'payroll' ? ' (before taxes)' : ''}
+              Submitted to the office.
             </p>
-            <button type="button" className="tsl-primary" onClick={() => setSubmitted(null)} autoFocus>OK</button>
+            <button type="button" className="tsl-primary" onClick={() => setPunched(null)} autoFocus>OK</button>
           </div>
         </div>
       )}
@@ -381,6 +441,167 @@ export default function TimesheetLink() {
         />
       )}
     </div>
+  );
+}
+
+/**
+ * The punch clock in the bottom bar: one button, green Punch in (with the project) when the day
+ * starts, red Punch out (with the lunch break) when it ends, and a status line under it saying
+ * the time went to the office. The server stamps the time; the phone's clock is never used.
+ */
+function PunchBar({
+  data,
+  token,
+  onPunched,
+  onOpenDay,
+}: {
+  data: LinkPayload;
+  token: string;
+  onPunched: (payload: LinkPayload, result: PunchResult) => void;
+  onOpenDay: (date: string) => void;
+}) {
+  const { open, can_punch_in: canPunchIn, last_project: lastProject } = data.punch;
+  const [project, setProject] = useState(lastProject || '');
+  const [breakMinutes, setBreakMinutes] = useState(data.usual.break_minutes);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loadedAt, setLoadedAt] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    setLoadedAt(Date.now());
+    setNow(Date.now());
+  }, [data]);
+
+  // The "on the clock" time and the clock shown above Punch in keep moving while the page is open.
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 15000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const projects = [...new Set([lastProject, ...data.days.map(day => day.entry?.job_site)].filter((value): value is string => Boolean(value)))];
+  const today = data.days.find(day => day.date === data.today)?.entry;
+
+  const punchIn = async (event: FormEvent) => {
+    event.preventDefault();
+    if (busy) return;
+    setError(null);
+    if (!project.trim()) {
+      setError('Enter the project first: the house number and street, like 123 Smith St.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const payload = await callLink(token, '/punch-in', { method: 'POST', body: { job_site: project } });
+      const shift = payload.punch.open;
+      onPunched(payload, { kind: 'in', time: shift?.start_time ?? null, project: shift?.job_site ?? project, hours: null });
+    } catch (punchError) {
+      setError((punchError as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const punchOut = async () => {
+    if (busy || !open) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const payload = await callLink(token, '/punch-out', { method: 'POST', body: { break_minutes: breakMinutes } });
+      const entry = payload.days.find(day => day.date === open.date)?.entry;
+      onPunched(payload, { kind: 'out', time: entry?.end_time ?? null, project: entry?.job_site ?? null, hours: entry?.hours ?? null });
+    } catch (punchError) {
+      setError((punchError as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const errorLine = error && <p className="tsl-punch-error" role="alert">{error}</p>;
+
+  if (open?.too_long) {
+    return (
+      <section className="tsl-punch" aria-label="Punch clock">
+        <button type="button" className="tsl-punch-btn tsl-punch-btn--fix" onClick={() => onOpenDay(open.date)}>
+          Enter the time you finished
+        </button>
+        <p className="tsl-punch-status tsl-punch-status--warn" role="status">
+          <CircleAlert size={18} aria-hidden="true" />
+          <span>You did not punch out on {formatDayLong(open.date)}.</span>
+        </p>
+      </section>
+    );
+  }
+
+  if (open) {
+    const minutes = open.minutes + Math.max(0, Math.floor((now - loadedAt) / 60000));
+    return (
+      <section className="tsl-punch" aria-label="Punch clock">
+        <div className="tsl-punch-row">
+          <Dropdown value={breakMinutes} onChange={event => setBreakMinutes(Number(event.target.value))} aria-label="Lunch break (unpaid)" disabled={busy}>
+            {BREAK_OPTIONS.map(option => <option key={option.minutes} value={option.minutes}>{option.minutes ? `Lunch ${option.label}` : option.label}</option>)}
+            {!BREAK_OPTIONS.some(option => option.minutes === breakMinutes) && <option value={breakMinutes}>Lunch {breakMinutes} minutes</option>}
+          </Dropdown>
+          <button type="button" className="tsl-punch-btn tsl-punch-btn--out" onClick={punchOut} disabled={busy}>
+            <LogOut size={20} aria-hidden="true" />
+            {busy ? 'Sending...' : 'Punch out'}
+          </button>
+        </div>
+        {errorLine}
+        <p className="tsl-punch-status tsl-punch-status--on" role="status">
+          <span className="tsl-punch-dot" aria-hidden="true" />
+          <span>
+            Punched in at {time12(open.start_time)}{open.date !== data.today ? ` ${formatWeekday(open.date)}` : ''}. Submitted to the office.
+          </span>
+          <span className="tsl-punch-elapsed">{elapsedText(minutes)}</span>
+        </p>
+      </section>
+    );
+  }
+
+  if (canPunchIn) {
+    return (
+      <form className="tsl-punch" aria-label="Punch clock" onSubmit={punchIn} noValidate>
+        <div className="tsl-punch-row">
+          <input
+            className="tsl-input"
+            type="text"
+            name="punch-project"
+            list="tsl-punch-projects"
+            value={project}
+            onChange={event => setProject(event.target.value)}
+            placeholder="Project: 123 Smith St"
+            aria-label="Project (house number and street)"
+            maxLength={200}
+            autoComplete="off"
+          />
+          <button type="submit" className="tsl-punch-btn tsl-punch-btn--in" disabled={busy}>
+            <LogIn size={20} aria-hidden="true" />
+            {busy ? 'Sending...' : 'Punch in'}
+          </button>
+        </div>
+        <datalist id="tsl-punch-projects">
+          {projects.map(item => <option key={item} value={item} />)}
+        </datalist>
+        {errorLine}
+        <p className="tsl-punch-status" role="status">
+          <Clock size={18} aria-hidden="true" />
+          <span>It's {nowEastern()}. Enter the project and tap Punch in when you start work.</span>
+        </p>
+      </form>
+    );
+  }
+
+  return (
+    <section className="tsl-punch" aria-label="Punch clock">
+      <p className="tsl-punch-status tsl-punch-status--done" role="status">
+        <CheckCircle2 size={18} aria-hidden="true" />
+        <span>
+          {today?.start_time ? `Today ${time12(today.start_time)} - ${time12(today.end_time)}. ` : today ? `Today ${hoursText(today.hours)} hrs. ` : ''}
+          Your hours have been submitted to the office.
+        </span>
+      </p>
+    </section>
   );
 }
 
@@ -458,7 +679,7 @@ function DayEditor({
         addons: addonsPayload(addons, types),
       };
       const payload = await callLink(token, `/days/${day.date}`, { method: 'PUT', body });
-      onSaved(payload, `Saved ${formatDayLong(day.date)}`);
+      onSaved(payload, `${formatDayLong(day.date)} submitted to the office`);
     } catch (saveError) {
       setError((saveError as Error).message);
     } finally {
@@ -508,7 +729,7 @@ function DayEditor({
           <div>
             <h2 id={titleId}>{formatDayLong(day.date)}</h2>
           </div>
-          {entry && <span className={`tsl-status tsl-status--${dayStatusLabel(data, entry).tone}`} style={{ marginLeft: 'auto' }}>{dayStatusLabel(data, entry).label}</span>}
+          {entry && <span className={`tsl-status tsl-status--${dayStatusLabel(entry).tone}`} style={{ marginLeft: 'auto' }}>{dayStatusLabel(entry).label}</span>}
         </header>
 
         <div className="tsl-sheet-body">
@@ -546,6 +767,9 @@ function DayEditor({
               </label>
               {timeResult?.error && <p className="tsl-hint" style={{ color: '#b91c1c' }}>{timeResult.error}</p>}
               {prefilled && !timeResult?.error && <p className="tsl-hint">Your usual hours are filled in. Change them if this day was different.</p>}
+              {entry?.open_shift && !readOnly && (
+                <p className="tsl-hint">You are still punched in. Tap Punch out at the bottom of the screen, or enter the time you finished here.</p>
+              )}
             </>
           ) : (
             <label className="tsl-field">

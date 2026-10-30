@@ -1847,6 +1847,7 @@ function initializeSchema() {
       pay_timing TEXT NOT NULL DEFAULT 'previous_week',
       payday_weekday INTEGER NOT NULL DEFAULT 5,
       auto_send_enabled INTEGER NOT NULL DEFAULT 1,
+      auto_send_schedule TEXT NOT NULL DEFAULT 'fridays',
       auto_last_sent_on TEXT,
       auto_attempt_on TEXT,
       auto_attempts INTEGER NOT NULL DEFAULT 0,
@@ -2213,6 +2214,8 @@ function initializeSchema() {
   try { db.exec(`ALTER TABLE hr_timesheet_workers ADD COLUMN auto_last_sent_on TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE hr_timesheet_workers ADD COLUMN auto_attempt_on TEXT`); } catch (_) { /* already exists */ }
   try { db.exec(`ALTER TABLE hr_timesheet_workers ADD COLUMN auto_attempts INTEGER NOT NULL DEFAULT 0`); } catch (_) { /* already exists */ }
+  // The link text goes out Fridays at 10 AM by default, or every workday (Mike, 2026-10-30).
+  try { db.exec(`ALTER TABLE hr_timesheet_workers ADD COLUMN auto_send_schedule TEXT NOT NULL DEFAULT 'fridays'`); } catch (_) { /* already exists */ }
   // Vendor activity ranking (directory + suppliers) aggregates payments per vendor.
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_quickbooks_bill_payments_vendor_txn ON quickbooks_bill_payments(vendor_id, txn_date)`); } catch (_) { /* table not created yet */ }
   try {

@@ -505,7 +505,7 @@ async function start() {
       console.log('');
       startCalendarReminderScheduler();
       startActivityRetentionScheduler();
-      // Texts (or emails) each field worker their timesheet link every Friday at 10 AM Eastern.
+      // Texts (or emails) each field worker their timesheet link at 10 AM Eastern on Fridays (or every workday).
       startTimesheetAutoSendScheduler();
       // The AI reads every agreement and quote document and checks how it is filed.
       documentReviewService.start();

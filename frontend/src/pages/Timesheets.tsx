@@ -24,6 +24,7 @@ import { Loading, Modal, PageHeader } from '../components/ui';
 import { useAuthStore } from '../store/authStore';
 import { formatEasternDateTime, formatEasternRelative } from '../lib/time';
 import {
+  AUTO_SEND_LABELS,
   BREAK_OPTIONS,
   PAY_FREQUENCY_LABELS,
   PAY_METHOD_LABELS,
@@ -49,6 +50,7 @@ import {
 } from '../lib/timesheets';
 import type {
   AddonType,
+  AutoSendChoice,
   DraftAddon,
   PayFrequency,
   PayMethod,
@@ -94,8 +96,11 @@ interface Worker {
   pay_timing: PayTiming;
   payday_weekday: number;
   auto_send_enabled: boolean;
+  auto_send_schedule: 'workdays' | 'fridays';
   auto_last_sent_on: string | null;
   link: WorkerLink;
+  /** Punched in from the link right now (workers list only). */
+  on_the_clock?: { date: string; start_time: string } | null;
   current_period?: TimesheetTotals & { start: string; end: string; submitted_at: string | null; changed_since_submit: boolean };
 }
 
@@ -160,9 +165,11 @@ const EVENT_LABELS: Record<string, string> = {
   period_reopen: 'Reopened the pay period',
   period_unpay: 'Undid paid',
   timesheet_submitted: 'Submitted the timesheet to the office',
-  link_auto_sent_sms: 'Friday 10 AM link texted',
-  link_auto_sent_email: 'Friday 10 AM link emailed',
-  link_auto_send_failed: 'Friday 10 AM link not sent',
+  link_auto_sent_sms: '10 AM link texted',
+  link_auto_sent_email: '10 AM link emailed',
+  link_auto_send_failed: '10 AM link not sent',
+  punched_in: 'Punched in',
+  punched_out: 'Punched out',
 };
 
 const STATUS_PILL: Record<string, string> = {
@@ -194,7 +201,12 @@ async function copyText(value: string) {
 }
 
 function linkMessage(worker: Worker, url: string) {
-  return `New Urban Development: Hi ${worker.preferred_name || worker.first_name}, here is your personal timesheet link. Open it to enter the days and hours you work: ${url} This link is only for you, please don't share it.`;
+  return `New Urban Development: Hi ${worker.preferred_name || worker.first_name}, here is your personal timesheet link. Use it every day to enter your hours, it is the same link every day: ${url} This link is only for you, please don't share it.`;
+}
+
+/** 'off' turns the automatic text off; otherwise it is on with that schedule. */
+function autoSendFields(choice: AutoSendChoice) {
+  return choice === 'off' ? { auto_send_enabled: false } : { auto_send_enabled: true, auto_send_schedule: choice };
 }
 
 function digitsOnly(value: string) {
@@ -418,18 +430,23 @@ export default function Timesheets() {
                   <p className={`mt-0.5 text-xs font-semibold ${item.phone ? 'text-slate-600' : 'text-amber-700'}`}>
                     {item.phone ? `Mobile ${item.phone}` : 'No mobile number'}
                   </p>
+                  {item.on_the_clock && (
+                    <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-800 ring-1 ring-inset ring-emerald-200">
+                      <span className="h-2 w-2 rounded-full bg-emerald-500" aria-hidden="true" />
+                      On the clock since {time12(item.on_the_clock.start_time)}
+                      {item.on_the_clock.date !== list.today ? ` ${formatWeekday(item.on_the_clock.date)}` : ''}
+                    </p>
+                  )}
                   {current && (
                     <p className="mt-2 text-sm text-slate-700">
                       This period: <strong className="text-slate-950">{hoursText(current.hours)} hrs</strong> · <strong className="text-slate-950">{money(current.gross_cents)}</strong>
                     </p>
                   )}
-                  {current?.submitted_at ? (
-                    <p className={`mt-1 text-xs font-semibold ${current.changed_since_submit ? 'text-amber-700' : 'text-emerald-700'}`}>
-                      {current.changed_since_submit ? 'Changed after submitting' : `Timesheet submitted ${formatEasternRelative(current.submitted_at)}`}
+                  {current?.submitted_at && (
+                    <p className="mt-1 text-xs font-semibold text-emerald-700">
+                      Last submitted from the link {formatEasternRelative(current.submitted_at)}
                     </p>
-                  ) : current && current.days_worked > 0 ? (
-                    <p className="mt-1 text-xs font-semibold text-amber-700">Not submitted yet</p>
-                  ) : null}
+                  )}
                   {current && current.open_days > 0 && (
                     <p className="mt-1 text-xs font-semibold text-amber-700">{current.open_days} day{current.open_days === 1 ? '' : 's'} waiting for approval</p>
                   )}
@@ -489,7 +506,9 @@ export default function Timesheets() {
                     </p>
                     <p className="mt-0.5 text-sm text-slate-500">
                       {[worker.phone ? `Mobile ${worker.phone}` : null, worker.email].filter(Boolean).join(' · ') || 'No phone or email on file'}
-                      {' · '}Friday 10 AM link: {!worker.auto_send_enabled ? 'off' : worker.phone ? 'on, by text' : worker.email ? 'on, by email' : 'on, but nothing to send it to'}
+                      {' · '}Link text: {!worker.auto_send_enabled
+                        ? 'off'
+                        : `${worker.auto_send_schedule === 'fridays' ? 'Fridays' : 'every workday'} at 10 AM, ${worker.phone ? 'by text' : worker.email ? 'by email' : 'but nothing to send it to'}`}
                     </p>
                     {!worker.phone && canEdit && (
                       <p className="mt-2 inline-flex flex-wrap items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm text-amber-800">
@@ -720,20 +739,13 @@ function PeriodPanel({
         )}
       </div>
 
-      {detail.submission ? (
-        <div className={`rounded-md border px-4 py-3 text-sm ${detail.submission.changed_since ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
-          <strong className="font-semibold">
-            {detail.submission.changed_since
-              ? `${detail.worker.first_name} changed this timesheet after submitting it (not submitted again yet).`
-              : `Submitted by ${detail.worker.first_name}.`}
-          </strong>{' '}
-          Sent to the office {formatEasternDateTime(detail.submission.submitted_at)}: {hoursText(detail.submission.hours)} hrs, {money(detail.submission.gross_cents)} gross.
+      {/* Every punch and saved day on the link is submitted as it happens (no Submit button). */}
+      {detail.submission && (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          <strong className="font-semibold">Submitted by {detail.worker.first_name} as they punch in and out.</strong>{' '}
+          Last update {formatEasternDateTime(detail.submission.submitted_at)}: {hoursText(detail.submission.hours)} hrs, {money(detail.submission.gross_cents)} gross.
         </div>
-      ) : totals.days_worked > 0 ? (
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          <strong className="font-semibold">Not submitted yet.</strong> {detail.worker.first_name} has entered days in this period but has not pressed Submit on their phone.
-        </div>
-      ) : null}
+      )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
@@ -779,8 +791,10 @@ function PeriodPanel({
                     {day.date === today && <span className="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800 ring-1 ring-inset ring-amber-200">Today</span>}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
-                    {entry ? (entry.start_time ? `${time12(entry.start_time)} - ${time12(entry.end_time)}` : 'Hours only') : '-'}
-                    {entry?.start_time && <span className="block text-xs text-slate-500">{breakText(entry.break_minutes)}</span>}
+                    {entry?.open_shift
+                      ? <>In {time12(entry.start_time)}<span className="block text-xs font-semibold text-emerald-700">On the clock</span></>
+                      : entry ? (entry.start_time ? `${time12(entry.start_time)} - ${time12(entry.end_time)}` : 'Hours only') : '-'}
+                    {entry?.start_time && !entry.open_shift && <span className="block text-xs text-slate-500">{breakText(entry.break_minutes)}</span>}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
                     {entry ? (
@@ -803,12 +817,7 @@ function PeriodPanel({
                   <td className="px-4 py-3">
                     {entry ? (
                       <>
-                        <StatusPill
-                          status={entry.status}
-                          label={entry.status === 'submitted'
-                            ? (detail.submission && entry.updated_at && entry.updated_at <= detail.submission.submitted_at ? 'Submitted' : 'Saved')
-                            : undefined}
-                        />
+                        <StatusPill status={entry.status} />
                         <span className="mt-1 block text-xs text-slate-500">{entry.updated_via === 'manager' ? 'Office' : 'From link'}</span>
                       </>
                     ) : null}
@@ -888,7 +897,7 @@ function AddWorkerModal({
     usual_break_minutes: 0,
     pay_timing: 'previous_week' as PayTiming,
     payday_weekday: 5,
-    auto_send_enabled: true,
+    auto_send: 'fridays' as AutoSendChoice,
   });
   const [saving, setSaving] = useState(false);
   const [created, setCreated] = useState<{ worker: Worker; url: string | null } | null>(null);
@@ -912,7 +921,7 @@ function AddWorkerModal({
         usual_break_minutes: form.usual_break_minutes,
         pay_timing: form.pay_timing,
         payday_weekday: form.payday_weekday,
-        auto_send_enabled: form.auto_send_enabled,
+        ...autoSendFields(form.auto_send),
       };
       const response = await api.post<{ worker: Worker; link_url: string | null }>('/human-resources/timesheets/workers', body);
       setCreated({ worker: response.data.worker, url: response.data.link_url });
@@ -1027,7 +1036,7 @@ interface PayForm {
   usual_break_minutes: number;
   pay_timing: PayTiming;
   payday_weekday: number;
-  auto_send_enabled: boolean;
+  auto_send: AutoSendChoice;
 }
 
 function PayFields<T extends PayForm>({ form, set }: { form: T; set: (patch: Partial<T>) => void }) {
@@ -1094,10 +1103,11 @@ function PayFields<T extends PayForm>({ form, set }: { form: T; set: (patch: Par
             </select>
           </Field>
         </div>
-        <label className="mt-3 flex items-center gap-2 text-sm text-slate-700">
-          <input type="checkbox" className="h-4 w-4" checked={form.auto_send_enabled} onChange={event => set({ auto_send_enabled: event.target.checked } as Partial<T>)} />
-          Send the timesheet link every Friday at 10 AM (by text; by email if there is no mobile number)
-        </label>
+        <Field labelText="Text the link automatically" className="mt-3" hint="By text, or by email when there is no mobile number. The link works every day, any time, whatever this is set to.">
+          <select className={fieldClass} value={form.auto_send} onChange={event => set({ auto_send: event.target.value as AutoSendChoice } as Partial<T>)}>
+            {(Object.keys(AUTO_SEND_LABELS) as AutoSendChoice[]).map(choice => <option key={choice} value={choice}>{AUTO_SEND_LABELS[choice]}</option>)}
+          </select>
+        </Field>
       </div>
       <p className={`rounded-md border px-3 py-2 text-xs ${notice.tone === 'payroll' ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
         <strong>{notice.title}.</strong> {payNotice(form.pay_method, 'worker').body} (This is what the worker sees on their timesheet.)
@@ -1134,7 +1144,7 @@ function SettingsModal({
     usual_break_minutes: worker.usual_break_minutes,
     pay_timing: worker.pay_timing,
     payday_weekday: worker.payday_weekday,
-    auto_send_enabled: worker.auto_send_enabled,
+    auto_send: (worker.auto_send_enabled ? worker.auto_send_schedule : 'off') as AutoSendChoice,
   });
   const [saving, setSaving] = useState(false);
   const [confirm, setConfirm] = useState<null | 'rotate' | 'off'>(null);
@@ -1144,7 +1154,8 @@ function SettingsModal({
     event.preventDefault();
     setSaving(true);
     try {
-      await api.patch(`/human-resources/timesheets/workers/${worker.id}`, form);
+      const { auto_send: autoSend, ...rest } = form;
+      await api.patch(`/human-resources/timesheets/workers/${worker.id}`, { ...rest, ...autoSendFields(autoSend) });
       toast.success('Saved');
       await onSaved();
       onClose();

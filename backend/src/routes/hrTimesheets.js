@@ -27,9 +27,11 @@ const PAY_FREQUENCIES = new Set(['weekly', 'biweekly', 'semimonthly', 'monthly']
 // When a worker is paid for a period: on payday inside it (Chad: Friday for this week) or on
 // the first payday after it (a week behind).
 const PAY_TIMINGS = new Set(['same_week', 'previous_week']);
-// Every Friday at 10 AM Eastern each worker's link goes out (Mike, 2026-10-30). A restart
-// during 10:00-11:00 still sends; nothing is sent late after that.
-const AUTO_SEND_WEEKDAY = 5;
+// Each worker's link is texted at 10 AM Eastern every workday (Mon-Fri), or Fridays only, per
+// worker (Mike, 2026-10-30: the link is for every day, not only Fridays). A restart during
+// 10:00-11:00 still sends; nothing is sent late after that.
+const FRIDAY = 5;
+const AUTO_SEND_SCHEDULES = new Set(['workdays', 'fridays']);
 const AUTO_SEND_START_MINUTES = 10 * 60;
 const AUTO_SEND_WINDOW_MINUTES = 60;
 const AUTO_SEND_MAX_ATTEMPTS = 3;
@@ -368,6 +370,8 @@ function buildPeriod(db, employee, settings, start, end) {
       addons_cents: addonsCents,
       gross_cents: regularCents + overtimeCents + addonsCents,
       pay_method: row.pay_method || settings.pay_method,
+      // Punched in from the link and not punched out yet.
+      open_shift: Boolean(row.start_time && !row.end_time),
       entered_via: row.entered_via,
       updated_via: row.updated_via,
       created_at: row.created_at,
@@ -515,6 +519,38 @@ function deleteDay(db, req, { employee, date, actor }) {
   });
 }
 
+// ── punch in / punch out (Mike, 2026-10-30) ──────────────────────────────────
+// Punching in makes today's day with a start time and no end time; punching out fills in the
+// end time and the hours. Times come from the server's Eastern clock, never the phone's.
+const MAX_SHIFT_MINUTES = 16 * 60;
+
+function openShift(db, employeeId) {
+  return db.prepare(`
+    SELECT * FROM hr_timesheet_entries
+    WHERE employee_id = ? AND start_time IS NOT NULL AND end_time IS NULL AND status = 'submitted'
+    ORDER BY work_date DESC
+    LIMIT 1
+  `).get(employeeId) || null;
+}
+
+function minutesSince(entry, clock) {
+  return daysBetween(entry.work_date, clock.date) * 24 * 60 + clock.minutes - minutesOf(entry.start_time);
+}
+
+function clockTime(clock) {
+  return `${String(Math.floor(clock.minutes / 60)).padStart(2, '0')}:${String(clock.minutes % 60).padStart(2, '0')}`;
+}
+
+/** The punch clock's "now". The preview's test hook may set it; production never does. */
+function punchNow(req) {
+  if (process.env.TIMESHEET_AUTO_SEND_TEST_ROUTE === 'true' && req.body?.test_now) {
+    const now = new Date(String(req.body.test_now));
+    if (Number.isNaN(now.getTime())) throw httpError(400, 'Invalid test_now.');
+    return now;
+  }
+  return new Date();
+}
+
 function latestSubmission(db, employeeId, periodStart) {
   return db.prepare(`
     SELECT submitted_at, hours, gross_cents, days
@@ -654,6 +690,7 @@ function managerWorker(employee, settings) {
     pay_timing: settings.pay_timing,
     payday_weekday: settings.payday_weekday,
     auto_send_enabled: Boolean(settings.auto_send_enabled),
+    auto_send_schedule: settings.auto_send_schedule,
     auto_last_sent_on: settings.auto_last_sent_on,
     link: {
       active: Boolean(settings.link_token_hash),
@@ -695,8 +732,9 @@ function timesheetErrorHandler(label) {
   };
 }
 
-// ── the Friday 10 AM link ────────────────────────────────────────────────────
+// ── the 10 AM link text (every workday, or Fridays only) ─────────────────────
 
+/** Friday: enter the week's hours, press Submit, and when the week is paid. */
 function fridayMessage(employee, settings, period, url, today) {
   const name = employee.preferred_name || employee.first_name;
   const payday = paydayFor(period, settings.pay_timing, settings.payday_weekday);
@@ -706,15 +744,22 @@ function fridayMessage(employee, settings, period, url, today) {
   return `New Urban Development: Hi ${name}, please enter your hours for this week (${shortDay(period.start)} - ${shortDay(period.end)}) and press Submit: ${url} ${when}`;
 }
 
+/** Monday-Thursday: a short reminder that the same link takes each day's hours. */
+function dailyMessage(employee, period, url) {
+  const name = employee.preferred_name || employee.first_name;
+  return `New Urban Development: Hi ${name}, enter your hours each day you work on your timesheet for this week (${shortDay(period.start)} - ${shortDay(period.end)}). It is the same link every day: ${url}`;
+}
+
 /**
  * Sends each worker their link (text if a mobile number is on file, else email) once per
- * Friday between 10:00 and 11:00 Eastern. A worker is claimed before sending so overlapping
- * runs can never double-send; a failed send is retried at most AUTO_SEND_MAX_ATTEMPTS times,
- * and a worker with no phone or email (or who opted out) is not retried.
+ * day between 10:00 and 11:00 Eastern: every workday, or Fridays only, per worker. A worker is
+ * claimed before sending so overlapping runs can never double-send; a failed send is retried
+ * at most AUTO_SEND_MAX_ATTEMPTS times that day, and a worker with no phone or email (or who
+ * opted out) is not retried.
  */
-async function runFridaySend({ now = new Date() } = {}) {
+async function runAutoSend({ now = new Date() } = {}) {
   const clock = easternClock(now);
-  if (clock.weekday !== AUTO_SEND_WEEKDAY
+  if (clock.weekday < 1 || clock.weekday > 5
     || clock.minutes < AUTO_SEND_START_MINUTES
     || clock.minutes >= AUTO_SEND_START_MINUTES + AUTO_SEND_WINDOW_MINUTES) {
     return { ran: false, date: clock.date, results: [] };
@@ -725,9 +770,10 @@ async function runFridaySend({ now = new Date() } = {}) {
     FROM hr_timesheet_workers w
     JOIN hr_employees e ON e.id = w.employee_id
     WHERE w.auto_send_enabled = 1 AND e.employment_status != 'terminated'
+      AND (w.auto_send_schedule = 'workdays' OR (w.auto_send_schedule = 'fridays' AND ? = ${FRIDAY}))
       AND COALESCE(w.auto_last_sent_on, '') != ?
       AND NOT (COALESCE(w.auto_attempt_on, '') = ? AND w.auto_attempts >= ?)
-  `).all(clock.date, clock.date, AUTO_SEND_MAX_ATTEMPTS);
+  `).all(clock.weekday, clock.date, clock.date, AUTO_SEND_MAX_ATTEMPTS);
   const results = [];
   for (const { employee_id: employeeId } of due) {
     const claim = db.prepare(`
@@ -754,7 +800,10 @@ async function runFridaySend({ now = new Date() } = {}) {
     const via = phone ? 'sms' : 'email';
     try {
       if (phone) {
-        await sendTextThroughGateway(phone, fridayMessage(employee, settings, period, url, clock.date));
+        const message = clock.weekday === FRIDAY
+          ? fridayMessage(employee, settings, period, url, clock.date)
+          : dailyMessage(employee, period, url);
+        await sendTextThroughGateway(phone, message);
       } else {
         if (!isEmailConfigured()) throw httpError(503, 'Email is not set up on BuildTrack.');
         await sendTimesheetLinkEmail({ name: employee.preferred_name || employee.first_name, email, timesheetUrl: url });
@@ -778,7 +827,7 @@ async function runFridaySend({ now = new Date() } = {}) {
 
 function startTimesheetAutoSendScheduler() {
   if (process.env.TIMESHEET_AUTO_SEND_ENABLED === 'false') {
-    console.log('[TIMESHEETS] Friday timesheet links disabled by environment');
+    console.log('[TIMESHEETS] Timesheet link texts disabled by environment');
     return;
   }
   let running = false;
@@ -786,13 +835,13 @@ function startTimesheetAutoSendScheduler() {
     if (running) return;
     running = true;
     try {
-      const outcome = await runFridaySend();
+      const outcome = await runAutoSend();
       if (outcome.ran && outcome.results.length) {
         const count = status => outcome.results.filter(result => result.status === status).length;
-        console.log(`[TIMESHEETS] Friday links ${outcome.date}: sent ${count('sent')}, failed ${count('failed')}, skipped ${count('skipped')}`);
+        console.log(`[TIMESHEETS] Link texts ${outcome.date}: sent ${count('sent')}, failed ${count('failed')}, skipped ${count('skipped')}`);
       }
     } catch (error) {
-      console.error('[TIMESHEETS] Friday link run failed:', error.message);
+      console.error('[TIMESHEETS] Link text run failed:', error.message);
     } finally {
       running = false;
     }
@@ -801,7 +850,7 @@ function startTimesheetAutoSendScheduler() {
   if (timer.unref) timer.unref();
   const first = setTimeout(tick, 30 * 1000);
   if (first.unref) first.unref();
-  console.log('[TIMESHEETS] Friday timesheet links on: Fridays 10:00-11:00 America/Detroit');
+  console.log('[TIMESHEETS] Timesheet link texts on: Mon-Fri 10:00-11:00 America/Detroit');
 }
 
 // ── manager API (/api/human-resources/timesheets) ────────────────────────────
@@ -867,8 +916,10 @@ function createManagerRouter({ seedComplianceTasks, auditMutation }) {
         const period = payPeriodFor(employee.pay_frequency, settings.period_anchor_date, today);
         const data = buildPeriod(db, employee, settings, period.start, period.end);
         const submission = submissionState(latestSubmission(db, employee.id, period.start), data);
+        const shift = openShift(db, employee.id);
         workers.push({
           ...managerWorker(employee, settings),
+          on_the_clock: shift ? { date: shift.work_date, start_time: shift.start_time } : null,
           current_period: {
             start: period.start,
             end: period.end,
@@ -910,8 +961,10 @@ function createManagerRouter({ seedComplianceTasks, auditMutation }) {
       const usual = normalizeUsualHours(body, { start: '08:00', end: '17:00', breakMinutes: 0 });
       const payTiming = PAY_TIMINGS.has(body.pay_timing) ? body.pay_timing : 'previous_week';
       const paydayWeekday = body.payday_weekday === undefined || body.payday_weekday === ''
-        ? AUTO_SEND_WEEKDAY
+        ? FRIDAY
         : Math.round(numberIn(body.payday_weekday, 'payday', 0, 6));
+      if (body.auto_send_schedule !== undefined && !AUTO_SEND_SCHEDULES.has(body.auto_send_schedule)) throw httpError(400, 'Invalid text schedule.');
+      const sendSchedule = body.auto_send_schedule || 'fridays';
       const mileageCents = body.mileage_rate === undefined || body.mileage_rate === ''
         ? 70
         : Math.round(numberIn(body.mileage_rate, 'mileage rate', 0, 10) * 100);
@@ -964,11 +1017,11 @@ function createManagerRouter({ seedComplianceTasks, auditMutation }) {
           INSERT INTO hr_timesheet_workers (
             employee_id, pay_method, period_anchor_date, overtime_enabled, mileage_rate_cents,
             usual_start_time, usual_end_time, usual_break_minutes, pay_timing, payday_weekday,
-            auto_send_enabled, created_by
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            auto_send_enabled, auto_send_schedule, created_by
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(employeeId, payMethod, anchor, body.overtime_enabled === true ? 1 : 0, mileageCents,
           usual.start, usual.end, usual.breakMinutes, payTiming, paydayWeekday,
-          body.auto_send_enabled === false ? 0 : 1, req.user.id);
+          body.auto_send_enabled === false ? 0 : 1, sendSchedule, req.user.id);
         token = issueLink(db, employeeId, req.user.id);
       })();
 
@@ -1037,6 +1090,10 @@ function createManagerRouter({ seedComplianceTasks, auditMutation }) {
         settingsUpdates.push('payday_weekday = ?'); settingsParams.push(Math.round(numberIn(body.payday_weekday, 'payday', 0, 6)));
       }
       if (has('auto_send_enabled')) { settingsUpdates.push('auto_send_enabled = ?'); settingsParams.push(body.auto_send_enabled ? 1 : 0); }
+      if (has('auto_send_schedule')) {
+        if (!AUTO_SEND_SCHEDULES.has(body.auto_send_schedule)) throw httpError(400, 'Invalid text schedule.');
+        settingsUpdates.push('auto_send_schedule = ?'); settingsParams.push(body.auto_send_schedule);
+      }
       if (has('usual_start_time') || has('usual_end_time') || has('usual_break_minutes')) {
         const usual = normalizeUsualHours(body, { start: current.usual_start_time, end: current.usual_end_time, breakMinutes: current.usual_break_minutes });
         settingsUpdates.push('usual_start_time = ?', 'usual_end_time = ?', 'usual_break_minutes = ?');
@@ -1054,7 +1111,7 @@ function createManagerRouter({ seedComplianceTasks, auditMutation }) {
       const changed = Object.keys(body).filter(key => [
         'first_name', 'last_name', 'phone', 'email', 'hourly_rate', 'pay_frequency', 'pay_method',
         'period_anchor_date', 'overtime_enabled', 'mileage_rate',
-        'usual_start_time', 'usual_end_time', 'usual_break_minutes', 'pay_timing', 'payday_weekday', 'auto_send_enabled',
+        'usual_start_time', 'usual_end_time', 'usual_break_minutes', 'pay_timing', 'payday_weekday', 'auto_send_enabled', 'auto_send_schedule',
       ].includes(key));
       recordEvent(db, req, { employeeId: employee.id, action: 'settings_updated', actor: { type: 'user', userId: req.user.id }, details: { changed } });
       audit(req, 'hr_timesheet_settings_updated', employee.id, { changed });
@@ -1132,6 +1189,7 @@ function createManagerRouter({ seedComplianceTasks, auditMutation }) {
           SET status = 'approved', hourly_rate_cents = COALESCE(hourly_rate_cents, ?), pay_method = COALESCE(pay_method, ?),
               approved_at = datetime('now'), approved_by = ?, updated_at = datetime('now')
           WHERE employee_id = ? AND work_date BETWEEN ? AND ? AND status = 'submitted'
+            AND NOT (start_time IS NOT NULL AND end_time IS NULL)
         `).run(rate, settings.pay_method, req.user.id, ...range);
       } else if (action === 'paid') {
         result = db.prepare(`
@@ -1140,6 +1198,7 @@ function createManagerRouter({ seedComplianceTasks, auditMutation }) {
               approved_at = COALESCE(approved_at, datetime('now')), approved_by = COALESCE(approved_by, ?),
               paid_at = datetime('now'), paid_by = ?, updated_at = datetime('now')
           WHERE employee_id = ? AND work_date BETWEEN ? AND ? AND status IN ('submitted', 'approved')
+            AND NOT (start_time IS NOT NULL AND end_time IS NULL)
         `).run(rate, settings.pay_method, req.user.id, req.user.id, ...range);
       } else if (action === 'reopen') {
         result = db.prepare(`
@@ -1240,7 +1299,7 @@ function createManagerRouter({ seedComplianceTasks, auditMutation }) {
       if (channel === 'sms') {
         const phone = normalizeUsPhone(req.body?.to || employee.phone);
         if (!phone) throw httpError(400, 'Enter a 10-digit mobile number to text the link to.');
-        const message = `New Urban Development: Hi ${firstName}, here is your personal timesheet link. Open it to enter the days and hours you work: ${url} This link is only for you, please don't share it.`;
+        const message = `New Urban Development: Hi ${firstName}, here is your personal timesheet link. Use it every day to enter your hours, it is the same link every day: ${url} This link is only for you, please don't share it.`;
         delivery = await sendTextThroughGateway(phone, message);
         sentTo = displayPhone(phone);
         db.prepare("UPDATE hr_employees SET phone = COALESCE(NULLIF(phone, ''), ?), updated_at = datetime('now') WHERE id = ?").run(sentTo, employee.id);
@@ -1278,7 +1337,7 @@ function createManagerRouter({ seedComplianceTasks, auditMutation }) {
   if (process.env.TIMESHEET_AUTO_SEND_TEST_ROUTE === 'true') {
     router.post('/auto-send/run', requireLinkManager, async (req, res, next) => {
       try {
-        res.json(await runFridaySend({ now: new Date(String(req.body?.now || '')) }));
+        res.json(await runAutoSend({ now: new Date(String(req.body?.now || '')) }));
       } catch (error) {
         next(error);
       }
@@ -1355,6 +1414,15 @@ function linkPayload(db, employee, settings, start) {
   const window = linkWindow(employee, settings);
   const data = buildPeriod(db, employee, settings, start, payPeriodFor(employee.pay_frequency, settings.period_anchor_date, start).end);
   const submission = submissionState(latestSubmission(db, employee.id, data.period.start), data);
+  const clock = easternClock();
+  const shift = openShift(db, employee.id);
+  const todayEntry = db.prepare('SELECT 1 FROM hr_timesheet_entries WHERE employee_id = ? AND work_date = ?').get(employee.id, clock.date);
+  const lastProject = db.prepare(`
+    SELECT job_site FROM hr_timesheet_entries
+    WHERE employee_id = ? AND job_site IS NOT NULL AND job_site != ''
+    ORDER BY work_date DESC, updated_at DESC
+    LIMIT 1
+  `).get(employee.id);
   return {
     company: NUD_COMPANY.name,
     office: { phone: NUD_COMPANY.phone, phone_href: NUD_COMPANY.phoneHref },
@@ -1380,6 +1448,17 @@ function linkPayload(db, employee, settings, start) {
     },
     // Submit is offered while the period is open to the worker and has a day the office has not approved.
     can_submit: data.period.end >= window.editableFrom && data.totals.open_days > 0,
+    punch: {
+      open: shift && {
+        date: shift.work_date,
+        start_time: shift.start_time,
+        job_site: shift.job_site,
+        minutes: minutesSince(shift, clock),
+        too_long: minutesSince(shift, clock) > MAX_SHIFT_MINUTES,
+      },
+      can_punch_in: !shift && !todayEntry,
+      last_project: lastProject ? lastProject.job_site : null,
+    },
     days: data.days.map(day => ({
       date: day.date,
       hours_before_in_week: day.hours_before_in_week,
@@ -1402,6 +1481,7 @@ function linkPayload(db, employee, settings, start) {
         gross_cents: day.entry.gross_cents,
         pay_method: day.entry.pay_method,
         entered_by_office: day.entry.entered_via === 'manager',
+        open_shift: day.entry.open_shift,
         updated_at: day.entry.updated_at,
       },
     })),
@@ -1446,6 +1526,31 @@ publicRouter.get('/:token', limitByIp('ts-view', 120, 60 * 1000), (req, res, nex
   }
 });
 
+function insertSubmission(db, req, employee, period, data) {
+  const days = data.days.filter(day => day.entry).length;
+  db.prepare(`
+    INSERT INTO hr_timesheet_submissions (
+      id, employee_id, period_start, period_end, hours, gross_cents, days, ip_address, user_agent
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    uuidv4(), employee.id, period.start, period.end, data.totals.hours, data.totals.gross_cents, days,
+    String(getClientIp(req) || '').slice(0, 80), String(req.headers['user-agent'] || '').slice(0, 300),
+  );
+  return days;
+}
+
+/**
+ * Every punch and every day saved from the link goes to the office as it happens (Mike,
+ * 2026-10-30): the period is recorded as sent, so there is nothing left for the worker to submit.
+ * Returns the period start for the response.
+ */
+function sendToOffice(db, req, employee, settings, date) {
+  const period = payPeriodFor(employee.pay_frequency, settings.period_anchor_date, date);
+  const data = buildPeriod(db, employee, settings, period.start, period.end);
+  if (data.days.some(day => day.entry)) insertSubmission(db, req, employee, period, data);
+  return period.start;
+}
+
 publicRouter.put('/:token/days/:date', limitByIp('ts-write', 60, 10 * 60 * 1000), (req, res, next) => {
   try {
     const { db, employee, settings } = workerFromLink(req);
@@ -1453,7 +1558,7 @@ publicRouter.put('/:token/days/:date', limitByIp('ts-write', 60, 10 * 60 * 1000)
     editableDate(employee, settings, date);
     const input = normalizeDay(req.body, { manager: false, mileageRateCents: settings.mileage_rate_cents, requireProject: true });
     saveDay(db, req, { employee, date, input, actor: { type: 'link' } });
-    res.json(linkPayload(db, employee, settings, payPeriodFor(employee.pay_frequency, settings.period_anchor_date, date).start));
+    res.json(linkPayload(db, employee, settings, sendToOffice(db, req, employee, settings, date)));
   } catch (error) {
     next(error);
   }
@@ -1465,14 +1570,14 @@ publicRouter.delete('/:token/days/:date', limitByIp('ts-write', 60, 10 * 60 * 10
     const date = dayValue(req.params.date, 'date');
     editableDate(employee, settings, date);
     deleteDay(db, req, { employee, date, actor: { type: 'link' } });
-    res.json(linkPayload(db, employee, settings, payPeriodFor(employee.pay_frequency, settings.period_anchor_date, date).start));
+    res.json(linkPayload(db, employee, settings, sendToOffice(db, req, employee, settings, date)));
   } catch (error) {
     next(error);
   }
 });
 
-// "Submit timesheet": the worker sends the period to the office. Days stay editable until the
-// office approves them; submitting again after a change replaces what the office sees.
+// "Submit timesheet": the worker sends the period to the office. The phone page no longer shows
+// the button (every change is sent as it happens); the route stays for pages opened before that.
 publicRouter.post('/:token/submit', limitByIp('ts-write', 60, 10 * 60 * 1000), (req, res, next) => {
   try {
     const { db, employee, settings } = workerFromLink(req);
@@ -1485,15 +1590,8 @@ publicRouter.post('/:token/submit', limitByIp('ts-write', 60, 10 * 60 * 1000), (
     const data = buildPeriod(db, employee, settings, period.start, period.end);
     if (!data.days.some(day => day.entry)) throw httpError(400, 'Enter the days and hours you worked before you submit.');
     if (!data.totals.open_days) throw httpError(409, 'The office has already approved this timesheet.');
-    const days = data.days.filter(day => day.entry).length;
-    db.prepare(`
-      INSERT INTO hr_timesheet_submissions (
-        id, employee_id, period_start, period_end, hours, gross_cents, days, ip_address, user_agent
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      uuidv4(), employee.id, period.start, period.end, data.totals.hours, data.totals.gross_cents, days,
-      String(getClientIp(req) || '').slice(0, 80), String(req.headers['user-agent'] || '').slice(0, 300),
-    );
+    if (data.days.some(day => day.entry?.open_shift)) throw httpError(409, 'You are still punched in. Punch out before you submit.');
+    const days = insertSubmission(db, req, employee, period, data);
     recordEvent(db, req, {
       employeeId: employee.id,
       action: 'timesheet_submitted',
@@ -1501,6 +1599,61 @@ publicRouter.post('/:token/submit', limitByIp('ts-write', 60, 10 * 60 * 1000), (
       details: { start: period.start, end: period.end, hours: data.totals.hours, gross_cents: data.totals.gross_cents, days },
     });
     res.json(linkPayload(db, employee, settings, period.start));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Punch in: today's day starts now (Eastern), on the project the worker names.
+publicRouter.post('/:token/punch-in', limitByIp('ts-write', 60, 10 * 60 * 1000), (req, res, next) => {
+  try {
+    const { db, employee, settings } = workerFromLink(req);
+    const clock = easternClock(punchNow(req));
+    const project = text(req.body?.job_site, 200);
+    if (!project) throw httpError(400, 'Enter the project: the house number and street, like 123 Smith St.');
+    if (openShift(db, employee.id)) throw httpError(409, 'You are already punched in.');
+    if (db.prepare('SELECT 1 FROM hr_timesheet_entries WHERE employee_id = ? AND work_date = ?').get(employee.id, clock.date)) {
+      throw httpError(409, 'You already have hours for today. Tap today in the list to change them.');
+    }
+    const entryId = uuidv4();
+    db.prepare(`
+      INSERT INTO hr_timesheet_entries (
+        id, employee_id, work_date, start_time, end_time, break_minutes, hours, job_site,
+        status, entered_via, updated_via
+      ) VALUES (?, ?, ?, ?, NULL, 0, 0, ?, 'submitted', 'link', 'link')
+    `).run(entryId, employee.id, clock.date, clockTime(clock), project);
+    recordEvent(db, req, { employeeId: employee.id, entryId, action: 'punched_in', actor: { type: 'link' }, details: { work_date: clock.date, time: clockTime(clock), project } });
+    res.json(linkPayload(db, employee, settings, sendToOffice(db, req, employee, settings, clock.date)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Punch out: closes the open shift now, less the lunch break. An overnight shift closes the
+// next morning; a shift left open longer than 16 hours must be fixed by hand instead.
+publicRouter.post('/:token/punch-out', limitByIp('ts-write', 60, 10 * 60 * 1000), (req, res, next) => {
+  try {
+    const { db, employee, settings } = workerFromLink(req);
+    const shift = openShift(db, employee.id);
+    if (!shift) throw httpError(409, 'You are not punched in.');
+    const clock = easternClock(punchNow(req));
+    const worked = minutesSince(shift, clock);
+    if (worked > MAX_SHIFT_MINUTES) {
+      throw httpError(409, `You did not punch out on ${longDay(shift.work_date)}. Tap that day and enter the time you finished.`);
+    }
+    if (worked < 1) throw httpError(400, 'Punch out at least a minute after you punch in.');
+    const breakMinutes = req.body?.break_minutes === undefined || req.body?.break_minutes === ''
+      ? settings.usual_break_minutes
+      : Math.round(numberIn(req.body.break_minutes, 'lunch break', 0, 720));
+    if (breakMinutes >= worked) throw httpError(400, 'The lunch break is longer than the time worked.');
+    const hours = round2((worked - breakMinutes) / 60);
+    db.prepare(`
+      UPDATE hr_timesheet_entries
+      SET end_time = ?, break_minutes = ?, hours = ?, updated_via = 'link', updated_by = NULL, updated_at = datetime('now')
+      WHERE id = ? AND end_time IS NULL
+    `).run(clockTime(clock), breakMinutes, hours, shift.id);
+    recordEvent(db, req, { employeeId: employee.id, entryId: shift.id, action: 'punched_out', actor: { type: 'link' }, details: { work_date: shift.work_date, time: clockTime(clock), hours } });
+    res.json(linkPayload(db, employee, settings, sendToOffice(db, req, employee, settings, shift.work_date)));
   } catch (error) {
     next(error);
   }
