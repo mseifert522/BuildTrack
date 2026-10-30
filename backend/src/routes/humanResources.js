@@ -15,6 +15,7 @@ const {
 } = require('../services/hrResumeIntake');
 const { logActivity } = require('../utils/audit');
 const { logDataAccess } = require('../utils/dataAccessAudit');
+const { createManagerRouter: createTimesheetRouter } = require('./hrTimesheets');
 
 const router = express.Router();
 const HR_ROLES = ['super_admin', 'operations_manager', 'project_manager'];
@@ -37,6 +38,8 @@ router.use(authenticate, authorize(...HR_ROLES));
 // Project managers may VIEW everything in HR but never change records —
 // the standing rule the rest of the app enforces via blockProjectManagerMutation.
 router.use((req, res, next) => (req.method === 'GET' ? next() : blockProjectManagerMutation(req, res, next)));
+// Field timesheets (HR > Timesheets) share this login, role and read-only rule.
+router.use('/timesheets', createTimesheetRouter({ seedComplianceTasks, auditMutation }));
 
 function text(value, maxLength = 500) {
   const normalized = String(value ?? '').trim();

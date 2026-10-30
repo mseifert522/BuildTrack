@@ -1242,6 +1242,60 @@ function paymentPolicyHtml() {
     </div>`;
 }
 
+// HR > Timesheets: the worker's personal link for entering the days and hours they work.
+async function sendTimesheetLinkEmail({ name, email, timesheetUrl }) {
+  if (!email) throw new Error('Missing employee email');
+  const transporter = createTransporter();
+  const firstName = String(name || '').trim();
+  const safeUrl = escapeHtml(timesheetUrl);
+
+  const html = emailWrapper(`
+    <h2 style="color:#111827; font-size:22px; font-weight:800; margin:0 0 10px;">Your timesheet link</h2>
+    <p style="color:#374151; font-size:14px; line-height:1.65; margin:0 0 14px;">
+      ${firstName ? `Hi ${escapeHtml(firstName)},` : 'Hello,'}
+    </p>
+    <p style="color:#374151; font-size:14px; line-height:1.65; margin:0 0 18px;">
+      Use this link to enter the days and hours you work for New Urban Development, along with gas money, lunch and other expenses. It works on any iPhone or Android phone &mdash; save it to your home screen so it is always one tap away.
+    </p>
+    <a href="${safeUrl}" style="display:block; text-align:center; background:${BRAND.color}; color:#ffffff; padding:15px 24px; border-radius:12px; text-decoration:none; font-weight:800; font-size:15px; margin:0 0 16px;">
+      Open My Timesheet
+    </a>
+    <p style="color:#6B7280; font-size:12px; line-height:1.6; margin:0 0 18px;">
+      This link is only for you. Please do not share it. If the button does not open, copy and paste this link into your phone's browser:<br />
+      <span style="word-break:break-all; color:#111827;">${safeUrl}</span>
+    </p>
+    ${companyContactHtml()}
+    <p style="color:#374151; font-size:14px; line-height:1.6; margin:0;">
+      Thank you,<br />
+      <strong style="color:#111827;">The New Urban Development Team</strong>
+    </p>
+  `);
+
+  const text = [
+    'Your timesheet link',
+    '',
+    firstName ? `Hi ${firstName},` : 'Hello,',
+    '',
+    'Use this link to enter the days and hours you work for New Urban Development, along with gas money, lunch and other expenses. It works on any iPhone or Android phone.',
+    '',
+    `Open your timesheet: ${timesheetUrl}`,
+    '',
+    'This link is only for you. Please do not share it.',
+    '',
+    companyContactText(),
+    '',
+    'Thank you,',
+    'The New Urban Development Team',
+  ].join('\n');
+
+  await sendBrandedMail(transporter, {
+    to: email,
+    subject: 'Your New Urban Development timesheet link',
+    html,
+    text,
+  });
+}
+
 async function sendVendorSetupInviteEmail({ companyName, email, ccEmail, setupUrl, expiresAt }) {
   if (!email) throw new Error('Missing vendor email');
   const transporter = createTransporter();
@@ -1468,6 +1522,7 @@ async function sendVendorSetupConfirmationEmail({ companyName, email }) {
 
 module.exports = {
   isEmailConfigured,
+  sendTimesheetLinkEmail,
   sendVendorSetupInviteEmail,
   sendVendorSetupCodeEmail,
   sendVendorSetupSubmittedEmail,

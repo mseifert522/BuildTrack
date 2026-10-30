@@ -2730,6 +2730,106 @@ textarea,
   background: #d9ecfa !important;
 }
 
+/* Section pages (Human Resources > Timesheets, Layout.tsx). In the phone/tablet drawer
+   they are listed under the item; in the desktop top bar (>= 1024px, below) they drop down
+   under the item on hover or keyboard focus. */
+.bt-sidebar-nav-group {
+  display: grid;
+  gap: 4px;
+}
+
+.bt-sidebar-flyout {
+  display: none;
+}
+
+.bt-sidebar-flyout-panel {
+  min-width: 210px;
+  padding: 6px;
+  border: 1px solid #527a9b;
+  border-radius: 6px;
+  background: #0f1a24;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.5);
+}
+
+.bt-sidebar-flyout-title {
+  margin: 4px 8px 6px;
+  color: #8fb3cf;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.bt-sidebar-flyout-item,
+.bt-sidebar-subnav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #dbe8f2;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.bt-sidebar-flyout-item:hover,
+.bt-sidebar-subnav-item:hover {
+  border-color: #76a1c2;
+  background: #23577f;
+  color: #ffffff;
+}
+
+.bt-sidebar-flyout-item.is-active,
+.bt-sidebar-subnav-item.is-active {
+  border-color: #a5c4dc;
+  background: #2d6897;
+  color: #ffffff;
+}
+
+.bt-sidebar-subnav {
+  display: grid;
+  gap: 4px;
+  margin-left: 18px;
+  padding-left: 10px;
+  border-left: 1px solid #2f4a61;
+}
+
+@media (min-width: 1024px) {
+  .bt-desktop-shell > .bt-sidebar-frame .bt-sidebar-nav-group {
+    flex: 0 0 auto;
+  }
+
+  /* No room in the 48px bar: section pages live only in the pull-down. */
+  .bt-desktop-shell > .bt-sidebar-frame .bt-sidebar-subnav {
+    display: none;
+  }
+
+  /* The group is a grid, so this position: fixed menu's static position is the group's
+     top-left corner: margin-top drops it just under the 34px tab with no JS, and being
+     fixed it escapes the nav strip's overflow clip. The top padding is part of the menu,
+     so the mouse can move from the tab onto it without the menu closing. */
+  .bt-desktop-shell > .bt-sidebar-frame .bt-sidebar-flyout {
+    display: block;
+    position: fixed;
+    z-index: 1060;
+    margin-top: 34px;
+    padding-top: 7px;
+    visibility: hidden;
+    opacity: 0;
+    transition: opacity 120ms ease, visibility 0s linear 180ms;
+  }
+
+  .bt-desktop-shell > .bt-sidebar-frame .bt-sidebar-nav-group:hover .bt-sidebar-flyout,
+  .bt-desktop-shell > .bt-sidebar-frame .bt-sidebar-nav-group:focus-within .bt-sidebar-flyout {
+    visibility: visible;
+    opacity: 1;
+    transition: opacity 120ms ease 60ms, visibility 0s linear 0s;
+  }
+}
+
 .bt-desktop-shell .bt-sidebar-frame > div > div:last-child > div {
   border: 1px solid #527a9b !important;
   border-radius: 4px !important;

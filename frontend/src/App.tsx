@@ -36,6 +36,8 @@ const Users = lazy(() => import('./pages/Users'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Security = lazy(() => import('./pages/Security'));
 const HumanResources = lazy(() => import('./pages/HumanResources'));
+const Timesheets = lazy(() => import('./pages/Timesheets'));
+const TimesheetLink = lazy(() => import('./pages/TimesheetLink'));
 const CostAnalyzer = lazy(() => import('./pages/CostAnalyzer'));
 const ConsolidatedFinances = lazy(() => import('./pages/ConsolidatedFinances'));
 const Agreements = lazy(() => import('./pages/Agreements'));
@@ -229,6 +231,8 @@ function DeviceHostRedirect() {
     // either host; never bounce a phone to the mobile host for it, since
     // mobile.buildtrack / m.buildtrack currently fail TLS at Cloudflare.
     if (location.pathname.startsWith('/vendor-setup/')) return;
+    // A field worker's timesheet link is built for phones and needs no login.
+    if (location.pathname.startsWith('/timesheet/')) return;
 
     const requestedPath = `${location.pathname}${location.search}${location.hash}`;
     const mobileDevice = isLikelyMobileDevice();
@@ -543,6 +547,7 @@ function MobileHostRoutes() {
       <Route path="/contractor-setup" element={<ContractorSetup />} />
       <Route path="/vendor-setup/:token" element={<VendorSetup />} />
       <Route path="/vendor-quote/:token" element={<VendorQuoteRequest />} />
+      <Route path="/timesheet/:token" element={<TimesheetLink />} />
 
       {/* Mobile-first BuildTrack app on the dedicated mobile host */}
       <Route path="/" element={<MobileRoute><MobileHome /></MobileRoute>} />
@@ -577,6 +582,7 @@ function MobileHostRoutes() {
       <Route path="/settings" element={<UpperManagementMobileRoute allowed={canAccessSettings}><Layout><Settings /></Layout></UpperManagementMobileRoute>} />
       <Route path="/security" element={<UpperManagementMobileRoute allowed={canAccessSecurity}><Layout><Security /></Layout></UpperManagementMobileRoute>} />
       <Route path="/human-resources" element={<UpperManagementMobileRoute allowed={canAccessHumanResources}><Layout><HumanResources /></Layout></UpperManagementMobileRoute>} />
+      <Route path="/human-resources/timesheets" element={<UpperManagementMobileRoute allowed={canAccessHumanResources}><Layout><Timesheets /></Layout></UpperManagementMobileRoute>} />
       <Route path="/cost-analyzer" element={<UpperManagementMobileRoute allowed={canAccessCostAnalyzer}><Layout><CostAnalyzer /></Layout></UpperManagementMobileRoute>} />
       <Route path="/agreements" element={<ManagementMobileRoute><Layout><Agreements /></Layout></ManagementMobileRoute>} />
 
@@ -659,6 +665,7 @@ export default function App() {
         <Route path="/contractor-setup" element={<ContractorSetup />} />
         <Route path="/vendor-setup/:token" element={<VendorSetup />} />
         <Route path="/vendor-quote/:token" element={<VendorQuoteRequest />} />
+        <Route path="/timesheet/:token" element={<TimesheetLink />} />
 
         {/* Root redirect — smart device detection */}
         <Route path="/" element={<ProtectedRoute><SmartHomeRedirect /></ProtectedRoute>} />
@@ -759,6 +766,11 @@ export default function App() {
         <Route path="/human-resources" element={
           <HumanResourcesRoute>
             <Layout><HumanResources /></Layout>
+          </HumanResourcesRoute>
+        } />
+        <Route path="/human-resources/timesheets" element={
+          <HumanResourcesRoute>
+            <Layout><Timesheets /></Layout>
           </HumanResourcesRoute>
         } />
         <Route path="/cost-analyzer" element={

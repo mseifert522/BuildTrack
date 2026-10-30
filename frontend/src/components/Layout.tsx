@@ -7,7 +7,7 @@ import {
   LayoutDashboard, FolderOpen, ClipboardList, FileText,
   Users, Settings, LogOut, Menu, X, Bell, ChevronRight,
   Camera, Search, Trash2, ShieldCheck, MessageSquare,
-  BriefcaseBusiness, CalendarDays, Calculator, UserPlus, Landmark
+  BriefcaseBusiness, CalendarDays, Calculator, UserPlus, Landmark, Clock3
 } from 'lucide-react';
 import api from '../lib/api';
 import { useFinancialAccess } from '../lib/financialAccess';
@@ -39,6 +39,8 @@ interface NavItem {
   label: string;
   stackedLabel?: string[];
   match?: string[];
+  /** Pages under this section: a pull-down on hover, and listed under it while you're there. */
+  children?: Array<{ to: string; icon: typeof LayoutDashboard; label: string }>;
 }
 
 interface SearchResult {
@@ -406,7 +408,12 @@ export default function Layout({ children }: LayoutProps) {
     { to: '/invoices', icon: FileText, label: 'Invoices' },
     { to: '/contractors', icon: Users, label: 'Vendors', match: ['/contractors', '/suppliers'] },
     ...(user && canAccessSecurity(user.role) ? [{ to: '/security', icon: ShieldCheck, label: 'Security' }] : []),
-    ...(user && canAccessHumanResources(user.role) ? [{ to: '/human-resources', icon: BriefcaseBusiness, label: 'Human Resources' }] : []),
+    ...(user && canAccessHumanResources(user.role) ? [{
+      to: '/human-resources',
+      icon: BriefcaseBusiness,
+      label: 'Human Resources',
+      children: [{ to: '/human-resources/timesheets', icon: Clock3, label: 'Timesheets' }],
+    }] : []),
     ...(user && canAccessCostAnalyzer(user.role) ? [{ to: '/cost-analyzer', icon: Calculator, label: 'Cost Analyzer' }] : []),
     ...(financialAccess.allowed ? [{ to: '/consolidated-finances', icon: Landmark, label: 'Consolidated Finances' }] : []),
   ];
@@ -460,9 +467,9 @@ export default function Layout({ children }: LayoutProps) {
 
       {/* Nav items */}
       <nav className="bt-sidebar-nav-list flex-1 px-3 pt-5 pb-2 overflow-y-auto" aria-label="Primary navigation">
-        {navItems.map(({ to, icon: Icon, label, stackedLabel, match }) => {
+        {navItems.map(({ to, icon: Icon, label, stackedLabel, match, children }) => {
           const active = isActive(to, match);
-          return (
+          const link = (
             <Link
               key={to}
               to={to}
@@ -499,6 +506,46 @@ export default function Layout({ children }: LayoutProps) {
                 </div>
               )}
             </Link>
+          );
+          if (!children?.length) return link;
+          return (
+            <div key={to} className={`bt-sidebar-nav-group ${active ? 'is-open' : ''} ${collapsed ? 'is-collapsed' : ''}`}>
+              {link}
+              {/* Desktop top bar: pull-down under the item on hover (index.css). */}
+              <div className="bt-sidebar-flyout">
+                <div className="bt-sidebar-flyout-panel" role="group" aria-label={`${label} pages`}>
+                  <p className="bt-sidebar-flyout-title">{label}</p>
+                  {children.map(({ to: childTo, icon: ChildIcon, label: childLabel }) => (
+                    <Link
+                      key={childTo}
+                      to={childTo}
+                      onClick={() => setSidebarOpen(false)}
+                      aria-current={isActive(childTo) ? 'page' : undefined}
+                      className={`bt-sidebar-flyout-item ${isActive(childTo) ? 'is-active' : ''}`}
+                    >
+                      <ChildIcon className="h-4 w-4 flex-shrink-0" />
+                      {childLabel}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+              {/* Phone/tablet drawer: always listed under the item. */}
+              <div className="bt-sidebar-subnav">
+                {children.map(({ to: childTo, icon: ChildIcon, label: childLabel }) => (
+                  <Link
+                    key={childTo}
+                    to={childTo}
+                    onClick={() => setSidebarOpen(false)}
+                    title={collapsed ? childLabel : undefined}
+                    aria-current={isActive(childTo) ? 'page' : undefined}
+                    className={`bt-sidebar-subnav-item ${isActive(childTo) ? 'is-active' : ''}`}
+                  >
+                    <ChildIcon className="h-4 w-4 flex-shrink-0" />
+                    {collapsed ? <span className="sr-only">{childLabel}</span> : childLabel}
+                  </Link>
+                ))}
+              </div>
+            </div>
           );
         })}
       </nav>

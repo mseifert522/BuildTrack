@@ -25,7 +25,8 @@ const MAX_FIELD_LENGTH = 100_000;
 const SAVE_ACTION_PATTERN = /\b(save|add|create|submit|post|send|update|record|log|upload|publish|complete|approve)\b/i;
 const SENSITIVE_FIELD_PATTERN = /password|passcode|\bpin\b|verification|two.?factor|\botp\b|secret|token|api.?key|security.?code|credit.?card|card.?number|\bcvv\b|\bssn\b|social security|bank account|routing number/i;
 // /vendor-setup is a public page where a logged-in tester could type SSNs and bank numbers.
-const EXCLUDED_ROUTES = ['/login', '/forgot-password', '/reset-password', '/change-password', '/vendor-setup'];
+// /timesheet/<token> is a field worker's private link; its URL is the credential.
+const EXCLUDED_ROUTES = ['/login', '/forgot-password', '/reset-password', '/change-password', '/vendor-setup', '/timesheet/'];
 
 type DraftElement = HTMLInputElement | HTMLTextAreaElement;
 

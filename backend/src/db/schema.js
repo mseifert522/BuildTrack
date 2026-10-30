@@ -1832,6 +1832,95 @@ function initializeSchema() {
     CREATE INDEX IF NOT EXISTS idx_hr_resume_import_items_batch_status
       ON hr_resume_import_items(batch_id, status, created_at);
 
+    -- Field timesheets (HR > Timesheets). One settings row per worker, holding the
+    -- pay method, pay period and the worker's private timesheet link. The link token is
+    -- looked up by its SHA-256 hash and kept encrypted so managers can copy it again.
+    CREATE TABLE IF NOT EXISTS hr_timesheet_workers (
+      employee_id TEXT PRIMARY KEY,
+      pay_method TEXT NOT NULL DEFAULT 'payroll' CHECK(pay_method IN ('cash','payroll','check','other')),
+      period_anchor_date TEXT NOT NULL,
+      overtime_enabled INTEGER NOT NULL DEFAULT 1,
+      mileage_rate_cents INTEGER NOT NULL DEFAULT 70 CHECK(mileage_rate_cents >= 0 AND mileage_rate_cents <= 1000),
+      link_token_hash TEXT UNIQUE,
+      link_token_enc TEXT,
+      link_created_at TEXT,
+      link_created_by TEXT,
+      link_last_opened_at TEXT,
+      link_last_sent_at TEXT,
+      link_last_sent_via TEXT,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (employee_id) REFERENCES hr_employees(id) ON DELETE CASCADE,
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    );
+
+    -- One row per worker per day. hourly_rate_cents and pay_method stay NULL while the
+    -- day is open (the worker's current settings apply) and are frozen on approval.
+    CREATE TABLE IF NOT EXISTS hr_timesheet_entries (
+      id TEXT PRIMARY KEY,
+      employee_id TEXT NOT NULL,
+      work_date TEXT NOT NULL,
+      start_time TEXT,
+      end_time TEXT,
+      break_minutes INTEGER NOT NULL DEFAULT 0 CHECK(break_minutes >= 0 AND break_minutes <= 720),
+      hours REAL NOT NULL DEFAULT 0 CHECK(hours >= 0 AND hours <= 24),
+      job_site TEXT,
+      notes TEXT,
+      status TEXT NOT NULL DEFAULT 'submitted' CHECK(status IN ('submitted','approved','paid')),
+      hourly_rate_cents INTEGER,
+      pay_method TEXT,
+      approved_at TEXT,
+      approved_by TEXT,
+      paid_at TEXT,
+      paid_by TEXT,
+      entered_via TEXT NOT NULL DEFAULT 'link' CHECK(entered_via IN ('link','manager')),
+      updated_via TEXT NOT NULL DEFAULT 'link' CHECK(updated_via IN ('link','manager')),
+      created_by TEXT,
+      updated_by TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (employee_id) REFERENCES hr_employees(id) ON DELETE CASCADE,
+      UNIQUE(employee_id, work_date)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_hr_timesheet_entries_employee_date
+      ON hr_timesheet_entries(employee_id, work_date);
+
+    -- Pay on top of hours for a day: gas money, mileage, lunch, tools, ...
+    CREATE TABLE IF NOT EXISTS hr_timesheet_addons (
+      id TEXT PRIMARY KEY,
+      entry_id TEXT NOT NULL,
+      addon_type TEXT NOT NULL,
+      quantity REAL,
+      amount_cents INTEGER NOT NULL CHECK(amount_cents >= 0 AND amount_cents <= 500000),
+      note TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (entry_id) REFERENCES hr_timesheet_entries(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_hr_timesheet_addons_entry
+      ON hr_timesheet_addons(entry_id);
+
+    -- Who changed a timesheet and how. Link visits have no BuildTrack user, so they
+    -- are recorded here (with IP + device) rather than in activity_log.
+    CREATE TABLE IF NOT EXISTS hr_timesheet_events (
+      id TEXT PRIMARY KEY,
+      employee_id TEXT NOT NULL,
+      entry_id TEXT,
+      action TEXT NOT NULL,
+      actor_type TEXT NOT NULL CHECK(actor_type IN ('link','user')),
+      user_id TEXT,
+      ip_address TEXT,
+      user_agent TEXT,
+      details TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (employee_id) REFERENCES hr_employees(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_hr_timesheet_events_employee_created
+      ON hr_timesheet_events(employee_id, created_at);
+
     -- Estimate or agreed-scope documents attached to a specific scope-of-work section.
     CREATE TABLE IF NOT EXISTS project_scope_documents (
       id TEXT PRIMARY KEY,

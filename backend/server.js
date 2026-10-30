@@ -33,6 +33,7 @@ const agentBridgeRoutes = require('./src/routes/agentBridge');
 const securityRoutes = require('./src/routes/security');
 const quickBooksRoutes = require('./src/routes/quickbooks');
 const humanResourcesRoutes = require('./src/routes/humanResources');
+const { publicRouter: timesheetLinkRoutes } = require('./src/routes/hrTimesheets');
 const financeTrackerRoutes = require('./src/routes/financeTracker');
 const costAnalyzerRoutes = require('./src/routes/costAnalyzer');
 const agreementRoutes = require('./src/routes/agreements');
@@ -133,6 +134,14 @@ app.use(express.urlencoded({ extended: true, limit: bodyLimit }));
 // a signed link, the Max AI API key, a Bearer token, or the httpOnly __Host-bt_files
 // cookie; the API itself stays Bearer-only. UPLOADS_AUTH_MODE=report serves every file
 // and only logs what WOULD be refused (the rollout soak); any other value enforces.
+// The timesheet page carries the worker's link token in its URL: never send it on as a
+// Referer, and keep the page out of search engines.
+app.use('/timesheet', (_req, res, next) => {
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+  next();
+});
+
 // In-flight chunked-upload pieces live under uploads/chunk-tmp and are never served
 // (the gate also catches the //chunk-tmp, %2Fchunk-tmp and /./chunk-tmp spellings).
 app.use('/uploads/chunk-tmp', (req, res) => res.status(404).json({ error: 'Not found' }));
@@ -245,6 +254,8 @@ app.use('/api/quote-analytics', quoteAnalyticsRoutes.analyticsRouter);
 app.use('/api/security', securityRoutes);
 app.use('/api/quickbooks', quickBooksRoutes);
 app.use('/api/human-resources', humanResourcesRoutes);
+// A field worker's private timesheet link (no login; the token is the credential).
+app.use('/api/timesheet-link', timesheetLinkRoutes);
 app.use('/api/cost-analyzer', costAnalyzerRoutes);
 app.use('/api/agreements', agreementRoutes);
 app.use('/api/document-reviews', documentReviewRoutes);

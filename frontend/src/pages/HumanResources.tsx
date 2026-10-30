@@ -1,6 +1,7 @@
 import { formatEasternDateTime } from '../lib/time';
 import DatedNoteList from '../components/DatedNoteList';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   BadgeDollarSign,
   BriefcaseBusiness,
@@ -1219,6 +1220,13 @@ export default function HumanResources() {
               </button>
             );
           })}
+          <Link
+            to="/human-resources/timesheets"
+            className="flex h-11 items-center gap-2 border-b-2 border-transparent px-3 text-sm font-semibold text-slate-500 transition hover:border-slate-300 hover:text-slate-800"
+          >
+            <Clock3 className="h-4 w-4" />
+            Timesheets
+          </Link>
         </nav>
       </div>
 
