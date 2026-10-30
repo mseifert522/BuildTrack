@@ -1839,8 +1839,11 @@ function initializeSchema() {
       employee_id TEXT PRIMARY KEY,
       pay_method TEXT NOT NULL DEFAULT 'payroll' CHECK(pay_method IN ('cash','payroll','check','other')),
       period_anchor_date TEXT NOT NULL,
-      overtime_enabled INTEGER NOT NULL DEFAULT 1,
+      overtime_enabled INTEGER NOT NULL DEFAULT 0,
       mileage_rate_cents INTEGER NOT NULL DEFAULT 70 CHECK(mileage_rate_cents >= 0 AND mileage_rate_cents <= 1000),
+      usual_start_time TEXT NOT NULL DEFAULT '08:00',
+      usual_end_time TEXT NOT NULL DEFAULT '17:00',
+      usual_break_minutes INTEGER NOT NULL DEFAULT 0,
       link_token_hash TEXT UNIQUE,
       link_token_enc TEXT,
       link_created_at TEXT,
@@ -1920,6 +1923,25 @@ function initializeSchema() {
 
     CREATE INDEX IF NOT EXISTS idx_hr_timesheet_events_employee_created
       ON hr_timesheet_events(employee_id, created_at);
+
+    -- The worker pressed "Submit timesheet" on their link: the period's hours and gross at
+    -- that moment. Every submit is kept; the latest one per period is what the office sees.
+    CREATE TABLE IF NOT EXISTS hr_timesheet_submissions (
+      id TEXT PRIMARY KEY,
+      employee_id TEXT NOT NULL,
+      period_start TEXT NOT NULL,
+      period_end TEXT NOT NULL,
+      hours REAL NOT NULL,
+      gross_cents INTEGER NOT NULL,
+      days INTEGER NOT NULL,
+      ip_address TEXT,
+      user_agent TEXT,
+      submitted_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (employee_id) REFERENCES hr_employees(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_hr_timesheet_submissions_employee_period
+      ON hr_timesheet_submissions(employee_id, period_start, submitted_at);
 
     -- Estimate or agreed-scope documents attached to a specific scope-of-work section.
     CREATE TABLE IF NOT EXISTS project_scope_documents (
@@ -2173,6 +2195,10 @@ function initializeSchema() {
   try { db.exec(`ALTER TABLE auth_sessions ADD COLUMN ip_address_updated_at TEXT`); } catch (_) { /* already exists */ }
   // Quote sections (2026-09-18): existing rows keep NULL = not sectioned.
   try { db.exec(`ALTER TABLE quote_line_items ADD COLUMN section_id TEXT REFERENCES quote_sections(id) ON DELETE SET NULL`); } catch (_) { /* already exists */ }
+  // HR timesheets: the hours a worker's link pre-fills for a new day (Mike: 8 to 5).
+  try { db.exec(`ALTER TABLE hr_timesheet_workers ADD COLUMN usual_start_time TEXT NOT NULL DEFAULT '08:00'`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE hr_timesheet_workers ADD COLUMN usual_end_time TEXT NOT NULL DEFAULT '17:00'`); } catch (_) { /* already exists */ }
+  try { db.exec(`ALTER TABLE hr_timesheet_workers ADD COLUMN usual_break_minutes INTEGER NOT NULL DEFAULT 0`); } catch (_) { /* already exists */ }
   // Vendor activity ranking (directory + suppliers) aggregates payments per vendor.
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_quickbooks_bill_payments_vendor_txn ON quickbooks_bill_payments(vendor_id, txn_date)`); } catch (_) { /* table not created yet */ }
   try {

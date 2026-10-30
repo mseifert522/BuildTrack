@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useId, useState } from 'react';
 import type { FormEvent, SelectHTMLAttributes } from 'react';
 import { useParams } from 'react-router-dom';
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleAlert, LoaderCircle, Plus, Trash2, X } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleAlert, LoaderCircle, Plus, Send, Trash2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 import '../styles/timesheet-link.css';
+import { formatEasternDateTime } from '../lib/time';
 import {
   BREAK_OPTIONS,
   PAY_FREQUENCY_LABELS,
@@ -35,13 +36,23 @@ interface LinkPayload {
   company: string;
   office: { phone: string; phone_href: string };
   worker: { first_name: string };
+  usual: { start_time: string; end_time: string; break_minutes: number };
   today: string;
   editable_from: string;
   period: TimesheetPeriod;
   pay: TimesheetPay;
   totals: TimesheetTotals;
+  submission: { submitted_at: string; hours: number; gross_cents: number; changed_since: boolean } | null;
+  can_submit: boolean;
   days: TimesheetDay[];
   addon_types: AddonType[];
+}
+
+/** An open day reads "Submitted" once the period was submitted after it was last saved, else "Saved". */
+function dayStatusLabel(data: LinkPayload, entry: { status: keyof typeof STATUS_LABELS; updated_at?: string }) {
+  if (entry.status !== 'submitted') return { label: STATUS_LABELS[entry.status], tone: entry.status };
+  const sent = Boolean(data.submission && entry.updated_at && entry.updated_at <= data.submission.submitted_at);
+  return sent ? { label: 'Submitted', tone: 'submitted' } : { label: 'Saved', tone: 'saved' };
 }
 
 const SHORT_FREQUENCY: Record<string, string> = {
@@ -85,6 +96,8 @@ export default function TimesheetLink() {
   const [loadingPeriod, setLoadingPeriod] = useState(false);
   const [editing, setEditing] = useState<TimesheetDay | null>(null);
   const [totalsOpen, setTotalsOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState<LinkPayload | null>(null);
 
   // The token is in the URL: send no Referer anywhere, and give the tab a plain title.
   useEffect(() => {
@@ -118,6 +131,20 @@ export default function TimesheetLink() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const submitTimesheet = async () => {
+    if (!data || submitting) return;
+    setSubmitting(true);
+    try {
+      const payload = await callLink(token, '/submit', { method: 'POST', body: { start: data.period.start } });
+      setData(payload);
+      setSubmitted(payload);
+    } catch (error) {
+      toast.error((error as Error).message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   if (fatal) {
     return (
@@ -214,6 +241,7 @@ export default function TimesheetLink() {
                           {entry.overtime_hours > 0 ? ` (${hoursText(entry.overtime_hours)} overtime)` : ''}
                           {isToday && <span className="tsl-today-tag">Today</span>}
                         </span>
+                        {entry.job_site && <span className="tsl-day-project">{entry.job_site}</span>}
                         <span className="tsl-day-detail">
                           {entry.start_time ? `${time12(entry.start_time)} - ${time12(entry.end_time)}` : 'Total hours entered'}
                         </span>
@@ -234,7 +262,7 @@ export default function TimesheetLink() {
                   {entry && (
                     <span className="tsl-day-right">
                       <strong>{money(entry.gross_cents)}</strong>
-                      <span className={`tsl-status tsl-status--${entry.status}`}>{STATUS_LABELS[entry.status]}</span>
+                      <span className={`tsl-status tsl-status--${dayStatusLabel(data, entry).tone}`}>{dayStatusLabel(data, entry).label}</span>
                     </span>
                   )}
                 </button>
@@ -248,11 +276,6 @@ export default function TimesheetLink() {
           <p>{notice.body}</p>
         </section>
 
-        {pay.overtime_enabled && overtimeRate != null && (
-          <p className="tsl-fineprint">
-            Hours over {pay.overtime_after_hours} in a week are overtime, paid at {pay.overtime_multiplier}x ({money(overtimeRate)} / hour).
-          </p>
-        )}
         <p className="tsl-fineprint">
           This page is only for you. Tip: save it to your home screen so it's one tap away. Questions? Call the office at{' '}
           <a href={data.office.phone_href}>{data.office.phone}</a>.
@@ -267,7 +290,7 @@ export default function TimesheetLink() {
               {pay.hourly && pay.hourly_rate_cents != null ? (
                 <>
                   <div className="tsl-breakdown-row">
-                    <span>Regular {hoursText(totals.regular_hours)} hrs x {money(pay.hourly_rate_cents)}</span>
+                    <span>{pay.overtime_enabled ? 'Regular ' : ''}{hoursText(totals.regular_hours)} hrs x {money(pay.hourly_rate_cents)}</span>
                     <strong>{money(totals.regular_cents)}</strong>
                   </div>
                   {totals.overtime_hours > 0 && (
@@ -308,8 +331,38 @@ export default function TimesheetLink() {
             <ChevronUp size={24} className={`tsl-chevron ${totalsOpen ? 'is-open' : ''}`} aria-hidden="true" />
             <span className="tsl-sr-only">{totalsOpen ? 'Hide the breakdown' : 'Show the breakdown'}</span>
           </button>
+          {data.can_submit && (
+            <div className="tsl-submit-area">
+              {data.submission && !data.submission.changed_since ? (
+                <p className="tsl-submitted-note" role="status">
+                  <CheckCircle2 size={20} aria-hidden="true" />
+                  Submitted to the office {formatEasternDateTime(data.submission.submitted_at)}
+                </p>
+              ) : (
+                <button type="button" className="tsl-submit" onClick={submitTimesheet} disabled={submitting}>
+                  <Send size={20} aria-hidden="true" />
+                  {submitting ? 'Submitting...' : data.submission ? 'Submit changes to the office' : 'Submit timesheet'}
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </footer>
+
+      {submitted && (
+        <div className="tsl-popup-backdrop" role="presentation" onClick={() => setSubmitted(null)}>
+          <div className="tsl-popup" role="alertdialog" aria-modal="true" aria-labelledby="tsl-popup-title" onClick={event => event.stopPropagation()}>
+            <CheckCircle2 size={56} className="tsl-popup-icon" aria-hidden="true" />
+            <h2 id="tsl-popup-title">Your timesheet has been submitted to the office</h2>
+            <p>
+              {formatPeriod(submitted.period.start, submitted.period.end)}
+              <br />
+              {hoursText(submitted.totals.hours)} hours · {money(submitted.totals.gross_cents)} gross{submitted.pay.pay_method === 'payroll' ? ' (before taxes)' : ''}
+            </p>
+            <button type="button" className="tsl-primary" onClick={() => setSubmitted(null)} autoFocus>OK</button>
+          </div>
+        </div>
+      )}
 
       {editing && (
         <DayEditor
@@ -349,10 +402,12 @@ function DayEditor({
   const isWorkerType = (type: string) => types.some(option => option.type === type);
   // Extras the office added (a bonus) are shown but cannot be changed from the link.
   const officeAddons = entry ? entry.addons.filter(addon => !isWorkerType(addon.type)) : [];
+  // A new day starts from the worker's usual hours (8 to 5 unless the office set others).
+  const prefilled = !entry && !readOnly;
   const [mode, setMode] = useState<'times' | 'hours'>(entry && !entry.start_time ? 'hours' : 'times');
-  const [start, setStart] = useState(entry?.start_time || '');
-  const [end, setEnd] = useState(entry?.end_time || '');
-  const [breakMinutes, setBreakMinutes] = useState(entry?.break_minutes ?? 0);
+  const [start, setStart] = useState(entry ? entry.start_time || '' : data.usual.start_time);
+  const [end, setEnd] = useState(entry ? entry.end_time || '' : data.usual.end_time);
+  const [breakMinutes, setBreakMinutes] = useState(entry ? entry.break_minutes : data.usual.break_minutes);
   const [hours, setHours] = useState(entry && !entry.start_time ? String(entry.hours) : '');
   const [jobSite, setJobSite] = useState(entry?.job_site || '');
   const [notes, setNotes] = useState(entry?.notes || '');
@@ -390,6 +445,7 @@ function DayEditor({
     } else if (!(Number(hours) > 0) && !addons.length) {
       return setError('Enter the hours you worked.');
     }
+    if (!jobSite.trim()) return setError('Enter the project: the house number and street, like 123 Smith St.');
     if (addons.some(addon => !addon.type)) return setError('Choose what each extra is for, or remove it.');
     setSaving(true);
     try {
@@ -450,7 +506,7 @@ function DayEditor({
           <div>
             <h2 id={titleId}>{formatDayLong(day.date)}</h2>
           </div>
-          {entry && <span className={`tsl-status tsl-status--${entry.status}`} style={{ marginLeft: 'auto' }}>{STATUS_LABELS[entry.status]}</span>}
+          {entry && <span className={`tsl-status tsl-status--${dayStatusLabel(data, entry).tone}`} style={{ marginLeft: 'auto' }}>{dayStatusLabel(data, entry).label}</span>}
         </header>
 
         <div className="tsl-sheet-body">
@@ -487,6 +543,7 @@ function DayEditor({
                 </Dropdown>
               </label>
               {timeResult?.error && <p className="tsl-hint" style={{ color: '#b91c1c' }}>{timeResult.error}</p>}
+              {prefilled && !timeResult?.error && <p className="tsl-hint">Your usual hours are filled in. Change them if this day was different.</p>}
             </>
           ) : (
             <label className="tsl-field">
@@ -506,8 +563,27 @@ function DayEditor({
           )}
 
           <label className="tsl-field">
-            <span>Job site <em>(optional)</em></span>
-            <input type="text" value={jobSite} onChange={event => setJobSite(event.target.value)} placeholder="Address or job name" maxLength={200} disabled={readOnly} autoComplete="off" />
+            <span>Project <em className="tsl-required">(required)</em></span>
+            <input
+              type="text"
+              name="project"
+              list="tsl-projects"
+              value={jobSite}
+              onChange={event => setJobSite(event.target.value)}
+              placeholder="123 Smith St"
+              maxLength={200}
+              disabled={readOnly}
+              autoComplete="off"
+              aria-describedby="tsl-project-hint"
+            />
+            <small id="tsl-project-hint" className="tsl-field-hint">
+              The project is the property address: house number and street, like 123 Smith St. No city or ZIP needed.
+            </small>
+            <datalist id="tsl-projects">
+              {[...new Set(data.days.map(item => item.entry?.job_site).filter((value): value is string => Boolean(value)))].map(project => (
+                <option key={project} value={project} />
+              ))}
+            </datalist>
           </label>
 
           <section className="tsl-extras" aria-label="Extras">

@@ -893,3 +893,114 @@
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+/* ── project, saved/submitted, submit to the office ── */
+
+.tsl-day-project {
+  overflow: hidden;
+  color: var(--tsl-ink);
+  font-size: 14px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tsl-status--saved { background: #fff7ed; color: #9a3412; }
+
+.tsl-field em.tsl-required {
+  color: var(--tsl-red);
+  font-weight: 700;
+}
+
+.tsl-field-hint {
+  color: var(--tsl-muted);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.tsl-submit-area {
+  padding: 0 0 12px;
+}
+
+.tsl-submit {
+  display: flex;
+  width: 100%;
+  min-height: 54px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--tsl-gold);
+  color: #1a1204;
+  font-size: 17px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.tsl-submit:disabled {
+  opacity: 0.6;
+}
+
+.tsl-submitted-note {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0 10px;
+  border-radius: 12px;
+  background: rgba(16, 185, 129, 0.16);
+  color: #6ee7b7;
+  font-size: 15px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.tsl-popup-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(17, 24, 39, 0.6);
+}
+
+.tsl-popup {
+  width: 100%;
+  max-width: 360px;
+  padding: 26px 22px 20px;
+  border-radius: 20px;
+  background: #ffffff;
+  color: var(--tsl-ink);
+  text-align: center;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.3);
+}
+
+/* Icons are display:block app-wide (Tailwind preflight), so center it with margins. */
+.tsl-popup-icon {
+  display: block;
+  margin: 0 auto;
+  color: var(--tsl-green);
+}
+
+.tsl-popup h2 {
+  margin: 10px 0 8px;
+  font-size: 21px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.tsl-popup p {
+  margin: 0 0 18px;
+  color: var(--tsl-muted);
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+.tsl-popup .tsl-primary {
+  width: 100%;
+}

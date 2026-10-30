@@ -106,8 +106,9 @@ function todayEastern() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 }
 
-function mondayOf(value) {
-  return addDays(value, -((weekdayOf(value) + 6) % 7));
+// Weeks run Sunday to Saturday (Mike, 2026-10-30): new workers' pay periods start on a Sunday.
+function sundayOf(value) {
+  return addDays(value, -weekdayOf(value));
 }
 
 function lastDayOfMonth(year, month) {
@@ -129,9 +130,9 @@ function payPeriodFor(frequency, anchor, date) {
   return { start, end: addDays(start, length - 1) };
 }
 
-/** Overtime is counted per workweek: it starts on the anchor's weekday for weekly/biweekly pay, else Monday. */
+/** Overtime (when on) is counted per workweek: it starts on the anchor's weekday for weekly/biweekly pay, else Sunday. */
 function workweekStartDay(frequency, anchor) {
-  return frequency === 'weekly' || frequency === 'biweekly' ? weekdayOf(anchor) : 1;
+  return frequency === 'weekly' || frequency === 'biweekly' ? weekdayOf(anchor) : 0;
 }
 
 function workweekStartFor(frequency, anchor, date) {
@@ -182,8 +183,22 @@ function normalizeAddons(value, { manager, mileageRateCents }) {
   return addons;
 }
 
+/** A worker's usual hours (pre-filled on the link for a new day). Defaults 8:00 AM - 5:00 PM, no lunch. */
+function normalizeUsualHours(body, current) {
+  const has = key => Object.prototype.hasOwnProperty.call(body || {}, key);
+  const start = has('usual_start_time') ? timeValue(body.usual_start_time, 'usual start time') : current.start;
+  const end = has('usual_end_time') ? timeValue(body.usual_end_time, 'usual end time') : current.end;
+  const breakMinutes = has('usual_break_minutes') ? Math.round(numberIn(body.usual_break_minutes, 'usual lunch break', 0, 720)) : current.breakMinutes;
+  if (!start || !end) throw httpError(400, 'Enter the usual start and end time.');
+  let span = minutesOf(end) - minutesOf(start);
+  if (span === 0) throw httpError(400, 'The usual end time must be after the start time.');
+  if (span < 0) span += 24 * 60;
+  if (breakMinutes >= span) throw httpError(400, 'The usual lunch break is longer than the usual day.');
+  return { start, end, breakMinutes };
+}
+
 /** Hours come from start/end minus the lunch break, or are entered directly. */
-function normalizeDay(body, { manager, mileageRateCents }) {
+function normalizeDay(body, { manager, mileageRateCents, requireProject = false }) {
   const startTime = timeValue(body?.start_time, 'start time');
   const endTime = timeValue(body?.end_time, 'end time');
   let breakMinutes = 0;
@@ -201,12 +216,15 @@ function normalizeDay(body, { manager, mileageRateCents }) {
   }
   const addons = normalizeAddons(body?.addons, { manager, mileageRateCents });
   if (hours <= 0 && !addons.length) throw httpError(400, 'Enter the hours you worked.');
+  // The project is the property's address: house number and street (Mike, 2026-10-30).
+  const project = text(body?.job_site, 200);
+  if (requireProject && !project) throw httpError(400, 'Enter the project: the house number and street, like 123 Smith St.');
   return {
     start_time: startTime,
     end_time: endTime,
     break_minutes: breakMinutes,
     hours,
-    job_site: text(body?.job_site, 200),
+    job_site: project,
     notes: text(body?.notes, 1000),
     addons,
   };
@@ -454,6 +472,28 @@ function deleteDay(db, req, { employee, date, actor }) {
   });
 }
 
+function latestSubmission(db, employeeId, periodStart) {
+  return db.prepare(`
+    SELECT submitted_at, hours, gross_cents, days
+    FROM hr_timesheet_submissions
+    WHERE employee_id = ? AND period_start = ?
+    ORDER BY submitted_at DESC, rowid DESC
+    LIMIT 1
+  `).get(employeeId, periodStart) || null;
+}
+
+/**
+ * The period's latest submit, and whether the worker changed it since (totals moved, or an
+ * open day was saved after the submit). Office approvals do not count as a change.
+ */
+function submissionState(submission, data) {
+  if (!submission) return null;
+  const changed = submission.hours !== data.totals.hours
+    || submission.gross_cents !== data.totals.gross_cents
+    || data.days.some(day => day.entry && day.entry.status === 'submitted' && day.entry.updated_at > submission.submitted_at);
+  return { ...submission, changed_since: changed };
+}
+
 // ── the private link ─────────────────────────────────────────────────────────
 
 function hashToken(token) {
@@ -565,6 +605,9 @@ function managerWorker(employee, settings) {
     period_anchor_date: settings.period_anchor_date,
     overtime_enabled: Boolean(settings.overtime_enabled),
     mileage_rate_cents: settings.mileage_rate_cents,
+    usual_start_time: settings.usual_start_time,
+    usual_end_time: settings.usual_end_time,
+    usual_break_minutes: settings.usual_break_minutes,
     link: {
       active: Boolean(settings.link_token_hash),
       created_at: settings.link_created_at,
@@ -633,6 +676,7 @@ function createManagerRouter({ seedComplianceTasks, auditMutation }) {
     return {
       ...data,
       today,
+      submission: submissionState(latestSubmission(db, employee.id, data.period.start), data),
       worker: managerWorker(employee, settings),
       events,
       addon_types: addonTypeList({ manager: true }),
@@ -665,10 +709,17 @@ function createManagerRouter({ seedComplianceTasks, auditMutation }) {
         }
         const settings = db.prepare('SELECT * FROM hr_timesheet_workers WHERE employee_id = ?').get(employee.id);
         const period = payPeriodFor(employee.pay_frequency, settings.period_anchor_date, today);
-        const { totals } = buildPeriod(db, employee, settings, period.start, period.end);
+        const data = buildPeriod(db, employee, settings, period.start, period.end);
+        const submission = submissionState(latestSubmission(db, employee.id, period.start), data);
         workers.push({
           ...managerWorker(employee, settings),
-          current_period: { start: period.start, end: period.end, ...totals },
+          current_period: {
+            start: period.start,
+            end: period.end,
+            ...data.totals,
+            submitted_at: submission ? submission.submitted_at : null,
+            changed_since_submit: Boolean(submission?.changed_since),
+          },
         });
       }
       logDataAccess(req, {
@@ -699,7 +750,8 @@ function createManagerRouter({ seedComplianceTasks, auditMutation }) {
       const rateCents = Math.round(numberIn(body.hourly_rate, 'hourly rate', 0.01, 1000) * 100);
       const payMethod = PAY_METHODS.has(body.pay_method) ? body.pay_method : 'payroll';
       const payFrequency = PAY_FREQUENCIES.has(body.pay_frequency) ? body.pay_frequency : 'weekly';
-      const anchor = body.period_anchor_date ? dayValue(body.period_anchor_date, 'pay period start') : mondayOf(todayEastern());
+      const anchor = body.period_anchor_date ? dayValue(body.period_anchor_date, 'pay period start') : sundayOf(todayEastern());
+      const usual = normalizeUsualHours(body, { start: '08:00', end: '17:00', breakMinutes: 0 });
       const mileageCents = body.mileage_rate === undefined || body.mileage_rate === ''
         ? 70
         : Math.round(numberIn(body.mileage_rate, 'mileage rate', 0, 10) * 100);
@@ -747,11 +799,14 @@ function createManagerRouter({ seedComplianceTasks, auditMutation }) {
           );
           seedComplianceTasks(db, employeeId, null, req.user.id);
         }
+        // No overtime unless it is switched on for the worker (company policy, 2026-10-30).
         db.prepare(`
           INSERT INTO hr_timesheet_workers (
-            employee_id, pay_method, period_anchor_date, overtime_enabled, mileage_rate_cents, created_by
-          ) VALUES (?, ?, ?, ?, ?, ?)
-        `).run(employeeId, payMethod, anchor, body.overtime_enabled === false ? 0 : 1, mileageCents, req.user.id);
+            employee_id, pay_method, period_anchor_date, overtime_enabled, mileage_rate_cents,
+            usual_start_time, usual_end_time, usual_break_minutes, created_by
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(employeeId, payMethod, anchor, body.overtime_enabled === true ? 1 : 0, mileageCents,
+          usual.start, usual.end, usual.breakMinutes, req.user.id);
         token = issueLink(db, employeeId, req.user.id);
       })();
 
@@ -770,7 +825,7 @@ function createManagerRouter({ seedComplianceTasks, auditMutation }) {
   router.patch('/workers/:employeeId', (req, res, next) => {
     try {
       const db = getDb();
-      const { employee } = loadWorker(db, req.params.employeeId);
+      const { employee, settings: current } = loadWorker(db, req.params.employeeId);
       const body = req.body || {};
       const employeeUpdates = [];
       const employeeParams = [];
@@ -812,6 +867,11 @@ function createManagerRouter({ seedComplianceTasks, auditMutation }) {
         settingsUpdates.push('mileage_rate_cents = ?');
         settingsParams.push(Math.round(numberIn(body.mileage_rate, 'mileage rate', 0, 10) * 100));
       }
+      if (has('usual_start_time') || has('usual_end_time') || has('usual_break_minutes')) {
+        const usual = normalizeUsualHours(body, { start: current.usual_start_time, end: current.usual_end_time, breakMinutes: current.usual_break_minutes });
+        settingsUpdates.push('usual_start_time = ?', 'usual_end_time = ?', 'usual_break_minutes = ?');
+        settingsParams.push(usual.start, usual.end, usual.breakMinutes);
+      }
 
       db.transaction(() => {
         if (employeeUpdates.length) {
@@ -824,6 +884,7 @@ function createManagerRouter({ seedComplianceTasks, auditMutation }) {
       const changed = Object.keys(body).filter(key => [
         'first_name', 'last_name', 'phone', 'email', 'hourly_rate', 'pay_frequency', 'pay_method',
         'period_anchor_date', 'overtime_enabled', 'mileage_rate',
+        'usual_start_time', 'usual_end_time', 'usual_break_minutes',
       ].includes(key));
       recordEvent(db, req, { employeeId: employee.id, action: 'settings_updated', actor: { type: 'user', userId: req.user.id }, details: { changed } });
       audit(req, 'hr_timesheet_settings_updated', employee.id, { changed });
@@ -1112,10 +1173,12 @@ function linkWindow(employee, settings) {
 function linkPayload(db, employee, settings, start) {
   const window = linkWindow(employee, settings);
   const data = buildPeriod(db, employee, settings, start, payPeriodFor(employee.pay_frequency, settings.period_anchor_date, start).end);
+  const submission = submissionState(latestSubmission(db, employee.id, data.period.start), data);
   return {
     company: NUD_COMPANY.name,
     office: { phone: NUD_COMPANY.phone, phone_href: NUD_COMPANY.phoneHref },
     worker: { first_name: employee.preferred_name || employee.first_name },
+    usual: { start_time: settings.usual_start_time, end_time: settings.usual_end_time, break_minutes: settings.usual_break_minutes },
     today: window.today,
     editable_from: window.editableFrom,
     period: {
@@ -1128,6 +1191,14 @@ function linkPayload(db, employee, settings, start) {
     },
     pay: data.pay,
     totals: data.totals,
+    submission: submission && {
+      submitted_at: submission.submitted_at,
+      hours: submission.hours,
+      gross_cents: submission.gross_cents,
+      changed_since: submission.changed_since,
+    },
+    // Submit is offered while the period is open to the worker and has a day the office has not approved.
+    can_submit: data.period.end >= window.editableFrom && data.totals.open_days > 0,
     days: data.days.map(day => ({
       date: day.date,
       hours_before_in_week: day.hours_before_in_week,
@@ -1150,6 +1221,7 @@ function linkPayload(db, employee, settings, start) {
         gross_cents: day.entry.gross_cents,
         pay_method: day.entry.pay_method,
         entered_by_office: day.entry.entered_via === 'manager',
+        updated_at: day.entry.updated_at,
       },
     })),
     addon_types: addonTypeList({ manager: false }),
@@ -1198,7 +1270,7 @@ publicRouter.put('/:token/days/:date', limitByIp('ts-write', 60, 10 * 60 * 1000)
     const { db, employee, settings } = workerFromLink(req);
     const date = dayValue(req.params.date, 'date');
     editableDate(employee, settings, date);
-    const input = normalizeDay(req.body, { manager: false, mileageRateCents: settings.mileage_rate_cents });
+    const input = normalizeDay(req.body, { manager: false, mileageRateCents: settings.mileage_rate_cents, requireProject: true });
     saveDay(db, req, { employee, date, input, actor: { type: 'link' } });
     res.json(linkPayload(db, employee, settings, payPeriodFor(employee.pay_frequency, settings.period_anchor_date, date).start));
   } catch (error) {
@@ -1213,6 +1285,41 @@ publicRouter.delete('/:token/days/:date', limitByIp('ts-write', 60, 10 * 60 * 10
     editableDate(employee, settings, date);
     deleteDay(db, req, { employee, date, actor: { type: 'link' } });
     res.json(linkPayload(db, employee, settings, payPeriodFor(employee.pay_frequency, settings.period_anchor_date, date).start));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// "Submit timesheet": the worker sends the period to the office. Days stay editable until the
+// office approves them; submitting again after a change replaces what the office sees.
+publicRouter.post('/:token/submit', limitByIp('ts-write', 60, 10 * 60 * 1000), (req, res, next) => {
+  try {
+    const { db, employee, settings } = workerFromLink(req);
+    const window = linkWindow(employee, settings);
+    const requested = req.body?.start ? dayValue(req.body.start, 'pay period') : window.current.start;
+    const period = payPeriodFor(employee.pay_frequency, settings.period_anchor_date, requested);
+    if (period.end < window.editableFrom || period.start > window.current.start) {
+      throw httpError(400, 'That pay period is closed. Call the office if something needs to change.');
+    }
+    const data = buildPeriod(db, employee, settings, period.start, period.end);
+    if (!data.days.some(day => day.entry)) throw httpError(400, 'Enter the days and hours you worked before you submit.');
+    if (!data.totals.open_days) throw httpError(409, 'The office has already approved this timesheet.');
+    const days = data.days.filter(day => day.entry).length;
+    db.prepare(`
+      INSERT INTO hr_timesheet_submissions (
+        id, employee_id, period_start, period_end, hours, gross_cents, days, ip_address, user_agent
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      uuidv4(), employee.id, period.start, period.end, data.totals.hours, data.totals.gross_cents, days,
+      String(getClientIp(req) || '').slice(0, 80), String(req.headers['user-agent'] || '').slice(0, 300),
+    );
+    recordEvent(db, req, {
+      employeeId: employee.id,
+      action: 'timesheet_submitted',
+      actor: { type: 'link' },
+      details: { start: period.start, end: period.end, hours: data.totals.hours, gross_cents: data.totals.gross_cents, days },
+    });
+    res.json(linkPayload(db, employee, settings, period.start));
   } catch (error) {
     next(error);
   }

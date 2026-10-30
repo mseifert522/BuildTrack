@@ -85,8 +85,11 @@ interface Worker {
   period_anchor_date: string;
   overtime_enabled: boolean;
   mileage_rate_cents: number;
+  usual_start_time: string;
+  usual_end_time: string;
+  usual_break_minutes: number;
   link: WorkerLink;
-  current_period?: TimesheetTotals & { start: string; end: string };
+  current_period?: TimesheetTotals & { start: string; end: string; submitted_at: string | null; changed_since_submit: boolean };
 }
 
 interface WorkersResponse {
@@ -115,6 +118,7 @@ interface PeriodResponse {
   totals: TimesheetTotals;
   pay: TimesheetPay;
   today: string;
+  submission: { submitted_at: string; hours: number; gross_cents: number; days: number; changed_since: boolean } | null;
   worker: Worker;
   events: TimesheetEvent[];
   addon_types: AddonType[];
@@ -148,6 +152,7 @@ const EVENT_LABELS: Record<string, string> = {
   period_paid: 'Marked the pay period paid',
   period_reopen: 'Reopened the pay period',
   period_unpay: 'Undid paid',
+  timesheet_submitted: 'Submitted the timesheet to the office',
 };
 
 const STATUS_PILL: Record<string, string> = {
@@ -186,9 +191,10 @@ function digitsOnly(value: string) {
   return value.replace(/\D/g, '');
 }
 
-function mondayOf(value: string) {
+// Pay weeks run Sunday to Saturday by default.
+function sundayOf(value: string) {
   const date = new Date(`${value}T12:00:00Z`);
-  date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7));
+  date.setUTCDate(date.getUTCDate() - date.getUTCDay());
   return date.toISOString().slice(0, 10);
 }
 
@@ -202,10 +208,10 @@ function Field({ labelText, children, className = '', hint }: { labelText: strin
   );
 }
 
-function StatusPill({ status }: { status: string }) {
+function StatusPill({ status, label }: { status: string; label?: string }) {
   return (
     <span className={`inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${STATUS_PILL[status] || STATUS_PILL.paid}`}>
-      {STATUS_LABELS[status as keyof typeof STATUS_LABELS] || status}
+      {label || STATUS_LABELS[status as keyof typeof STATUS_LABELS] || status}
     </span>
   );
 }
@@ -385,6 +391,13 @@ export default function Timesheets() {
                       This period: <strong className="text-slate-950">{hoursText(current.hours)} hrs</strong> · <strong className="text-slate-950">{money(current.gross_cents)}</strong>
                     </p>
                   )}
+                  {current?.submitted_at ? (
+                    <p className={`mt-1 text-xs font-semibold ${current.changed_since_submit ? 'text-amber-700' : 'text-emerald-700'}`}>
+                      {current.changed_since_submit ? 'Changed after submitting' : `Timesheet submitted ${formatEasternRelative(current.submitted_at)}`}
+                    </p>
+                  ) : current && current.days_worked > 0 ? (
+                    <p className="mt-1 text-xs font-semibold text-amber-700">Not submitted yet</p>
+                  ) : null}
                   {current && current.open_days > 0 && (
                     <p className="mt-1 text-xs font-semibold text-amber-700">{current.open_days} day{current.open_days === 1 ? '' : 's'} waiting for approval</p>
                   )}
@@ -412,7 +425,7 @@ export default function Timesheets() {
                       {worker.pay_type === 'hourly' ? `${money(worker.hourly_rate_cents)} per hour` : 'Salaried (hours only)'}
                       {' · '}Paid {PAY_METHOD_LABELS[worker.pay_method].toLowerCase()}
                       {' · '}{PAY_FREQUENCY_LABELS[worker.pay_frequency]}
-                      {worker.overtime_enabled && worker.pay_type === 'hourly' ? ' · Overtime 1.5x after 40 hrs/week' : ' · No overtime'}
+                      {' · '}Usual hours {time12(worker.usual_start_time)} - {time12(worker.usual_end_time)}
                     </p>
                     {(worker.phone || worker.email) && (
                       <p className="mt-0.5 text-sm text-slate-500">{[worker.phone, worker.email].filter(Boolean).join(' · ')}</p>
@@ -620,10 +633,24 @@ function PeriodPanel({
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      {detail.submission ? (
+        <div className={`rounded-md border px-4 py-3 text-sm ${detail.submission.changed_since ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+          <strong className="font-semibold">
+            {detail.submission.changed_since
+              ? `${detail.worker.first_name} changed this timesheet after submitting it (not submitted again yet).`
+              : `Submitted by ${detail.worker.first_name}.`}
+          </strong>{' '}
+          Sent to the office {formatEasternDateTime(detail.submission.submitted_at)}: {hoursText(detail.submission.hours)} hrs, {money(detail.submission.gross_cents)} gross.
+        </div>
+      ) : totals.days_worked > 0 ? (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <strong className="font-semibold">Not submitted yet.</strong> {detail.worker.first_name} has entered days in this period but has not pressed Submit on their phone.
+        </div>
+      ) : null}
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
           { title: 'Total hours', value: hoursText(totals.hours), sub: `${totals.days_worked} day${totals.days_worked === 1 ? '' : 's'} worked` },
-          { title: 'Regular / overtime', value: `${hoursText(totals.regular_hours)} / ${hoursText(totals.overtime_hours)}`, sub: pay.overtime_enabled ? 'Overtime after 40 hrs/week' : 'No overtime' },
           { title: 'Hours pay', value: pay.hourly ? money(totals.wages_cents) : '-', sub: pay.hourly ? `${money(pay.hourly_rate_cents)}/hr` : 'Salaried' },
           { title: 'Extras', value: money(totals.addons_cents), sub: (totals.addons_by_type || []).map(addon => addon.label).join(', ') || 'None' },
           { title: 'Gross pay', value: money(totals.gross_cents), sub: pay.pay_method === 'payroll' ? 'Before payroll taxes' : `Paid ${PAY_METHOD_LABELS[pay.pay_method].toLowerCase()}` },
@@ -647,7 +674,7 @@ function PeriodPanel({
               <th className="px-4 py-3">Day</th>
               <th className="px-4 py-3">Time</th>
               <th className="px-4 py-3">Hours</th>
-              <th className="px-4 py-3">Job site</th>
+              <th className="px-4 py-3">Project</th>
               <th className="px-4 py-3">Extras</th>
               <th className="px-4 py-3 text-right">Day gross</th>
               <th className="px-4 py-3">Status</th>
@@ -689,7 +716,12 @@ function PeriodPanel({
                   <td className="px-4 py-3">
                     {entry ? (
                       <>
-                        <StatusPill status={entry.status} />
+                        <StatusPill
+                          status={entry.status}
+                          label={entry.status === 'submitted'
+                            ? (detail.submission && entry.updated_at && entry.updated_at <= detail.submission.submitted_at ? 'Submitted' : 'Saved')
+                            : undefined}
+                        />
                         <span className="mt-1 block text-xs text-slate-500">{entry.updated_via === 'manager' ? 'Office' : 'From link'}</span>
                       </>
                     ) : null}
@@ -762,9 +794,11 @@ function AddWorkerModal({
     hourly_rate: '',
     pay_method: 'cash' as PayMethod,
     pay_frequency: 'weekly' as PayFrequency,
-    period_anchor_date: mondayOf(list.today),
-    overtime_enabled: true,
+    period_anchor_date: sundayOf(list.today),
     mileage_rate: '0.70',
+    usual_start_time: '08:00',
+    usual_end_time: '17:00',
+    usual_break_minutes: 0,
   });
   const [saving, setSaving] = useState(false);
   const [created, setCreated] = useState<{ worker: Worker; url: string | null } | null>(null);
@@ -782,8 +816,10 @@ function AddWorkerModal({
         pay_method: form.pay_method,
         pay_frequency: form.pay_frequency,
         period_anchor_date: form.period_anchor_date,
-        overtime_enabled: form.overtime_enabled,
         mileage_rate: form.mileage_rate,
+        usual_start_time: form.usual_start_time,
+        usual_end_time: form.usual_end_time,
+        usual_break_minutes: form.usual_break_minutes,
       };
       const response = await api.post<{ worker: Worker; link_url: string | null }>('/human-resources/timesheets/workers', body);
       setCreated({ worker: response.data.worker, url: response.data.link_url });
@@ -892,8 +928,10 @@ interface PayForm {
   pay_method: PayMethod;
   pay_frequency: PayFrequency;
   period_anchor_date: string;
-  overtime_enabled: boolean;
   mileage_rate: string;
+  usual_start_time: string;
+  usual_end_time: string;
+  usual_break_minutes: number;
 }
 
 function PayFields<T extends PayForm>({ form, set }: { form: T; set: (patch: Partial<T>) => void }) {
@@ -918,7 +956,7 @@ function PayFields<T extends PayForm>({ form, set }: { form: T; set: (patch: Par
           </select>
         </Field>
         {form.pay_frequency === 'weekly' || form.pay_frequency === 'biweekly' ? (
-          <Field labelText="First day of a pay period" hint={`Periods repeat every ${form.pay_frequency === 'weekly' ? 'week' : '2 weeks'} from this day.`}>
+          <Field labelText="First day of a pay period" hint={`Periods repeat every ${form.pay_frequency === 'weekly' ? 'week' : '2 weeks'} from this day. A Sunday gives Sunday-Saturday weeks.`}>
             <input required type="date" className={fieldClass} value={form.period_anchor_date} onChange={event => set({ period_anchor_date: event.target.value } as Partial<T>)} />
           </Field>
         ) : (
@@ -932,10 +970,18 @@ function PayFields<T extends PayForm>({ form, set }: { form: T; set: (patch: Par
             <input type="number" min="0" max="10" step="0.01" className={`${fieldClass} pl-7`} value={form.mileage_rate} onChange={event => set({ mileage_rate: event.target.value } as Partial<T>)} />
           </div>
         </Field>
-        <label className="flex items-center gap-2 self-end pb-2 text-sm text-slate-700">
-          <input type="checkbox" className="h-4 w-4" checked={form.overtime_enabled} onChange={event => set({ overtime_enabled: event.target.checked } as Partial<T>)} />
-          Overtime at 1.5x after 40 hours in a week
-        </label>
+      </div>
+      <div>
+        <p className="mb-1.5 text-xs font-semibold uppercase text-slate-500">Usual hours (filled in for a new day on the worker's phone)</p>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Field labelText="Start"><input required type="time" className={fieldClass} value={form.usual_start_time} onChange={event => set({ usual_start_time: event.target.value } as Partial<T>)} /></Field>
+          <Field labelText="End"><input required type="time" className={fieldClass} value={form.usual_end_time} onChange={event => set({ usual_end_time: event.target.value } as Partial<T>)} /></Field>
+          <Field labelText="Lunch break (unpaid)">
+            <select className={fieldClass} value={form.usual_break_minutes} onChange={event => set({ usual_break_minutes: Number(event.target.value) } as Partial<T>)}>
+              {BREAK_OPTIONS.map(option => <option key={option.minutes} value={option.minutes}>{option.label}</option>)}
+            </select>
+          </Field>
+        </div>
       </div>
       <p className={`rounded-md border px-3 py-2 text-xs ${notice.tone === 'payroll' ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
         <strong>{notice.title}.</strong> {payNotice(form.pay_method, 'worker').body} (This is what the worker sees on their timesheet.)
@@ -966,8 +1012,10 @@ function SettingsModal({
     pay_method: worker.pay_method,
     pay_frequency: worker.pay_frequency,
     period_anchor_date: worker.period_anchor_date,
-    overtime_enabled: worker.overtime_enabled,
     mileage_rate: (worker.mileage_rate_cents / 100).toFixed(2),
+    usual_start_time: worker.usual_start_time,
+    usual_end_time: worker.usual_end_time,
+    usual_break_minutes: worker.usual_break_minutes,
   });
   const [saving, setSaving] = useState(false);
   const [confirm, setConfirm] = useState<null | 'rotate' | 'off'>(null);
@@ -1073,20 +1121,18 @@ function SendLinkModal({
 }) {
   const [to, setTo] = useState(channel === 'sms' ? worker.phone || '' : worker.email || '');
   const [sending, setSending] = useState(false);
-  const [result, setResult] = useState<string | null>(null);
   const message = linkUrl ? linkMessage(worker, linkUrl) : '';
   const phoneDigits = digitsOnly(to);
 
   const send = async (event: FormEvent) => {
     event.preventDefault();
     setSending(true);
-    setResult(null);
     try {
       const response = await api.post<{ to: string; url: string }>(`/human-resources/timesheets/workers/${worker.id}/link/send`, { channel, to });
+      // Close the window and confirm briefly (Mike: about 2 seconds).
+      toast.success(`Submitted: ${channel === 'sms' ? 'text' : 'email'} sent to ${response.data.to}`, { duration: 2000 });
       onSent(response.data.url);
-      const done = `${channel === 'sms' ? 'Text' : 'Email'} sent to ${response.data.to}`;
-      setResult(done);
-      toast.success(done);
+      onClose();
     } catch (error) {
       toast.error(errorMessage(error, channel === 'sms' ? 'The text was not sent' : 'The email was not sent'));
     } finally {
@@ -1113,7 +1159,7 @@ function SendLinkModal({
           />
         </Field>
         {message && (
-          <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 [overflow-wrap:anywhere]">
             <p className="mb-1 text-xs font-semibold uppercase text-slate-500">{channel === 'sms' ? 'Text message' : 'The email says'}</p>
             {channel === 'sms'
               ? message
@@ -1125,7 +1171,6 @@ function SendLinkModal({
             {channel === 'sms' ? 'Texting from BuildTrack is not switched on yet.' : 'Email is not set up on BuildTrack.'} Use the buttons below to send it yourself.
           </p>
         )}
-        {result && <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{result}</p>}
         <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4">
           <button type="button" className={secondaryButton} onClick={onCopy}>
             <Copy className="h-4 w-4" />
@@ -1164,9 +1209,9 @@ function DayModal({
   const types = detail.addon_types;
   const { pay } = detail;
   const [mode, setMode] = useState<'times' | 'hours'>(entry && !entry.start_time ? 'hours' : 'times');
-  const [start, setStart] = useState(entry?.start_time || '');
-  const [end, setEnd] = useState(entry?.end_time || '');
-  const [breakMinutes, setBreakMinutes] = useState(entry?.break_minutes ?? 0);
+  const [start, setStart] = useState(entry ? entry.start_time || '' : detail.worker.usual_start_time);
+  const [end, setEnd] = useState(entry ? entry.end_time || '' : detail.worker.usual_end_time);
+  const [breakMinutes, setBreakMinutes] = useState(entry ? entry.break_minutes : detail.worker.usual_break_minutes);
   const [hours, setHours] = useState(entry && !entry.start_time ? String(entry.hours) : '');
   const [jobSite, setJobSite] = useState(entry?.job_site || '');
   const [notes, setNotes] = useState(entry?.notes || '');
@@ -1253,7 +1298,7 @@ function DayModal({
         {timeResult?.error && <p className="text-sm text-rose-700">{timeResult.error}</p>}
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field labelText="Job site (optional)"><input className={fieldClass} value={jobSite} onChange={event => setJobSite(event.target.value)} maxLength={200} /></Field>
+          <Field labelText="Project (house number and street)"><input className={fieldClass} value={jobSite} onChange={event => setJobSite(event.target.value)} maxLength={200} placeholder="123 Smith St" /></Field>
           <Field labelText="Notes (optional)"><input className={fieldClass} value={notes} onChange={event => setNotes(event.target.value)} maxLength={1000} /></Field>
         </div>
 
